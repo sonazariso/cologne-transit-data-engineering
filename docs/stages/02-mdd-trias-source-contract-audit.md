@@ -1,14 +1,21 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
-**Stage status:** IN PROGRESS
+**Stage status:** READY FOR APPROVAL
 **Audit date:** 2026-09-25  
 **Scope:** Evidence review for Stage 02, including the read-only Legacy
 Collector implementation audit, the S13 audit of the successful controlled
 `/delfi` response, local authorization and credential-equality follow-up, and
 the historical S10/S11/S12 transport diagnostics. The controlled response is
-audited below; this is not a claim about every MDD endpoint or a final
-provider-wide MDD/TRIAS contract.
+audited below; this is not a claim about every MDD endpoint or a provider-wide
+MDD/TRIAS coverage result.
+
+**Current-state rule:** This is a chronological audit. Sections 1–16 contain
+source-audit and historical probe chronology, including statements that were
+correct before the successful S13 response or before this S14 finalization.
+Sections explicitly marked historical remain historical evidence. The current
+technical conclusion is the S14 final synthesis in §§19–22, which supersedes
+earlier current-status wording and is **READY FOR APPROVAL**, not approved.
 
 ## 1. Environment & Repository Discovery
 
@@ -49,7 +56,8 @@ https://github.com/sonazariso/cologne-public-transport-intelligence.git
 This document records four different evidence layers and does not conflate
 them:
 
-1. TRIAS specification capability — not established by this source audit.
+1. TRIAS specification capability — documented separately from this initial
+   source audit using the supplied VDV 431-2 TRIAS 1.2 semantic authority.
 2. Actual MDD response behavior — established for the audited controlled
    `/delfi` request in the S13 raw artifact, but not generalized to all MDD
    endpoints or populations.
@@ -297,7 +305,11 @@ Additional source findings are not assumptions about MDD: the request includes
 None of these findings state that MDD cannot provide a field. They state only
 what the Legacy implementation does or does not handle.
 
-## 9. Unknowns / Not Proven After the S13 Audit
+## 9. Historical Unknowns / Not Proven Before S14 Finalization
+
+This section preserves the open questions as they stood immediately after the
+S13 response audit. S14 reclassifies them in the final synthesis; these
+historical statements are not the current Stage 02 blocker state.
 
 The successful artifact resolves the response-format and controlled-response
 structure questions for this `/delfi` request. The following remain open:
@@ -943,6 +955,10 @@ the pre-S13 current-status statements in §§13–16. Those sections remain in t
 document as historical chronology for the earlier 401, credential mismatch,
 Codex-environment DNS failure, and host-vs-Codex DNS qualification.
 
+This section records the S13 state before the S14 final technical/documentation
+pass. Its parent-Stage-02 “in progress” and “not approved” wording is
+historical S13 state and is superseded by the S14 final synthesis in §§19–22.
+
 The audit used only the existing successful user-run artifact from the
 controlled host probe. No new MDD request or probe execution occurred in this
 task.
@@ -1243,9 +1259,10 @@ All required controlled-response evidence is available:
 
 **STAGE 02A.2: COMPLETED**
 
-Parent Stage 02 remains **IN PROGRESS**. This completion does not approve
-Stage 02, a future schema, a new polling schedule, or a general claim about
-MDD field coverage.
+At the S13 point in the chronology, Parent Stage 02 remained **IN PROGRESS**.
+S13 did not approve Stage 02, a future schema, a new polling schedule, or a
+general claim about MDD field coverage. S14 later completes the technical
+audit and places Stage 02 **READY FOR APPROVAL**; it remains not approved.
 
 ### 17.10 Documentation and Safety Synchronization
 
@@ -1285,19 +1302,18 @@ new project-level decision. No historical prompt file was modified.
 | Raw response committed | No |
 | Secret exposed or written | No |
 
-### 17.12 Recommended Next Stage-02 Action
+### 17.12 Historical Recommended Next Stage-02 Action
 
-Use this successful response audit as the implementation evidence baseline, then
-finish the remaining Stage 02 contract decisions from authoritative TRIAS/MDD
-documentation: semantic validation of the observed estimate, operational-flag,
-bay, and situation fields; representative-coverage limits; quota/retention
-constraints; and the future field-retention matrix. Do not label estimated
-timestamps as actual delay, infer cancellation from absent fields, infer
-platform stability from absent estimates, or treat situation association as
-causality. Keep Stage 02 in progress until those decisions are explicitly
-reviewed and approved.
+This was the pre-S14 recommendation. S14 completed the semantic, coverage,
+quota/permission, raw-retention, and field-retention contract work described
+here. The warning remains durable: do not label estimated timestamps as actual
+delay, infer cancellation from absent fields, infer platform stability from
+absent estimates, or treat situation association as causality.
 
-## 18. Current Stage 02 State
+## 18. Historical Pre-S14 Stage 02 State
+
+The following was the current state before S14 finalization. The current state
+is recorded in §§19–22.
 
 STAGE 02: IN PROGRESS
 STAGE 02A.1: COMPLETED
@@ -1317,3 +1333,284 @@ TASK SCHEDULER CHANGES: NONE
 POWER BI CHANGES: NONE
 RAW RESPONSE COMMITTED: NO
 SECRET EXPOSED OR WRITTEN: NO
+
+## 19. Final Stage 02 Synthesis (S14)
+
+**Technical completion state:** STAGE 02 READY FOR APPROVAL
+**Approval state:** Not approved; the user/reviewer performs the explicit gate.
+
+S14 is the final technical/documentation pass for Stage 02. It made no MDD
+request, performed no probe, executed no SQL, changed no database or
+implementation, and did not modify the Legacy repository.
+
+### 19.1 Official TRIAS 1.2 semantic conclusions
+
+The semantic authority is VDV — IP-KOM-ÖV / VDV 431-2,
+“EKAP-Schnittstellenbeschreibung V1.2”, 02/2017. The contract uses TRIAS 1.2
+semantics only.
+
+- `TimetabledTime` is the required scheduled/timetable time.
+- `EstimatedTime` is the optional expected/predicted time.
+- `RecordedAtTime` is the optional actual/recorded time candidate.
+- `EstimatedTimeLow` and `EstimatedTimeHigh` are optional bounds for the
+  expected time.
+- `PlannedBay` is planned platform information; `EstimatedBay` is the latest
+  predicted platform information.
+- `StopSeqNumber`, `UnplannedStop`, `NotServicedStop`, `NoBoardingAtStop`,
+  `NoAlightingAtStop`, and `SituationFullRef` retain their distinct call,
+  operational, or association meanings.
+- Journey-level `Cancelled` is distinct from stop-level
+  `NotServicedStop`; `Deviation` means a different route, not cancellation.
+- `NumberOfResults` is a maximum number of returned stop-event results.
+  `TimeWindow` is a stop-event interval calculated from the location-context
+  time. The include flags control call context, operating-day inclusion, and
+  realtime consideration as documented in the request contract.
+
+No TRIAS 1.4 semantics were used to extend or overwrite this contract.
+
+### 19.2 Timing conclusion
+
+The approved semantic interpretation candidate is:
+
+```text
+Estimated Delay = EstimatedTime - TimetabledTime
+```
+
+This measure is allowed only when the two timestamps are present and
+comparable for the same event. It must be labelled **Estimated Delay**. It is
+not Actual Delay, Actual Arrival Delay, Actual Physical Delay, or realized
+delay.
+
+The controlled response did not contain `RecordedAtTime`, although TRIAS 1.2
+defines it as an optional actual-time field. This is **SPEC_DEFINED but NOT
+OBSERVED IN THIS CONTROLLED RESPONSE**. `responseTimestamp`/Legacy
+`ObservedAtUtc` is delivery metadata and is not a substitute. Actual Delay
+and Prediction Accuracy are not approved in Stage 02.
+
+### 19.3 Observed-response conclusion
+
+The controlled response was one successful `POST` to MDD NRW `/delfi` for
+Köln Hbf, arrival events, a maximum of five results, and one point in time. It
+used an XML/TRIAS 1.2 request and returned HTTP 200 with JSON
+`application/json;charset=UTF-8`.
+
+The response contained timetable and estimate timestamps, journey/service and
+stop identity, origin/destination identity/text, operating-day and mode
+context, Previous/This/Onward calls, stop sequence, planned/estimated bay
+fields, operational flags, and situation references/context. It did not
+contain `RecordedAtTime`, estimate bounds, a direct delay field, a populated
+journey-level cancellation field, or an explicit platform-change field.
+
+These are controlled-response observations only. They do not establish
+provider-wide absence or field-population rates.
+
+### 19.4 Operational, bay, and situation conclusions
+
+- `NotServicedStop` means the planned stop is not served. It does not mean the
+  whole journey is cancelled. No cancellation KPI is approved from this
+  response, and cancellation is not inferred from missing timing or estimates.
+- `UnplannedStop`, `NoBoardingAtStop`, `NoAlightingAtStop`, `Deviation`, and
+  `Cancelled` remain independent fields and concepts.
+- `PlannedBay` and `EstimatedBay` remain separate nullable fields. A missing
+  `EstimatedBay` does not mean unchanged. A difference can support planned-vs-
+  estimated bay evidence, but not an actual physical platform-change KPI.
+- `SituationFullRef`, situation identity/text/validity/source/priority, and
+  affected-entity context establish association evidence. They do not prove a
+  delay cause, cancellation cause, platform-change cause, or poor performance.
+
+### 19.5 Four-layer evidence conclusion
+
+The final package preserves the four evidence layers:
+
+| Layer | Final Stage 02 treatment |
+|---|---|
+| TRIAS 1.2 specification capability | Documented from the supplied VDV 431-2 semantics. |
+| Controlled MDD response | Limited to the successful five-result Köln Hbf response. |
+| Legacy parser | Records current-call parsing, service/situation handling, and parser omissions. |
+| Legacy persistence | Records source-only DataTable/TVP behavior without executing SQL. |
+
+The Legacy parser and persistence path are neither a provider capability claim
+nor the future schema design.
+
+### 19.6 Coverage and representativeness conclusion
+
+The controlled response is sufficient to confirm the actual wire format,
+demonstrate example structure, confirm observed fields, and identify future
+field candidates. It is not sufficient for:
+
+- field-population percentages;
+- Cologne-wide realtime coverage;
+- mode, station, or operator coverage;
+- `RecordedAtTime`, cancellation, platform, or situation coverage; or
+- network performance claims.
+
+`RecordedAtTime` population coverage is **UNKNOWN**. It is a future validation
+question, not a Stage 02 blocker. Stage 02 does not depend on measuring these
+percentages.
+
+### 19.7 Quota and permission conclusion
+
+The Legacy Collector audit snapshot at `2026-09-25 11:23:41 UTC` records
+`1,599` collector executions, `1,629` recorded HTTP attempts, and `35`
+additional retry attempts. Recorded collector usage is approximately
+`0.6516%` against the documented `250,000` requests/month, with approximately
+`99.3484%` remaining against that documented figure.
+
+This proves collector-recorded consumption only. It does not prove total
+account consumption where other callers share the credential, and the current
+public MDD dataset page is not treated as independent confirmation of the
+`250,000` value. Until provider/account documentation proves otherwise,
+`250,000` is the conservative known request ceiling for this project.
+
+Current authentication/access is working. MDD use remains subject to
+registration/activation, provider terms, and agreed purpose. No unrestricted
+raw-payload publication or redistribution right is assumed.
+
+Stage 7 and Stage 13 must budget base requests, retries, overlap/concurrency,
+and all measurable active callers. No new polling schedule is approved in
+Stage 02.
+
+### 19.8 Raw-retention decision candidate
+
+Full raw MDD responses are not a permanent or automated source of record by
+default. Durable retention consists of approved source-faithful fields plus
+lineage/audit metadata. Temporary raw responses are allowed only for explicit
+diagnostics or source-contract validation, outside source control, without
+secrets, and under the controls of the diagnostic task.
+
+Stage 02 does not approve automated short-term raw capture or an arbitrary
+retention period. Any later Stage 7 exception must explicitly approve the
+purpose, bounded period, storage location, access controls, and cleanup
+mechanism.
+
+### 19.9 Field-retention conclusion
+
+The field-retention matrix is complete. It preserves nullable source fields,
+matching identities, scheduled/estimated/actual distinctions, independent
+operational flags, situation relation scope, arrival/departure context, and
+Previous/This/Onward call scope. It does not reduce the source to a derived
+delay value and does not design SQL tables or columns.
+
+### 19.10 Stage 02 analytical permission matrix
+
+| Permission class | Stage 02 conclusion |
+|---|---|
+| **ALLOWED FROM CURRENT EVIDENCE** | Scheduled/timetable reporting; **Estimated Delay** when timetable and estimate exist and are explicitly labelled; estimate availability/data-quality reporting; source-supported operational-flag reporting; planned-vs-estimated bay evidence; situation-association reporting; collector/source-quality reporting. |
+| **NOT YET ALLOWED** | Actual Delay KPI; prediction-accuracy KPI; inferred cancellation from missing estimates; network-wide cancellation rate from this response; actual platform-change KPI; causal delay-reason attribution; Cologne-wide performance claims from one controlled response. |
+| **FUTURE VALIDATION REQUIRED** | `RecordedAtTime` population/coverage; cancellation-field population; representative platform evidence; situation coverage; field coverage by station/mode/operator/time; actual-timing suitability. |
+
+### 19.11 Deferred questions and destination stages
+
+The former “Open critical questions” are explicitly reclassified:
+
+| Question | Stage 02 classification | Destination / treatment |
+|---|---|---|
+| Is `RecordedAtTime` semantically the actual-time candidate? | `RESOLVED_FOR_STAGE_02` | VDV 431-2 semantics documented. |
+| Does `RecordedAtTime` have sufficient population coverage? | `DEFERRED_TO_STAGE_8` and revisitable in `DEFERRED_TO_STAGE_16` | Validate in the small realtime pilot and revisit timing/data coverage with richer evidence. |
+| Is current MDD access working, and what permission boundary applies? | `RESOLVED_FOR_STAGE_02` | Access works; terms/agreed use are documented; any future publication request requires a separate provider-terms check. |
+| What is the conservative request ceiling and what quota work remains? | `RESOLVED_FOR_STAGE_02` | The documented `250,000` ceiling and shared-caller caveat are captured; operational budgeting is `DEFERRED_TO_STAGE_7` and `DEFERRED_TO_STAGE_13`. |
+| Should full raw payloads be retained? | `RESOLVED_FOR_STAGE_02` | Raw-retention decision candidate is documented; any automated exception requires the Stage 7 gate. |
+| Which fields must be retained before schema design? | `RESOLVED_FOR_STAGE_02` | Field-retention matrix is complete; implementation design belongs to later approved stages. |
+| What is the authoritative GTFS feed and coverage/update policy? | `DEFERRED_TO_STAGE_3` | Remove from Stage 02 blockers; resolve in the static GTFS profile. |
+| Is representative field coverage known by station/mode/operator/time? | `DEFERRED_TO_STAGE_8` and `DEFERRED_TO_STAGE_16` | Validate with pilot/coverage evidence, not the single controlled response. |
+
+**STILL BLOCKING STAGE 02: NONE.**
+
+### 19.12 Acceptance criteria
+
+| # | Criterion | Result |
+|---:|---|---|
+| 1 | 02A.1 Completed | PASS |
+| 2 | 02A.2 Completed | PASS |
+| 3 | TRIAS 1.2 timing semantics documented | PASS |
+| 4 | Operational, bay, and situation semantics documented | PASS |
+| 5 | Observed vs specified vs parsed vs persisted remain separate | PASS |
+| 6 | Coverage limitations documented | PASS |
+| 7 | Quota/permission constraint documented | PASS |
+| 8 | Raw retention decided | PASS — approval candidate; no permanent/automated full-payload retention by default |
+| 9 | Field-retention matrix created | PASS |
+| 10 | No Stage-02-specific blocker remains | PASS |
+| 11 | No unsupported Actual Delay, cancellation, or causality claims exist | PASS |
+| 12 | Documentation is synchronized | PASS |
+
+All technical acceptance criteria pass. The technical completion state is
+**STAGE 02: READY FOR APPROVAL**. It is not **APPROVED**.
+
+## 20. Documentation and safety synchronization record
+
+Created:
+
+- `docs/source-contracts/mdd-trias-request-contract.md`
+- `docs/source-contracts/mdd-trias-response-contract.md`
+- `docs/source-contracts/mdd-trias-raw-retention.md`
+- `docs/source-contracts/mdd-trias-field-retention-matrix.md`
+
+Changed:
+
+- `docs/source-contracts/README.md`
+- `docs/stages/02-mdd-trias-source-contract-audit.md`
+- `docs/PROJECT-STATUS.md`
+- `docs/ROADMAP.md`
+- `docs/GUARDRAILS.md`
+- `README.md`
+
+Not changed:
+
+- `docs/DECISION-LOG.md`;
+- historical prompt files;
+- Legacy repository files;
+- collector, scheduler, database, network, or Power BI implementation.
+
+No MDD HTTP request or probe was executed. No SQL query was executed. No
+database object or data was changed. No secret was exposed or written. No
+commit or push was made.
+
+## 21. Consistency audit result
+
+The current authoritative documentation now states:
+
+- Stage 02 technical audit is complete and ready for approval, not approved.
+- Stage 02A.1 and 02A.2 are completed.
+- Current MDD authorization is working and host DNS is normal.
+- `RecordedAtTime` is a TRIAS 1.2 optional actual-time field, not a claim of
+  general MDD availability; it was not observed in the controlled response.
+- Estimated Delay is not Actual Delay.
+- `NotServicedStop` is not journey cancellation.
+- Missing `EstimatedBay` is not evidence of an unchanged platform.
+- Situation association is not causality.
+- `NumberOfResults` is not an HTTP request count; retries are additional HTTP
+  requests.
+- `250,000` is a conservative known ceiling with a shared-caller caveat, not
+  an independently reconfirmed public-page fact.
+- Full raw responses are not retained permanently or automatically by default.
+
+Earlier 401, DNS, and blocked-status statements remain only as explicitly
+labelled historical chronology in the detailed audit. No current authoritative
+status relies on those superseded blockers.
+
+## 22. Final technical status
+
+```text
+STAGE 02A.1: COMPLETED
+STAGE 02A.2: COMPLETED
+STAGE 02 TECHNICAL AUDIT: COMPLETE
+STAGE 02 STATUS: READY FOR APPROVAL
+CURRENT MDD AUTHORIZATION: WORKING
+TRIAS CONTRACT VERSION: 1.2
+REQUEST FORMAT: XML
+AUDITED RESPONSE FORMAT: JSON
+RECORDED_AT_TIME SEMANTIC: ACTUAL TIME
+RECORDED_AT_TIME CONTROLLED RESPONSE: NOT OBSERVED
+ACTUAL DELAY KPI: NOT APPROVED
+ESTIMATED DELAY: ALLOWED WHEN EXPLICITLY LABELLED
+RAW PAYLOAD DEFAULT RETENTION: NO PERMANENT/AUTOMATED FULL PAYLOAD RETENTION
+MDD HTTP REQUESTS IN THIS TASK: 0
+MDD PROBE EXECUTIONS IN THIS TASK: 0
+SQL QUERIES EXECUTED: 0
+DATABASE CHANGES: NONE
+LEGACY REPOSITORY MODIFIED: NO
+TASK SCHEDULER CHANGES: NONE
+POWER BI CHANGES: NONE
+SECRET EXPOSED OR WRITTEN: NO
+COMMIT OR PUSH: NO
+```

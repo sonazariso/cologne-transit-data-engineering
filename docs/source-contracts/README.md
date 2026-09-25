@@ -1,49 +1,67 @@
 # Source Contracts
 
-This directory will hold approved source-contract documentation. The Stage 02
-audit document contains evidence for both the Legacy implementation audit and
-the controlled MDD raw-response probe; it is not an approved final MDD/TRIAS
-response contract.
+This directory contains the Stage 02 MDD/TRIAS source-contract package. The
+package is technically complete and **READY FOR APPROVAL**; it is not marked
+approved until the user/reviewer performs the explicit Stage 02 approval gate.
 
-Current Stage 02 evidence:
+## Approval candidate contract
 
-- [Stage 02 — MDD/TRIAS Source-Contract Audit](../stages/02-mdd-trias-source-contract-audit.md)
+These documents are the current Stage 02 approval candidates:
 
-Stage 02A.2 — Controlled MDD Raw-Response Audit — is **Completed** for the
-successful controlled response. The normalized host request used XML/TRIAS 1.2
-and returned HTTP **200** with response Content-Type
-`application/json;charset=UTF-8`; the audited body is JSON and contains five
-stop-event results. `MDD_API_KEY VALUE COMPARISON: SAME`,
-`HOST_DNS_RESULT: NORMAL_RESOLVER_WORKS`, and current MDD authorization is
-working.
+- [MDD/TRIAS request contract](mdd-trias-request-contract.md)
+- [MDD/TRIAS response contract](mdd-trias-response-contract.md)
+- [MDD/TRIAS field-retention matrix](mdd-trias-field-retention-matrix.md)
+- [MDD/TRIAS raw-retention decision](mdd-trias-raw-retention.md)
+- [Detailed Stage 02 evidence/audit](../stages/02-mdd-trias-source-contract-audit.md)
 
-The audited response contains timetable and estimate timestamps, service and
-stop identities, planned/estimated bay fields, explicit operational flags, and
-situation evidence. `RecordedAtTime`, direct delay, cancellation, and an
-explicit platform-change flag were not present in this response. These are
-single-response observations and do not establish general MDD capability or
-absence.
+The request contract records the audited `POST` XML/TRIAS 1.2 request,
+`x-api-key` mechanism, request parameters, `NumberOfResults` versus HTTP
+request-count semantics, and quota/permission boundaries.
 
-The temporary artifact used for the audit is outside the repository at
-`/private/tmp/cologne-transit-stage-02a2-hhqob8km.raw`. It was not copied or
-committed, and no raw-payload retention policy was created. No secret was
-exposed or written.
+The response contract records the successful controlled `/delfi` response as
+JSON with HTTP 200 and keeps these layers separate:
 
-The earlier HTTP **401** and S10/S11/S12 DNS findings remain historical
-chronology in the Stage 02 audit, not current blockers. S13 made zero MDD
-requests, executed zero probes, and did not execute SQL or modify the database.
-Stage 02 remains **In progress** while the broader TRIAS/MDD semantic,
-coverage, quota, retention, and approval decisions are completed.
+1. TRIAS 1.2 specification capability;
+2. fields observed in the controlled MDD response;
+3. Legacy parser behavior; and
+4. Legacy persistence behavior.
 
-Planned documents include:
+The field matrix uses `SPEC_DEFINED_NOT_OBSERVED` for specified candidate
+fields absent from this one response. It does not generalize that absence to
+MDD as a whole. In particular, `RecordedAtTime` is a TRIAS 1.2 optional
+actual-time field but was not observed in the controlled response.
 
-- GTFS source contract / field inventory
-- MDD/TRIAS request contract
-- MDD/TRIAS response field inventory
-- field retention matrix: defined → returned → coverage → parsed → persisted → analytical purpose
-- raw-payload retention decision
+The raw-retention candidate says that full raw MDD responses are not a
+permanent or automated source of record by default. Temporary diagnostic
+artifacts may remain outside source control for an explicitly approved
+diagnostic task, without secrets. No arbitrary retention period or automated
+capture is approved in Stage 02.
 
-Do not treat the Legacy parser audit as proof of MDD capability or actual live
-response behavior. Stage 1 and Stage 2 must establish the final contracts from
-authoritative documentation, Legacy source evidence, and the controlled raw
-response probe.
+## Historical / Legacy implementation evidence
+
+The detailed audit contains historical chronology for the Legacy source audit,
+the earlier 401, S10/S11/S12 transport diagnostics, and the successful S13
+controlled-response audit. Those sections are evidence, not approval of the
+Legacy implementation or proof of provider-wide behavior.
+
+The Legacy parser audit must not be read as a capability claim for MDD. It
+shows what the inspected Legacy code parsed and what its checked-in
+persistence path received. The controlled response is one Köln Hbf arrival
+request with five results at one point in time; it is not representative
+coverage evidence.
+
+Current status facts:
+
+- Stage 02A.1 — Legacy Implementation Audit: **Completed**.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
+- Current MDD authorization: **Working**.
+- Host DNS result: `NORMAL_RESOLVER_WORKS`.
+- Stage 02 technical audit: **Complete**.
+- Stage 02 status: **Ready for approval**, not approved.
+- No MDD request or probe was executed for this finalization task.
+- No SQL query, database change, Legacy repository change, scheduler change,
+  Power BI change, commit, or push was made.
+
+Historical prompt files and `docs/DECISION-LOG.md` remain unchanged. The
+decision log indexes approved decisions and is not updated before the approval
+gate.
