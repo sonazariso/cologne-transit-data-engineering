@@ -4,9 +4,11 @@
 **Stage status:** IN PROGRESS
 **Audit date:** 2026-09-25  
 **Scope:** Evidence review for Stage 02, including the read-only Legacy
-Collector implementation audit, Stage 02A.2 controlled-probe history, local
-authorization and credential-equality follow-up, and the S10/S11 transport
-diagnostics. This is not the complete MDD/TRIAS source-contract validation.
+Collector implementation audit, the S13 audit of the successful controlled
+`/delfi` response, local authorization and credential-equality follow-up, and
+the historical S10/S11/S12 transport diagnostics. The controlled response is
+audited below; this is not a claim about every MDD endpoint or a final
+provider-wide MDD/TRIAS contract.
 
 ## 1. Environment & Repository Discovery
 
@@ -48,8 +50,9 @@ This document records four different evidence layers and does not conflate
 them:
 
 1. TRIAS specification capability — not established by this source audit.
-2. Actual MDD response behavior — not established without the controlled
-   Stage 02A.2 probe.
+2. Actual MDD response behavior — established for the audited controlled
+   `/delfi` request in the S13 raw artifact, but not generalized to all MDD
+   endpoints or populations.
 3. Legacy PowerShell request/parser behavior — established below from source.
 4. Legacy SQL persistence behavior — established below from source and
    checked-in SQL definitions, without executing SQL.
@@ -278,8 +281,9 @@ Additional source findings are not assumptions about MDD: the request includes
 - This is a Legacy implementation audit, not approval of the final MDD/TRIAS
   contract.
 - The request is hand-built XML; `$StopPointRef` is not explicitly escaped.
-- The response path is JSON parsing despite the XML request body. Live response
-  media type and structure remain unproven.
+- The response path is JSON parsing despite the XML request body. S13 confirms
+  that this behavior matches the successful audited `/delfi` response, whose
+  media type was JSON; it is not generalized to every MDD endpoint.
 - Previous and onward calls are requested but not parsed.
 - The Legacy parser does not handle `RecordedAtTime`, cancellation, operating
   day, stop sequence, origin/destination, or low/high estimate candidates.
@@ -293,17 +297,21 @@ Additional source findings are not assumptions about MDD: the request includes
 None of these findings state that MDD cannot provide a field. They state only
 what the Legacy implementation does or does not handle.
 
-## 9. Unknowns / Not Proven
+## 9. Unknowns / Not Proven After the S13 Audit
 
-The following remain open until Stage 02A.2:
+The successful artifact resolves the response-format and controlled-response
+structure questions for this `/delfi` request. The following remain open:
 
-- Actual MDD response media type and live JSON/XML structure.
-- Whether MDD returns any candidate field marked `D` and with what coverage.
-- Whether the live endpoint accepts the emitted namespace, timestamp, and
-  request serialization for all relevant StopPointRefs.
-- Actual response examples, field presence, nullability, multiplicity, and
-  timestamp formats.
-- Runtime behavior of authentication, retry responses, and `Retry-After`.
+- Whether `RecordedAtTime`, direct delay, cancellation, or other absent fields
+  are returned for other request times, stops, services, or MDD endpoints.
+- Whether the audited field coverage is representative of the intended Cologne
+  population; one response cannot establish population coverage or absence in
+  MDD generally.
+- Whether the provider's authoritative TRIAS/MDD documentation assigns the
+  exact semantics needed for future analytical retention, especially for
+  `deviation`, operational flags, situations, and estimate timestamps.
+- Current quota, retention, and provider-policy constraints beyond the
+  successful authorization evidence.
 - Whether deployed Windows Collector files exactly match the inspected branch.
 - Whether any external historical logs or copies contain raw payloads.
 - Whether the deployed SQL Server objects match the checked-in definitions.
@@ -311,7 +319,7 @@ The following remain open until Stage 02A.2:
 Stage 02A.1 made no MDD request, executed no SQL, changed no database or
 Task Scheduler state, modified no Legacy file, and did not expose the API key.
 
-## 10. Recommended Stage 02A.2 Probe Design
+## 10. Historical Stage 02A.2 Probe Design
 
 At the time of the Stage 02A.1 source audit, Stage 02A.2 probe execution had
 not been performed. That historical preflight status is recorded below; the
@@ -364,7 +372,7 @@ the final status of the controlled probe:
 
 Stage 02 remains in progress and is not complete or approved.
 
-## 12. Stage 02A.2 Controlled Probe Result
+## 12. Historical Stage 02A.2 Controlled Probe Result (HTTP 401)
 
 **Stage:** 02A.2 — Controlled MDD Raw-Response Probe
 **Status:** BLOCKED
@@ -537,7 +545,7 @@ service-event multiplicity, situation linkage, platform semantics, quota
 behavior, or the exact provider-side reason for access denial. Stage 02A.2
 therefore remains blocked. Stage 2 is not approved or complete.
 
-## 13. Stage 02A.2 Local Authorization Diagnosis
+## 13. Historical Stage 02A.2 Local Authorization Diagnosis
 
 **Diagnosis date:** 2026-09-25
 **Scope:** Local source and documentation inspection only. No HTTP request,
@@ -715,7 +723,7 @@ remains historical evidence and is not reclassified by the transport failure.
 No provider-support email was sent or drafted from this result, and no second
 request was authorized or made.
 
-## 14. Stage 02A.2 S10 Controlled Re-run Result
+## 14. Historical Stage 02A.2 S10 Controlled Re-run Result
 
 **Stage:** 02A.2 — Controlled MDD Raw-Response Probe
 **Status:** BLOCKED
@@ -772,7 +780,7 @@ remains **Blocked** because no valid operational MDD service payload was
 obtained or audited. Stage 02 remains **In progress** and is not approved or
 complete.
 
-## 15. Stage 02A.2 S11 DNS-only Diagnosis
+## 15. Historical Stage 02A.2 S11 DNS-only Diagnosis
 
 **Stage:** 02A.2 — Controlled MDD Raw-Response Probe
 
@@ -875,7 +883,7 @@ MDD probe in S12.
 
 Stage 02A.2 remains **Blocked** and Stage 02 remains **In progress**.
 
-## 16. Stage 02A.2 S12 Host-vs-Codex DNS Qualification
+## 16. Historical Stage 02A.2 S12 Host-vs-Codex DNS Qualification
 
 **Stage:** 02A.2 — Controlled MDD Raw-Response Probe
 
@@ -923,3 +931,389 @@ host DNS result is recorded here. Host-level DNS evidence remains pending.
 
 Until the host result is supplied, Stage 02A.2 remains **Blocked** and Stage 02
 remains **In progress**.
+
+## 17. Stage 02A.2 S13 Successful Response Audit
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+**Status:** COMPLETED
+**Audit date:** 2026-09-25
+
+This section is the current authoritative Stage 02A.2 result and supersedes
+the pre-S13 current-status statements in §§13–16. Those sections remain in the
+document as historical chronology for the earlier 401, credential mismatch,
+Codex-environment DNS failure, and host-vs-Codex DNS qualification.
+
+The audit used only the existing successful user-run artifact from the
+controlled host probe. No new MDD request or probe execution occurred in this
+task.
+
+### 17.1 Raw Artifact Verification
+
+| Check | Result |
+|---|---|
+| Artifact | `/private/tmp/cologne-transit-stage-02a2-hhqob8km.raw` |
+| Availability/readability | **YES**; readable with mode `0600` |
+| Size | **71,602 bytes** |
+| JSON parse | **SUCCESS** |
+| Top-level JSON type | **object** |
+| Top-level properties | `serviceDelivery`, `version` |
+| Repository location | Outside the authoritative repository |
+| Authentication/header material | No header envelope or authentication/header-named JSON property was structurally present. No JSON value was printed, searched, hashed, or compared for secret material. |
+
+The supplied successful-probe metadata records request time
+`2026-09-25T18:29:21.835Z`, endpoint `https://mdd.gorheinland.com/delfi`,
+method `POST`, request Content-Type `application/xml; charset=utf-8`, one HTTP
+attempt, HTTP 200, response Content-Type `application/json;charset=UTF-8`,
+71602 response bytes, 71553 response characters, and 774.625 ms elapsed. No
+retry occurred. The API-key value is not reproduced.
+
+The artifact was used as temporary diagnostic evidence only. It was not copied
+into this repository, and this audit does not define a policy to retain raw
+MDD payloads permanently. It was not deleted because no approved cleanup
+policy was supplied.
+
+### 17.2 Actual Response Structure
+
+The audited body is JSON even though the request body is XML. JSON path
+notation below uses `[]` for any array element.
+
+| Level | Actual path and evidence |
+|---|---|
+| Root | `$` is an object with `version` and `serviceDelivery`; `version` is `1.2`. |
+| Delivery | `$.serviceDelivery` is an object with `responseTimestamp`, `producerRef`, `calcTime`, `language`, `status`, and `deliveryPayload`. |
+| Payload | `$.serviceDelivery.deliveryPayload` contains `stopEventResponse`. |
+| Response | `$.serviceDelivery.deliveryPayload.stopEventResponse` contains an empty `errorMessage` array, `stopEventResponseContext`, and `stopEventResult`. |
+| Results | `$.serviceDelivery.deliveryPayload.stopEventResponse.stopEventResult[]` is an array of **5** result objects. Five results were returned. |
+| Stop event | Each result has `stopEvent`; each `stopEvent` has `previousCall`, `thisCall`, `onwardCall`, `service`, `operatingDaysDescription`, and `parallelService`. |
+| Context situations | `$.serviceDelivery.deliveryPayload.stopEventResponse.stopEventResponseContext.situations.ptSituation[]` contains **9** objects; `roadSituation[]` is empty. |
+
+Per result, the call cardinalities are:
+
+| Result index | `previousCall[]` | `thisCall` | `onwardCall[]` |
+|---:|---:|---:|---:|
+| 0 | 9 | 1 object | 0 |
+| 1 | 11 | 1 object | 0 |
+| 2 | 28 | 1 object | 2 |
+| 3 | 44 | 1 object | 1 |
+| 4 | 5 | 1 object | 6 |
+| **Total call records** | **97** | **5** | **9** |
+
+Every returned call record has a `callAtStop` object, for **111**
+call-level records. `serviceArrival` occurs 106 times and
+`serviceDeparture` occurs 103 times. `thisCall` is an
+object rather than a collection; `previousCall` and
+`onwardCall` are collections.
+
+### 17.3 Deterministic Field Inventory
+
+Counts below are occurrences in the response unless otherwise stated. A field
+can be structurally present as an empty array; such fields are identified as
+empty rather than treated as populated evidence. `varies` means the
+populated value or collection differs across the five returned result objects
+where the field is result-scoped.
+
+#### Timing
+
+| Candidate | Classification | Exact JSON path(s) | Count/type | Varies across results |
+|---|---|---|---:|---|
+| `TimetabledTime` | PRESENT | `$.serviceDelivery.deliveryPayload.stopEventResponse.stopEventResult[].stopEvent.previousCall[].callAtStop.serviceArrival.timetabledTime`; same `serviceDeparture` path; corresponding `onwardCall[]` paths; `thisCall.callAtStop.serviceArrival.timetabledTime` | 209 / string | YES |
+| `EstimatedTime` | PRESENT | Same call branches as `TimetabledTime`, under `serviceArrival.estimatedTime` and `serviceDeparture.estimatedTime` | 196 / string | YES |
+| `RecordedAtTime` | NOT_PRESENT_IN_THIS_RESPONSE | No path observed | 0 | — |
+| `ExpectedTime`, `ActualTime`, `AimedTime` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key observed | 0 each | — |
+| `ArrivalTime`, `DepartureTime` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key observed; `serviceArrival`/`serviceDeparture` are the observed containers | 0 each | — |
+| `EstimatedTimeLow`, `EstimatedTimeHigh` | NOT_PRESENT_IN_THIS_RESPONSE | No path observed | 0 each | — |
+| Direct `Delay`, `DelayMinutes`, `ArrivalDelayMinutes` | NOT_PRESENT_IN_THIS_RESPONSE | No path observed | 0 | — |
+| `responseTimestamp` | PRESENT | `$.serviceDelivery.responseTimestamp` | 1 / string | Not result-scoped |
+| Other timestamp-like fields | PRESENT | `...ptSituation[].creationTime` (9), `...ptSituation[].validityPeriod[].startTime` (3), `...ptSituation[].validityPeriod[].endTime` (3) | string | Situation-scoped |
+
+**RecordedAtTime was not present in this controlled response.** This is a
+single-response absence finding only; it does not establish that MDD never
+provides `RecordedAtTime`.
+
+#### Journey and service identity
+
+| Candidate | Classification | Exact JSON path | Count/type | Varies across results |
+|---|---|---|---:|---|
+| `JourneyRef` | PRESENT | `...stopEventResult[].stopEvent.service.journeyRef.value` | 5 / string | YES |
+| `LineRef` | PRESENT | `...stopEventResult[].stopEvent.service.serviceSection[].lineRef.value` (5); also `...ptSituation[].affects.vehicleJourneys.affectedVehicleJourney[].lineRef.value` (21) | 26 / string | YES |
+| `DirectionRef` | PRESENT | `...service.serviceSection[].directionRef.value` | 5 / string | YES |
+| `OperatorRef` | PRESENT | `...service.serviceSection[].operatorRef.value` | 5 / string | YES |
+| `StopPointRef` | PRESENT | `...stopEventResult[].stopEvent.(previousCall[]/thisCall/onwardCall[]).callAtStop.stopPointRef.value` | 111 / string | YES |
+| `DestinationText` | PRESENT | `...stopEventResult[].stopEvent.service.destinationText[].text` | 5 / string | YES |
+| `DestinationRef` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key; `destinationStopPointRef.value` is present instead | 0 | — |
+| `OriginText` | PRESENT | `...stopEventResult[].stopEvent.service.originText[].text` | 5 / string | YES |
+| `OriginRef` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key; `originStopPointRef.value` is present instead | 0 | — |
+| `originStopPointRef` / `destinationStopPointRef` | PRESENT | `...service.originStopPointRef.value`; `...service.destinationStopPointRef.value` | 5 each / string | YES |
+| `ServiceSection` | PRESENT | `...stopEventResult[].stopEvent.service.serviceSection[]` | 5 arrays, one populated section per result | YES |
+| `OperatingDayRef` | PRESENT | `...service.operatingDayRef.value` | 5 / string | NO |
+| `ResultId` | PRESENT | `...stopEventResult[].resultId` | 5 / string | YES |
+| Vehicle/journey identifiers beyond `JourneyRef` | NOT_PRESENT_IN_THIS_RESPONSE | `datedVehicleJourneyRef[]` and `vehicleJourneyRef[]` occur only as 21 empty arrays in situation impact objects; no `vehicleRef` or `vehicleType` key | 0 populated | — |
+
+#### Call structure
+
+| Candidate | Classification | Evidence |
+|---|---|---|
+| `PreviousCall` | PRESENT | `...stopEventResult[].stopEvent.previousCall[]`; 97 `callAtStop` records across five results |
+| `ThisCall` | PRESENT | `...stopEventResult[].stopEvent.thisCall.callAtStop`; one object per result |
+| `OnwardCall` | PRESENT | `...stopEventResult[].stopEvent.onwardCall[]`; 9 records across three results and empty arrays in two results |
+| `callAtStop` | PRESENT | 111 objects, each containing stop/location and call-level fields |
+| `serviceArrival` | PRESENT | 106 objects across previous/current/onward calls |
+| `serviceDeparture` | PRESENT | 103 objects across previous/onward calls; no populated current-call departure object was observed |
+| `stopPointRef` / `stopPointName` / `stopSeqNumber` | PRESENT | Each occurs on all 111 call records; `stopPointName[].text` is the localized display value and `stopSeqNumber` is numeric |
+
+#### Realtime and operational status
+
+| Candidate | Classification | Exact path/evidence |
+|---|---|---|
+| Delivery `status` | PRESENT | `$.serviceDelivery.status` is boolean `true`; the Legacy parser uses it as a validity gate |
+| `deviation` | PRESENT | `...stopEventResult[].stopEvent.service.deviation`; boolean `true` in 2 of 5 services. Its precise provider semantics remain to be validated. |
+| `notServicedStop` | PRESENT | `...callAtStop.notServicedStop`; 7 populated boolean values, all `true`, in three results; previous and current calls only |
+| `noBoardingAtStop` | PRESENT | `...callAtStop.noBoardingAtStop`; 6 populated boolean values, all `true`, in three results; previous calls only |
+| `noAlightingAtStop` | PRESENT | `...callAtStop.noAlightingAtStop`; 7 populated boolean values, all `true`, in three results; previous and current calls only |
+| `unplannedStop` | PRESENT | `...previousCall[].callAtStop.unplannedStop`; 4 populated boolean values, all `true`, in three results |
+| Cancellation/service availability/realtime status | NOT_PRESENT_IN_THIS_RESPONSE | No `cancellation`, `cancelled`, `serviceCancelled`, `stopCancelled`, `realtime`, `realtimeStatus`, `serviceStatus`, or `availability` key was observed |
+| Direct delay | NOT_PRESENT_IN_THIS_RESPONSE | No direct delay field was observed; missing delay does not imply no delay |
+
+The explicit boarding/alighting and service flags are evidence of named source
+fields in this response. They must not be widened into a general cancellation
+or service-availability conclusion.
+
+#### Platform/bay
+
+| Candidate | Classification | Exact path/evidence |
+|---|---|---|
+| Planned bay | PRESENT | `...callAtStop.plannedBay[].text`; non-empty in 110 of 111 call records, including all five `thisCall` records |
+| Estimated/current bay | PRESENT | `...callAtStop.estimatedBay[].text`; non-empty in 12 of 111 records, all on `previousCall`; empty on all five `thisCall` records and all nine `onwardCall` records |
+| `BayText`, `BayRef`, `Platform` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key observed; bay text is represented by `plannedBay[].text`/`estimatedBay[].text` |
+| Explicit platform-change flag | NOT_PRESENT_IN_THIS_RESPONSE | No platform-change indicator observed |
+
+Missing estimated-bay data is not evidence that the planned bay was unchanged.
+
+#### Situations and disruptions
+
+| Candidate | Classification | Exact path/evidence |
+|---|---|---|
+| `PtSituation` | PRESENT | `...stopEventResponseContext.situations.ptSituation[]`; 9 objects |
+| `SituationFullRef` | PRESENT | `...service.situationFullRef[]`; 3 populated service references across three results. Call-level `situationFullRef[]` properties are present but empty. |
+| `ParticipantRef` / `SituationNumber` | PRESENT | `...ptSituation[].participantRef.value` and `...ptSituation[].situationNumber.value` (9 each); also on the 3 service references |
+| `Summary` / `Description` / `Detail` | PRESENT | `...ptSituation[].summary.value`, `.description.value`, `.detail.value` (9 each) |
+| Validity period | PRESENT | `...ptSituation[].validityPeriod[]`; 3 populated periods with 3 `startTime` and 3 `endTime` values; six period arrays empty |
+| `Priority`, `CreationTime`, `Source`, `SourceType`, `UnknownReason` | PRESENT | `priority` (9 numeric), `creationTime` (9 string), `source.sourceType` (9 string), `unknownReason` (9 string) |
+| Affected journeys | PRESENT | `...ptSituation[].affects.vehicleJourneys.affectedVehicleJourney[]`; 21 objects, with 21 populated affected `lineRef` values and 21 `route[]` arrays whose `direction[]` arrays are empty |
+| `SituationRef`, `Reason`, `Cause`, `Advice`, `Severity` | NOT_PRESENT_IN_THIS_RESPONSE | No exact key observed |
+
+Situation references, affected lines, and situation text are structural
+associations. **Situation Evidence does not prove causality.** Semantic
+interpretation of `deviation` and situation impact relationships
+remains UNKNOWN until the provider/TRIAS contract is validated.
+
+No candidate required an `NOT_APPLICABLE` classification in this response;
+`UNKNOWN` is reserved for unresolved semantics, not used to turn a field
+absence into a provider-wide capability claim.
+
+### 17.4 Additional Valuable Fields Actually Present
+
+| Present field/path | Evidence | Management or BI question supported | Limitation |
+|---|---|---|---|
+| `stopSeqNumber` and `stopPointName[].text` | 111 call records | Which stop sequence and named locations are represented in a returned service call chain? | Requires matching and stop-scope rules before KPI use. |
+| `operatingDayRef.value` | 5 of 5 services | Which operating day does a returned service identity belong to? | Not a replacement for a validated timetable/calendar contract. |
+| `originStopPointRef.value`, `destinationStopPointRef.value` | 5 each | What origin/destination endpoints are associated with returned services? | Legacy does not currently parse these fields. |
+| `mode.ptMode`, `mode.railSubmode`, `mode.name[].text` | 5 each | Which transport mode/submode is represented in the response mix? | The observed sample is not a population distribution. |
+| `publishedLineName[].text` | 5 of 5 services | What public-facing line name accompanies each service identity? | It is display metadata, not necessarily a stable route key. |
+| `service.attribute[].code` and `service.attribute[].text[].text` | 21 attribute objects across five results | Which source-provided service attributes are attached to journeys? | Code semantics require a provider codebook; no amenity KPI is inferred. |
+| `service.deviation` | 2 boolean `true` values | Which returned services carry the provider's deviation flag? | Provider semantics and causality are not established. |
+| Situation priority, creation time, source type, validity, affected line refs | 9 situation objects; 21 affected-journey objects | Which notices have what validity, source, priority, and affected-line scope? | Association is evidence, not confirmed cause; only this response is audited. |
+| `serviceDelivery.responseTimestamp`, `calcTime`, `producerRef`, `language`, `version` | Delivery metadata present once | When and by which producer/version was the response produced, and what response calculation time was reported? | These are response metadata, not physical delay measures. |
+
+No KPI is proposed here for actual delay, cancellation rate, platform-change
+rate, or disruption causality because this response does not provide the
+required direct evidence.
+
+### 17.5 Actual Response vs Legacy Parser Matrix
+
+The Legacy parser is `ConvertFrom-MddTriasResponse` at
+`/Users/admin/Documents/cologne-public-transport-intelligence/collector/MddRealtimeCollector.psm1:547-739`.
+The classifications below are limited to this actual response.
+
+| Field/structure | Actual response | Legacy parser handling | Classification |
+|---|---|---|---|
+| `serviceDelivery.status` | Present, `true` | Validates it at `566-568` | ACTUAL RESPONSE + LEGACY PARSED |
+| `serviceDelivery.responseTimestamp` | Present once | Converts to `ObservedAtUtc` at `570-571` | ACTUAL RESPONSE + LEGACY PARSED |
+| `stopEventResult` / `ResultId` | Five results; five IDs | Enumerates results and reads `resultId` at `573-594` | ACTUAL RESPONSE + LEGACY PARSED |
+| `ThisCall.callAtStop` | One current call per result | Traverses `thisCall.callAtStop` at `582-586` | ACTUAL RESPONSE + LEGACY PARSED |
+| `PreviousCall` | 97 records | Not traversed; only the request flag is built | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `OnwardCall` | 9 records | Not traversed; only the request flag is built | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `TimetabledTime` | 209 timestamps across all call branches | Reads only current arrival `timetabledTime` at `602` | ACTUAL RESPONSE + LEGACY PARSED, with previous/onward occurrences not parsed |
+| `EstimatedTime` | 196 timestamps across all call branches | Reads only current arrival `estimatedTime` at `603` | ACTUAL RESPONSE + LEGACY PARSED, with previous/onward occurrences not parsed |
+| `RecordedAtTime` | Not observed | No `RecordedAtTime` path; uses response timestamp instead | NOT OBSERVED IN RESPONSE + LEGACY DOES NOT PARSE |
+| Direct delay | Not observed | No direct delay parser field | NOT OBSERVED IN RESPONSE + LEGACY DOES NOT PARSE |
+| `serviceArrival` | Present on current, previous, and onward records | Current arrival is parsed; other branches are not | ACTUAL RESPONSE + LEGACY PARSED, partially |
+| `serviceDeparture` | 103 populated departure objects | Not read | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `JourneyRef`, `LineRef`, `DirectionRef`, `OperatorRef` | Present at service paths in all five results | Read at `596-599` | ACTUAL RESPONSE + LEGACY PARSED |
+| `StopPointRef`, `StopPointName` | Present on all 111 call records | Reads current values at `593-595` | ACTUAL RESPONSE + LEGACY PARSED, current call only |
+| `PtMode`, `RailSubmode`, `PublishedLineName` | Present in all five service sections | Reads mode and published line name at `595,600-601` | ACTUAL RESPONSE + LEGACY PARSED |
+| `OriginText`, `OriginStopPointRef`, `DestinationText`, `DestinationStopPointRef` | Present in all five services | No corresponding parser properties | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `OperatingDayRef` | Present in all five services | No corresponding parser property | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `stopSeqNumber` | Present on all 111 call records | No corresponding parser property | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `PlannedBay`, `EstimatedBay` | Planned populated on 110 calls; estimated populated on 12 previous calls | Reads current-call properties at `604-605` | ACTUAL RESPONSE + LEGACY PARSED, current call only |
+| `notServicedStop`, `noBoardingAtStop`, `noAlightingAtStop` | Populated on previous/current calls; no-boarding is absent on current calls | Reads current-call properties at `606-608` | ACTUAL RESPONSE + LEGACY PARSED, current call only |
+| `unplannedStop` | Four populated previous-call flags | No corresponding parser property | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `deviation` | Two populated service flags | No corresponding parser property | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| Cancellation/realtime status fields | Not observed | No corresponding parser properties | NOT OBSERVED IN RESPONSE + LEGACY DOES NOT PARSE |
+| `PtSituation` and situation text/validity | Nine situations; all nine have identity, text, and valid identity fields | Parses context situations at `621-676` | ACTUAL RESPONSE + LEGACY PARSED |
+| Service `SituationFullRef` | Three populated service references | Parses service links at `678-705` | ACTUAL RESPONSE + LEGACY PARSED |
+| Call `SituationFullRef` | Call-level properties empty | Parser has a current-call branch at `708-727`, but no populated current-call ref occurs here | ACTUAL RESPONSE + LEGACY PARSED, no populated value in this response |
+| Situation priority/source/creation/unknown reason/affected journeys | Present in context | No corresponding parser properties | ACTUAL RESPONSE + LEGACY NOT PARSED |
+| `service.attribute`, mode name, route/via, `parallelService` | Attributes present; route/via/parallel arrays empty | No corresponding parser properties | ACTUAL RESPONSE + LEGACY NOT PARSED or empty |
+| `errorMessage` arrays | Structurally present but empty | Not parsed as response error objects | ACTUAL RESPONSE + LEGACY NOT PARSED |
+
+No important requested field fell into **NOT OBSERVED IN RESPONSE + LEGACY
+PARSER EXPECTS**: the parser's required identifiers and current-call path are
+present in this response. Legacy parser capability still does not establish
+provider capability for fields absent from this one response.
+
+### 17.6 Actual Response vs Legacy SQL Persistence Matrix
+
+This comparison is from checked-in source/schema only. No SQL query was
+executed and no database was changed. The source path is the parser result →
+`New-MddRealtimeSnapshotDataTables`
+(`collector/MddRealtimeCollector.psm1:785-877`) → typed TVPs →
+`stg.uspPersistMddRealtimeSnapshot`.
+
+| Evidence class | Fields/structures | Source-only persistence conclusion |
+|---|---|---|
+| ACTUAL + PARSED + PERSISTED | `responseTimestamp` as `ObservedAtUtc`; `ResultId`; current `StopPointRef`, `StopName`, `LineName`, `LineRef`, `JourneyRef`, `DirectionRef`, `OperatorRef`, `PtMode`, `RailSubmode`, `TimetabledArrivalUtc`, `EstimatedArrivalUtc`, `PlannedBay`, `EstimatedBay`, `NotServicedStop`, `NoBoardingAtStop`, `NoAlightingAtStop` | Mapped to the stop-observation DataTable and the `stg.MddRealtimeStopObservation` TVP/table. The SQL definitions list the same columns at `sql/02-staging/05-create-mdd-realtime-staging-tables.sql:14-40` and `06-create-mdd-realtime-persistence-api.sql:62-85,146-214`. |
+| ACTUAL + PARSED + PERSISTED | Nine identifiable `PtSituation` records and their `ParticipantRef`, `SituationNumber`, `Summary`, `Description`, `Detail`, `ValidFromUtc`, `ValidToUtc` | Mapped to the situation DataTable/TVP and `stg.MddRealtimeSituationObservation`; source path at parser `652-660`, DataTable `834-853`, SQL type/table `79-95` and `90-103`. |
+| ACTUAL + PARSED + PERSISTED | Three populated service `SituationFullRef` relationships | Mapped to `SituationLinks` with `RelationScope = SERVICE`; the persistence procedure resolves links through source identities. This is persistence of association, not causality. |
+| ACTUAL + PARSED + NOT_PERSISTED_AS_SOURCE_FIELD | `serviceDelivery.status`, parser container objects, and `ThisCall`/`serviceSection` containers | `status` gates parsing; containers supply child values. A successful collector-run status is not the same as persisting the source status field. |
+| ACTUAL + NOT_PARSED | Previous/onward call records and their timing, stop sequence, stop names, bays, flags, and situation properties | Not placed in the Legacy stop TVP because the parser only materializes the current call. |
+| ACTUAL + NOT_PARSED | `serviceDeparture`, origin/destination fields, `OperatingDayRef`, `deviation`, `unplannedStop`, `service.attribute`, mode name, route/via, priority/source/creation/unknown-reason, affected-journey detail | No Legacy snapshot DataTable or TVP column receives these fields. |
+| NOT OBSERVED | `RecordedAtTime`, direct delay, cancellation/realtime status, explicit platform-change, vehicle identifiers beyond `JourneyRef` | No source value is available to parse or persist from this response; absence is not a general MDD capability claim. |
+
+The current Legacy SQL persistence is implementation evidence, not the desired
+future source-contract schema. In particular, downstream delay values are
+derived from persisted timetable/estimate fields; no direct delay field was
+received in this response.
+
+### 17.7 Response Format Conclusion
+
+| Contract element | Audited evidence |
+|---|---|
+| Request payload | XML / TRIAS 1.2 |
+| Request method/content type | `POST`; `application/xml; charset=utf-8` |
+| Actual successful response Content-Type | `application/json;charset=UTF-8` |
+| Actual successful body format | JSON |
+| Audited endpoint | `https://mdd.gorheinland.com/delfi` |
+| Audited HTTP status | 200 |
+
+Therefore the historical Legacy use of `ConvertFrom-Json` is
+consistent with the actual MDD response observed for this audited `/delfi` request on
+2026-09-25. This conclusion is limited to this request and does not claim that
+all MDD endpoints return JSON.
+
+### 17.8 Authorization Conclusion
+
+The complete chronology is now:
+
+1. Historical Legacy execution included HTTP 200 evidence.
+2. The initial macOS probe used a credential value different from the
+   Windows/Legacy value and received HTTP 401.
+3. The later comparison established `MDD_API_KEY VALUE COMPARISON: SAME`.
+4. Host DNS was then confirmed healthy as `HOST_DNS_RESULT: NORMAL_RESOLVER_WORKS`.
+5. The normalized host probe using the confirmed Legacy-equivalent credential
+   returned HTTP 200 with one HTTP attempt and no retry.
+
+**CURRENT MDD AUTHORIZATION: WORKING.** The evidence strongly supports that
+the earlier 401 occurred while the macOS probe was using a different
+credential value. It does not support a claim that provider-side entitlement
+changed. Provider support is not currently required based on this evidence.
+
+### 17.9 Stage 02A.2 Completion Decision
+
+All required controlled-response evidence is available:
+
+- raw artifact available and readable;
+- JSON parse successful;
+- actual response hierarchy and call cardinality audited;
+- timing, identity, call, operational, platform/bay, and situation fields
+  inventoried;
+- Legacy parser comparison complete;
+- Legacy source/schema persistence comparison complete; and
+- no unresolved technical blocker remains for this controlled response.
+
+**STAGE 02A.2: COMPLETED**
+
+Parent Stage 02 remains **IN PROGRESS**. This completion does not approve
+Stage 02, a future schema, a new polling schedule, or a general claim about
+MDD field coverage.
+
+### 17.10 Documentation and Safety Synchronization
+
+The current-state summaries in the following files were synchronized with this
+S13 result:
+
+- `docs/PROJECT-STATUS.md`
+- `docs/source-contracts/README.md`
+- `README.md`
+
+The current blocker language was superseded with the working authorization,
+normal host DNS, successful HTTP 200, JSON response, and completed Stage
+02A.2 findings. Historical S10/S11/S12 chronology remains labeled as
+historical. `docs/DECISION-LOG.md` was not modified because S13 did not make a
+new project-level decision. No historical prompt file was modified.
+
+### 17.11 S13 Verification Record
+
+| Verification | Result |
+|---|---|
+| Stage 0 | Approved |
+| Stage 1 | Approved |
+| Stage 02 | In progress |
+| Stage 02A.1 | Completed |
+| Stage 02A.2 | Completed |
+| Current MDD authorization | Working |
+| Request format | XML / TRIAS 1.2 |
+| Successful response format | JSON |
+| New MDD HTTP requests in this task | 0 |
+| MDD probe executions in this task | 0 |
+| SQL queries executed | 0 |
+| Database changes | None |
+| Legacy repository modified | No |
+| Task Scheduler changes | None |
+| Power BI changes | None |
+| Raw response copied to repository | No |
+| Raw response committed | No |
+| Secret exposed or written | No |
+
+### 17.12 Recommended Next Stage-02 Action
+
+Use this successful response audit as the implementation evidence baseline, then
+finish the remaining Stage 02 contract decisions from authoritative TRIAS/MDD
+documentation: semantic validation of the observed estimate, operational-flag,
+bay, and situation fields; representative-coverage limits; quota/retention
+constraints; and the future field-retention matrix. Do not label estimated
+timestamps as actual delay, infer cancellation from absent fields, infer
+platform stability from absent estimates, or treat situation association as
+causality. Keep Stage 02 in progress until those decisions are explicitly
+reviewed and approved.
+
+## 18. Current Stage 02 State
+
+STAGE 02: IN PROGRESS
+STAGE 02A.1: COMPLETED
+STAGE 02A.2: COMPLETED
+CURRENT MDD AUTHORIZATION: WORKING
+MDD_API_KEY VALUE COMPARISON: SAME
+HOST DNS RESULT: NORMAL_RESOLVER_WORKS
+REQUEST FORMAT: XML
+RESPONSE FORMAT: JSON
+HTTP STATUS OF AUDITED RESPONSE: 200
+NEW MDD HTTP REQUESTS IN THIS TASK: 0
+MDD PROBE EXECUTIONS IN THIS TASK: 0
+SQL QUERIES EXECUTED: 0
+DATABASE CHANGES: NONE
+LEGACY REPOSITORY MODIFIED: NO
+TASK SCHEDULER CHANGES: NONE
+POWER BI CHANGES: NONE
+RAW RESPONSE COMMITTED: NO
+SECRET EXPOSED OR WRITTEN: NO

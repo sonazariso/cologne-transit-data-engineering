@@ -31,70 +31,38 @@
 
 - Stage 02A.1 — Legacy Implementation Audit: **Completed** (read-only source
   evidence documented).
-- Stage 02A.2 — Controlled MDD Raw-Response Probe: **Blocked**.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
 
-  The latest S10 preflight confirmed `MDD_API_KEY` present = **YES**, and the
-  user confirmed that the macOS value matches the historically successful
-  Windows User-level Legacy value. The reviewed probe was invoked exactly once
-  at `2026-09-25T17:43:59.786Z` for Köln Hbf
-  (`de:05315:11201`) with five arrival results and previous/onward/realtime
-  calls enabled. DNS name resolution failed before an HTTP response was
-  obtained:
+  The existing successful host-probe artifact was audited without another MDD
+  request. The normalized request to `https://mdd.gorheinland.com/delfi` used
+  XML/TRIAS 1.2 and returned HTTP **200** with
+  `application/json;charset=UTF-8`; the body is JSON. It contains five
+  `stopEventResult` records, timetable and estimate timestamps, identity,
+  bay, operational-flag, and situation evidence. `RecordedAtTime`, direct
+  delay, cancellation, and explicit platform-change fields were not present
+  in this response.
 
-  ```text
-  URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
-  ```
+  The artifact is temporary evidence at
+  `/private/tmp/cologne-transit-stage-02a2-hhqob8km.raw`, outside this
+  repository. It was not copied or committed. The audit found no unresolved
+  technical blocker for this controlled response.
 
-  Probe attempts = **1**, HTTP retries = **0**, confirmed MDD HTTP requests =
-  **0**, HTTP status = **unavailable**, response bytes = **0**, and no temporary
-  raw artifact was created. This run does not establish provider
-  authorization or denial.
+Current authoritative transport and authorization state:
 
-  The earlier HTTP **401** response remains historical evidence in the Stage
-  02 audit. It was not a valid MDD service payload, so Stage 02A.2 remains
-  blocked and no successful response-field audit could be completed.
+- `HOST_DNS_RESULT: NORMAL_RESOLVER_WORKS`.
+- `MDD_API_KEY VALUE COMPARISON: SAME`.
+- `CURRENT MDD AUTHORIZATION: WORKING`.
+- The earlier 401 is historical evidence and is strongly explained by the
+  earlier different macOS credential value; no provider-side entitlement
+  change is claimed.
+- Stage 02 remains **In progress** because this response audit does not finish
+  the broader TRIAS/MDD semantic, coverage, quota, retention, and approval
+  decisions.
 
-Stage 02 is not complete. The Stage 02 audit document records Legacy request,
-parser, and persistence behavior, the earlier controlled HTTP 401, and the
-latest S10 transport failure; actual successful MDD response behavior remains
-unproven. The user's value comparison removes a current key-value mismatch as
-the explanation under investigation, but the S10 run obtained no HTTP response
-and therefore cannot establish provider authorization, entitlement, key
-validity, or account state. The S10 request-level diagnosis was
-`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`. The
-probe source uses the Legacy Content-Type `application/xml; charset=utf-8`.
-S11 DNS-only diagnostics classified the observed Codex-environment resolver
-behavior as `LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`: the same-environment Python
-and system resolver paths did not resolve the tested hosts, while the permitted
-public resolver comparison did. Because those diagnostics were constrained by
-the Codex execution environment, host-level macOS DNS failure is not yet
-independently established. Provider authorization remains undetermined. No
-second request was made.
-
-The current diagnosis is
-`CODEX_ENVIRONMENT_DNS_FAILURE; HOST_MACOS_RESOLVER_STATE_UNCONFIRMED; PROVIDER_AUTHORIZATION_UNDETERMINED`.
-Host-level DNS evidence is still pending. S12 made no MDD request and did not
-execute the MDD probe or modify DNS/network configuration.
-
-S11 endpoint and Codex-environment DNS evidence:
-
-- `ENDPOINT_LITERAL_VALID: YES` for
-  `https://mdd.gorheinland.com/delfi`; no source change was required.
-- Python `socket.getaddrinfo()` returned no address for
-  `mdd.gorheinland.com`, `ckan.mdd.gorheinland.com`,
-  `download.gorheinland.com`, or `gorheinland.com`.
-- `/etc/hosts` had no relevant override; `dscacheutil` returned no record and
-  `scutil --dns` reported no available DNS configuration in this environment.
-- Public DNS at `1.1.1.1` resolved the MDD hostname and the two requested
-  sibling hosts. No connection was made to those addresses.
-
-**S12 next action:** The user must run
-`scripts/stage_02a2_host_dns_check.sh` from a normal interactive macOS
-Terminal outside Codex. Its result will determine whether the host resolver
-works, whether the host resolver fails while public DNS works, whether there
-is a general host DNS failure, or whether the evidence is inconclusive. S11
-and S12 made zero MDD HTTP requests and zero probe executions; Stage 02A.2
-remains **Blocked** and Stage 02 remains **In progress**.
+The earlier S10/S11/S12 transport and DNS findings remain in the Stage 02 audit
+as historical chronology, not as current blockers. S13 made zero MDD requests,
+executed zero probes, executed no SQL, and changed no database, Legacy
+repository, Task Scheduler, or Power BI state.
 
 ## Current authoritative decisions
 
@@ -103,6 +71,8 @@ remains **Blocked** and Stage 02 remains **In progress**.
 - Analytical geography is public transport performance **inside Cologne**; a route merely passing through Cologne does not automatically make the whole route part of the core KPI scope.
 - Primary timing objective: Actual Delay based on validated `RecordedAtTime` evidence.
 - `EstimatedTime` is secondary and may later support estimated-delay and prediction-accuracy analysis.
+- The audited successful response did not contain `RecordedAtTime` or a direct
+  delay value; this does not establish general MDD absence.
 - Core starting modes: Stadtbahn/Tram, urban/KVB bus, and S-Bahn.
 - RE, RB, and regional/other bus require Stage 4 service-level scope validation.
 - SEV is retained as a separate analytical category.
@@ -112,7 +82,7 @@ remains **Blocked** and Stage 02 remains **In progress**.
 
 ## Open critical questions
 
-1. Does the actual MDD endpoint return `RecordedAtTime` with sufficient coverage for the intended population?
+1. Does MDD return `RecordedAtTime` with sufficient coverage for the intended population? It was absent from the one audited response.
 2. What are the current MDD permission, quota, retention, and provider constraints?
 3. What is the current account-level or shared-caller MDD quota consumption
    beyond the recorded Legacy Collector snapshot, and what current provider

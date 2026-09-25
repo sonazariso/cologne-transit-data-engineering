@@ -15,9 +15,12 @@ The primary timing objective is **Actual Delay derived from validated `RecordedA
 - Stage 0 — Project Definition: **Approved**
 - Stage 1 — Source Inventory & Permission: **Approved**
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress**
-- Stage 02A.2 remains **Blocked** pending successful controlled MDD response
-  evidence. See [Project Status](docs/PROJECT-STATUS.md) for the detailed
-  blocker.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**. The audited
+  request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
+  HTTP 200; current MDD authorization and host DNS are working.
+- The audited response did not contain `RecordedAtTime` or a direct delay field;
+  Stage 02 remains in progress while the broader source-contract decisions are
+  reviewed. See [Project Status](docs/PROJECT-STATUS.md) for details.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 
