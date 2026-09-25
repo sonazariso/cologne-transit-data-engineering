@@ -1,7 +1,7 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
-**Stage status:** IN PROGRESS — STAGE 02A.3 COMPLETED; READY FOR APPROVAL
+**Stage status:** APPROVED — STAGE 02A.1/02A.2/02A.3 COMPLETED
 **Audit date:** 2026-09-25  
 **Scope:** Evidence review for Stage 02, including the read-only Legacy
 Collector implementation audit, the S13 audit of the successful controlled
@@ -17,8 +17,10 @@ source-audit and historical probe chronology, including statements that were
 correct before the successful S13 response or before this S14 finalization.
 Sections explicitly marked historical remain historical evidence. The current
 technical baseline is the S14 final synthesis in §§19–22. S15 preserved that
-baseline and deferred the approval gate; S16 completed the offline audit.
-Stage 02 is now **IN PROGRESS — READY FOR APPROVAL**, not approved.
+baseline and deferred the approval gate; S16 completed the offline audit. S17
+then synchronized the explicit user approval, so Stage 02 is now
+**APPROVED**. Earlier READY FOR APPROVAL wording below is retained only as
+historical S14–S16 chronology.
 
 ## 1. Environment & Repository Discovery
 
@@ -1752,7 +1754,10 @@ COMMIT OR PUSH: NO
 
 ## 24. S16 Offline Forensic Re-analysis and Stage 02A.3 Closure
 
-**Current Stage 02 status:** IN PROGRESS — READY FOR APPROVAL
+**Status recorded by S16 before the S17 approval synchronization:** IN PROGRESS
+— READY FOR APPROVAL
+
+**Current Stage 02 status after S17:** APPROVED
 
 **Stage 02A.1:** COMPLETED
 
@@ -1899,11 +1904,13 @@ parser limitation and correction, and the collector-design implication. No
 material Stage 02 historical-source question remains that requires another
 request.
 
-Stage 02 is **READY FOR APPROVAL** but is not marked approved. S14 remains
-preserved; `docs/DECISION-LOG.md` remains unchanged pending the Stage 02
-approval gate. S16 did not execute SQL, change the database, modify Legacy,
-Task Scheduler, or Power BI, expose or write a secret, copy raw files into the
-repository, commit, or push.
+At the S16 point in time, Stage 02 was **READY FOR APPROVAL** and the decision
+log was unchanged pending the approval gate. S17 preserved the S16 evidence,
+updated the decision log, and approved Stage 02. S16 did not execute SQL,
+change the database, modify Legacy, Task Scheduler, or Power BI, expose or
+write a secret, copy raw files into the repository, commit, or push.
+
+The following gate state is preserved as S16 historical output:
 
 ```text
 STAGE 02: IN PROGRESS / READY FOR APPROVAL
@@ -1930,3 +1937,33 @@ RAW RESPONSE COMMITTED: NO
 SECRET EXPOSED OR WRITTEN: NO
 COMMIT OR PUSH: NO
 ```
+
+## 25. S17 Explicit Approval Synchronization and Post-Stage-02 Validation
+
+S17 is the explicit user approval gate for the remaining Stage 02
+synchronization. The approved current state is:
+
+```text
+STAGE 00: APPROVED
+STAGE 01: APPROVED
+STAGE 02: APPROVED
+STAGE 02A.1: COMPLETED
+STAGE 02A.2: COMPLETED
+STAGE 02A.3: COMPLETED
+STAGE 03: NEXT / NOT STARTED
+```
+
+The approved evidence remains unchanged: TRIAS 1.2 is the audited semantic
+contract; the controlled response was JSON after an XML request; timetable and
+estimate fields were observed; `RecordedAtTime` was not observed in the
+controlled live or tested historical responses; the tested historical results
+were timetable-only or no-event; no exact retention cutoff was inferred; and
+Actual Delay remains unapproved until a validated actual-time source is
+observed and validated.
+
+The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
+are the durable approved design handoff with implementation deferred. The
+[near-event RecordedAtTime lifecycle validation](../source-contracts/mdd-trias-event-lifecycle-validation.md)
+is separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host execution
+pending. It does not reopen Stage 02; any positive evidence requires an
+explicit source-contract amendment or refinement.

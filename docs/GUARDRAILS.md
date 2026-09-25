@@ -2,6 +2,13 @@
 
 These guardrails apply from project foundation unless explicitly replaced by a later approved decision.
 
+The approved Stage 02 source-contract package hands future collector work to
+the [realtime collector requirements](collector-design/realtime-collector-requirements.md);
+implementation remains deferred. The separate [near-event RecordedAtTime
+lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+is post-Stage-02 design evidence with host execution pending and is not a Stage
+02 blocker.
+
 1. Estimated timing is not Actual Physical Delay. `Estimated Delay` may be
    derived only from comparable `EstimatedTime` and `TimetabledTime` values and
    must be labelled explicitly.
@@ -42,3 +49,9 @@ These guardrails apply from project foundation unless explicitly replaced by a l
 24. Historical scheduled events without `EstimatedTime` or `RecordedAtTime`
     must not be treated as historical realtime or actual-delay evidence. A
     successful HTTP status alone does not establish historical alignment.
+25. Later realtime collector implementation must preserve prospective
+    observations because the tested historical StopEvent interface cannot be
+    relied on to reconstruct missed realtime state.
+26. A near-event lifecycle result is evidence about the tested event and
+    coverage scenario only; it must not be generalized to provider-wide
+    `RecordedAtTime` presence or absence without further validation.

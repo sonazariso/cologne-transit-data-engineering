@@ -17,17 +17,18 @@ sufficient recorded/actual timing evidence.
 
 ## Current status
 
-- Stage 0 — Project Definition: **Approved**
-- Stage 1 — Source Inventory & Permission: **Approved**
-- Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress — ready for
-  approval**. The S14 technical-closure package remains the baseline. The
-  previous host run completed the five S15 historical requests, and S16
-  performed zero MDD requests while correcting their offline analysis.
-- Stage 02A.1 — Legacy Implementation Audit: **Completed**.
-- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**. The audited
+- Stage 0 — Project Definition: **APPROVED**
+- Stage 1 — Source Inventory & Permission: **APPROVED**
+- Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
+  technical-closure package remains the approved baseline. The previous host
+  run completed the five S15 historical requests, and S16 performed zero MDD
+  requests while correcting their offline analysis.
+- Stage 3 — Static GTFS Profile: **NEXT / NOT STARTED**.
+- Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**. The audited
   request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
   HTTP 200; current MDD authorization and host DNS are working.
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
   The corrected offline evidence classifies 1D/7D/30D as
   `HISTORICAL_TIMETABLE_ONLY` and 90D/180D as `HISTORY_NO_EVENT`. No
   `EstimatedTime` or `RecordedAtTime` was observed in the historical result
@@ -37,6 +38,11 @@ sufficient recorded/actual timing evidence.
   not a provider-wide absence claim. No Actual Delay KPI is approved. See the
   [Stage 02 source-contract package](docs/source-contracts/README.md) and
   [Project Status](docs/PROJECT-STATUS.md) for details.
+- [Realtime collector requirements](docs/collector-design/realtime-collector-requirements.md)
+  are approved Stage 02 design inputs; implementation is deferred.
+- The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
+  is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host
+  execution pending and does not reopen Stage 02.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 

@@ -8,10 +8,10 @@
 
 | Stage | Name | Status |
 |---|---|---|
-| 0 | Project Definition | Approved |
-| 1 | Source Inventory & Permission | Approved |
-| 2 | MDD/TRIAS Source-Contract Audit | In progress — ready for approval |
-| 3 | Static GTFS Profile | Not started |
+| 0 | Project Definition | APPROVED |
+| 1 | Source Inventory & Permission | APPROVED |
+| 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
+| 3 | Static GTFS Profile | NEXT / NOT STARTED |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
 | 6 | Static Warehouse & Analytics | Not started |
@@ -29,9 +29,9 @@
 
 ### Stage 2 substage status
 
-- Stage 02A.1 — Legacy Implementation Audit: **Completed** (read-only source
+- Stage 02A.1 — Legacy Implementation Audit: **COMPLETED** (read-only source
   evidence documented).
-- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**.
 
   The existing successful host-probe artifact was audited without another MDD
   request. The normalized request to `https://mdd.gorheinland.com/delfi` used
@@ -47,7 +47,7 @@
   repository. It was not copied or committed. The audit found no unresolved
   technical blocker for this controlled response.
 
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
   The previous host run already completed one independent HTTP request at each
   of 1, 7, 30, 90, and 180 days before execution. S16 made zero MDD HTTP
   requests and reanalysed only the five existing raw artifacts. The corrected
@@ -62,15 +62,20 @@ Current authoritative transport and authorization state:
 - The earlier 401 is historical evidence and is strongly explained by the
   earlier different macOS credential value; no provider-side entitlement
   change is claimed.
-- The S14 technical-closure package remains the valid baseline. Stage 02 is
-  currently **In progress — ready for approval** because it is not marked
-  **Approved**; S16 completed the deferred historical actual-time gate
-  evidence.
+- The S14 technical-closure package remains the approved Stage 02 baseline.
+  Stage 02 received explicit user approval in S17 after S16 completed the
+  deferred historical actual-time gate evidence.
 
 The earlier S10/S11/S12 transport and DNS findings remain in the Stage 02 audit
 as historical chronology, not as current blockers. S13 made zero MDD requests,
 executed zero probes, executed no SQL, and changed no database, Legacy
 repository, Task Scheduler, or Power BI state.
+
+The durable [realtime collector requirements](collector-design/realtime-collector-requirements.md)
+are approved Stage 02 design inputs with implementation deferred. The separate
+[near-event RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+is a **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host execution pending;
+it is not a Stage 02 blocker.
 
 ## Current authoritative decisions
 
@@ -100,6 +105,7 @@ repository, Task Scheduler, or Power BI state.
 - ICE, IC, NightJet, FlixTrain, and Thalys are outside the core KPI scope for now; source evidence may still be retained.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.
+- Stage 02 is **APPROVED**; Stage 03 is **NEXT / NOT STARTED**.
 
 ## Former open critical questions and S15/S16 refinement
 
@@ -126,15 +132,17 @@ source-contract conclusions.
 5. Future retained TRIAS fields — **RESOLVED_FOR_STAGE_02** by the field-
    retention matrix; implementation/schema design belongs to later approved
    stages.
-6. Full raw-payload retention — **RESOLVED_FOR_STAGE_02** by the raw-retention
-   decision candidate; any automated exception requires a later Stage 7 gate.
+6. Full raw-payload retention — **RESOLVED_FOR_STAGE_02** by the approved
+   raw-retention decision; any automated exception requires a later Stage 7
+   gate.
 
-**FINAL STAGE 02 APPROVAL: READY FOR APPROVAL; NOT APPROVED.**
+**FINAL STAGE 02 APPROVAL: APPROVED.**
 
-S16 does not approve Actual Delay, a production collector change, a new
-polling schedule, or any permanent raw-payload retention policy. The five
-host requests were a bounded diagnostic/source-contract validation already
-completed before S16; S16 itself performed zero MDD HTTP requests.
+Stage 02 approval does not approve Actual Delay, a production collector change,
+a new polling schedule, or any permanent raw-payload retention policy. The five
+host requests were a bounded diagnostic/source-contract validation completed
+before S16; S16 itself performed zero MDD HTTP requests. The later lifecycle
+validation is separately tracked as post-approval evidence.
 
 ## Stage 02A.3 S16 corrected offline result
 
@@ -199,3 +207,12 @@ See the [Stage 02 source-contract package](source-contracts/README.md) and
 [detailed Stage 02 synthesis](stages/02-mdd-trias-source-contract-audit.md)
 for the full evidence layers, retention matrix, analytical permission matrix,
 and acceptance criteria.
+
+## Post-Stage-02 handoff and validation
+
+- Stage 02 approval synchronization and approved decisions are recorded in the
+  [Decision Log](DECISION-LOG.md).
+- Collector implementation is deferred, and later collector-design stages must
+  begin with the [realtime collector requirements](collector-design/realtime-collector-requirements.md).
+- The [RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+  remains `HOST EXECUTION PENDING` and does not reopen Stage 02.

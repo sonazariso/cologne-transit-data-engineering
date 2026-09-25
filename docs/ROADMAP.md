@@ -9,19 +9,17 @@ No stage is considered authoritative merely because a similar solution existed i
 ## Stage 0 — Project Definition — APPROVED
 Define business questions, portfolio goal, geography, modes, System Performance, audience, and explicit exclusions.
 
-## Stage 1 — Source Inventory & Permission
+## Stage 1 — Source Inventory & Permission — APPROVED
 Re-establish GTFS and MDD source ownership, URLs/contracts, feed coverage, update frequency, API quota, permission/retention conditions, TRIAS version, endpoint contract, and current legacy quota consumption. **No new polling is required to perform the initial quota audit.**
 
-## Stage 2 — MDD/TRIAS Source-Contract Audit — IN PROGRESS; 02A.3 COMPLETED; READY FOR APPROVAL
-The S14 technical-closure package remains the valid baseline. The user
-extended the approval gate with Stage 02A.3 — Historical Actual-Time
-Availability Validation because Actual Operational Performance is a primary
-project objective. The previous host run completed one independent request at
-each of 1D, 7D, 30D, 90D, and 180D, using a 12:00 Europe/Berlin target, no
-retries, and temporary raw artifacts outside the repository. S16 made zero MDD
-HTTP requests and corrected the analysis offline using those five artifacts.
-Stage 02A.1, 02A.2, and 02A.3 are completed; Stage 02 is ready for approval
-but is not approved.
+## Stage 2 — MDD/TRIAS Source-Contract Audit — APPROVED; 02A.1/02A.2/02A.3 COMPLETED
+The S14 technical-closure package remains the approved baseline. The user
+approved Stage 02 explicitly in S17 after Stage 02A.3 — Historical Actual-Time
+Availability Validation was completed. The previous host run completed one
+independent request at each of 1D, 7D, 30D, 90D, and 180D, using a 12:00
+Europe/Berlin target, no retries, and temporary raw artifacts outside the
+repository. S16 made zero MDD HTTP requests and corrected the analysis offline
+using those five artifacts.
 
 The corrected evidence classifies 1D/7D/30D as historical timetable-only:
 their returned `ThisCall` timetable dates match the requested dates, but no
@@ -33,15 +31,22 @@ operational actual delay; a prospective collector remains important, and a
 validated actual-time source is still required. Cadence and schema remain
 deferred to later stages.
 
-The approval candidate package compares official TRIAS 1.2 semantics, the
+The approved source-contract package compares official TRIAS 1.2 semantics, the
 successful controlled MDD response, Legacy parser candidates, and Legacy
 persistence requirements. It documents `RecordedAtTime`, estimate ranges,
 errors/no-realtime evidence, cancellation/status fields, `OperatingDayRef`,
 `StopSeqNumber`, origin/destination, call structure, `NumberOfResults`,
-`TimeWindow`, provider limits, and raw-payload retention. S15 does not approve
-Actual Delay, a production polling schedule, or a collector/schema change.
+`TimeWindow`, provider limits, and raw-payload retention. The historical S15
+gate did not approve Actual Delay, a production polling schedule, or a
+collector/schema change; the S17 approval preserves those constraints.
 
-## Stage 3 — Static GTFS Profile
+The [approved collector requirements](collector-design/realtime-collector-requirements.md)
+are a later-stage handoff, not implementation. The [near-event RecordedAtTime
+lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+is separately tracked as `POST-STAGE-02 COLLECTOR-DESIGN VALIDATION` with host
+execution pending and does not reopen Stage 02.
+
+## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is
 deferred from Stage 02.
 Re-profile raw files, counts, duplicates, missing values, date coverage, stop hierarchy, routes, agencies, and modes from the current authoritative feed.
@@ -58,7 +63,11 @@ Build static dimensions/facts/views incrementally and reconcile source-to-wareho
 ## Stage 7 — Realtime Pilot Design
 Approve target rationale, request contract, `NumberOfResults`, `TimeWindow` if
 supported, retry/timeout, quota budget, any justified bounded raw capture, and
-audit. Validate `RecordedAtTime` population in the pilot; Stage 02 does not
+audit. Collector implementation begins by reviewing
+[docs/collector-design/realtime-collector-requirements.md](collector-design/realtime-collector-requirements.md).
+Validate `RecordedAtTime` population in the pilot; the separate
+[post-Stage-02 lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+is additional design evidence, not a Stage 02 blocker. Stage 02 does not
 approve a production retry policy or new polling schedule.
 
 ## Stage 8 — Small Realtime Pilot

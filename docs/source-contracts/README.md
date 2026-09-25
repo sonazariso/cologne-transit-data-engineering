@@ -1,15 +1,16 @@
 # Source Contracts
 
-This directory contains the Stage 02 MDD/TRIAS source-contract package. The
-S14 technical-closure package remains the baseline, but the current Stage 02
-status is **IN PROGRESS** because the user intentionally extended the
-approval gate for Stage 02A.3 historical actual-time validation. The evidence
-is now complete and Stage 02 is **ready for approval**, but it is not yet
-approved.
+This directory contains the approved Stage 02 MDD/TRIAS source-contract
+package. The S14 technical-closure package remains the baseline, and the
+current Stage 02 status is **APPROVED** after the explicit S17 user approval
+gate. Stage 02A.1, Stage 02A.2, and Stage 02A.3 are completed.
 
-## Approval candidate contract
+Current stage position: Stage 0 — **APPROVED**; Stage 1 — **APPROVED**;
+Stage 2 — **APPROVED**; Stage 3 — **NEXT / NOT STARTED**.
 
-These documents are the current Stage 02 approval candidates:
+## Approved Stage 02 contract
+
+These documents are the current Stage 02 source-contract record:
 
 - [MDD/TRIAS request contract](mdd-trias-request-contract.md)
 - [MDD/TRIAS response contract](mdd-trias-response-contract.md)
@@ -42,11 +43,17 @@ fields absent from this one response. It does not generalize that absence to
 MDD as a whole. In particular, `RecordedAtTime` is a TRIAS 1.2 optional
 actual-time field but was not observed in the controlled response.
 
-The raw-retention candidate says that full raw MDD responses are not a
+The approved raw-retention decision says that full raw MDD responses are not a
 permanent or automated source of record by default. Temporary diagnostic
 artifacts may remain outside source control for an explicitly approved
 diagnostic task, without secrets. No arbitrary retention period or automated
 capture is approved in Stage 02.
+
+The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
+are the durable Stage 02-approved design handoff; implementation is deferred.
+The [near-event RecordedAtTime lifecycle validation](mdd-trias-event-lifecycle-validation.md)
+is separate post-approval evidence for later collector design and is currently
+`HOST EXECUTION PENDING`.
 
 ## Historical / Legacy implementation evidence
 
@@ -63,13 +70,13 @@ coverage evidence.
 
 Current status facts:
 
-- Stage 02A.1 — Legacy Implementation Audit: **Completed**.
-- Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
+- Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
+- Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
 - Current MDD authorization: **Working**.
 - Host DNS result: `NORMAL_RESOLVER_WORKS`.
 - Stage 02 technical audit baseline: **Complete under S14**; current Stage 02
-  status: **In progress — ready for approval**, not approved.
+  status: **Approved** after the S17 approval synchronization.
 - The previous host run completed five historical MDD requests. S16 performed
   zero MDD HTTP requests and zero probe executions; it used only the existing
   raw artifacts.
@@ -88,6 +95,7 @@ Current status facts:
 - No SQL query, database change, Legacy repository change, scheduler change,
   Power BI change, commit, or push was made.
 
-Historical prompt files and `docs/DECISION-LOG.md` remain unchanged. The
-decision log indexes approved decisions and is not updated before the approval
-gate.
+Historical prompt files remain unchanged. `docs/DECISION-LOG.md` now indexes
+the approved Stage 02 decisions, while the lifecycle validation remains a
+separate post-approval experiment and does not alter this historical evidence
+baseline.
