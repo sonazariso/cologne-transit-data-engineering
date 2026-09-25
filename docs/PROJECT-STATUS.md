@@ -46,12 +46,18 @@ Stage 02 is not complete. The Stage 02 audit document records Legacy request,
 parser, and persistence behavior together with the controlled Stage 02A.2
 access-denied result; actual successful MDD response behavior remains
 unproven. The read-only local authorization diagnosis in the same document
-found no concrete request or configuration mismatch that can be fixed locally:
-the named key source is the same, but the Legacy Windows User environment and
-the current macOS process environment are not proven to contain the same value.
+found no concrete local fix that can be validated without another request. The
+historical 401 used a different request `Content-Type`, which is now corrected
+in the unexecuted probe source. The named key source is the same, but the
+Legacy Windows User environment and the current macOS process environment are
+not proven to contain the same value.
+The credential-value comparison was not performed because the two environment
+values are separated between the Windows VMware guest and the macOS process.
 The provider-denial condition therefore remains unresolved and the outcome is
-`PROVIDER_SUPPORT_REQUIRED`. This does not state that the API key itself is
-invalid.
+`CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`. This does not
+state that the API key itself is invalid. The unexecuted probe source now uses
+the Legacy Content-Type `application/xml; charset=utf-8`; the historical 401
+request used `application/xml`, and no new request was made.
 
 ## Current authoritative decisions
 

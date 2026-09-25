@@ -25,9 +25,14 @@ an authorized probe obtains a valid service payload and is reviewed. The
 raw-response retention decision also remains open.
 
 The local authorization diagnosis recorded in §13 of the Stage 02 audit found
-no concrete local request/configuration fix for the 401. Its outcome is
-`PROVIDER_SUPPORT_REQUIRED`; this is not an approved MDD response contract and
-does not claim that the API key itself is invalid.
+found no concrete local fix for the 401 that can be validated without another
+request, but the Windows User-level and macOS process-level `MDD_API_KEY`
+values were not compared. Its outcome is
+`CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`; this is not an
+approved MDD response contract and does not claim that the API key itself is
+invalid. The unexecuted probe source is now normalized to the Legacy
+Content-Type `application/xml; charset=utf-8`; the historical 401 request used
+`application/xml`, and no new request was made.
 
 Planned documents include:
 

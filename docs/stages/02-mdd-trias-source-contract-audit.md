@@ -1,7 +1,7 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
-**Substage status:** COMPLETED  
+**Stage status:** IN PROGRESS
 **Audit date:** 2026-09-25  
 **Scope:** Read-only inspection of the Legacy Collector source. This is not the complete MDD/TRIAS source-contract validation.
 
@@ -398,6 +398,11 @@ Final preflight confirmed `MDD_API_KEY` visible = **YES**. The XML request
 used the audited TRIAS 1.2 and SIRI namespaces, `RequestorRef` value,
 `LocationRef`, `DepArrTime`, timestamp shape, and `Params` hierarchy.
 
+The table above records the already completed historical request and therefore
+retains its actual `application/xml` header. In this task, the unexecuted probe
+source was normalized to the Legacy value `application/xml; charset=utf-8`.
+No request was made to validate that source change.
+
 ### 12.2 HTTP result
 
 | Measurement | Result |
@@ -532,8 +537,10 @@ therefore remains blocked. Stage 2 is not approved or complete.
 SQL query, database change, Legacy repository change, Task Scheduler change, or
 Power BI change was made for this diagnosis.
 **HTTP requests authorized in this task:** 0
+**MDD HTTP requests made in this task:** 0
 **SQL queries executed:** 0
-**Outcome:** `PROVIDER_SUPPORT_REQUIRED`
+**MDD_API_KEY value comparison:** `NOT PERFORMED`
+**Outcome:** `CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`
 
 Line numbers below refer to the inspected Legacy working copy at
 `/Users/admin/Documents/cologne-public-transport-intelligence` and to the
@@ -563,7 +570,7 @@ additional explicit authentication header (`collector/MddRealtimeCollector.psm1:
 |---|---|---|
 | Endpoint | **MATCH** | Probe `scripts/stage_02a2_probe.py:24`; Legacy default `collector/MddRealtimeCollector.psm1:1292-1296`. |
 | HTTP method | **MATCH** | Probe `scripts/stage_02a2_probe.py:118-125`; Legacy `collector/MddRealtimeCollector.psm1:448-451`. |
-| Request `Content-Type` | **DIFFERENT** | Probe sends `application/xml` (`scripts/stage_02a2_probe.py:122-125`); Legacy sends `application/xml; charset=utf-8` (`collector/MddRealtimeCollector.psm1:451-453`). This is a request-contract difference, but local evidence does not show that it caused the 401. |
+| Request `Content-Type` | **MATCH IN CURRENT SOURCE; HISTORICAL REQUEST DIFFERED** | The unexecuted probe source now sends `application/xml; charset=utf-8` (`scripts/stage_02a2_probe.py:122-125`), matching the Legacy value (`collector/MddRealtimeCollector.psm1:451-453`). The historical 401 request recorded in §12 used `application/xml`; no request was made to revalidate the normalization. |
 | Authentication header name | **MATCH** | Both use `x-api-key`: probe `scripts/stage_02a2_probe.py:122-125`; Legacy `collector/MddRealtimeCollector.psm1:428-430`. |
 | API-key source | **DIFFERENT** | Probe reads the current Python process environment with `os.environ.get("MDD_API_KEY")` (`scripts/stage_02a2_probe.py:110-114`); Legacy resolves an explicit parameter, then Windows User environment, then secure prompt (`collector/MddRealtimeCollector.psm1:1273-1289`). |
 | `RequestorRef` | **MATCH** | Both use `CologneTransitIntelligence`: probe `scripts/stage_02a2_probe.py:45-48`; Legacy `collector/MddRealtimeCollector.psm1:180-183`. |
@@ -574,12 +581,13 @@ additional explicit authentication header (`collector/MddRealtimeCollector.psm1:
 | Retry behavior | **DIFFERENT** | The probe makes one attempt. Legacy defaults to up to three attempts, but classifies HTTP 401/403 as non-retryable (`collector/MddRealtimeCollector.psm1:397-407,440-456,505-508`). Retry behavior therefore cannot explain the first 401 response. |
 | Other explicit request headers | **MATCH** in names | The probe explicitly supplies only `Content-Type` and `x-api-key` (`scripts/stage_02a2_probe.py:122-125`); the Legacy code explicitly constructs only `x-api-key` and supplies `ContentType` separately (`collector/MddRealtimeCollector.psm1:428-430,451-453`). No additional Legacy authentication header was found. |
 
-The differences that could plausibly merit provider-side or controlled
-configuration review are the current process-versus-Windows-User key scope and
-the `Content-Type` value. The endpoint, explicit authentication header name,
-RequestorRef, namespaces, timestamp shape, and controlled TRIAS body otherwise
-match. No local evidence identifies a missing account, client, tenant,
-subscription, provider, or dataset parameter.
+The remaining locally relevant authentication uncertainty is the current
+process-versus-Windows-User key scope. The historical 401 also retains a
+`Content-Type` difference from the now-normalized, unexecuted probe source.
+The endpoint, explicit authentication header name, RequestorRef, namespaces,
+timestamp shape, and controlled TRIAS body otherwise match. No local evidence
+identifies a missing account, client, tenant, subscription, provider, or
+dataset parameter.
 
 ### 13.3 Named key-source comparison
 
@@ -591,6 +599,15 @@ Legacy collector's normal fallback is the Windows User environment (with a
 secure prompt fallback), while the current macOS probe reads the environment of
 the Codex/Python process. The two environment scopes and their values were not
 equated or compared.
+
+**MDD_API_KEY VALUE COMPARISON: NOT PERFORMED**
+
+The Windows User-level value is available only inside the Windows VMware
+environment, while the current probe value is available only to the macOS
+process environment. No safe in-process comparison bridge was available in
+this task. Neither API-key value, a hash, a length, a prefix, a suffix, or any
+other derived secret material was read into this report, printed, or persisted.
+Credential identity therefore remains an unresolved blocker.
 
 ### 13.4 Historical Legacy success evidence
 
@@ -622,10 +639,10 @@ not provide per-attempt HTTP 200 status evidence and is not used to infer it.
 | Hypothesis | Classification | Local evidence |
 |---|---|---|
 | A. Probe authentication implementation differs from Legacy | **SUPPORTED** | The key environment scope, request `Content-Type`, redirect policy, and retry behavior differ or are not equivalent as documented in §13.2. This establishes differences, not their causal role in the 401. |
-| B. Current API-key value may differ from the Legacy working key | **POSSIBLE** | The named source is the same, but Legacy reads a Windows User environment value and the probe reads the current macOS process environment. Values were not compared. |
+| B. Current API-key value may differ from the Legacy working key | **UNRESOLVED** | The named source is the same, but Legacy reads a Windows User environment value and the probe reads the current macOS process environment. Equality was not compared. |
 | C. Same key may exist but DELFI/provider entitlement is disabled | **SUPPORTED** for the provider-denial condition; same-key identity is unproven | The controlled response stated that access to the data provider was not enabled (`§12.2`). This does not establish whether the key itself is invalid. |
 | D. Account/provider authorization may have changed since historical success | **POSSIBLE** | Historical HTTP 200 evidence exists, while the later controlled request returned 401. No local change record proves when or why authorization changed. |
-| E. Endpoint/request contract may have changed | **POSSIBLE** for server-side contract drift; endpoint change itself is not supported | The endpoint and TRIAS body match the Legacy source, but no current provider contract or redirect policy is locally authoritative. The `Content-Type` spelling differs. |
+| E. Endpoint/request contract may have changed | **POSSIBLE** for server-side contract drift; endpoint change itself is not supported | The endpoint and TRIAS body match the Legacy source, but no current provider contract or redirect policy is locally authoritative. The historical 401 request used a different `Content-Type` spelling; the unexecuted probe source is now normalized. |
 | F. Another locally evidenced explanation | **NOT SUPPORTED** | No additional account, client, tenant, subscription, provider, dataset, or authentication-header condition was found in the local request path. |
 
 No listed hypothesis is established as the sole cause, and no hypothesis is
@@ -660,11 +677,13 @@ entitlement state.
 
 ### 13.7 Local remediation decision
 
-**PROVIDER_SUPPORT_REQUIRED**
+**CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL**
 
-The local evidence identifies no concrete request or configuration mismatch
-that safely explains the 401 and can be fixed locally. Provider-side support or
-an authorized account administrator must verify the current DELFI/provider
-entitlement, the account/key association, and any current request-contract
-requirements before another request is considered. No request was authorized
-or made by this diagnosis.
+The local evidence is not sufficient to distinguish a credential mismatch from
+provider-side denial because the Windows and macOS values were not compared.
+Provider support remains a provisional external next action, not a final local
+conclusion. An authorized account administrator or the user must first resolve
+credential identity safely; if the values are the same, provider-side support
+becomes substantially better supported, while the historical Content-Type
+difference and other request-contract differences remain documented. No
+request was authorized or made by this diagnosis.

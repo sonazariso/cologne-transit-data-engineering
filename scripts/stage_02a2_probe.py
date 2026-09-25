@@ -120,7 +120,7 @@ def main() -> int:
         data=body,
         method="POST",
         headers={
-            "Content-Type": "application/xml",
+            "Content-Type": "application/xml; charset=utf-8",
             "x-api-key": api_key,
         },
     )
@@ -161,7 +161,7 @@ def main() -> int:
         "request_timestamp_utc": request_utc,
         "endpoint": ENDPOINT,
         "method": "POST",
-        "request_content_type": "application/xml",
+        "request_content_type": "application/xml; charset=utf-8",
         "station": "Köln Hbf",
         "stop_point_ref": STOP_POINT_REF,
         "number_of_results": NUMBER_OF_RESULTS,
