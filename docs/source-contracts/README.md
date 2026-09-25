@@ -9,30 +9,33 @@ Current Stage 02 evidence:
 
 - [Stage 02 — MDD/TRIAS Source-Contract Audit](../stages/02-mdd-trias-source-contract-audit.md)
 
-Stage 02A.2 — Controlled MDD Raw-Response Probe — is **Blocked**. The final
-preflight confirmed `MDD_API_KEY` present = **YES**, but the one authorized POST
-to the approved Köln Hbf target returned HTTP **401**. The response header was
-`application/json;charset=UTF-8`; its 162-byte/161-character body was
-UTF-8 plain text stating that access to this data provider is not enabled,
-not a valid MDD service payload. HTTP attempts = **1**, with no retry.
+Stage 02A.2 — Controlled MDD Raw-Response Probe — remains **Blocked**. The
+latest S10 preflight confirmed `MDD_API_KEY` present = **YES** and the user
+confirmed that the macOS value matches the historically successful Windows
+User-level Legacy value. The reviewed probe was invoked exactly once at
+`2026-09-25T17:43:59.786Z`, but DNS name resolution failed before an HTTP
+response was obtained:
 
-The earlier missing-key preflight remains documented as historical evidence in
-the Stage 02 audit. No successful MDD response-field or source-contract audit
-was completed by the controlled probe.
+```text
+URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
+```
 
-The actual successful MDD response shape and field coverage remain open until
-an authorized probe obtains a valid service payload and is reviewed. The
-raw-response retention decision also remains open.
+Probe attempts = **1**, HTTP retries = **0**, confirmed MDD HTTP requests =
+**0**, HTTP status = **unavailable**, response bytes = **0**, and no temporary
+raw artifact was created. No provider-authorization conclusion can be drawn
+from this transport failure.
 
-The local authorization diagnosis recorded in §13 of the Stage 02 audit found
-found no concrete local fix for the 401 that can be validated without another
-request, but the Windows User-level and macOS process-level `MDD_API_KEY`
-values were not compared. Its outcome is
-`CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`; this is not an
-approved MDD response contract and does not claim that the API key itself is
-invalid. The unexecuted probe source is now normalized to the Legacy
-Content-Type `application/xml; charset=utf-8`; the historical 401 request used
-`application/xml`, and no new request was made.
+The earlier HTTP **401** response remains historical evidence in the Stage 02
+audit. No successful MDD response-field or source-contract audit has been
+completed. The actual successful MDD response shape and field coverage remain
+open until an authorized probe obtains a valid service payload and is reviewed.
+The raw-response retention decision also remains open.
+
+The current conservative diagnosis is
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
+The probe source uses the Legacy Content-Type
+`application/xml; charset=utf-8`. No key, fingerprint, authorization header,
+raw response, or derived secret material was written to the repository.
 
 Planned documents include:
 

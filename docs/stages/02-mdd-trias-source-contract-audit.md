@@ -399,9 +399,10 @@ used the audited TRIAS 1.2 and SIRI namespaces, `RequestorRef` value,
 `LocationRef`, `DepArrTime`, timestamp shape, and `Params` hierarchy.
 
 The table above records the already completed historical request and therefore
-retains its actual `application/xml` header. In this task, the unexecuted probe
-source was normalized to the Legacy value `application/xml; charset=utf-8`.
-No request was made to validate that source change.
+retains its actual `application/xml` header. For that historical request, the
+probe source had not yet been executed with the normalized Legacy value
+`application/xml; charset=utf-8`. The later S10 re-run and its transport result
+are recorded separately in §14.
 
 ### 12.2 HTTP result
 
@@ -594,20 +595,20 @@ dataset parameter.
 **SAME CONFIGURATION SOURCE: YES**
 
 Both implementations are intended to use the same named configuration source,
-`MDD_API_KEY`. This does **not** establish that the values are identical. The
-Legacy collector's normal fallback is the Windows User environment (with a
-secure prompt fallback), while the current macOS probe reads the environment of
-the Codex/Python process. The two environment scopes and their values were not
-equated or compared.
+`MDD_API_KEY`. The Legacy collector's normal fallback is the Windows User
+environment (with a secure prompt fallback), while the current macOS probe
+reads the environment of the Codex/Python process. The environment scopes are
+different, but the user separately established that the two values are the
+same.
 
-**MDD_API_KEY VALUE COMPARISON: NOT PERFORMED**
+**MDD_API_KEY VALUE COMPARISON: SAME**
 
-The Windows User-level value is available only inside the Windows VMware
-environment, while the current probe value is available only to the macOS
-process environment. No safe in-process comparison bridge was available in
-this task. Neither API-key value, a hash, a length, a prefix, a suffix, or any
-other derived secret material was read into this report, printed, or persisted.
-Credential identity therefore remains an unresolved blocker.
+The user locally compared the SHA-256 fingerprints of the Windows User-level
+Legacy value and the macOS probe value and established that the values are the
+same. This report does not reproduce either fingerprint and does not contain
+the key, its length, prefix, suffix, or any other derived secret material. The
+user also relaunched VS Code from the macOS terminal carrying the confirmed
+credential so the probe process could inherit it.
 
 ### 13.4 Historical Legacy success evidence
 
@@ -638,11 +639,11 @@ not provide per-attempt HTTP 200 status evidence and is not used to infer it.
 
 | Hypothesis | Classification | Local evidence |
 |---|---|---|
-| A. Probe authentication implementation differs from Legacy | **SUPPORTED** | The key environment scope, request `Content-Type`, redirect policy, and retry behavior differ or are not equivalent as documented in §13.2. This establishes differences, not their causal role in the 401. |
-| B. Current API-key value may differ from the Legacy working key | **UNRESOLVED** | The named source is the same, but Legacy reads a Windows User environment value and the probe reads the current macOS process environment. Equality was not compared. |
-| C. Same key may exist but DELFI/provider entitlement is disabled | **SUPPORTED** for the provider-denial condition; same-key identity is unproven | The controlled response stated that access to the data provider was not enabled (`§12.2`). This does not establish whether the key itself is invalid. |
+| A. Probe authentication implementation differs from Legacy | **SUPPORTED** | The key environment scope, redirect policy, and retry behavior differ or are not equivalent as documented in §13.2; the historical 401 also used a different request `Content-Type`. This establishes implementation differences, not their causal role in the 401. |
+| B. Current API-key value may differ from the Legacy working key | **NOT SUPPORTED by the user's comparison** | The user established that the Windows User-level Legacy value and macOS probe value are the same. This does not establish that the key is valid or currently authorized. |
+| C. Same key may exist but DELFI/provider entitlement is disabled | **SUPPORTED for the earlier 401 only; current state undetermined** | The earlier controlled response stated that access to the data provider was not enabled (`§12.2`). The S10 re-run failed during DNS resolution before an HTTP response, so it provides no new provider-side authorization evidence. |
 | D. Account/provider authorization may have changed since historical success | **POSSIBLE** | Historical HTTP 200 evidence exists, while the later controlled request returned 401. No local change record proves when or why authorization changed. |
-| E. Endpoint/request contract may have changed | **POSSIBLE** for server-side contract drift; endpoint change itself is not supported | The endpoint and TRIAS body match the Legacy source, but no current provider contract or redirect policy is locally authoritative. The historical 401 request used a different `Content-Type` spelling; the unexecuted probe source is now normalized. |
+| E. Endpoint/request contract may have changed | **POSSIBLE** for server-side contract drift; endpoint change itself is not supported | The endpoint and TRIAS body match the Legacy source, but no current provider contract or redirect policy is locally authoritative. The historical 401 request used a different `Content-Type` spelling; the S10 probe source and preflight now use the normalized Legacy value. |
 | F. Another locally evidenced explanation | **NOT SUPPORTED** | No additional account, client, tenant, subscription, provider, dataset, or authentication-header condition was found in the local request path. |
 
 No listed hypothesis is established as the sole cause, and no hypothesis is
@@ -677,13 +678,71 @@ entitlement state.
 
 ### 13.7 Local remediation decision
 
-**CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL**
+**TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED**
 
-The local evidence is not sufficient to distinguish a credential mismatch from
-provider-side denial because the Windows and macOS values were not compared.
-Provider support remains a provisional external next action, not a final local
-conclusion. An authorized account administrator or the user must first resolve
-credential identity safely; if the values are the same, provider-side support
-becomes substantially better supported, while the historical Content-Type
-difference and other request-contract differences remain documented. No
-request was authorized or made by this diagnosis.
+The user's comparison removes a current Windows-versus-macOS key-value mismatch
+as the explanation under investigation. However, the S10 re-run received no
+HTTP response because endpoint name resolution failed before an HTTP response
+could be obtained. It therefore cannot establish current provider
+authorization, entitlement, key validity, or account state. The earlier 401
+remains historical evidence and is not reclassified by the transport failure.
+
+No provider-support email was sent or drafted from this result, and no second
+request was authorized or made.
+
+## 14. Stage 02A.2 S10 Controlled Re-run Result
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+**Status:** BLOCKED
+**Probe request timestamp:** `2026-09-25T17:43:59.786Z`
+**Probe network attempts:** `1`
+**Confirmed MDD HTTP requests:** `0`
+**HTTP retries:** `0`
+
+This section records the single S10 re-run after the user confirmed that the
+macOS `MDD_API_KEY` value matched the historically successful Windows User-level
+Legacy value. The preflight verified the reviewed endpoint, `POST` method,
+`x-api-key` header, `application/xml; charset=utf-8` request content type,
+request body target, one-call path, disabled redirects, 30-second timeout, and
+secure external temporary-artifact behavior. The process reported
+`MDD_API_KEY` present = **YES**. No secret or fingerprint was read into this
+document.
+
+The probe was invoked exactly once. It failed with:
+
+```text
+URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
+```
+
+The probe reported an elapsed time of `33.598` ms. No HTTP status, response
+`Content-Type`, response body, or response bytes were obtained. The failure is
+consistent with DNS name resolution failing before an HTTP response; no MDD
+HTTP request is confirmed as having reached the endpoint. The single probe
+attempt is not a retry, and no follow-up request was made.
+
+### 14.1 Response format and field audit
+
+There was no response to classify as XML, JSON, or other, and no root,
+TRIAS/service-delivery, `StopEventResult`, call, timing, identity, operational
+status, platform, or situation structure was available for audit. These fields
+remain unobserved; this run must not be converted into a claim about MDD field
+support or field absence. The earlier HTTP 401 body and its limitations remain
+documented in §12 as a separate historical response.
+
+### 14.2 Raw-response safety
+
+No response bytes were received, so no temporary raw-response artifact was
+created. No raw response, authorization header, API key, or derived secret
+material was written to the repository or documentation.
+
+### 14.3 Current status and diagnosis
+
+The current blocker is:
+
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`
+
+The result does not support classifying the provider as unauthorized,
+disabled, revoked, or otherwise responsible for the failure. Stage 02A.2
+remains **Blocked** because no valid operational MDD service payload was
+obtained or audited. Stage 02 remains **In progress** and is not approved or
+complete.

@@ -33,31 +33,37 @@
   evidence documented).
 - Stage 02A.2 — Controlled MDD Raw-Response Probe: **Blocked**.
 
-  Final preflight confirmed `MDD_API_KEY` present = **YES**. The one authorized
-  POST was sent for Köln Hbf (`de:05315:11201`) with five arrival results and
-  previous/onward/realtime calls enabled. It returned HTTP **401** after
-  **1** HTTP attempt. The response header was
-  `application/json;charset=UTF-8`, but the 162-byte/161-character body was
-  UTF-8 plain text stating that access to this data provider is not enabled.
-  It was not a valid MDD service payload, so Stage 02A.2 remains blocked and
-  no response-field audit could be completed.
+  The latest S10 preflight confirmed `MDD_API_KEY` present = **YES**, and the
+  user confirmed that the macOS value matches the historically successful
+  Windows User-level Legacy value. The reviewed probe was invoked exactly once
+  at `2026-09-25T17:43:59.786Z` for Köln Hbf
+  (`de:05315:11201`) with five arrival results and previous/onward/realtime
+  calls enabled. DNS name resolution failed before an HTTP response was
+  obtained:
+
+  ```text
+  URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
+  ```
+
+  Probe attempts = **1**, HTTP retries = **0**, confirmed MDD HTTP requests =
+  **0**, HTTP status = **unavailable**, response bytes = **0**, and no temporary
+  raw artifact was created. This run does not establish provider
+  authorization or denial.
+
+  The earlier HTTP **401** response remains historical evidence in the Stage
+  02 audit. It was not a valid MDD service payload, so Stage 02A.2 remains
+  blocked and no successful response-field audit could be completed.
 
 Stage 02 is not complete. The Stage 02 audit document records Legacy request,
-parser, and persistence behavior together with the controlled Stage 02A.2
-access-denied result; actual successful MDD response behavior remains
-unproven. The read-only local authorization diagnosis in the same document
-found no concrete local fix that can be validated without another request. The
-historical 401 used a different request `Content-Type`, which is now corrected
-in the unexecuted probe source. The named key source is the same, but the
-Legacy Windows User environment and the current macOS process environment are
-not proven to contain the same value.
-The credential-value comparison was not performed because the two environment
-values are separated between the Windows VMware guest and the macOS process.
-The provider-denial condition therefore remains unresolved and the outcome is
-`CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`. This does not
-state that the API key itself is invalid. The unexecuted probe source now uses
-the Legacy Content-Type `application/xml; charset=utf-8`; the historical 401
-request used `application/xml`, and no new request was made.
+parser, and persistence behavior, the earlier controlled HTTP 401, and the
+latest S10 transport failure; actual successful MDD response behavior remains
+unproven. The user's value comparison removes a current key-value mismatch as
+the explanation under investigation, but the S10 run obtained no HTTP response
+and therefore cannot establish provider authorization, entitlement, key
+validity, or account state. The current conservative diagnosis is
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`. The
+probe source uses the Legacy Content-Type `application/xml; charset=utf-8`.
+No second request was made.
 
 ## Current authoritative decisions
 
