@@ -33,15 +33,19 @@
   evidence documented).
 - Stage 02A.2 — Controlled MDD Raw-Response Probe: **Blocked**.
 
-  Preflight completed, but `MDD_API_KEY` was not available in the Codex
-  execution environment. `MDD_API_KEY` present = **NO**. HTTP attempts = **0**;
-  probe execution did not occur. The blocker is API-key unavailability in the
-  execution environment. No source-contract conclusion was made from this
-  failed preflight.
+  Final preflight confirmed `MDD_API_KEY` present = **YES**. The one authorized
+  POST was sent for Köln Hbf (`de:05315:11201`) with five arrival results and
+  previous/onward/realtime calls enabled. It returned HTTP **401** after
+  **1** HTTP attempt. The response header was
+  `application/json;charset=UTF-8`, but the 162-byte/161-character body was
+  UTF-8 plain text stating that access to this data provider is not enabled.
+  It was not a valid MDD service payload, so Stage 02A.2 remains blocked and
+  no response-field audit could be completed.
 
 Stage 02 is not complete. The Stage 02A.1 document records Legacy request,
-parser, and persistence behavior only; actual MDD response behavior remains
-unproven until the controlled Stage 02A.2 probe.
+parser, and persistence behavior only. The controlled Stage 02A.2 probe proved
+only that this request received an access-denied response; actual successful
+MDD response behavior remains unproven.
 
 ## Current authoritative decisions
 

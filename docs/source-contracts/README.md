@@ -8,15 +8,20 @@ Current Stage 02 evidence:
 
 - [Stage 02A.1 — Legacy Implementation Audit](../stages/02-mdd-trias-source-contract-audit.md)
 
-Stage 02A.2 — Controlled MDD Raw-Response Probe — is **Blocked**. Its preflight
-completed, but `MDD_API_KEY` was not available in the Codex execution
-environment (`MDD_API_KEY` present = **NO**). HTTP attempts = **0** and probe
-execution did not occur. The blocker is API-key unavailability in the
-execution environment; no source-contract conclusion was made from this
-failed preflight.
+Stage 02A.2 — Controlled MDD Raw-Response Probe — is **Blocked**. The final
+preflight confirmed `MDD_API_KEY` present = **YES**, but the one authorized POST
+to the approved Köln Hbf target returned HTTP **401**. The response header was
+`application/json;charset=UTF-8`; its 162-byte/161-character body was
+UTF-8 plain text stating that access to this data provider is not enabled,
+not a valid MDD service payload. HTTP attempts = **1**, with no retry.
 
-The actual MDD response shape, field coverage, and raw-response retention
-decision remain open until the controlled probe is completed and reviewed.
+The earlier missing-key preflight remains documented as historical evidence in
+the Stage 02 audit. No successful MDD response-field or source-contract audit
+was completed by the controlled probe.
+
+The actual successful MDD response shape and field coverage remain open until
+an authorized probe obtains a valid service payload and is reviewed. The
+raw-response retention decision also remains open.
 
 Planned documents include:
 

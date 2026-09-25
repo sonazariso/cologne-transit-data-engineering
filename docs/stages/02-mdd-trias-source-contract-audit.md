@@ -342,14 +342,15 @@ TRIAS capability → actual MDD response → Legacy parser handling → SQL pers
 No MDD request, SQL query, database change, Legacy repository change, or
 Task Scheduler change was made for Stage 02A.1.
 
-## 11. Stage 02A.2 Preflight Status
+## 11. Historical Stage 02A.2 Preflight Status
 
 **Stage:** 02A.2 — Controlled MDD Raw-Response Probe
 **Status:** BLOCKED
 **Preflight date:** 2026-09-25
 
-The Stage 02A.2 preflight completed before any network operation. `MDD_API_KEY`
-was not available in the Codex execution environment:
+This section records the preflight performed before the API key became
+available to the Codex execution environment. It is historical context, not
+the final status of the controlled probe:
 
 - `MDD_API_KEY` present = **NO**.
 - HTTP attempts = **0**.
@@ -358,3 +359,168 @@ was not available in the Codex execution environment:
 - No source-contract conclusion was made from this failed preflight.
 
 Stage 02 remains in progress and is not complete or approved.
+
+## 12. Stage 02A.2 Controlled Probe Result
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+**Status:** BLOCKED
+**Probe request time:** `2026-09-25T16:41:44.264Z`
+**Maximum authorized HTTP attempts:** `1`
+**Actual HTTP attempts:** `1`
+**HTTP retries:** `0`
+
+### 12.1 Probe implementation and final preflight
+
+The diagnostic-only probe is [scripts/stage_02a2_probe.py](../../scripts/stage_02a2_probe.py).
+It constructs the request from the audited Legacy builder contract and has one
+network call, no retry loop, no redirect follow-up, no Legacy Collector
+invocation, no SQL/database code, and no Task Scheduler code. The API key is
+read only from `MDD_API_KEY` and supplied only as the `x-api-key` header; it was
+not printed, logged, or written to disk.
+
+The authorized target was:
+
+| Item | Value |
+|---|---|
+| Station | Köln Hbf |
+| `StopPointRef` | `de:05315:11201` |
+| `NumberOfResults` | `5` |
+| `StopEventType` | `arrival` |
+| `IncludePreviousCalls` | `true` |
+| `IncludeOnwardCalls` | `true` |
+| `IncludeRealtimeData` | `true` |
+| Endpoint | `https://mdd.gorheinland.com/delfi` |
+| Method | `POST` |
+| Request `Content-Type` | `application/xml` |
+| Authentication header | `x-api-key` |
+
+Final preflight confirmed `MDD_API_KEY` visible = **YES**. The XML request
+used the audited TRIAS 1.2 and SIRI namespaces, `RequestorRef` value,
+`LocationRef`, `DepArrTime`, timestamp shape, and `Params` hierarchy.
+
+### 12.2 HTTP result
+
+| Measurement | Result |
+|---|---|
+| HTTP status | `401` |
+| Response `Content-Type` | `application/json;charset=UTF-8` |
+| Response size | `162` bytes / `161` decoded characters |
+| Elapsed request duration | `157.061` ms |
+| Response body | UTF-8 text stating that access to this data provider is not enabled; exact raw body is not copied into source-controlled documentation |
+
+The single request failed with an access-denied response. The response does
+not establish whether the cause was the key, provider-side permission, data
+provider enablement, or another authentication/authorization condition.
+
+### 12.3 Actual MDD response format and structure
+
+The response header advertised `application/json;charset=UTF-8`, but the body
+was not valid JSON and was not XML. It decoded as one plain UTF-8 text message
+(payload format: **other / unstructured text**). JSON parsing failed at the
+first character.
+
+The following structures were therefore not returned or could not be
+meaningfully audited:
+
+- no JSON top-level object or TRIAS XML document;
+- no `serviceDelivery` or response/status structure;
+- no `stopEventResponse` or `stopEventResult` collection;
+- no `PreviousCall`, `ThisCall`, or `OnwardCall` structure;
+- no service/journey or location/stop structure;
+- no structured situation/disruption linkage; and
+- no named `ErrorMessage` or other structured error object.
+
+These are not field-absence findings for MDD. They are limitations of the
+single HTTP 401 error response.
+
+### 12.4 Timing, identity, operational, and platform field audits
+
+Because no valid service payload was returned, the recursive field audits were
+not meaningful. Every field below is **not auditable from this response**;
+occurrence count, path, and representative type/value are **N/A**. This must
+not be converted into a `present = NO` conclusion.
+
+| Audit group | Fields not auditable in the 401 response |
+|---|---|
+| Timing | `RecordedAtTime`, `TimetabledTime`, `EstimatedTime`, `EstimatedTimeLow`, `EstimatedTimeHigh` |
+| Identity | `OperatingDayRef`, `StopSeqNumber`, `JourneyRef`, `LineRef`, `DirectionRef`, `OperatorRef`, `OriginStopPointRef`, `DestinationStopPointRef` |
+| Operational status | `Cancelled`, `NotServicedStop`, `NoBoardingAtStop`, `NoAlightingAtStop`, `UnplannedStop`, `ErrorMessage` |
+| Platform | `PlannedBay`, `EstimatedBay` |
+
+In particular, the probe does not establish whether `RecordedAtTime` is
+returned by MDD. The only permitted conclusion about this response is that
+`RecordedAtTime` was not auditable in the controlled Köln Hbf access-denied
+response.
+
+### 12.5 Situation findings
+
+No situation structure, identifier, service linkage, summary, description, or
+detail field was available in the error response. No causality conclusion was
+made.
+
+### 12.6 Actual response versus Legacy parser and persistence
+
+The actual-response column is intentionally the same limitation for each
+candidate: the request returned no valid MDD service payload. The Legacy
+columns reproduce the Stage 02A.1 evidence and do not turn the 401 body into a
+successful response audit.
+
+| Field | Actual MDD response | Legacy parser | Legacy SQL persistence | Observation |
+|---|---|---|---|---|
+| `RecordedAtTime` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `TimetabledTime` | Not observable in 401 body | A — parsed | `TimetabledArrivalUtc` | Actual presence remains unknown |
+| `EstimatedTime` | Not observable in 401 body | A — parsed | `EstimatedArrivalUtc` | Actual presence remains unknown |
+| `EstimatedTimeLow` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `EstimatedTimeHigh` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `OperatingDayRef` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `StopSeqNumber` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `Cancelled` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `NotServicedStop` | Not observable in 401 body | A — parsed | Stop-observation flag | Actual presence remains unknown |
+| `NoBoardingAtStop` | Not observable in 401 body | A — parsed | Stop-observation flag | Actual presence remains unknown |
+| `NoAlightingAtStop` | Not observable in 401 body | A — parsed | Stop-observation flag | Actual presence remains unknown |
+| `UnplannedStop` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `PlannedBay` | Not observable in 401 body | A — parsed | `PlannedBay` | Actual presence remains unknown |
+| `EstimatedBay` | Not observable in 401 body | A — parsed | `EstimatedBay` | Actual presence remains unknown |
+| `JourneyRef` | Not observable in 401 body | A — parsed | `JourneyRef` | Actual presence remains unknown |
+| `LineRef` | Not observable in 401 body | A — parsed | `LineRef` | Actual presence remains unknown |
+| `DirectionRef` | Not observable in 401 body | A — parsed | `DirectionRef` | Actual presence remains unknown |
+| `OperatorRef` | Not observable in 401 body | A — parsed | `OperatorRef` | Actual presence remains unknown |
+| `OriginStopPointRef` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `DestinationStopPointRef` | Not observable in 401 body | D — not found | Not persisted | Actual presence remains unknown |
+| `PreviousCall` | Not observable in 401 body | D — not parsed | Not persisted | Actual presence remains unknown |
+| `ThisCall` | Not observable in 401 body | C — traversed, container not persisted | Not persisted as a container | Actual presence remains unknown |
+| `OnwardCall` | Not observable in 401 body | D — not parsed | Not persisted | Actual presence remains unknown |
+| `ErrorMessage` | Unstructured access-denied text only; no named field | C — used for collector error/audit text, not parsed as response field | Not persisted as response field | Not a valid structured MDD error object |
+| `Situation` | Not observable in 401 body | A — parsed when valid | Situation observations and links | Actual presence remains unknown |
+
+No A/B/C/D classification of *actual returned fields* is possible from this
+failed request:
+
+- A — returned by MDD and persisted by Legacy: **not determined**.
+- B — returned by MDD but lost before Legacy persistence: **not determined**.
+- C — handled by Legacy but absent from this response: **not determined**;
+  the response was not a service payload.
+- D — candidate not observed in this response: **not determined as an MDD
+  capability claim**.
+
+### 12.7 Raw artifact safety and limitations
+
+For this investigation only, the exact response bytes were retained in the
+mode-600 temporary file `/private/tmp/cologne-transit-stage-02a2-h6r5yofu.raw`.
+The artifact is outside the repository, contains no API key or authentication
+header, and is not tracked by Git. This is transient diagnostic evidence, not
+a production raw-response retention policy. The raw payload was not added to
+source-controlled documentation.
+
+The probe establishes only the following:
+
+- the authorized request was constructed and sent once;
+- the endpoint returned HTTP 401;
+- the response header/body format was inconsistent with a parseable JSON
+  service payload; and
+- a successful MDD response contract was not obtained.
+
+It does not establish MDD field coverage, `RecordedAtTime` availability,
+service-event multiplicity, situation linkage, platform semantics, quota
+behavior, or the exact provider-side reason for access denial. Stage 02A.2
+therefore remains blocked. Stage 2 is not approved or complete.
