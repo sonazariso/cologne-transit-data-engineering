@@ -1,0 +1,51 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+secrets/
+
+# Logs / runtime
+*.log
+logs/
+runtime/
+tmp/
+temp/
+
+# Data / payloads / database artifacts
+data/
+raw/
+raw-data/
+raw-payloads/
+*.bak
+*.bacpac
+*.mdf
+*.ldf
+*.sqlite
+*.db
+
+# Power BI local/binary state
+*.pbix
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+
+# .NET / build output
+bin/
+obj/
+TestResults/
+
+# PowerShell/local state
+*.clixml
+
+# Archives generated locally
+*.zip
+*.7z
+*.tar
+*.gz
