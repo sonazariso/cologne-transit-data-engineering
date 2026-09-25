@@ -10,7 +10,7 @@
 |---|---|---|
 | 0 | Project Definition | Approved |
 | 1 | Source Inventory & Permission | Approved |
-| 2 | MDD/TRIAS Source-Contract Audit | In progress |
+| 2 | MDD/TRIAS Source-Contract Audit | In progress — ready for approval |
 | 3 | Static GTFS Profile | Not started |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
@@ -47,13 +47,12 @@
   repository. It was not copied or committed. The audit found no unresolved
   technical blocker for this controlled response.
 
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **In progress
-  / host execution pending**. The S15 probe is prepared but has not been
-  executed from Codex. It will test one independent historical StopEvent
-  request for each of 1, 7, 30, 90, and 180 days ago, using a 12:00
-  Europe/Berlin target and no retries. The purpose is to determine whether
-  historical events expose `RecordedAtTime`, historical realtime estimates,
-  timetable-only data, a bounded history window, or a request fallback.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
+  The previous host run already completed one independent HTTP request at each
+  of 1, 7, 30, 90, and 180 days before execution. S16 made zero MDD HTTP
+  requests and reanalysed only the five existing raw artifacts. The corrected
+  result is historical timetable-only data at 1D/7D/30D and no event at 90D/
+  180D; no `EstimatedTime` or `RecordedAtTime` was observed.
 
 Current authoritative transport and authorization state:
 
@@ -63,10 +62,10 @@ Current authoritative transport and authorization state:
 - The earlier 401 is historical evidence and is strongly explained by the
   earlier different macOS credential value; no provider-side entitlement
   change is claimed.
-- The S14 technical-closure package remains the valid baseline, but Stage 02
-  is currently **In progress** because the user intentionally deferred the
-  approval gate for the S15 historical actual-time validation. Stage 02 is
-  not marked **Approved**.
+- The S14 technical-closure package remains the valid baseline. Stage 02 is
+  currently **In progress — ready for approval** because it is not marked
+  **Approved**; S16 completed the deferred historical actual-time gate
+  evidence.
 
 The earlier S10/S11/S12 transport and DNS findings remain in the Stage 02 audit
 as historical chronology, not as current blockers. S13 made zero MDD requests,
@@ -85,10 +84,11 @@ repository, Task Scheduler, or Power BI state.
 - `EstimatedTime` is secondary and may later support estimated-delay and prediction-accuracy analysis.
 - The audited successful response did not contain `RecordedAtTime` or a direct
   delay value; this does not establish general MDD absence.
-- `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. Historical
-  availability is being validated in Stage 02A.3 before final approval;
-  representative coverage, reliability, and operational suitability remain
-  later Stage 8/16 questions.
+- `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. It was not
+  observed in the five tested historical responses, and 1D/7D/30D were
+  timetable-only after corrected date alignment. This is not a provider-wide
+  absence claim; representative coverage, reliability, and operational
+  suitability remain later Stage 8/16 questions.
 - `NotServicedStop` is a stop-level flag, not journey-level cancellation.
   `PlannedBay` and `EstimatedBay` remain separate, and situation association
   is not causal evidence.
@@ -101,19 +101,19 @@ repository, Task Scheduler, or Power BI state.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.
 
-## Former open critical questions and S15 refinement
+## Former open critical questions and S15/S16 refinement
 
-The S14 baseline reclassified the questions below. S15 intentionally reopens
-only the historical actual-time availability evidence question before the
-final Stage 02 approval gate; it does not invalidate the S14 semantic or
+The S14 baseline reclassified the questions below. S15 intentionally reopened
+only the historical actual-time availability evidence question, and S16
+completed its offline audit without invalidating the S14 semantic or
 source-contract conclusions.
 
-1. `RecordedAtTime` semantic role — **RESOLVED_FOR_STAGE_02**. Historical
-   availability for past StopEvent requests — **IN_PROGRESS_IN_STAGE_02A.3**;
-   representative population coverage, reliability, and operational
+1. `RecordedAtTime` semantic role — **RESOLVED_FOR_STAGE_02**. In the five
+   tested historical responses, `RecordedAtTime` was not observed, and the
+   1D/7D/30D responses were timetable-only after corrected date alignment.
+   This is evidence for the tested requests, not a provider-wide absence
+   claim. Representative population coverage, reliability, and operational
    suitability remain **DEFERRED_TO_STAGE_8** and **DEFERRED_TO_STAGE_16**.
-   It was absent from the one audited response, but that does not establish
-   provider-wide absence.
 2. Current MDD permission/access boundary — **RESOLVED_FOR_STAGE_02**. Access
    works; registration/activation, provider terms, and agreed use remain
    documented constraints. Future publication or redistribution requires a
@@ -129,12 +129,59 @@ source-contract conclusions.
 6. Full raw-payload retention — **RESOLVED_FOR_STAGE_02** by the raw-retention
    decision candidate; any automated exception requires a later Stage 7 gate.
 
-**FINAL STAGE 02 APPROVAL: DEFERRED PENDING STAGE 02A.3 HOST EXECUTION AND
-AUDIT.**
+**FINAL STAGE 02 APPROVAL: READY FOR APPROVAL; NOT APPROVED.**
 
-S15 does not approve Actual Delay, a production collector change, a new
-polling schedule, or any permanent raw-payload retention policy. The host
-probe is a bounded diagnostic/source-contract validation only.
+S16 does not approve Actual Delay, a production collector change, a new
+polling schedule, or any permanent raw-payload retention policy. The five
+host requests were a bounded diagnostic/source-contract validation already
+completed before S16; S16 itself performed zero MDD HTTP requests.
+
+## Stage 02A.3 S16 corrected offline result
+
+The raw artifacts at
+`/private/tmp/cologne-transit-stage-02a3-3qdsj02c` were all readable JSON:
+
+| Artifact | Bytes | Results | Corrected result |
+|---|---:|---:|---|
+| `01-1d.raw` | 56,216 | 5 | `HISTORICAL_TIMETABLE_ONLY`; target date matched |
+| `02-7d.raw` | 55,838 | 5 | `HISTORICAL_TIMETABLE_ONLY`; target date matched |
+| `03-30d.raw` | 54,340 | 5 | `HISTORICAL_TIMETABLE_ONLY`; target date matched |
+| `04-90d.raw` | 429 | 0 | `HISTORY_NO_EVENT`; populated `STOPEVENT_NOEVENTFOUND` |
+| `05-180d.raw` | 429 | 0 | `HISTORY_NO_EVENT`; populated `STOPEVENT_NOEVENTFOUND` |
+
+The original 1D/7D/30D summaries reported `ThisCall` timetable counts but
+`null` min/max values and `INCONCLUSIVE` alignment because the provider
+lexical value ended in `Z[GMT]`. The `Z` is explicit UTC; `[GMT]` is a
+provider suffix. S16 now strips only that observed suffix before parsing and
+preserves timezone-less values as unresolved rather than assigning a guessed
+offset. Calendar comparison is explicitly **DATE-ALIGNMENT ONLY**.
+
+The original `response_error_message_count` and
+`result_error_message_count` counts came from counting empty `ErrorMessage`
+containers. S16 counts only populated messages: both counts are zero for
+1D/7D/30D, while the populated response-level message and
+`STOPEVENT_NOEVENTFOUND` evidence remain for 90D/180D.
+
+No historical response contained `EstimatedTime`, `RecordedAtTime`, a
+recorded/actual timing candidate, or another actual-looking timestamp. The
+responses did contain delivery `responseTimestamp` values and processing
+`calcTime`; neither is treated as vehicle timing. `estimatedBay` was present
+as empty arrays in the result structures and is not an estimated arrival time.
+
+At the tested 1-, 7-, and 30-day horizons, the MDD StopEvent interface
+returned historical scheduled events but did not return `EstimatedTime` or
+`RecordedAtTime` in those responses. Retrospective StopEvent retrieval
+therefore cannot currently be relied on to reconstruct operational actual
+delay. A prospective collector remains important for preserving future
+realtime evidence, and any later actual-delay capability still requires a
+validated actual-time source. Collector cadence and schema are deferred to
+later stages.
+
+No StopEvent result was returned for the specific tested Köln Hbf arrival
+request at the 90-day or 180-day target times. This does not establish a
+retention cutoff or a provider-wide history boundary. No additional
+historical request is required for the current Stage 02 source-contract
+decision.
 
 The point-in-time Legacy Collector quota audit snapshot at **2026-09-25
 11:23:41 UTC** recorded **1,599** collector executions, **1,629** HTTP

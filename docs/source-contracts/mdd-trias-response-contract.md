@@ -52,8 +52,8 @@ The VDV 431-2 TRIAS 1.2 semantics supplied for this audit are:
 | `EstimatedTime` | Optional expected/predicted time in `ServiceCallStructure`. |
 | `EstimatedTimeLow` / `EstimatedTimeHigh` | Optional lower and upper bounds for the expected time. |
 
-The controlled response contained `TimetabledTime` and `EstimatedTime` values,
-but did not contain `RecordedAtTime`, `EstimatedTimeLow`, or
+The S14 controlled response contained `TimetabledTime` and `EstimatedTime`
+values, but did not contain `RecordedAtTime`, `EstimatedTimeLow`, or
 `EstimatedTimeHigh`. `RecordedAtTime` is therefore:
 
 > **SPEC_DEFINED but NOT OBSERVED IN THIS CONTROLLED RESPONSE.**
@@ -76,6 +76,51 @@ Actual Delay remains unavailable for production until a valid
 `RecordedAtTime`/actual-timing source is observed, validated, and later
 matched appropriately. Prediction Accuracy is also unavailable until
 comparable actual timing exists. Stage 02 does not approve either KPI.
+
+### Historical response evidence (S16)
+
+The previous host run completed five historical requests for the same Köln Hbf
+arrival contract. S16 made zero MDD HTTP requests and reanalysed only the
+existing raw response artifacts. The corrected result is:
+
+| Horizon | Results | `ThisCall` timetable dates | `EstimatedTime` | `RecordedAtTime` | Classification |
+|---|---:|---|---:|---:|---|
+| 1 day | 5 | 2026-09-24 (5/5; requested date) | 0 | 0 | `HISTORICAL_TIMETABLE_ONLY` |
+| 7 days | 5 | 2026-09-18 (5/5; requested date) | 0 | 0 | `HISTORICAL_TIMETABLE_ONLY` |
+| 30 days | 5 | 2026-08-26 (5/5; requested date) | 0 | 0 | `HISTORICAL_TIMETABLE_ONLY` |
+| 90 days | 0 | none | 0 | 0 | `HISTORY_NO_EVENT` |
+| 180 days | 0 | none | 0 | 0 | `HISTORY_NO_EVENT` |
+
+The historical `TimetabledTime` lexical form was
+`YYYY-MM-DDTHH:mm:ssZ[GMT]`. The terminal `Z` is explicit UTC; `[GMT]` is a
+provider-specific suffix stripped by the corrected parser. The original
+summaries returned `null` min/max values and `INCONCLUSIVE` alignment because
+the suffix caused the previous ISO parser to fail. The corrected contract
+reports UTC min/max values and preserves the original lexical min/max values.
+
+If a future provider value is timezone-less, it must remain timezone-unresolved
+for absolute-time work. Comparing its lexical calendar date with the
+requested Europe/Berlin date is permitted for **DATE-ALIGNMENT ONLY**; no UTC
+or Europe/Berlin offset may be fabricated.
+
+The result-bearing historical responses contained empty `ErrorMessage` arrays,
+not populated errors. Corrected response- and result-level error-message
+counts are both zero for 1D/7D/30D. The 90D/180D responses contain populated
+response-level `STOPEVENT_NOEVENTFOUND` evidence. `responseTimestamp` is
+delivery metadata and `calcTime` is processing metadata; neither is actual
+vehicle timing. No historical response contained `EstimatedTime`,
+`RecordedAtTime`, a recorded/actual timing candidate, or an actual-delay
+field.
+
+At the tested 1-, 7-, and 30-day horizons, the MDD StopEvent interface
+returned historical scheduled events but did not return `EstimatedTime` or
+`RecordedAtTime` in those responses. Retrospective StopEvent retrieval cannot
+currently be relied on to reconstruct operational actual delay. A prospective
+collector remains important for preserving future realtime evidence, while a
+validated actual-time source is still required for actual-delay capability.
+This evidence does not establish a provider-wide retention cutoff: at 90D and
+180D, no StopEvent result was returned for the specific tested Köln Hbf
+arrival request at those historical target times.
 
 Arrival and departure timing must remain distinguishable. The controlled
 response contained `serviceArrival` and `serviceDeparture` structures. The
@@ -197,9 +242,10 @@ It is not sufficient to calculate field-population percentages or claim
 Cologne-wide, mode-wide, station-wide, operator-wide, or network performance.
 In particular, `RecordedAtTime` coverage is **UNKNOWN**. Coverage validation
 belongs to controlled pilot/coverage stages, especially Stages 7, 8, 9, and
-16. The S14 technical baseline remains valid, but S15 intentionally extends
-the final Stage 02 approval gate with Stage 02A.3 historical availability
-validation before approval.
+16. The S14 technical baseline remains valid. S15 extended the final Stage 02
+approval gate with Stage 02A.3 historical availability validation, and S16
+completed that evidence review. Representative coverage remains a later-stage
+question.
 
 ## Permission, quota, and raw-payload boundary
 

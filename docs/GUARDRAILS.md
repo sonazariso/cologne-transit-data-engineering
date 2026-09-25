@@ -33,3 +33,12 @@ These guardrails apply from project foundation unless explicitly replaced by a l
 21. Full raw MDD responses are not retained permanently or automatically by
     default; temporary diagnostic artifacts require explicit purpose and remain
     outside source control without secrets.
+22. A provider timestamp with an explicit `Z` and a lexical suffix such as the
+    observed `[GMT]` may be normalized only according to the observed format.
+    A timezone-less value remains timezone-unresolved for absolute-time work.
+23. Comparing a timezone-less provider timestamp's lexical calendar date with
+    the requested Europe/Berlin date is **DATE-ALIGNMENT ONLY**; it must not be
+    used to fabricate a UTC instant or perform delay arithmetic.
+24. Historical scheduled events without `EstimatedTime` or `RecordedAtTime`
+    must not be treated as historical realtime or actual-delay evidence. A
+    successful HTTP status alone does not establish historical alignment.

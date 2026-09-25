@@ -3,7 +3,8 @@
 This directory contains the Stage 02 MDD/TRIAS source-contract package. The
 S14 technical-closure package remains the baseline, but the current Stage 02
 status is **IN PROGRESS** because the user intentionally extended the
-approval gate for Stage 02A.3 historical actual-time validation. It is not
+approval gate for Stage 02A.3 historical actual-time validation. The evidence
+is now complete and Stage 02 is **ready for approval**, but it is not yet
 approved.
 
 ## Approval candidate contract
@@ -16,11 +17,13 @@ These documents are the current Stage 02 approval candidates:
 - [MDD/TRIAS raw-retention decision](mdd-trias-raw-retention.md)
 - [Detailed Stage 02 evidence/audit](../stages/02-mdd-trias-source-contract-audit.md)
 
-Stage 02A.3 is prepared in
+Stage 02A.3 is implemented in
 [`scripts/stage_02a3_historical_actual_time_probe.py`](../../scripts/stage_02a3_historical_actual_time_probe.py).
-It is a host-execution-pending diagnostic probe for one historical request at
-each of 1D, 7D, 30D, 90D, and 180D. It does not yet provide evidence for any
-one historical-availability branch.
+The previous host run completed one historical request at each of 1D, 7D,
+30D, 90D, and 180D. The offline-only correction/reanalysis path is
+[`scripts/stage_02a3_reanalyze_existing.py`](../../scripts/stage_02a3_reanalyze_existing.py);
+it reads only the five existing raw artifacts and does not require credentials
+or network access.
 
 The request contract records the audited `POST` XML/TRIAS 1.2 request,
 `x-api-key` mechanism, request parameters, `NumberOfResults` versus HTTP
@@ -62,13 +65,26 @@ Current status facts:
 
 - Stage 02A.1 — Legacy Implementation Audit: **Completed**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **In progress
-  / host execution pending**.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
 - Current MDD authorization: **Working**.
 - Host DNS result: `NORMAL_RESOLVER_WORKS`.
 - Stage 02 technical audit baseline: **Complete under S14**; current Stage 02
-  status: **In progress**, not approved.
-- No MDD request or probe was executed in S15. Host execution is pending.
+  status: **In progress — ready for approval**, not approved.
+- The previous host run completed five historical MDD requests. S16 performed
+  zero MDD HTTP requests and zero probe executions; it used only the existing
+  raw artifacts.
+- Corrected historical result: 1D/7D/30D are
+  `HISTORICAL_TIMETABLE_ONLY`; 90D/180D are `HISTORY_NO_EVENT` with the
+  populated `STOPEVENT_NOEVENTFOUND` response evidence.
+- The provider timetable lexical form is `...Z[GMT]`: `Z` is explicit UTC and
+  `[GMT]` is a provider suffix. Timezone-less values remain unresolved for
+  absolute time; date comparison is **DATE-ALIGNMENT ONLY**.
+- Empty `ErrorMessage` arrays are not real errors. Corrected counts are zero
+  for the three result-bearing responses; the 90D/180D populated response
+  messages remain counted.
+- No `EstimatedTime` or `RecordedAtTime` was observed in the historical
+  responses. Delivery `responseTimestamp` and processing `calcTime` are not
+  actual vehicle timing.
 - No SQL query, database change, Legacy repository change, scheduler change,
   Power BI change, commit, or push was made.
 

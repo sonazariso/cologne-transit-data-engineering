@@ -1,13 +1,14 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
-**Stage status:** IN PROGRESS — STAGE 02A.3 HOST EXECUTION PENDING
+**Stage status:** IN PROGRESS — STAGE 02A.3 COMPLETED; READY FOR APPROVAL
 **Audit date:** 2026-09-25  
 **Scope:** Evidence review for Stage 02, including the read-only Legacy
 Collector implementation audit, the S13 audit of the successful controlled
 `/delfi` response, local authorization and credential-equality follow-up, the
-historical S10/S11/S12 transport diagnostics, and the S15 preparation of
-Stage 02A.3 historical actual-time availability validation. The controlled
+historical S10/S11/S12 transport diagnostics, the S15 preparation, and the S16
+offline reanalysis of Stage 02A.3 historical actual-time availability
+validation. The controlled
 response is audited below; this is not a claim about every MDD endpoint or a
 provider-wide MDD/TRIAS coverage result.
 
@@ -15,9 +16,9 @@ provider-wide MDD/TRIAS coverage result.
 source-audit and historical probe chronology, including statements that were
 correct before the successful S13 response or before this S14 finalization.
 Sections explicitly marked historical remain historical evidence. The current
-technical baseline is the S14 final synthesis in §§19–22. S15 preserves that
-baseline but supersedes its current approval status: Stage 02 is now
-**IN PROGRESS** until the host executes and the project audits Stage 02A.3.
+technical baseline is the S14 final synthesis in §§19–22. S15 preserved that
+baseline and deferred the approval gate; S16 completed the offline audit.
+Stage 02 is now **IN PROGRESS — READY FOR APPROVAL**, not approved.
 
 ## 1. Environment & Repository Discovery
 
@@ -1748,3 +1749,184 @@ POWER BI CHANGES: NONE
 RAW RESPONSE COMMITTED: NO
 SECRET EXPOSED OR WRITTEN: NO
 COMMIT OR PUSH: NO
+
+## 24. S16 Offline Forensic Re-analysis and Stage 02A.3 Closure
+
+**Current Stage 02 status:** IN PROGRESS — READY FOR APPROVAL
+
+**Stage 02A.1:** COMPLETED
+
+**Stage 02A.2:** COMPLETED
+
+**Stage 02A.3:** COMPLETED
+
+S16 performed no MDD HTTP request and no probe execution. The previous host
+run had already completed the five authorized historical requests and left the
+following temporary artifacts outside the repository:
+
+```text
+/private/tmp/cologne-transit-stage-02a3-3qdsj02c/
+```
+
+The offline analyzer is
+[`scripts/stage_02a3_reanalyze_existing.py`](../../scripts/stage_02a3_reanalyze_existing.py).
+It requires the raw directory and the original Europe/Berlin execution date,
+reads only the five expected files, does not require the API key, and does not
+open a network connection. The five artifacts were all readable and parsed as
+JSON:
+
+| File | Bytes | JSON | Results |
+|---|---:|---:|---:|
+| `01-1d.raw` | 56,216 | success | 5 |
+| `02-7d.raw` | 55,838 | success | 5 |
+| `03-30d.raw` | 54,340 | success | 5 |
+| `04-90d.raw` | 429 | success | 0 |
+| `05-180d.raw` | 429 | success | 0 |
+
+### 24.1 Timestamp lexical evidence and correction
+
+The actual path for the target values is:
+
+```text
+serviceDelivery.deliveryPayload.stopEventResponse.stopEventResult[*]
+  .stopEvent.thisCall.callAtStop.serviceArrival.timetabledTime
+```
+
+The values are JSON strings. Bounded examples are:
+
+```text
+2026-09-24T10:00:00Z[GMT]
+2026-09-24T10:02:00Z[GMT]
+2026-09-24T10:03:00Z[GMT]
+```
+
+The same `Z[GMT]` lexical form occurs in sampled `PreviousCall` and
+`OnwardCall` timetable values. The previous parser translated only a terminal
+`Z`, leaving `[GMT]` attached; `datetime.fromisoformat()` consequently raised
+`ValueError`. The corrected parser removes only the observed trailing
+`[GMT]`, then parses the explicit `Z` as UTC. The provider values therefore
+encode UTC; they do not encode a timezone-less local time.
+
+The network probe now reports both provider-faithful lexical min/max fields
+and absolute UTC min/max fields. For the observed responses, for example:
+
+```text
+min_thiscall_timetabled_lexical = 2026-09-24T10:00:00Z[GMT]
+max_thiscall_timetabled_lexical = 2026-09-24T10:03:00Z[GMT]
+min_thiscall_timetabled_utc     = 2026-09-24T10:00:00Z
+max_thiscall_timetabled_utc     = 2026-09-24T10:03:00Z
+```
+
+Timezone-less values remain timezone-unresolved in the parser. A lexical
+calendar-date comparison with the requested Europe/Berlin date is permitted
+only as **DATE-ALIGNMENT ONLY** and is never used to fabricate an absolute UTC
+instant or to perform delay arithmetic.
+
+### 24.2 ErrorMessage correction
+
+The 1D/7D/30D response contains an `errorMessage: []` array and each of its
+five result objects also contains `errorMessage: []`. Those properties exist,
+but they are not populated errors. The corrected analyzer therefore reports:
+
+```text
+1D/7D/30D: response_error_message_count = 0
+             result_error_message_count   = 0
+             response_error_codes          = []
+             result_error_codes            = []
+```
+
+The 90D/180D response contains a populated response-level error with
+`STOPEVENT_NOEVENTFOUND` (and provider code `-4030`). Those messages remain
+counted and are the basis for `HISTORY_NO_EVENT`.
+
+### 24.3 Corrected historical results
+
+The previous host run used 2026-09-25 as its Europe/Berlin execution date and
+requested 12:00 local at each horizon. The corrected offline alignment is:
+
+| Horizon | Requested local date | Distinct returned `ThisCall` timetable dates | Target matches | Current-date matches | Alignment | Classification |
+|---|---|---|---:|---:|---|---|
+| 1D | 2026-09-24 | 2026-09-24 | 5/5 | 0/5 | `HISTORICAL_TARGET_MATCH` | `HISTORICAL_TIMETABLE_ONLY` |
+| 7D | 2026-09-18 | 2026-09-18 | 5/5 | 0/5 | `HISTORICAL_TARGET_MATCH` | `HISTORICAL_TIMETABLE_ONLY` |
+| 30D | 2026-08-26 | 2026-08-26 | 5/5 | 0/5 | `HISTORICAL_TARGET_MATCH` | `HISTORICAL_TIMETABLE_ONLY` |
+| 90D | 2026-06-27 | none | — | — | `NO_RESULTS` | `HISTORY_NO_EVENT` |
+| 180D | 2026-03-29 | none | — | — | `NO_RESULTS` | `HISTORY_NO_EVENT` |
+
+No current-date fallback occurred in the result-bearing horizons. The 90D and
+180D conclusion is limited to the specific tested Köln Hbf arrival request at
+those historical target times. It is not evidence of an exact retention
+cutoff, a global 90-day limitation, or a global 180-day limitation.
+
+### 24.4 Recorded/estimated-time inventory
+
+Across the 1D/7D/30D responses, `ThisCall`, `PreviousCall`, and `OnwardCall`
+contained `TimetabledTime` but no `EstimatedTime` and no `RecordedAtTime`.
+The bounded structural inventory found no populated actual/recorded/prediction
+timestamp candidate and no cancellation or delay field. `responseTimestamp`
+was present as delivery metadata; `calcTime` was a numeric processing-time
+field; neither is actual vehicle timing. `estimatedBay` occurred as empty
+arrays and is not arrival prediction evidence. This is response evidence for
+the tested requests, not a provider-wide impossibility claim.
+
+### 24.5 Collector architecture implication
+
+At the tested 1-, 7-, and 30-day horizons, the MDD StopEvent interface
+returned historical scheduled events but did not return `EstimatedTime` or
+`RecordedAtTime` in those responses.
+
+Therefore:
+
+- retrospective StopEvent retrieval cannot currently be relied on to
+  reconstruct operational actual delay;
+- historical `EstimatedTime` cannot be assumed available from retrospective
+  queries;
+- a prospective collector remains important for preserving operational
+  realtime evidence over time;
+- future collector design should retain source-faithful estimates and any
+  `RecordedAtTime` if it later appears; and
+- actual-delay capability still requires a validated actual-time source.
+
+Collector cadence, schema, and production activation remain later-stage
+decisions. No additional 45D/60D or boundary-search request is needed for the
+current Stage 02 source-contract conclusion.
+
+### 24.6 Stage 02A.3 decision and controls
+
+Stage 02A.3 is **COMPLETED** because the existing raw evidence establishes
+the corrected 1D/7D/30D alignment, the absence of historical recorded and
+estimated timing in those responses, the 90D/180D no-event responses, the
+parser limitation and correction, and the collector-design implication. No
+material Stage 02 historical-source question remains that requires another
+request.
+
+Stage 02 is **READY FOR APPROVAL** but is not marked approved. S14 remains
+preserved; `docs/DECISION-LOG.md` remains unchanged pending the Stage 02
+approval gate. S16 did not execute SQL, change the database, modify Legacy,
+Task Scheduler, or Power BI, expose or write a secret, copy raw files into the
+repository, commit, or push.
+
+```text
+STAGE 02: IN PROGRESS / READY FOR APPROVAL
+STAGE 02A.1: COMPLETED
+STAGE 02A.2: COMPLETED
+STAGE 02A.3: COMPLETED
+HISTORICAL 1D: HISTORICAL_TIMETABLE_ONLY
+HISTORICAL 7D: HISTORICAL_TIMETABLE_ONLY
+HISTORICAL 30D: HISTORICAL_TIMETABLE_ONLY
+HISTORICAL 90D: HISTORY_NO_EVENT
+HISTORICAL 180D: HISTORY_NO_EVENT
+RECORDED_AT_TIME HISTORICAL: NOT OBSERVED IN FIVE TESTED RESPONSES
+ESTIMATED_TIME HISTORICAL: NOT OBSERVED IN FIVE TESTED RESPONSES
+COLLECTOR ARCHITECTURE IMPLICATION: PROSPECTIVE COLLECTION REMAINS IMPORTANT; VALIDATED ACTUAL-TIME SOURCE STILL REQUIRED
+ADDITIONAL MDD REQUESTS REQUIRED FOR STAGE 02: NO
+MDD HTTP REQUESTS IN S16: 0
+MDD PROBE EXECUTIONS IN S16: 0
+SQL QUERIES EXECUTED: 0
+DATABASE CHANGES: NONE
+LEGACY REPOSITORY MODIFIED: NO
+TASK SCHEDULER CHANGES: NONE
+POWER BI CHANGES: NONE
+RAW RESPONSE COMMITTED: NO
+SECRET EXPOSED OR WRITTEN: NO
+COMMIT OR PUSH: NO
+```

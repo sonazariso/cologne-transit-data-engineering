@@ -12,14 +12,26 @@ Define business questions, portfolio goal, geography, modes, System Performance,
 ## Stage 1 — Source Inventory & Permission
 Re-establish GTFS and MDD source ownership, URLs/contracts, feed coverage, update frequency, API quota, permission/retention conditions, TRIAS version, endpoint contract, and current legacy quota consumption. **No new polling is required to perform the initial quota audit.**
 
-## Stage 2 — MDD/TRIAS Source-Contract Audit — IN PROGRESS; 02A.3 HOST EXECUTION PENDING
+## Stage 2 — MDD/TRIAS Source-Contract Audit — IN PROGRESS; 02A.3 COMPLETED; READY FOR APPROVAL
 The S14 technical-closure package remains the valid baseline. The user
-intentionally extended the approval gate with Stage 02A.3 — Historical
-Actual-Time Availability Validation because Actual Operational Performance is
-a primary project objective. The host-only diagnostic probe tests one
-independent request at each of 1D, 7D, 30D, 90D, and 180D, using a 12:00
-Europe/Berlin target, no retries, and temporary raw artifacts outside the
-repository. Stage 02A.1 and 02A.2 remain completed; Stage 02 is not approved.
+extended the approval gate with Stage 02A.3 — Historical Actual-Time
+Availability Validation because Actual Operational Performance is a primary
+project objective. The previous host run completed one independent request at
+each of 1D, 7D, 30D, 90D, and 180D, using a 12:00 Europe/Berlin target, no
+retries, and temporary raw artifacts outside the repository. S16 made zero MDD
+HTTP requests and corrected the analysis offline using those five artifacts.
+Stage 02A.1, 02A.2, and 02A.3 are completed; Stage 02 is ready for approval
+but is not approved.
+
+The corrected evidence classifies 1D/7D/30D as historical timetable-only:
+their returned `ThisCall` timetable dates match the requested dates, but no
+`EstimatedTime` or `RecordedAtTime` is present. The 90D/180D responses contain
+no StopEvent result and populated `STOPEVENT_NOEVENTFOUND` evidence for the
+specific tested Köln Hbf arrival request. This does not establish a retention
+cutoff. Retrospective retrieval cannot currently be relied on to reconstruct
+operational actual delay; a prospective collector remains important, and a
+validated actual-time source is still required. Cadence and schema remain
+deferred to later stages.
 
 The approval candidate package compares official TRIAS 1.2 semantics, the
 successful controlled MDD response, Legacy parser candidates, and Legacy

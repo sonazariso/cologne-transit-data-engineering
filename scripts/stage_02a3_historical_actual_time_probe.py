@@ -36,6 +36,7 @@ RETRIES = 0
 HISTORICAL_HORIZONS_DAYS = (1, 7, 30, 90, 180)
 MAX_HTTP_ATTEMPTS = 5
 BERLIN_TIMEZONE_NAME = "Europe/Berlin"
+DATE_ALIGNMENT_SEMANTICS = "DATE-ALIGNMENT ONLY"
 
 ERROR_MESSAGE_KEYS = {"ErrorMessage", "errorMessage"}
 ERROR_CODE_KEYS = {"Code", "code", "ErrorCode", "errorCode"}
@@ -57,6 +58,7 @@ KNOWN_ERROR_CODES = {
     "STOPEVENT_NOREALTIME",
 }
 STOPEVENT_CODE_PATTERN = re.compile(r"\bSTOPEVENT_[A-Z0-9_]+\b")
+PROVIDER_GMT_SUFFIX_PATTERN = re.compile(r"^(?P<base>.+Z)\[GMT\]$")
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -294,31 +296,83 @@ def merge_timing_values(*scopes: dict[str, list[str]]) -> dict[str, list[str]]:
     return merged
 
 
-def parse_timestamp(value: str) -> datetime | None:
+def normalize_timestamp_text(value: str) -> str | None:
+    """Normalize the observed provider suffix without inventing a timezone."""
+
+    if not isinstance(value, str):
+        return None
     text = value.strip()
+    provider_match = PROVIDER_GMT_SUFFIX_PATTERN.fullmatch(text)
+    if provider_match:
+        text = provider_match.group("base")
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
+    return text
+
+
+def parse_timestamp(value: str) -> datetime | None:
+    """Parse an ISO-like value, preserving naive values as timezone-unresolved."""
+
+    text = normalize_timestamp_text(value)
+    if text is None:
+        return None
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
-    if parsed.tzinfo is None:
-        # Do not guess an offset for a timezone-less response timestamp.
-        return None
     return parsed
 
 
+def timestamp_semantics(value: str) -> str:
+    """Describe the timezone evidence carried by one provider timestamp."""
+
+    if not isinstance(value, str) or not value.strip():
+        return "INVALID_OR_EMPTY"
+    original_text = value.strip()
+    provider_match = PROVIDER_GMT_SUFFIX_PATTERN.fullmatch(original_text)
+    normalized_text = normalize_timestamp_text(original_text)
+    if normalized_text is None:
+        return "UNPARSEABLE"
+    try:
+        parsed = datetime.fromisoformat(normalized_text)
+    except ValueError:
+        return "UNPARSEABLE"
+    if parsed.tzinfo is None:
+        return "TIMEZONE_UNRESOLVED"
+    if provider_match:
+        return "EXPLICIT_UTC_Z_WITH_PROVIDER_GMT_SUFFIX"
+    if original_text.endswith("Z"):
+        return "EXPLICIT_UTC_Z"
+    return "EXPLICIT_NUMERIC_OFFSET"
+
+
 def min_max_timestamps(values: list[str]) -> tuple[str | None, str | None, list[datetime]]:
-    parsed_values = [parsed for value in values if (parsed := parse_timestamp(value))]
-    if not parsed_values:
+    nonempty_values = [value for value in values if isinstance(value, str) and value.strip()]
+    parsed_values = [parsed for value in nonempty_values if (parsed := parse_timestamp(value))]
+    aware_values = [parsed for parsed in parsed_values if parsed.tzinfo is not None]
+    if not parsed_values or len(parsed_values) != len(nonempty_values):
+        return None, None, parsed_values
+    if len(aware_values) != len(parsed_values):
+        # A timezone-less provider value cannot honestly be serialized as UTC.
+        return None, None, parsed_values
+    if not aware_values:
         return None, None, []
-    minimum = min(parsed_values)
-    maximum = max(parsed_values)
+    minimum = min(aware_values)
+    maximum = max(aware_values)
     return (
         format_utc_xs_datetime(minimum),
         format_utc_xs_datetime(maximum),
         parsed_values,
     )
+
+
+def min_max_lexical_timestamps(values: list[str]) -> tuple[str | None, str | None]:
+    nonempty_values = sorted(
+        {value.strip() for value in values if isinstance(value, str) and value.strip()}
+    )
+    if not nonempty_values:
+        return None, None
+    return nonempty_values[0], nonempty_values[-1]
 
 
 def contains_result_scope(path: str) -> bool:
@@ -348,6 +402,20 @@ def error_codes_from_value(value: Any) -> set[str]:
     return codes
 
 
+def has_populated_error_message(value: Any) -> bool:
+    """Return true only when an ErrorMessage value contains error evidence."""
+
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(has_populated_error_message(child) for child in value)
+    if isinstance(value, dict):
+        return any(has_populated_error_message(child) for child in value.values())
+    return has_nonempty_scalar(value)
+
+
 def response_and_result_error_codes(
     parsed: Any,
     results: list[Any],
@@ -356,16 +424,18 @@ def response_and_result_error_codes(
     response_error_message_count = 0
     for path, key, value in iter_dict_entries(parsed):
         if key in ERROR_MESSAGE_KEYS and not contains_result_scope(path):
-            response_error_message_count += 1
-            response_codes.update(error_codes_from_value(value))
+            if has_populated_error_message(value):
+                response_error_message_count += 1
+                response_codes.update(error_codes_from_value(value))
 
     result_codes: set[str] = set()
     result_error_message_count = 0
     for result in results:
         for _path, key, value in iter_dict_entries(result):
             if key in ERROR_MESSAGE_KEYS:
-                result_error_message_count += 1
-                result_codes.update(error_codes_from_value(value))
+                if has_populated_error_message(value):
+                    result_error_message_count += 1
+                    result_codes.update(error_codes_from_value(value))
     return (
         sorted(response_codes),
         sorted(result_codes),
@@ -411,12 +481,46 @@ def recorded_field_inventory(parsed: Any, api_key: str) -> tuple[bool, list[str]
     return recorded_observed, sorted(safe_text(name, api_key) for name in recorded_names), candidates
 
 
-def target_date_match(values: list[str], target_date: Any, berlin_timezone: ZoneInfo) -> bool:
+def timestamp_calendar_date(value: str, berlin_timezone: ZoneInfo) -> Any:
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        # DATE-ALIGNMENT ONLY. No absolute instant is assigned.
+        return parsed.date()
+    return parsed.astimezone(berlin_timezone).date()
+
+
+def date_alignment_counts(
+    values: list[str],
+    target_date: Any,
+    execution_local_date: Any,
+    berlin_timezone: ZoneInfo,
+) -> dict[str, Any]:
+    dates: list[Any] = []
+    target_count = 0
+    execution_count = 0
     for value in values:
-        parsed = parse_timestamp(value)
-        if parsed is not None and parsed.astimezone(berlin_timezone).date() == target_date:
-            return True
-    return False
+        calendar_date = timestamp_calendar_date(value, berlin_timezone)
+        if calendar_date is None:
+            continue
+        dates.append(calendar_date)
+        target_count += calendar_date == target_date
+        execution_count += calendar_date == execution_local_date
+    return {
+        "observed_count": len(values),
+        "parseable_count": len(dates),
+        "unparseable_count": len(values) - len(dates),
+        "target_date_match_count": target_count,
+        "execution_date_match_count": execution_count,
+        "distinct_calendar_dates": sorted({date.isoformat() for date in dates}),
+    }
+
+
+def target_date_match(values: list[str], target_date: Any, berlin_timezone: ZoneInfo) -> bool:
+    return any(
+        timestamp_calendar_date(value, berlin_timezone) == target_date for value in values
+    )
 
 
 def temporal_alignment(
@@ -437,9 +541,26 @@ def temporal_alignment(
         return "NO_RESULTS"
     if http_status == 200 and json_parse_success and result_count == 0:
         return "NO_RESULTS"
-    if target_date_match(thiscall_timetabled_values, requested_local_date, berlin_timezone):
+    date_counts = date_alignment_counts(
+        thiscall_timetabled_values,
+        requested_local_date,
+        execution_local_date,
+        berlin_timezone,
+    )
+    parseable_count = date_counts["parseable_count"]
+    observed_count = date_counts["observed_count"]
+    if parseable_count and parseable_count == observed_count and date_counts[
+        "target_date_match_count"
+    ] == parseable_count:
         return "HISTORICAL_TARGET_MATCH"
-    if target_date_match(thiscall_timetabled_values, execution_local_date, berlin_timezone):
+    if parseable_count and parseable_count == observed_count and date_counts[
+        "execution_date_match_count"
+    ] == parseable_count:
+        return "CURRENT_TIME_FALLBACK_SUSPECTED"
+    majority = max(1, (observed_count + 1) // 2)
+    if parseable_count >= majority and date_counts["target_date_match_count"] >= majority:
+        return "HISTORICAL_TARGET_MATCH"
+    if parseable_count >= majority and date_counts["execution_date_match_count"] >= majority:
         return "CURRENT_TIME_FALLBACK_SUSPECTED"
     return "INCONCLUSIVE"
 
@@ -471,11 +592,6 @@ def historical_classification(
     recorded_aligned = target_date_match(
         all_timing["recorded"], requested_local_date, berlin_timezone
     )
-    if not recorded_aligned and thiscall_timing["recorded"]:
-        # The ThisCall timetable already matched the target date. A populated
-        # RecordedAtTime in that same call is aligned even if its provider
-        # timestamp is not parseable by Python's strict ISO parser.
-        recorded_aligned = True
     if recorded_aligned:
         return "HISTORICAL_ACTUAL_OBSERVED", True
     if all_timing["estimated"]:
@@ -556,7 +672,7 @@ def response_summary(
     horizon_days: int,
     requested_local_datetime: str,
     requested_utc_datetime: str,
-    request_timestamp_utc: str,
+    request_timestamp_utc: str | None,
     http_status: int | None,
     elapsed_ms: float,
     response_content_type: str | None,
@@ -577,8 +693,17 @@ def response_summary(
         previouscall_timing,
         onwardcall_timing,
     )
-    min_timetabled, max_timetabled, _parsed_timetabled = min_max_timestamps(
+    min_timetabled_utc, max_timetabled_utc, _parsed_timetabled = min_max_timestamps(
         thiscall_timing["timetabled"]
+    )
+    min_timetabled_lexical, max_timetabled_lexical = min_max_lexical_timestamps(
+        thiscall_timing["timetabled"]
+    )
+    date_counts = date_alignment_counts(
+        thiscall_timing["timetabled"],
+        requested_local_date,
+        execution_local_date,
+        berlin_timezone,
     )
     alignment = temporal_alignment(
         analysis["result_count"],
@@ -606,8 +731,6 @@ def response_summary(
     recorded_target_match = target_date_match(
         all_timing["recorded"], requested_local_date, berlin_timezone
     )
-    if not recorded_target_match and alignment == "HISTORICAL_TARGET_MATCH":
-        recorded_target_match = bool(thiscall_timing["recorded"])
 
     summary: dict[str, Any] = {
         "horizon_days": horizon_days,
@@ -639,8 +762,27 @@ def response_summary(
         "onwardcall_timetabled_count": len(onwardcall_timing["timetabled"]),
         "onwardcall_estimated_count": len(onwardcall_timing["estimated"]),
         "onwardcall_recorded_count": len(onwardcall_timing["recorded"]),
-        "min_thiscall_timetabled": min_timetabled,
-        "max_thiscall_timetabled": max_timetabled,
+        "min_thiscall_timetabled": min_timetabled_utc,
+        "max_thiscall_timetabled": max_timetabled_utc,
+        "min_thiscall_timetabled_utc": min_timetabled_utc,
+        "max_thiscall_timetabled_utc": max_timetabled_utc,
+        "min_thiscall_timetabled_lexical": min_timetabled_lexical,
+        "max_thiscall_timetabled_lexical": max_timetabled_lexical,
+        "thiscall_timetabled_timestamp_semantics": sorted(
+            {timestamp_semantics(value) for value in thiscall_timing["timetabled"]}
+        ),
+        "date_alignment_semantics": DATE_ALIGNMENT_SEMANTICS,
+        "requested_local_date": requested_local_date.isoformat(),
+        "execution_local_date": execution_local_date.isoformat(),
+        "thiscall_timetabled_parseable_count": date_counts["parseable_count"],
+        "thiscall_timetabled_unparseable_count": date_counts["unparseable_count"],
+        "thiscall_timetabled_target_date_match_count": date_counts[
+            "target_date_match_count"
+        ],
+        "thiscall_timetabled_execution_date_match_count": date_counts[
+            "execution_date_match_count"
+        ],
+        "thiscall_timetabled_calendar_dates": date_counts["distinct_calendar_dates"],
         "temporal_alignment": alignment,
         "recorded_at_time_observed": analysis["recorded_at_time_observed"],
         "recorded_at_time_field_names": analysis["recorded_at_time_field_names"],

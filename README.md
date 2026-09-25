@@ -19,16 +19,19 @@ sufficient recorded/actual timing evidence.
 
 - Stage 0 — Project Definition: **Approved**
 - Stage 1 — Source Inventory & Permission: **Approved**
-- Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress**. The S14
-  technical-closure package remains the baseline, but the user intentionally
- deferred final approval for the S15 historical actual-time validation.
+- Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress — ready for
+  approval**. The S14 technical-closure package remains the baseline. The
+  previous host run completed the five S15 historical requests, and S16
+  performed zero MDD requests while correcting their offline analysis.
 - Stage 02A.1 — Legacy Implementation Audit: **Completed**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**. The audited
   request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
   HTTP 200; current MDD authorization and host DNS are working.
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **In progress
-  / host execution pending**. The prepared diagnostic probe tests 1D, 7D,
-  30D, 90D, and 180D historical targets before final Stage 02 approval.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **Completed**.
+  The corrected offline evidence classifies 1D/7D/30D as
+  `HISTORICAL_TIMETABLE_ONLY` and 90D/180D as `HISTORY_NO_EVENT`. No
+  `EstimatedTime` or `RecordedAtTime` was observed in the historical result
+  sets.
 - The audited response did not contain `RecordedAtTime` or a direct delay
   field. `RecordedAtTime` remains a TRIAS 1.2 optional actual-time candidate,
   not a provider-wide absence claim. No Actual Delay KPI is approved. See the
@@ -36,6 +39,13 @@ sufficient recorded/actual timing evidence.
   [Project Status](docs/PROJECT-STATUS.md) for details.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
+
+The historical responses used the provider lexical timestamp form
+`YYYY-MM-DDTHH:mm:ssZ[GMT]`. The terminal `Z` supplies explicit UTC semantics;
+`[GMT]` is a provider suffix. Date comparisons in the Stage 02A.3 audit are
+documented as **DATE-ALIGNMENT ONLY** and do not fabricate a timezone for
+timezone-less values. The five raw artifacts remain temporary evidence outside
+the repository.
 
 See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/stages/00-project-definition.md), and [Roadmap](docs/ROADMAP.md).
 
