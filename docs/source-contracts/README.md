@@ -31,11 +31,28 @@ completed. The actual successful MDD response shape and field coverage remain
 open until an authorized probe obtains a valid service payload and is reviewed.
 The raw-response retention decision also remains open.
 
-The current conservative diagnosis is
+The S10 request-level diagnosis was
 `TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
 The probe source uses the Legacy Content-Type
-`application/xml; charset=utf-8`. No key, fingerprint, authorization header,
-raw response, or derived secret material was written to the repository.
+`application/xml; charset=utf-8`. S11 DNS-only diagnostics classified the
+local cause as `LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`: the same-environment
+Python and system resolver paths did not resolve the tested hosts, while the
+permitted public resolver comparison did. Provider authorization remains
+undetermined. No key, fingerprint, authorization header, raw response, or
+derived secret material was written to the repository.
+
+S11 verified `ENDPOINT_LITERAL_VALID: YES` for
+`https://mdd.gorheinland.com/delfi`. `/etc/hosts` had no relevant override;
+`dscacheutil` returned no record and `scutil --dns` reported no available DNS
+configuration in this environment. Public DNS at `1.1.1.1` resolved
+`mdd.gorheinland.com`, `ckan.mdd.gorheinland.com`, and
+`download.gorheinland.com`. S11 made zero MDD HTTP requests and zero probe
+executions.
+
+**S11 next action:** Fix/restore the local macOS DNS resolver, including any
+relevant network-service or VPN resolver state, and verify the MDD hostname
+with the normal resolver before running another MDD probe. Stage 02A.2 remains
+**Blocked** and Stage 02 remains **In progress**.
 
 Planned documents include:
 

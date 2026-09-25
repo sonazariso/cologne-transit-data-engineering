@@ -60,10 +60,32 @@ latest S10 transport failure; actual successful MDD response behavior remains
 unproven. The user's value comparison removes a current key-value mismatch as
 the explanation under investigation, but the S10 run obtained no HTTP response
 and therefore cannot establish provider authorization, entitlement, key
-validity, or account state. The current conservative diagnosis is
+validity, or account state. The S10 request-level diagnosis was
 `TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`. The
 probe source uses the Legacy Content-Type `application/xml; charset=utf-8`.
-No second request was made.
+S11 DNS-only diagnostics classified the local cause as
+`LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`: the same-environment Python and system
+resolver paths did not resolve the tested hosts, while the permitted public
+resolver comparison did. Provider authorization remains undetermined. No
+second request was made.
+
+S11 endpoint and DNS evidence:
+
+- `ENDPOINT_LITERAL_VALID: YES` for
+  `https://mdd.gorheinland.com/delfi`; no source change was required.
+- Python `socket.getaddrinfo()` returned no address for
+  `mdd.gorheinland.com`, `ckan.mdd.gorheinland.com`,
+  `download.gorheinland.com`, or `gorheinland.com`.
+- `/etc/hosts` had no relevant override; `dscacheutil` returned no record and
+  `scutil --dns` reported no available DNS configuration in this environment.
+- Public DNS at `1.1.1.1` resolved the MDD hostname and the two requested
+  sibling hosts. No connection was made to those addresses.
+
+**S11 next action:** Fix/restore the local macOS DNS resolver, including any
+relevant network-service or VPN resolver state, and verify the MDD hostname
+with the normal resolver before running another MDD probe. S11 made zero MDD
+HTTP requests and zero probe executions; Stage 02A.2 remains **Blocked** and
+Stage 02 remains **In progress**.
 
 ## Current authoritative decisions
 

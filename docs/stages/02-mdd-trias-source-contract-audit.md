@@ -3,7 +3,10 @@
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
 **Stage status:** IN PROGRESS
 **Audit date:** 2026-09-25  
-**Scope:** Read-only inspection of the Legacy Collector source. This is not the complete MDD/TRIAS source-contract validation.
+**Scope:** Evidence review for Stage 02, including the read-only Legacy
+Collector implementation audit, Stage 02A.2 controlled-probe history, local
+authorization and credential-equality follow-up, and the S10/S11 transport
+diagnostics. This is not the complete MDD/TRIAS source-contract validation.
 
 ## 1. Environment & Repository Discovery
 
@@ -310,8 +313,9 @@ Task Scheduler state, modified no Legacy file, and did not expose the API key.
 
 ## 10. Recommended Stage 02A.2 Probe Design
 
-Stage 02A.2 probe execution was not performed as part of this audit. Its
-preflight status is recorded below.
+At the time of the Stage 02A.1 source audit, Stage 02A.2 probe execution had
+not been performed. That historical preflight status is recorded below; the
+later controlled 401 and S10 transport result are recorded in §§12 and 14.
 
 The controlled probe should:
 
@@ -399,10 +403,12 @@ used the audited TRIAS 1.2 and SIRI namespaces, `RequestorRef` value,
 `LocationRef`, `DepArrTime`, timestamp shape, and `Params` hierarchy.
 
 The table above records the already completed historical request and therefore
-retains its actual `application/xml` header. For that historical request, the
-probe source had not yet been executed with the normalized Legacy value
-`application/xml; charset=utf-8`. The later S10 re-run and its transport result
-are recorded separately in §14.
+retains its actual `application/xml` header. After that request, the probe
+source was normalized to the Legacy value
+`application/xml; charset=utf-8`. S10 invoked that normalized probe exactly
+once, but DNS resolution failed before an HTTP response was obtained, so
+server receipt of the normalized request is not confirmed. The S10 re-run and
+its transport result are recorded separately in §14.
 
 ### 12.2 HTTP result
 
@@ -538,15 +544,29 @@ therefore remains blocked. Stage 2 is not approved or complete.
 SQL query, database change, Legacy repository change, Task Scheduler change, or
 Power BI change was made for this diagnosis.
 **HTTP requests authorized in this task:** 0
-**MDD HTTP requests made in this task:** 0
+**MDD HTTP requests made for this local authorization diagnosis:** 0
 **SQL queries executed:** 0
-**MDD_API_KEY value comparison:** `NOT PERFORMED`
-**Outcome:** `CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`
+
+**Historical S8 diagnosis (superseded):** At that time, the comparison was
+`MDD_API_KEY VALUE COMPARISON: NOT PERFORMED`, with outcome
+`CREDENTIAL_IDENTITY_UNRESOLVED; PROVIDER_SUPPORT_PROVISIONAL`. Those values
+describe the S8 state only and are not the current diagnosis.
+
+**S9 credential follow-up:** The user independently established
+`MDD_API_KEY VALUE COMPARISON: SAME` for the current macOS probe value and the
+historically successful Windows User-level Legacy value. The environments and
+credential scopes remain technically different, but credential value equality
+is no longer unresolved.
+
+**S10 request-level diagnosis:**
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
+The normalized probe was invoked exactly once and DNS failed before an HTTP
+response was obtained.
 
 Line numbers below refer to the inspected Legacy working copy at
 `/Users/admin/Documents/cologne-public-transport-intelligence` and to the
-probe in this repository. Secret values were not read into the report or
-compared.
+probe in this repository. Secret values were not written to or exposed in the
+report.
 
 ### 13.1 Legacy authentication configuration
 
@@ -571,7 +591,7 @@ additional explicit authentication header (`collector/MddRealtimeCollector.psm1:
 |---|---|---|
 | Endpoint | **MATCH** | Probe `scripts/stage_02a2_probe.py:24`; Legacy default `collector/MddRealtimeCollector.psm1:1292-1296`. |
 | HTTP method | **MATCH** | Probe `scripts/stage_02a2_probe.py:118-125`; Legacy `collector/MddRealtimeCollector.psm1:448-451`. |
-| Request `Content-Type` | **MATCH IN CURRENT SOURCE; HISTORICAL REQUEST DIFFERED** | The unexecuted probe source now sends `application/xml; charset=utf-8` (`scripts/stage_02a2_probe.py:122-125`), matching the Legacy value (`collector/MddRealtimeCollector.psm1:451-453`). The historical 401 request recorded in §12 used `application/xml`; no request was made to revalidate the normalization. |
+| Request `Content-Type` | **MATCH IN CURRENT SOURCE; HISTORICAL REQUEST DIFFERED** | The probe source sends `application/xml; charset=utf-8` (`scripts/stage_02a2_probe.py:122-125`), matching the Legacy value (`collector/MddRealtimeCollector.psm1:451-453`). The historical 401 request recorded in §12 used `application/xml`; S10 invoked the normalized probe exactly once, but DNS failed before an HTTP response, so server receipt of the normalized request is not confirmed. |
 | Authentication header name | **MATCH** | Both use `x-api-key`: probe `scripts/stage_02a2_probe.py:122-125`; Legacy `collector/MddRealtimeCollector.psm1:428-430`. |
 | API-key source | **DIFFERENT** | Probe reads the current Python process environment with `os.environ.get("MDD_API_KEY")` (`scripts/stage_02a2_probe.py:110-114`); Legacy resolves an explicit parameter, then Windows User environment, then secure prompt (`collector/MddRealtimeCollector.psm1:1273-1289`). |
 | `RequestorRef` | **MATCH** | Both use `CologneTransitIntelligence`: probe `scripts/stage_02a2_probe.py:45-48`; Legacy `collector/MddRealtimeCollector.psm1:180-183`. |
@@ -582,13 +602,15 @@ additional explicit authentication header (`collector/MddRealtimeCollector.psm1:
 | Retry behavior | **DIFFERENT** | The probe makes one attempt. Legacy defaults to up to three attempts, but classifies HTTP 401/403 as non-retryable (`collector/MddRealtimeCollector.psm1:397-407,440-456,505-508`). Retry behavior therefore cannot explain the first 401 response. |
 | Other explicit request headers | **MATCH** in names | The probe explicitly supplies only `Content-Type` and `x-api-key` (`scripts/stage_02a2_probe.py:122-125`); the Legacy code explicitly constructs only `x-api-key` and supplies `ContentType` separately (`collector/MddRealtimeCollector.psm1:428-430,451-453`). No additional Legacy authentication header was found. |
 
-The remaining locally relevant authentication uncertainty is the current
-process-versus-Windows-User key scope. The historical 401 also retains a
-`Content-Type` difference from the now-normalized, unexecuted probe source.
-The endpoint, explicit authentication header name, RequestorRef, namespaces,
-timestamp shape, and controlled TRIAS body otherwise match. No local evidence
-identifies a missing account, client, tenant, subscription, provider, or
-dataset parameter.
+The current process and Windows User environment scopes remain technically
+different, but S9 independently established that their `MDD_API_KEY` values
+were the same; credential value equality is therefore resolved. The historical
+401 retains its `Content-Type` difference from the normalized probe source.
+S10 invoked the normalized request exactly once, but DNS failed before an HTTP
+response, so server receipt is not confirmed. The endpoint, explicit
+authentication header name, RequestorRef, namespaces, timestamp shape, and
+controlled TRIAS body otherwise match. No local evidence identifies a missing
+account, client, tenant, subscription, provider, or dataset parameter.
 
 ### 13.3 Named key-source comparison
 
@@ -629,8 +651,10 @@ A later 2026-09-24 diagnostic inspection is explicitly a separate raw probe,
 not a scheduled Legacy Collector run (`docs/29-TIMING-UNAVAILABLE-ROOT-CAUSE.md:155-183`).
 
 This historical evidence supports that the Legacy Windows request path and its
-then-used authorization context worked at those historical points. It does not
-prove that the current macOS Codex environment contains the same key value.
+then-used authorization context worked at those historical points. The
+historical Legacy evidence alone did not prove credential equality. The later
+S9 user-side comparison independently established that the current Windows
+User-level and macOS probe credential values were the same.
 The current Stage 1 quota summary at
 `docs/PROJECT-STATUS.md:74-81` records executions and HTTP attempts, but does
 not provide per-attempt HTTP 200 status evidence and is not used to infer it.
@@ -678,7 +702,8 @@ entitlement state.
 
 ### 13.7 Local remediation decision
 
-**TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED**
+**S10 REQUEST-LEVEL DIAGNOSIS:**
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`
 
 The user's comparison removes a current Windows-versus-macOS key-value mismatch
 as the explanation under investigation. However, the S10 re-run received no
@@ -746,3 +771,97 @@ disabled, revoked, or otherwise responsible for the failure. Stage 02A.2
 remains **Blocked** because no valid operational MDD service payload was
 obtained or audited. Stage 02 remains **In progress** and is not approved or
 complete.
+
+## 15. Stage 02A.2 S11 DNS-only Diagnosis
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+
+**Status:** BLOCKED
+
+**Diagnostics date:** 2026-09-25
+
+**MDD HTTP requests in S11:** 0
+
+**MDD probe executions in S11:** 0
+
+**SQL queries executed:** 0
+**Database changes:** NONE
+
+S11 performed DNS-only diagnostics. It did not execute
+`scripts/stage_02a2_probe.py`, open an HTTP/HTTPS connection, connect to any
+returned IP address, or modify DNS/network configuration.
+
+### 15.1 Endpoint literal verification
+
+The `ENDPOINT` source literal in `scripts/stage_02a2_probe.py:24` is exactly:
+
+```text
+https://mdd.gorheinland.com/delfi
+```
+
+It has no leading or trailing whitespace, hidden/non-ASCII characters, newline,
+scheme error, hostname error, or path error.
+
+**ENDPOINT_LITERAL_VALID: YES**
+
+### 15.2 Python DNS results
+
+Using `socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)` from the same
+Codex environment as the probe:
+
+| Hostname | Result |
+|---|---|
+| `mdd.gorheinland.com` | **DOES_NOT_RESOLVE** |
+| `ckan.mdd.gorheinland.com` | **DOES_NOT_RESOLVE** |
+| `download.gorheinland.com` | **DOES_NOT_RESOLVE** |
+| `gorheinland.com` | **DOES_NOT_RESOLVE** |
+
+No address was returned for any tested hostname.
+
+### 15.3 macOS system DNS results
+
+- `/etc/hosts` contains no `gorheinland.com` or MDD override.
+- `dscacheutil -q host -a name` returned no host record for any of the four
+  tested names.
+- `scutil --dns` reported `No DNS configuration available` in this
+  environment.
+- The generated `/etc/resolv.conf` shows a `fritz.box` search domain and
+  private nameserver entries, but macOS states that this file is not the
+  resolver-routing source. The queried names are fully qualified, so the
+  search domain does not plausibly explain the failure.
+- Local `dig` was blocked before issuing a query (`Operation not permitted`),
+  and service-level `networksetup` inspection was unavailable because
+  `AuthorizationCreate()` failed. No VPN/tunnel-scoped resolver was therefore
+  established from the available system evidence.
+
+The system-resolver evidence is consistent with a local macOS/Codex resolver
+failure, not with an MDD HTTP or provider-authorization result.
+
+### 15.4 Public resolver comparison
+
+Because the normal resolver could not resolve the MDD hostname, the permitted
+comparison was made with `dig +time=2 +tries=1 @1.1.1.1 A`. No connection was
+made to any returned address.
+
+| Hostname | Public A result |
+|---|---|
+| `mdd.gorheinland.com` | **RESOLVES** → `195.14.241.23` |
+| `ckan.mdd.gorheinland.com` | **RESOLVES** → `195.14.241.23` |
+| `download.gorheinland.com` | **RESOLVES** → `195.14.241.21` |
+
+The MDD hostname and sibling hosts therefore have public DNS records.
+
+### 15.5 Classification and next action
+
+**DNS CLASSIFICATION:** `LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`
+
+The S10 request-level diagnosis remains
+`TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
+S11 narrows the transport cause to the local resolver path; it does not
+establish provider authorization.
+
+**NEXT ACTION:** Fix/restore the local macOS DNS resolver, including any
+relevant network-service or VPN resolver state, and verify the MDD hostname
+with the normal resolver before running another MDD probe.
+
+Stage 02A.2 remains **Blocked** and Stage 02 remains **In progress**.
