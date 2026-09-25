@@ -35,13 +35,22 @@ The S10 request-level diagnosis was
 `TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
 The probe source uses the Legacy Content-Type
 `application/xml; charset=utf-8`. S11 DNS-only diagnostics classified the
-local cause as `LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`: the same-environment
-Python and system resolver paths did not resolve the tested hosts, while the
-permitted public resolver comparison did. Provider authorization remains
-undetermined. No key, fingerprint, authorization header, raw response, or
-derived secret material was written to the repository.
+observed Codex-environment resolver behavior as
+`LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`: the same-environment Python and system
+resolver paths did not resolve the tested hosts, while the permitted public
+resolver comparison did. Because those diagnostics were constrained by the
+Codex execution environment, host-level macOS DNS failure is not yet
+independently established. Provider authorization remains undetermined. No
+key, fingerprint, authorization header, raw response, or derived secret
+material was written to the repository.
 
-S11 verified `ENDPOINT_LITERAL_VALID: YES` for
+The current diagnosis is
+`CODEX_ENVIRONMENT_DNS_FAILURE; HOST_MACOS_RESOLVER_STATE_UNCONFIRMED; PROVIDER_AUTHORIZATION_UNDETERMINED`.
+Host-level DNS evidence is still pending. S12 made no MDD request and did not
+execute the MDD probe or modify DNS/network configuration.
+
+S11 endpoint and DNS evidence was collected inside the Codex execution
+environment. S11 verified `ENDPOINT_LITERAL_VALID: YES` for
 `https://mdd.gorheinland.com/delfi`. `/etc/hosts` had no relevant override;
 `dscacheutil` returned no record and `scutil --dns` reported no available DNS
 configuration in this environment. Public DNS at `1.1.1.1` resolved
@@ -49,10 +58,10 @@ configuration in this environment. Public DNS at `1.1.1.1` resolved
 `download.gorheinland.com`. S11 made zero MDD HTTP requests and zero probe
 executions.
 
-**S11 next action:** Fix/restore the local macOS DNS resolver, including any
-relevant network-service or VPN resolver state, and verify the MDD hostname
-with the normal resolver before running another MDD probe. Stage 02A.2 remains
-**Blocked** and Stage 02 remains **In progress**.
+**S12 next action:** The user must run
+`scripts/stage_02a2_host_dns_check.sh` from a normal interactive macOS
+Terminal outside Codex. Stage 02A.2 remains **Blocked** and Stage 02 remains
+**In progress** until host-level evidence is available.
 
 Planned documents include:
 

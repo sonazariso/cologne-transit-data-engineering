@@ -851,17 +851,75 @@ made to any returned address.
 
 The MDD hostname and sibling hosts therefore have public DNS records.
 
-### 15.5 Classification and next action
+### 15.5 Historical classification and current qualification
 
-**DNS CLASSIFICATION:** `LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`
+**HISTORICAL S11 DNS CLASSIFICATION (inside the Codex environment):**
+`LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`
+
+S11 classified the observed Codex-environment resolver behavior as
+`LOCAL_MACOS_SYSTEM_RESOLVER_FAILURE`. Because the diagnostics were
+constrained by the Codex execution environment, host-level macOS DNS failure is
+not yet independently established. S11 narrows the observed transport cause
+inside that environment; it does not establish provider authorization.
 
 The S10 request-level diagnosis remains
 `TRANSPORT_DNS_RESOLUTION_FAILURE; PROVIDER_AUTHORIZATION_UNDETERMINED`.
-S11 narrows the transport cause to the local resolver path; it does not
-establish provider authorization.
 
-**NEXT ACTION:** Fix/restore the local macOS DNS resolver, including any
-relevant network-service or VPN resolver state, and verify the MDD hostname
-with the normal resolver before running another MDD probe.
+**CURRENT DNS DIAGNOSIS:**
+`CODEX_ENVIRONMENT_DNS_FAILURE; HOST_MACOS_RESOLVER_STATE_UNCONFIRMED; PROVIDER_AUTHORIZATION_UNDETERMINED`
+
+**S12 NEXT ACTION:** Run the host-side DNS diagnostic from a normal
+interactive macOS Terminal outside Codex and use its single final result to
+choose the next approved action. Do not change DNS configuration or run the
+MDD probe in S12.
 
 Stage 02A.2 remains **Blocked** and Stage 02 remains **In progress**.
+
+## 16. Stage 02A.2 S12 Host-vs-Codex DNS Qualification
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+
+**Status:** BLOCKED
+
+**Diagnostics date:** 2026-09-25
+
+**MDD HTTP requests in S12:** 0
+
+**MDD probe executions in S12:** 0
+
+**SQL queries executed:** 0
+**Database changes:** NONE
+
+S12 does not treat the S11 Codex-environment diagnostics as proof that the
+ordinary interactive macOS host resolver is broken. The S11 classification is
+retained as historical evidence and is qualified by the current diagnosis:
+`CODEX_ENVIRONMENT_DNS_FAILURE; HOST_MACOS_RESOLVER_STATE_UNCONFIRMED; PROVIDER_AUTHORIZATION_UNDETERMINED`.
+
+S12 created
+`scripts/stage_02a2_host_dns_check.sh` for the user to run from a normal
+interactive macOS Terminal. It checks the following hostnames with
+`python3` and `socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)`:
+`mdd.gorheinland.com`, `ckan.mdd.gorheinland.com`,
+`gorheinland.com`, and `example.com`. It summarizes
+`dscacheutil -q host -a name` results, uses the default
+`dig +time=2 +tries=1 A` resolver when available, runs the
+`@1.1.1.1` control query only when the normal/default MDD resolution
+fails, and internally summarizes `scutil --dns` without exposing its
+full output.
+
+The host script is diagnostic-only. It reads no credential, makes no service
+request, changes no network setting, uses no elevated command, and does not
+flush caches or alter VPN/proxy state. It was not executed by Codex, so no
+host DNS result is recorded here. Host-level DNS evidence remains pending.
+
+### 16.1 Decision tree after the host result
+
+| Host result | Next approved action |
+|---|---|
+| `HOST_DNS_RESULT: NORMAL_RESOLVER_WORKS` | Run the controlled MDD probe from the normal trusted macOS host environment with the already-confirmed credential and exactly one HTTP attempt. Do not run it in S12. |
+| `HOST_DNS_RESULT: NORMAL_RESOLVER_FAILS_PUBLIC_DNS_WORKS` | Repair or configure the macOS host DNS resolver before another MDD request. Do not modify DNS automatically in S12. |
+| `HOST_DNS_RESULT: GENERAL_HOST_DNS_FAILURE` | Resolve the general macOS network/DNS problem first. |
+| `HOST_DNS_RESULT: INCONCLUSIVE` | Keep Stage 02A.2 blocked and request only the minimum additional host diagnostic needed. |
+
+Until the host result is supplied, Stage 02A.2 remains **Blocked** and Stage 02
+remains **In progress**.

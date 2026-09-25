@@ -14,6 +14,10 @@ The primary timing objective is **Actual Delay derived from validated `RecordedA
 
 - Stage 0 — Project Definition: **Approved**
 - Stage 1 — Source Inventory & Permission: **Approved**
+- Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress**
+- Stage 02A.2 remains **Blocked** pending successful controlled MDD response
+  evidence. See [Project Status](docs/PROJECT-STATUS.md) for the detailed
+  blocker.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 
