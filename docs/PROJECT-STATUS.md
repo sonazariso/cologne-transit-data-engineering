@@ -10,7 +10,7 @@
 |---|---|---|
 | 0 | Project Definition | Approved |
 | 1 | Source Inventory & Permission | Not started |
-| 2 | MDD/TRIAS Source-Contract Audit | Not started |
+| 2 | MDD/TRIAS Source-Contract Audit | In progress |
 | 3 | Static GTFS Profile | Not started |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
@@ -26,6 +26,16 @@
 | 15 | Post-Cutover Validation | Not started |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
+
+### Stage 2 substage status
+
+- Stage 02A.1 — Legacy Implementation Audit: **Completed** (read-only source
+  evidence documented).
+- Stage 02A.2 — Controlled MDD Raw-Response Probe: **Not started**.
+
+Stage 02 is not complete. The Stage 02A.1 document records Legacy request,
+parser, and persistence behavior only; actual MDD response behavior remains
+unproven until the controlled Stage 02A.2 probe.
 
 ## Current authoritative decisions
 
