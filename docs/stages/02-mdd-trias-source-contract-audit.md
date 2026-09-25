@@ -1,21 +1,23 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
-**Stage status:** READY FOR APPROVAL
+**Stage status:** IN PROGRESS — STAGE 02A.3 HOST EXECUTION PENDING
 **Audit date:** 2026-09-25  
 **Scope:** Evidence review for Stage 02, including the read-only Legacy
 Collector implementation audit, the S13 audit of the successful controlled
-`/delfi` response, local authorization and credential-equality follow-up, and
-the historical S10/S11/S12 transport diagnostics. The controlled response is
-audited below; this is not a claim about every MDD endpoint or a provider-wide
-MDD/TRIAS coverage result.
+`/delfi` response, local authorization and credential-equality follow-up, the
+historical S10/S11/S12 transport diagnostics, and the S15 preparation of
+Stage 02A.3 historical actual-time availability validation. The controlled
+response is audited below; this is not a claim about every MDD endpoint or a
+provider-wide MDD/TRIAS coverage result.
 
 **Current-state rule:** This is a chronological audit. Sections 1–16 contain
 source-audit and historical probe chronology, including statements that were
 correct before the successful S13 response or before this S14 finalization.
 Sections explicitly marked historical remain historical evidence. The current
-technical conclusion is the S14 final synthesis in §§19–22, which supersedes
-earlier current-status wording and is **READY FOR APPROVAL**, not approved.
+technical baseline is the S14 final synthesis in §§19–22. S15 preserves that
+baseline but supersedes its current approval status: Stage 02 is now
+**IN PROGRESS** until the host executes and the project audits Stage 02A.3.
 
 ## 1. Environment & Repository Discovery
 
@@ -1334,10 +1336,11 @@ POWER BI CHANGES: NONE
 RAW RESPONSE COMMITTED: NO
 SECRET EXPOSED OR WRITTEN: NO
 
-## 19. Final Stage 02 Synthesis (S14)
+## 19. S14 Final Stage 02 Synthesis — Historical Baseline
 
-**Technical completion state:** STAGE 02 READY FOR APPROVAL
-**Approval state:** Not approved; the user/reviewer performs the explicit gate.
+**Technical completion state at S14:** STAGE 02 READY FOR APPROVAL
+**Approval state at S14:** Not approved; S15 later extended the gate before
+final approval.
 
 S14 is the final technical/documentation pass for Stage 02. It made no MDD
 request, performed no probe, executed no SQL, changed no database or
@@ -1536,7 +1539,7 @@ The former “Open critical questions” are explicitly reclassified:
 All technical acceptance criteria pass. The technical completion state is
 **STAGE 02: READY FOR APPROVAL**. It is not **APPROVED**.
 
-## 20. Documentation and safety synchronization record
+## 20. S14 Documentation and safety synchronization record — Historical
 
 Created:
 
@@ -1565,9 +1568,9 @@ No MDD HTTP request or probe was executed. No SQL query was executed. No
 database object or data was changed. No secret was exposed or written. No
 commit or push was made.
 
-## 21. Consistency audit result
+## 21. S14 Consistency audit result — Historical
 
-The current authoritative documentation now states:
+At the S14 point, the authoritative documentation stated:
 
 - Stage 02 technical audit is complete and ready for approval, not approved.
 - Stage 02A.1 and 02A.2 are completed.
@@ -1585,10 +1588,10 @@ The current authoritative documentation now states:
 - Full raw responses are not retained permanently or automatically by default.
 
 Earlier 401, DNS, and blocked-status statements remain only as explicitly
-labelled historical chronology in the detailed audit. No current authoritative
-status relies on those superseded blockers.
+labelled historical chronology in the detailed audit. S15 preserves those
+historical distinctions while adding the host-only 02A.3 validation gate.
 
-## 22. Final technical status
+## 22. S14 Final technical status — Historical Baseline
 
 ```text
 STAGE 02A.1: COMPLETED
@@ -1614,3 +1617,134 @@ POWER BI CHANGES: NONE
 SECRET EXPOSED OR WRITTEN: NO
 COMMIT OR PUSH: NO
 ```
+
+## 23. S15 Stage 02A.3 Historical Actual-Time Availability Validation
+
+**Current Stage 02 status:** IN PROGRESS
+
+**Stage 02A.1:** COMPLETED
+
+**Stage 02A.2:** COMPLETED
+
+**Stage 02A.3:** IN PROGRESS / HOST EXECUTION PENDING
+
+S14 remains the technical-closure baseline. Its TRIAS semantics, controlled
+response observations, Legacy parser/persistence evidence, quota boundary, and
+raw-retention conclusions remain valid. The user intentionally deferred the
+Stage 02 approval gate because Actual Operational Performance is a primary
+project objective and the single current response did not establish whether
+historical StopEvent requests can expose recorded/actual timing.
+
+### 23.1 Purpose and host-only execution boundary
+
+The prepared diagnostic script is
+[scripts/stage_02a3_historical_actual_time_probe.py](../../scripts/stage_02a3_historical_actual_time_probe.py).
+It is standalone and diagnostic-only. S15 authorizes no MDD request and no
+probe execution from Codex. The user will execute it later from the trusted
+normal macOS Terminal; this section records design and interpretation rules,
+not probe results.
+
+The fixed request contract is:
+
+| Item | S15 design |
+|---|---|
+| Endpoint and method | https://mdd.gorheinland.com/delfi, POST |
+| Authentication | x-api-key from MDD_API_KEY environment variable only |
+| Content type | application/xml; charset=utf-8 |
+| TRIAS/requestor | TRIAS 1.2; CologneTransitIntelligence |
+| Location | Köln Hbf; de:05315:11201 |
+| Stop-event parameters | arrival; NumberOfResults=5; previous/onward calls and realtime data enabled |
+| Historical targets | exactly one each at 1, 7, 30, 90, and 180 days before execution |
+| Target time | 12:00 local Europe/Berlin, serialized safely as an aware xs:dateTime; no hardcoded UTC offset |
+| Request time | RequestTimestamp is the real current UTC request time; DepArrTime is the historical target |
+| Request isolation | sequential only; 30-second timeout; redirects disabled; zero retries; no fallback or follow-up request |
+
+For each HTTP response, the script prints one structural JSON summary line and
+does not print the raw body. It records status, content type, byte count,
+JSON/result structure, response/result error codes, call-scope timing counts,
+historical alignment, candidate actual-looking field names, and a bounded
+historical classification. A final JSON object aggregates only the attempted
+horizons. EstimatedTime remains prediction evidence; it is never converted
+to actual time.
+
+### 23.2 Historical alignment and actual-time rules
+
+HTTP 200 is not treated as proof that a historical request was honored. The
+probe compares returned ThisCall TimetabledTime dates with the requested
+Europe/Berlin target date and distinguishes:
+
+- HISTORICAL_TARGET_MATCH;
+- CURRENT_TIME_FALLBACK_SUSPECTED;
+- NO_RESULTS;
+- DATE_OUT_OF_RANGE; and
+- INCONCLUSIVE.
+
+It separately inventories TimetabledTime, EstimatedTime, and RecordedAtTime
+in ThisCall, PreviousCall, and OnwardCall. It searches case-sensitively for
+RecordedAtTime representations and records other actual-looking field names,
+structural JSON paths, occurrence counts, and value types without assigning
+them actual-time semantics.
+
+Per horizon, the permitted classifications are:
+
+- HISTORICAL_ACTUAL_OBSERVED only when a recorded-time candidate is present
+  for a historically aligned event;
+- HISTORICAL_REALTIME_WITHOUT_ACTUAL when historical estimate/realtime
+  evidence is present but no aligned RecordedAtTime is observed;
+- HISTORICAL_TIMETABLE_ONLY when aligned historical events have no
+  realtime/estimate/actual evidence;
+- HISTORY_DATE_OUT_OF_RANGE when the specified date-range error is returned;
+- HISTORY_NO_EVENT when the specified no-event condition is returned;
+- REQUEST_NOT_HONORED_AS_HISTORICAL when current events appear to be
+  returned instead; and
+- INCONCLUSIVE otherwise.
+
+No horizon result is generalized to all history, and no branch is selected
+before the host responses and temporary raw artifacts are audited.
+
+### 23.3 Temporary evidence and safety controls
+
+The script creates one mode-700 temporary directory outside the repository
+and, for each HTTP response, a mode-600 artifact named 01-1d.raw through
+05-180d.raw. It checks the body for the API-key value before writing or
+retaining it, never stores request headers, and never writes raw responses to
+the repository. These files are temporary audit evidence only; S14's rule of
+no permanent or automated full raw-payload retention by default remains in
+force. A missing MDD_API_KEY stops before any request and prints only
+MDD_API_KEY PRESENT: NO.
+
+### 23.4 Conditional collector-design framework
+
+The host result will refine later collector design only through the evidence
+branch it supports:
+
+| Evidence branch | Later collector-design implication |
+|---|---|
+| Historical RecordedAtTime is available | Retrospective MDD actual-time retrieval may reduce reliance on dense snapshots for actual-delay reconstruction, but Stage 7 must still validate coverage, reliability, permissible history depth, and quota impact before relying on it. |
+| Historical realtime/estimates exist without RecordedAtTime | Preserve archived estimates as estimates for prediction-history use; do not convert them to Actual Delay. Another source remains necessary for actual performance. |
+| Only historical timetable data is returned | Historical MDD queries do not reconstruct realtime operational history; collector snapshots remain important from collection time onward. |
+| History is unavailable beyond a short window | Collector retention becomes critical because MDD cannot be assumed to serve long-term operational history. |
+| Historical requests are ignored or fall back to current data | A successful StopEvent response cannot be treated as a historical archive without explicit temporal alignment evidence. |
+
+These are conditional design rules, not the outcome of 02A.3. S15 does not
+implement a collector change, alter the Legacy repository, change Task
+Scheduler or Power BI, modify database objects/data, or approve Actual Delay.
+
+### 23.5 Current gate position
+
+STAGE 02: IN PROGRESS
+STAGE 02A.1: COMPLETED
+STAGE 02A.2: COMPLETED
+STAGE 02A.3: IN PROGRESS — HOST EXECUTION PENDING
+S14 BASELINE: PRESERVED
+ACTUAL DELAY KPI: NOT APPROVED
+MDD HTTP REQUESTS IN S15: 0
+MDD PROBE EXECUTIONS IN S15: 0
+SQL QUERIES EXECUTED: 0
+DATABASE CHANGES: NONE
+LEGACY REPOSITORY MODIFIED: NO
+TASK SCHEDULER CHANGES: NONE
+POWER BI CHANGES: NONE
+RAW RESPONSE COMMITTED: NO
+SECRET EXPOSED OR WRITTEN: NO
+COMMIT OR PUSH: NO

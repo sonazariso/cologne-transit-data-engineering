@@ -197,7 +197,9 @@ It is not sufficient to calculate field-population percentages or claim
 Cologne-wide, mode-wide, station-wide, operator-wide, or network performance.
 In particular, `RecordedAtTime` coverage is **UNKNOWN**. Coverage validation
 belongs to controlled pilot/coverage stages, especially Stages 7, 8, 9, and
-16, and does not block Stage 02 technical closure.
+16. The S14 technical baseline remains valid, but S15 intentionally extends
+the final Stage 02 approval gate with Stage 02A.3 historical availability
+validation before approval.
 
 ## Permission, quota, and raw-payload boundary
 

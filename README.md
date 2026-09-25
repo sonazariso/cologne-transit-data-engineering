@@ -19,16 +19,21 @@ sufficient recorded/actual timing evidence.
 
 - Stage 0 — Project Definition: **Approved**
 - Stage 1 — Source Inventory & Permission: **Approved**
-- Stage 2 — MDD/TRIAS Source-Contract Audit: **Ready for approval**. The
-  technical audit is complete; the user/reviewer approval gate is pending.
+- Stage 2 — MDD/TRIAS Source-Contract Audit: **In progress**. The S14
+  technical-closure package remains the baseline, but the user intentionally
+ deferred final approval for the S15 historical actual-time validation.
+- Stage 02A.1 — Legacy Implementation Audit: **Completed**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**. The audited
   request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
   HTTP 200; current MDD authorization and host DNS are working.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **In progress
+  / host execution pending**. The prepared diagnostic probe tests 1D, 7D,
+  30D, 90D, and 180D historical targets before final Stage 02 approval.
 - The audited response did not contain `RecordedAtTime` or a direct delay
   field. `RecordedAtTime` remains a TRIAS 1.2 optional actual-time candidate,
-  not a provider-wide absence claim. See the [Stage 02 source-contract
-  package](docs/source-contracts/README.md) and [Project Status](docs/PROJECT-STATUS.md)
-  for details.
+  not a provider-wide absence claim. No Actual Delay KPI is approved. See the
+  [Stage 02 source-contract package](docs/source-contracts/README.md) and
+  [Project Status](docs/PROJECT-STATUS.md) for details.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 

@@ -12,15 +12,22 @@ Define business questions, portfolio goal, geography, modes, System Performance,
 ## Stage 1 — Source Inventory & Permission
 Re-establish GTFS and MDD source ownership, URLs/contracts, feed coverage, update frequency, API quota, permission/retention conditions, TRIAS version, endpoint contract, and current legacy quota consumption. **No new polling is required to perform the initial quota audit.**
 
-## Stage 2 — MDD/TRIAS Source-Contract Audit — TECHNICAL AUDIT COMPLETE; READY FOR APPROVAL
+## Stage 2 — MDD/TRIAS Source-Contract Audit — IN PROGRESS; 02A.3 HOST EXECUTION PENDING
+The S14 technical-closure package remains the valid baseline. The user
+intentionally extended the approval gate with Stage 02A.3 — Historical
+Actual-Time Availability Validation because Actual Operational Performance is
+a primary project objective. The host-only diagnostic probe tests one
+independent request at each of 1D, 7D, 30D, 90D, and 180D, using a 12:00
+Europe/Berlin target, no retries, and temporary raw artifacts outside the
+repository. Stage 02A.1 and 02A.2 remain completed; Stage 02 is not approved.
+
 The approval candidate package compares official TRIAS 1.2 semantics, the
 successful controlled MDD response, Legacy parser candidates, and Legacy
 persistence requirements. It documents `RecordedAtTime`, estimate ranges,
 errors/no-realtime evidence, cancellation/status fields, `OperatingDayRef`,
 `StopSeqNumber`, origin/destination, call structure, `NumberOfResults`,
-`TimeWindow`, provider limits, and raw-payload retention. Stage 02 is not yet
-user-approved; no production polling schedule or future SQL design is approved
-here.
+`TimeWindow`, provider limits, and raw-payload retention. S15 does not approve
+Actual Delay, a production polling schedule, or a collector/schema change.
 
 ## Stage 3 — Static GTFS Profile
 Resolve the authoritative GTFS feed and its coverage/update policy; this is

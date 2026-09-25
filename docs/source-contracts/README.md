@@ -1,8 +1,10 @@
 # Source Contracts
 
 This directory contains the Stage 02 MDD/TRIAS source-contract package. The
-package is technically complete and **READY FOR APPROVAL**; it is not marked
-approved until the user/reviewer performs the explicit Stage 02 approval gate.
+S14 technical-closure package remains the baseline, but the current Stage 02
+status is **IN PROGRESS** because the user intentionally extended the
+approval gate for Stage 02A.3 historical actual-time validation. It is not
+approved.
 
 ## Approval candidate contract
 
@@ -13,6 +15,12 @@ These documents are the current Stage 02 approval candidates:
 - [MDD/TRIAS field-retention matrix](mdd-trias-field-retention-matrix.md)
 - [MDD/TRIAS raw-retention decision](mdd-trias-raw-retention.md)
 - [Detailed Stage 02 evidence/audit](../stages/02-mdd-trias-source-contract-audit.md)
+
+Stage 02A.3 is prepared in
+[`scripts/stage_02a3_historical_actual_time_probe.py`](../../scripts/stage_02a3_historical_actual_time_probe.py).
+It is a host-execution-pending diagnostic probe for one historical request at
+each of 1D, 7D, 30D, 90D, and 180D. It does not yet provide evidence for any
+one historical-availability branch.
 
 The request contract records the audited `POST` XML/TRIAS 1.2 request,
 `x-api-key` mechanism, request parameters, `NumberOfResults` versus HTTP
@@ -54,11 +62,13 @@ Current status facts:
 
 - Stage 02A.1 — Legacy Implementation Audit: **Completed**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **Completed**.
+- Stage 02A.3 — Historical Actual-Time Availability Validation: **In progress
+  / host execution pending**.
 - Current MDD authorization: **Working**.
 - Host DNS result: `NORMAL_RESOLVER_WORKS`.
-- Stage 02 technical audit: **Complete**.
-- Stage 02 status: **Ready for approval**, not approved.
-- No MDD request or probe was executed for this finalization task.
+- Stage 02 technical audit baseline: **Complete under S14**; current Stage 02
+  status: **In progress**, not approved.
+- No MDD request or probe was executed in S15. Host execution is pending.
 - No SQL query, database change, Legacy repository change, scheduler change,
   Power BI change, commit, or push was made.
 
