@@ -24,6 +24,11 @@ The actual successful MDD response shape and field coverage remain open until
 an authorized probe obtains a valid service payload and is reviewed. The
 raw-response retention decision also remains open.
 
+The local authorization diagnosis recorded in §13 of the Stage 02 audit found
+no concrete local request/configuration fix for the 401. Its outcome is
+`PROVIDER_SUPPORT_REQUIRED`; this is not an approved MDD response contract and
+does not claim that the API key itself is invalid.
+
 Planned documents include:
 
 - GTFS source contract / field inventory

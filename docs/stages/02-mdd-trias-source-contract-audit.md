@@ -524,3 +524,147 @@ It does not establish MDD field coverage, `RecordedAtTime` availability,
 service-event multiplicity, situation linkage, platform semantics, quota
 behavior, or the exact provider-side reason for access denial. Stage 02A.2
 therefore remains blocked. Stage 2 is not approved or complete.
+
+## 13. Stage 02A.2 Local Authorization Diagnosis
+
+**Diagnosis date:** 2026-09-25
+**Scope:** Local source and documentation inspection only. No HTTP request,
+SQL query, database change, Legacy repository change, Task Scheduler change, or
+Power BI change was made for this diagnosis.
+**HTTP requests authorized in this task:** 0
+**SQL queries executed:** 0
+**Outcome:** `PROVIDER_SUPPORT_REQUIRED`
+
+Line numbers below refer to the inspected Legacy working copy at
+`/Users/admin/Documents/cologne-public-transport-intelligence` and to the
+probe in this repository. Secret values were not read into the report or
+compared.
+
+### 13.1 Legacy authentication configuration
+
+| Question | Finding | Source evidence |
+|---|---|---|
+| API-key environment variable | `MDD_API_KEY` | Legacy `collector/MddRealtimeCollector.psm1:1273-1278` |
+| HTTP authentication header | `x-api-key` | Legacy `collector/MddRealtimeCollector.psm1:428-430` |
+| Endpoint and method | Default endpoint is `https://mdd.gorheinland.com/delfi`; the request is `POST` | Legacy `collector/MddRealtimeCollector.psm1:1292-1296,448-451` |
+| Other authentication headers | None explicitly constructed; the request header hashtable contains only `x-api-key` | Legacy `collector/MddRealtimeCollector.psm1:428-430` |
+| `RequestorRef` | `CologneTransitIntelligence` is part of the TRIAS XML body only. It is not used as HTTP authentication. | Legacy `collector/MddRealtimeCollector.psm1:175-183,428-430` |
+| Provider/dataset identifier outside the TRIAS body | None found in the MDD request path. The request function accepts endpoint, body, API key, timeout/retry settings, logging, and telemetry; it has no provider/dataset argument or URL parameter. | Legacy `collector/MddRealtimeCollector.psm1:382-413,448-456` |
+| Account/client/tenant/subscription/provider authorization parameter | None found in the MDD request path. `StopPointRef` is a TRIAS location identity, not an account or provider entitlement parameter. | Legacy `collector/MddRealtimeCollector.psm1:150-203,382-413` |
+| Legacy key source | An explicit `ApiKey` parameter is accepted first; if blank, the module reads the Windows **User** environment value named `MDD_API_KEY`; if still blank, it prompts securely. | Legacy `collector/MddRealtimeCollector.psm1:1273-1289,1316-1317,1396-1397` |
+| Process, machine, or config-file source | Not used by the production module's fallback path. The normal wrapper does not expose an API-key parameter and invokes the module. | Legacy `collector/Invoke-MddRealtimeCollector.ps1:3-10,19-33` |
+
+The Legacy request builder sends `application/xml; charset=utf-8` and no
+additional explicit authentication header (`collector/MddRealtimeCollector.psm1:448-456`).
+
+### 13.2 Probe versus Legacy request comparison
+
+| Item | Classification | Evidence and assessment |
+|---|---|---|
+| Endpoint | **MATCH** | Probe `scripts/stage_02a2_probe.py:24`; Legacy default `collector/MddRealtimeCollector.psm1:1292-1296`. |
+| HTTP method | **MATCH** | Probe `scripts/stage_02a2_probe.py:118-125`; Legacy `collector/MddRealtimeCollector.psm1:448-451`. |
+| Request `Content-Type` | **DIFFERENT** | Probe sends `application/xml` (`scripts/stage_02a2_probe.py:122-125`); Legacy sends `application/xml; charset=utf-8` (`collector/MddRealtimeCollector.psm1:451-453`). This is a request-contract difference, but local evidence does not show that it caused the 401. |
+| Authentication header name | **MATCH** | Both use `x-api-key`: probe `scripts/stage_02a2_probe.py:122-125`; Legacy `collector/MddRealtimeCollector.psm1:428-430`. |
+| API-key source | **DIFFERENT** | Probe reads the current Python process environment with `os.environ.get("MDD_API_KEY")` (`scripts/stage_02a2_probe.py:110-114`); Legacy resolves an explicit parameter, then Windows User environment, then secure prompt (`collector/MddRealtimeCollector.psm1:1273-1289`). |
+| `RequestorRef` | **MATCH** | Both use `CologneTransitIntelligence`: probe `scripts/stage_02a2_probe.py:45-48`; Legacy `collector/MddRealtimeCollector.psm1:180-183`. |
+| TRIAS namespace and version | **MATCH** | Both use the VDV TRIAS namespace, SIRI namespace, and version `1.2`: probe `scripts/stage_02a2_probe.py:41-44`; Legacy `collector/MddRealtimeCollector.psm1:175-179`. |
+| Request structure | **MATCH** for the controlled target | Both use `ServiceRequest → RequestPayload → StopEventRequest → Location/LocationRef → Params`, with `DepArrTime`, five results, arrival events, and all three include flags: probe `scripts/stage_02a2_probe.py:45-66`; Legacy `collector/MddRealtimeCollector.psm1:180-201`. |
+| Request timestamp | **MATCH** | Both emit UTC `yyyy-MM-ddTHH:mm:ssZ` without fractional seconds: probe `scripts/stage_02a2_probe.py:116`; Legacy `collector/MddRealtimeCollector.psm1:163-173`. |
+| Redirect behavior | **DIFFERENT** / Legacy policy **UNKNOWN** from source | The probe explicitly rejects redirect follow-up (`scripts/stage_02a2_probe.py:30-35,135-139`). Legacy calls `Invoke-WebRequest` without an explicit redirect setting (`collector/MddRealtimeCollector.psm1:448-456`). The recorded response was a direct HTTP 401; no redirect was evidenced. |
+| Retry behavior | **DIFFERENT** | The probe makes one attempt. Legacy defaults to up to three attempts, but classifies HTTP 401/403 as non-retryable (`collector/MddRealtimeCollector.psm1:397-407,440-456,505-508`). Retry behavior therefore cannot explain the first 401 response. |
+| Other explicit request headers | **MATCH** in names | The probe explicitly supplies only `Content-Type` and `x-api-key` (`scripts/stage_02a2_probe.py:122-125`); the Legacy code explicitly constructs only `x-api-key` and supplies `ContentType` separately (`collector/MddRealtimeCollector.psm1:428-430,451-453`). No additional Legacy authentication header was found. |
+
+The differences that could plausibly merit provider-side or controlled
+configuration review are the current process-versus-Windows-User key scope and
+the `Content-Type` value. The endpoint, explicit authentication header name,
+RequestorRef, namespaces, timestamp shape, and controlled TRIAS body otherwise
+match. No local evidence identifies a missing account, client, tenant,
+subscription, provider, or dataset parameter.
+
+### 13.3 Named key-source comparison
+
+**SAME CONFIGURATION SOURCE: YES**
+
+Both implementations are intended to use the same named configuration source,
+`MDD_API_KEY`. This does **not** establish that the values are identical. The
+Legacy collector's normal fallback is the Windows User environment (with a
+secure prompt fallback), while the current macOS probe reads the environment of
+the Codex/Python process. The two environment scopes and their values were not
+equated or compared.
+
+### 13.4 Historical Legacy success evidence
+
+The most recent explicit HTTP 200 evidence located in the Legacy repository is
+the compatibility report
+`docs/25-REALTIME-50-STATION-MDD-COMPATIBILITY.md:1-31,36-43`, timestamped
+`2026-09-22T12:35:17Z`. It records 50 HTTP 200 responses, including Köln Hbf
+(`de:05315:11201`) at line 42. This is a Legacy compatibility diagnostic using
+the Legacy request path, not the scheduled production collector.
+
+For the scheduled production collector, the latest documented live verification
+is `2026-09-08 13:45:46 UTC`; its latest collector run started at
+`13:43:52 UTC` and is documented as `Succeeded` (`docs/09-REALTIME-MDD-TRIAS-INTEGRATION-AND-GTFS-MATCHING.md:31-38`).
+The same document explicitly records HTTP 200 authentication and successful
+collector logs, including Köln Hbf, in
+`docs/09-REALTIME-MDD-TRIAS-INTEGRATION-AND-GTFS-MATCHING.md:91-102,430-438,475-481`.
+A later 2026-09-24 diagnostic inspection is explicitly a separate raw probe,
+not a scheduled Legacy Collector run (`docs/29-TIMING-UNAVAILABLE-ROOT-CAUSE.md:155-183`).
+
+This historical evidence supports that the Legacy Windows request path and its
+then-used authorization context worked at those historical points. It does not
+prove that the current macOS Codex environment contains the same key value.
+The current Stage 1 quota summary at
+`docs/PROJECT-STATUS.md:74-81` records executions and HTTP attempts, but does
+not provide per-attempt HTTP 200 status evidence and is not used to infer it.
+
+### 13.5 Local hypothesis classification
+
+| Hypothesis | Classification | Local evidence |
+|---|---|---|
+| A. Probe authentication implementation differs from Legacy | **SUPPORTED** | The key environment scope, request `Content-Type`, redirect policy, and retry behavior differ or are not equivalent as documented in §13.2. This establishes differences, not their causal role in the 401. |
+| B. Current API-key value may differ from the Legacy working key | **POSSIBLE** | The named source is the same, but Legacy reads a Windows User environment value and the probe reads the current macOS process environment. Values were not compared. |
+| C. Same key may exist but DELFI/provider entitlement is disabled | **SUPPORTED** for the provider-denial condition; same-key identity is unproven | The controlled response stated that access to the data provider was not enabled (`§12.2`). This does not establish whether the key itself is invalid. |
+| D. Account/provider authorization may have changed since historical success | **POSSIBLE** | Historical HTTP 200 evidence exists, while the later controlled request returned 401. No local change record proves when or why authorization changed. |
+| E. Endpoint/request contract may have changed | **POSSIBLE** for server-side contract drift; endpoint change itself is not supported | The endpoint and TRIAS body match the Legacy source, but no current provider contract or redirect policy is locally authoritative. The `Content-Type` spelling differs. |
+| F. Another locally evidenced explanation | **NOT SUPPORTED** | No additional account, client, tenant, subscription, provider, dataset, or authentication-header condition was found in the local request path. |
+
+No listed hypothesis is established as the sole cause, and no hypothesis is
+disproved by the local evidence. In particular, the 401 must not be converted
+into a claim that the API key itself is invalid.
+
+### 13.6 Existing authorization and correspondence documentation
+
+The search was limited to the new repository and the Legacy repository. It did
+not search the home directory, browser profiles, Keychain, email, or unrelated
+files.
+
+Useful non-secret references found:
+
+- Legacy `docs/02-DATA-SOURCES-AND-GTFS-PROFILE.md:75-115` documents the DELFI
+  endpoint, `x-api-key` access model, monthly planning limit, and an HTTP 200
+  five-result sample.
+- Legacy `docs/09-REALTIME-MDD-TRIAS-INTEGRATION-AND-GTFS-MATCHING.md:91-112`
+  documents historical authentication success and a reviewed permission/
+  retention correspondence boundary; it also identifies a contact for renewed
+  out-of-scope review. Its API-key setup description is at `:353-357`.
+- Legacy `docs/25-REALTIME-50-STATION-MDD-COMPATIBILITY.md:1-31,36-43`
+  documents the dated 50-station HTTP 200 compatibility test.
+- New `docs/PROJECT-STATUS.md:30-48,64-81` and this document's §12 record the
+  current 401 result without treating it as proof of an invalid key.
+
+No local document was found that records MDD registration, a provider
+activation transaction, account enablement details, a client/tenant/provider ID,
+or a current authorization change explaining the 401. The existing permission
+correspondence is therefore not sufficient to resolve the current provider
+entitlement state.
+
+### 13.7 Local remediation decision
+
+**PROVIDER_SUPPORT_REQUIRED**
+
+The local evidence identifies no concrete request or configuration mismatch
+that safely explains the 401 and can be fixed locally. Provider-side support or
+an authorized account administrator must verify the current DELFI/provider
+entitlement, the account/key association, and any current request-contract
+requirements before another request is considered. No request was authorized
+or made by this diagnosis.

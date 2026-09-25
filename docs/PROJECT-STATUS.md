@@ -45,7 +45,13 @@
 Stage 02 is not complete. The Stage 02 audit document records Legacy request,
 parser, and persistence behavior together with the controlled Stage 02A.2
 access-denied result; actual successful MDD response behavior remains
-unproven.
+unproven. The read-only local authorization diagnosis in the same document
+found no concrete request or configuration mismatch that can be fixed locally:
+the named key source is the same, but the Legacy Windows User environment and
+the current macOS process environment are not proven to contain the same value.
+The provider-denial condition therefore remains unresolved and the outcome is
+`PROVIDER_SUPPORT_REQUIRED`. This does not state that the API key itself is
+invalid.
 
 ## Current authoritative decisions
 
