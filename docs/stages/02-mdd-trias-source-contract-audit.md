@@ -310,7 +310,8 @@ Task Scheduler state, modified no Legacy file, and did not expose the API key.
 
 ## 10. Recommended Stage 02A.2 Probe Design
 
-Stage 02A.2 is **not started** and was not performed as part of this audit.
+Stage 02A.2 probe execution was not performed as part of this audit. Its
+preflight status is recorded below.
 
 The controlled probe should:
 
@@ -340,3 +341,20 @@ TRIAS capability → actual MDD response → Legacy parser handling → SQL pers
 
 No MDD request, SQL query, database change, Legacy repository change, or
 Task Scheduler change was made for Stage 02A.1.
+
+## 11. Stage 02A.2 Preflight Status
+
+**Stage:** 02A.2 — Controlled MDD Raw-Response Probe
+**Status:** BLOCKED
+**Preflight date:** 2026-09-25
+
+The Stage 02A.2 preflight completed before any network operation. `MDD_API_KEY`
+was not available in the Codex execution environment:
+
+- `MDD_API_KEY` present = **NO**.
+- HTTP attempts = **0**.
+- Probe execution did not occur.
+- Blocker = API key unavailable in the execution environment.
+- No source-contract conclusion was made from this failed preflight.
+
+Stage 02 remains in progress and is not complete or approved.

@@ -8,9 +8,15 @@ Current Stage 02 evidence:
 
 - [Stage 02A.1 — Legacy Implementation Audit](../stages/02-mdd-trias-source-contract-audit.md)
 
-Stage 02A.2 — Controlled MDD Raw-Response Probe — has not started. The actual
-MDD response shape, field coverage, and raw-response retention decision remain
-open until that controlled probe is completed and reviewed.
+Stage 02A.2 — Controlled MDD Raw-Response Probe — is **Blocked**. Its preflight
+completed, but `MDD_API_KEY` was not available in the Codex execution
+environment (`MDD_API_KEY` present = **NO**). HTTP attempts = **0** and probe
+execution did not occur. The blocker is API-key unavailability in the
+execution environment; no source-contract conclusion was made from this
+failed preflight.
+
+The actual MDD response shape, field coverage, and raw-response retention
+decision remain open until the controlled probe is completed and reviewed.
 
 Planned documents include:
 

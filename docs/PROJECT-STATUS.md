@@ -31,7 +31,13 @@
 
 - Stage 02A.1 — Legacy Implementation Audit: **Completed** (read-only source
   evidence documented).
-- Stage 02A.2 — Controlled MDD Raw-Response Probe: **Not started**.
+- Stage 02A.2 — Controlled MDD Raw-Response Probe: **Blocked**.
+
+  Preflight completed, but `MDD_API_KEY` was not available in the Codex
+  execution environment. `MDD_API_KEY` present = **NO**. HTTP attempts = **0**;
+  probe execution did not occur. The blocker is API-key unavailability in the
+  execution environment. No source-contract conclusion was made from this
+  failed preflight.
 
 Stage 02 is not complete. The Stage 02A.1 document records Legacy request,
 parser, and persistence behavior only; actual MDD response behavior remains
