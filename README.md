@@ -13,7 +13,7 @@ The primary timing objective is **Actual Delay derived from validated `RecordedA
 ## Current status
 
 - Stage 0 — Project Definition: **Approved**
-- Stage 1 — Source Inventory & Permission: **Not started**
+- Stage 1 — Source Inventory & Permission: **Approved**
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 

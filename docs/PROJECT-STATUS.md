@@ -1,7 +1,7 @@
 # Project Status
 
 **Project:** Cologne Transport Intelligence  
-**Repository:** `sonazariso/cologne-transport-intelligence`  
+**Repository:** `sonazariso/cologne-transit-intelligence`
 **Status date:** 2026-09-25
 
 ## Authoritative status
@@ -9,7 +9,7 @@
 | Stage | Name | Status |
 |---|---|---|
 | 0 | Project Definition | Approved |
-| 1 | Source Inventory & Permission | Not started |
+| 1 | Source Inventory & Permission | Approved |
 | 2 | MDD/TRIAS Source-Contract Audit | In progress |
 | 3 | Static GTFS Profile | Not started |
 | 4 | Cologne Scope & Mode Classification | Not started |
