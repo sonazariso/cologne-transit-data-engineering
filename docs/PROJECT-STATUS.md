@@ -42,10 +42,10 @@
   It was not a valid MDD service payload, so Stage 02A.2 remains blocked and
   no response-field audit could be completed.
 
-Stage 02 is not complete. The Stage 02A.1 document records Legacy request,
-parser, and persistence behavior only. The controlled Stage 02A.2 probe proved
-only that this request received an access-denied response; actual successful
-MDD response behavior remains unproven.
+Stage 02 is not complete. The Stage 02 audit document records Legacy request,
+parser, and persistence behavior together with the controlled Stage 02A.2
+access-denied result; actual successful MDD response behavior remains
+unproven.
 
 ## Current authoritative decisions
 
@@ -65,8 +65,19 @@ MDD response behavior remains unproven.
 
 1. Does the actual MDD endpoint return `RecordedAtTime` with sufficient coverage for the intended population?
 2. What are the current MDD permission, quota, retention, and provider constraints?
-3. What is the live quota consumption of the legacy 7-station collector, including retries?
+3. What is the current account-level or shared-caller MDD quota consumption
+   beyond the recorded Legacy Collector snapshot, and what current provider
+   quota constraints apply?
 4. What is the current authoritative GTFS feed and its coverage/update policy?
 5. Which TRIAS fields must be retained before a new realtime schema is designed?
+
+The point-in-time Legacy Collector quota audit snapshot at **2026-09-25
+11:23:41 UTC** recorded **1,599** collector executions, **1,629** HTTP
+attempts, and **35** additional retry attempts. Against the documented
+monthly quota of **250,000 requests**, that is approximately **0.6516%**
+recorded collector usage, with approximately **99.3484%** remaining against
+that documented quota. This proves recorded consumption by the Legacy
+Collector at that audit snapshot only; it does not prove total account-level
+MDD consumption if another caller shares the same API key or account.
 
 Do not implement around these unknowns before their designated approval gates.

@@ -1,12 +1,13 @@
 # Source Contracts
 
-This directory will hold approved source-contract documentation. The current
-Stage 02A.1 document is evidence for the Legacy implementation audit; it is
-not an approved final MDD/TRIAS response contract.
+This directory will hold approved source-contract documentation. The Stage 02
+audit document contains evidence for both the Legacy implementation audit and
+the controlled MDD raw-response probe; it is not an approved final MDD/TRIAS
+response contract.
 
 Current Stage 02 evidence:
 
-- [Stage 02A.1 — Legacy Implementation Audit](../stages/02-mdd-trias-source-contract-audit.md)
+- [Stage 02 — MDD/TRIAS Source-Contract Audit](../stages/02-mdd-trias-source-contract-audit.md)
 
 Stage 02A.2 — Controlled MDD Raw-Response Probe — is **Blocked**. The final
 preflight confirmed `MDD_API_KEY` present = **YES**, but the one authorized POST

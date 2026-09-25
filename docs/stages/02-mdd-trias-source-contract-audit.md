@@ -1,4 +1,4 @@
-# Stage 02A.1 — Legacy Implementation Audit
+# Stage 02 — MDD/TRIAS Source-Contract Audit
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
 **Substage status:** COMPLETED  
