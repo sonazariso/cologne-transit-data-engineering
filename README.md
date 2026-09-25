@@ -34,7 +34,7 @@ See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/
 
 The authoritative Git working copy is intended to live on macOS:
 
-`/Users/admin/Documents/cologne-transport-intelligence/`
+`/Users/admin/Documents/cologne-transit-intelligence/`
 
 Windows accesses the same working tree through VMware Shared Folders:
 
