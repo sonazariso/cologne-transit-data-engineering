@@ -1,7 +1,7 @@
 # MDD/TRIAS Response Contract
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Document state:** Approval candidate; not user-approved<br>
+**Document state:** Approved Stage 02 source contract; synchronized with post-Stage-02 consolidation<br>
 **Semantic version:** TRIAS 1.2<br>
 **Audited response date:** 2026-09-25
 
@@ -76,6 +76,21 @@ Actual Delay remains unavailable for production until a valid
 `RecordedAtTime`/actual-timing source is observed, validated, and later
 matched appropriately. Prediction Accuracy is also unavailable until
 comparable actual timing exists. Stage 02 does not approve either KPI.
+
+## Post-Stage-02 source-role direction
+
+MDD/TRIAS is the approved **primary realtime source** for the Cologne-oriented
+project because its station-targeted request model, Cologne/VRS alignment,
+call sequence, estimate, platform/bay, and situation evidence fit the core
+observation need. This role does not change the timing semantics above:
+`EstimatedTime` remains predicted time and `RecordedAtTime` remains an
+unobserved candidate in the bounded evidence.
+
+GTFS-RT is the approved **complementary/secondary realtime source**. Its
+operational states and independent coverage are useful alongside MDD, but its
+`StopTimeEvent.time` remains estimated-or-actual without an observed
+provider-specific actual semantic. The two source contracts must remain
+source-faithful and separate before any future reconciliation.
 
 ### Historical response evidence (S16)
 

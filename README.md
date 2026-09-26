@@ -25,7 +25,9 @@ sufficient recorded/actual timing evidence.
   requests while correcting their offline analysis.
 - Stage 3 — Static GTFS Profile: **NEXT / NOT STARTED**.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or start Stage 3.
-- Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **HOST EXECUTION PENDING**. S19 tests only third-party Wayback point snapshots near the 3-month and 6-month calendar horizons for the exact GTFS.de realtime URL; it does not establish provider-supported or continuous history, approve GTFS-RT for production, or start Stage 3.
+- Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history, approve GTFS-RT for production, or start Stage 3.
+- Approved realtime source direction: **MDD/TRIAS PRIMARY** and **GTFS-RT COMPLEMENTARY**. Source-faithful observations remain separate until a future reconciliation design is explicitly approved; neither source currently provides confirmed Actual Time.
+- [Stage 3 realtime collection design readiness](docs/stage-03/realtime-collection-design-readiness.md) is **READY FOR USER REVIEW — STAGE 3 NOT STARTED**. It records entry conditions and guardrails only; it is not an implementation design.
 - Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**. The audited
   request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
@@ -43,10 +45,14 @@ sufficient recorded/actual timing evidence.
 - [Realtime collector requirements](docs/collector-design/realtime-collector-requirements.md)
   are approved Stage 02 design inputs; implementation is deferred.
 - The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
-  is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host
-  execution pending and does not reopen Stage 02.
+  is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION**. Six bounded
+  live journeys were reviewed (three at Köln Hbf and three at Köln Neumarkt);
+  no `RecordedAtTime` was observed, and the result does not make a
+  provider-wide absence claim or reopen Stage 02.
 - No new database, collector, or Power BI implementation is authoritative yet.
 - The legacy collector/database must remain untouched until explicitly reviewed.
+- Confirmed Actual Time is unavailable; Actual Delay and prediction accuracy
+  against confirmed actual timing remain unapproved/unavailable.
 
 The historical responses used the provider lexical timestamp form
 `YYYY-MM-DDTHH:mm:ssZ[GMT]`. The terminal `Z` supplies explicit UTC semantics;

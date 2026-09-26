@@ -1,7 +1,7 @@
 # GTFS-Realtime Historical Availability Audit
 
-**Status:** `POST-STAGE-02 VALIDATION — HOST EXECUTION PENDING`<br>
-**Task:** S19<br>
+**Status:** `POST-STAGE-02 VALIDATION — BOUNDED VALIDATION COMPLETE`<br>
+**Task:** S19 / S19.1<br>
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
 **APPROVED**; Stage 3 — **NEXT / NOT STARTED**<br>
 **Production decision:** none; GTFS-Realtime remains non-production.
@@ -108,6 +108,11 @@ target_reference - 7 days through target_reference + 7 days
 
 The interval is controlled by `--window-days`. S19 does not expand the window
 automatically when no capture is found.
+
+The initial S19 host run used the default ±7-day window. A separate S19.1
+host-only metadata run later repeated the same two target searches with an
+expanded ±45-day window; it did not replay payloads. The two runs are recorded
+separately below and must not be combined into a provider-history claim.
 
 ## 9. Exact-URL Wayback discovery
 
@@ -309,21 +314,58 @@ Absence of an exact Wayback capture is likewise not proof that no historical
 copy exists elsewhere. Any later archive source or wider search window needs a
 separate explicit approval after the bounded result is reviewed.
 
-## 25. Next decision gate
+## 25. Final S19 handoff
 
-The next step is host execution of the exact bounded command below, followed by
-review of its JSONL evidence. No production collector, database, scheduler,
-Power BI, MDD, Legacy, or architecture change is authorized by S19.
+S19 and S19.1 are **BOUNDED VALIDATION COMPLETE**. No production collector,
+database, scheduler, Power BI, MDD, Legacy, or architecture implementation
+change is authorized by these archive tests. Prospective collection remains
+necessary for controlled historical GTFS-RT evidence.
 
-```bash
-cd /Users/admin/Documents/cologne-transit-intelligence
+## 26. Recorded host results
 
-python3 scripts/gtfs_rt_historical_availability_probe.py \
-  --as-of-date 2026-09-26 \
-  --months 3 6 \
-  --window-days 7
-```
+The following results are the bounded host evidence consolidated by S20. The
+exact source URL, target dates, and archive provider remained unchanged across
+both runs.
 
-The host command must be run manually. The archive window must not be widened
-and another archive provider must not be added automatically before the first
-bounded result is reviewed.
+### 26.1 S19 initial ±7-day exact-URL test
+
+As of `2026-09-26`, the run made one CDX metadata request per horizon:
+
+| Horizon | Target reference | Search window | CDX status | Rows returned | Captures | Replay |
+|---|---|---|---:|---:|---:|---|
+| 3 months | `2026-06-26T12:00:00Z` | ±7 days | `200` | `0` | `0` | not attempted |
+| 6 months | `2026-03-26T12:00:00Z` | ±7 days | `200` | `0` | `0` | not attempted |
+
+Run aggregate:
+
+- total HTTP attempts: `2`;
+- recoverable point snapshots: `0`; and
+- aggregate classification: `NO_3M_OR_6M_POINT_SNAPSHOT_RECOVERABLE`.
+
+### 26.2 S19.1 expanded ±45-day metadata-only test
+
+The same exact URL and target dates were tested with `metadata-only = true`:
+
+| Horizon | Search window start | Search window end | CDX status | Rows returned | Captures |
+|---|---|---|---:|---:|---:|
+| 3 months | `2026-05-12T12:00:00Z` | `2026-08-10T12:00:00Z` | `200` | `0` | `0` |
+| 6 months | `2026-02-09T12:00:00Z` | `2026-05-10T12:00:00Z` | `200` | `0` | `0` |
+
+Run aggregate:
+
+- total HTTP attempts: `2`;
+- archive capture count: `0`;
+- payload replay: not attempted; and
+- aggregate classification: `NO_3M_OR_6M_POINT_SNAPSHOT_RECOVERABLE`.
+
+### 26.3 Approved interpretation
+
+No exact-URL Wayback snapshot was recovered around either tested 3-month or
+6-month horizon, including the expanded ±45-day metadata windows. This is a
+bounded third-party archive result only. It does **not** establish that
+GTFS-RT history does not exist, that GTFS.de does not retain historical data,
+or that Wayback never archives this endpoint.
+
+The result supports prospective collection for controlled historical evidence.
+It does not provide confirmed Actual Time, change the GTFS-RT semantic
+guardrail, or approve an Actual Delay KPI.

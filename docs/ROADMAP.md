@@ -54,15 +54,33 @@ remains partial because railway Köln Hbf is unresolved. The bounded result does
 not reopen Stage 02, approve GTFS-RT as a production source, or start Stage 3.
 
 The [GTFS-RT Historical Availability Audit](source-contracts/gtfs-rt-historical-availability-audit.md)
-is the separate S19 post-Stage-02 validation and remains **HOST EXECUTION
-PENDING**. It tests only exact-URL third-party Wayback point snapshots near
-calendar-month horizons; it does not establish provider-supported or
-continuous history, change the collector design, or start Stage 3.
+is the separate S19 post-Stage-02 validation and is **BOUNDED VALIDATION
+COMPLETE**. The initial ±7-day exact-URL test and the separate ±45-day
+metadata-only test each returned zero captures at the 3-month and 6-month
+targets. These results do not establish provider-supported or continuous
+history, change the collector design, or start Stage 3.
+
+The bounded MDD/TRIAS near-event review covered six live journeys (three at
+Köln Hbf and three at Köln Neumarkt). No `RecordedAtTime` was observed in the
+tested `ThisCall`, `PreviousCall`, or `OnwardCall` contexts. Prediction
+evolution was observed in some journeys, so prospective collection remains
+necessary; this is not a provider-wide absence claim.
+
+The approved realtime source-role direction is **MDD/TRIAS primary** and
+**GTFS-RT complementary/secondary**. Future collection must preserve each
+source's semantics and provenance separately before any normalization or
+reconciliation. Confirmed Actual Time remains unavailable and Actual Delay is
+not approved.
 
 ## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is
 deferred from Stage 02.
 Re-profile raw files, counts, duplicates, missing values, date coverage, stop hierarchy, routes, agencies, and modes from the current authoritative feed.
+
+The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
+is **READY FOR USER REVIEW — STAGE 3 NOT STARTED**. It records entry
+conditions and guardrails only; it does not constitute the Stage 3 design or
+approval.
 
 ## Stage 4 — Cologne Scope & Mode Classification
 Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.

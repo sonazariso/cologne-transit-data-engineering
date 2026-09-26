@@ -14,6 +14,28 @@ Stage 02 audit](../stages/02-mdd-trias-source-contract-audit.md). The related
 near-event validation is described in the [RecordedAtTime lifecycle
 validation](../source-contracts/mdd-trias-event-lifecycle-validation.md).
 
+## 0. Approved source roles and separation
+
+The post-Stage-02 source direction is:
+
+- **MDD/TRIAS — primary realtime source** for Cologne-oriented,
+  station-targeted prediction, call-sequence, platform/bay, and situation
+  evidence; and
+- **GTFS-RT — complementary/secondary realtime source** for broad operational
+  coverage, TripUpdate/StopTimeUpdate state, `SKIPPED`, `NO_DATA`,
+  `ServiceAlerts`, and independent cross-source evidence.
+
+Future collection should therefore be conceptually separated into an
+`MddObservationCollector` path and a `GtfsRtObservationCollector` path, each
+preserving its source-faithful semantics and lineage. This is a design
+direction only: it does not approve collector implementation, table names,
+schemas, migrations, cadence, or a common canonical record.
+
+Do not initially blend MDD and GTFS-RT into one ambiguous observation. In
+particular, do not introduce `ActualTime` or `ActualDelay` to make the sources
+look equivalent. A later normalization/reconciliation layer is a separate
+design problem after source-specific staging is approved.
+
 ## 1. Prospective collection is required
 
 Stage 02 historical tests established the following results for the specific
@@ -109,6 +131,10 @@ Preserve the distinction between:
 - provider recorded timestamp; and
 - collector observation timestamp.
 
+For GTFS-RT, also preserve feed-header and trip-update timestamps as distinct
+source metadata; neither is an arrival time. Repeated observations of the same
+source event must remain available so prediction evolution can be reconstructed.
+
 ## 7. Operational flags remain independent
 
 Where available, preserve these independently:
@@ -160,6 +186,10 @@ Health and audit metadata must be capable of distinguishing:
 - persistence failure; and
 - scheduled non-collection.
 
+Missingness is source-observation state. A missing GTFS-RT StopTimeUpdate must
+not automatically mean on time, served, cancelled, or skipped. A missing MDD
+event must not automatically mean service absent, cancellation, or on time.
+
 ## 11. Retries and quota
 
 Each retry is another HTTP request. Future collector design must budget
@@ -198,7 +228,8 @@ Do not infer provider outage from a local resolver failure.
 
 ## 14. Raw response policy
 
-The default is **no permanent or automatic full raw-response retention**.
+The default is **no permanent or automatic full raw-response retention** for
+MDD XML/JSON or GTFS-RT protobuf payloads.
 Temporary raw evidence outside Git is allowed for an approved diagnostic
 experiment. If Stage 7 later requires short-term automated raw capture, that
 stage must explicitly approve its purpose, retention, storage, access control,

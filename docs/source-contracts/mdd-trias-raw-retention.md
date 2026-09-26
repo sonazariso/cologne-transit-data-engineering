@@ -1,10 +1,10 @@
 # MDD/TRIAS Raw-Payload Retention Decision
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Decision state:** Stage 02 approval candidate; not user-approved<br>
+**Decision state:** Approved Stage 02 decision; synchronized with post-Stage-02 consolidation<br>
 **Scope:** Full raw MDD XML/JSON response payloads
 
-## Decision candidate
+## Approved decision
 
 Full raw MDD responses are **not a permanent or automated source of record**.
 
@@ -20,8 +20,10 @@ The default policy is:
 - keep temporary raw artifacts outside source control; and
 - never store secrets or authentication material with a raw artifact.
 
-This is a bounded Stage 02 contract decision candidate. It closes the Stage
-02 question without inventing an arbitrary retention period.
+This is the approved Stage 02 contract decision. It closes the Stage 02
+question without inventing an arbitrary retention period. The same default
+applies to future GTFS-RT protobuf payloads: no permanent or automatic full
+raw payload retention is introduced by the source-role decision.
 
 ## Evidence and permission boundary
 
@@ -64,7 +66,9 @@ approval must state:
 5. cleanup mechanism.
 
 Stage 02 does not approve automated capture, a raw archive, or a policy such
-as “keep raw XML forever” or “keep raw JSON forever.”
+as “keep raw XML forever,” “keep raw JSON forever,” or “keep raw protobuf
+forever.” Any bounded automatic raw capture requires a later explicit approval
+of purpose, retention, storage, access, and cleanup.
 
 ## Relationship to source-faithful retention
 

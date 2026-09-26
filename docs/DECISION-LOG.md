@@ -26,3 +26,49 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-020 | 2026-09-25 | Prospective realtime collection is architecturally important; see the [collector requirements](collector-design/realtime-collector-requirements.md) | Approved |
 | D-021 | 2026-09-25 | Permanent/automatic full raw MDD payload retention is not the default source-of-record strategy; see the [raw-retention decision](source-contracts/mdd-trias-raw-retention.md) | Approved |
 | D-022 | 2026-09-25 | The conservative documented project request ceiling remains 250,000 requests/month until stronger provider/account evidence supersedes it; see the [Stage 02 request contract](source-contracts/mdd-trias-request-contract.md) | Approved |
+| D-023 | 2026-09-26 | Realtime source roles: **MDD/TRIAS primary; GTFS-RT complementary**; source-faithful staging remains separate before future reconciliation | Approved direction |
+
+## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
+
+**Decision:** Use MDD/TRIAS as the primary realtime source for the Cologne
+Transport Intelligence project. Use GTFS-RT as a complementary realtime source
+for operational states, cross-source evidence, broad coverage, and capabilities
+such as `SKIPPED`, `NO_DATA`, and `ServiceAlerts`.
+
+Neither source is currently approved as a confirmed Actual Time source. MDD
+`RecordedAtTime` has the relevant TRIAS semantic but was not observed in the
+bounded tested responses and six live lifecycle journeys. GTFS-RT
+`StopTimeEvent.time` can mean estimated or actual, and no provider-specific
+explicit actual/recorded semantic was observed.
+
+**Rationale:** MDD is better aligned with the project's Cologne/VRS source
+environment, supports station-targeted requests, exposes rich
+`PreviousCall`/`ThisCall`/`OnwardCall` context, explicit timetable and estimate
+times, platform/bay fields, and situation associations. GTFS-RT adds broad
+operational coverage, trip and stop schedule relationships, explicit
+`SKIPPED`/`NO_DATA` states, `ServiceAlerts`, independent cross-source
+evidence, and demonstrated current GTFS.de identity compatibility for tested
+Köln Neumarkt records. The two identifier namespaces remain distinct, and
+railway Köln Hbf is unresolved in GTFS.de.
+
+**Consequences:**
+
+- Future collection is expected to use separate MDD and GTFS-RT source-faithful
+  ingestion paths.
+- `ObservedAt`/`CapturedAt` is first-class, and repeated observations must
+  preserve prediction evolution rather than overwrite prior estimates.
+- Source provenance and source-specific semantics must not be erased by an
+  ambiguous common record.
+- Prospective collection is required; retrospective recovery cannot be relied
+  upon for either source's realtime history.
+- No `ActualTime` or `ActualDelay` field/KPI is introduced without later
+  validated semantic evidence; Actual Delay remains **NOT APPROVED**.
+- Missing events or updates remain source-observation states, not automatic
+  on-time, served, cancelled, skipped, or service-absent conclusions.
+- Future normalization/reconciliation is a separate design problem deferred
+  until source-specific staging is designed.
+
+This decision is a future design direction. It does not start Stage 3, approve
+collector production code, finalize schemas or table names, or authorize
+database, scheduler, Power BI, or runtime changes. See the [Stage 3 realtime
+collection design readiness document](stage-03/realtime-collection-design-readiness.md).

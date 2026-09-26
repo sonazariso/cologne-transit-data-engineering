@@ -1,7 +1,7 @@
 # MDD/TRIAS Request Contract
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Document state:** Approval candidate; not user-approved<br>
+**Document state:** Approved Stage 02 source contract; synchronized with post-Stage-02 consolidation<br>
 **Version:** TRIAS 1.2<br>
 **Last updated:** 2026-09-25
 

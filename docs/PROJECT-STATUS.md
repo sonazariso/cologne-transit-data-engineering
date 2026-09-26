@@ -35,7 +35,12 @@ Existing GTFS-RT validation:
 - Static identity bridge: **BOUNDED/PARTIAL**; current Neumarkt identity
   validated, railway Köln Hbf unresolved.
 - GTFS-RT bounded lifecycle validation: **COMPLETE**.
-- GTFS-RT historical availability audit: **HOST EXECUTION PENDING**.
+- GTFS-RT historical availability audit: **BOUNDED VALIDATION COMPLETE**;
+  both the initial ±7-day and the separate ±45-day metadata-only exact-URL
+  Wayback tests returned zero captures at the 3-month and 6-month targets.
+- MDD/TRIAS near-event lifecycle validation: **BOUNDED VALIDATION COMPLETE**;
+  six live journeys were reviewed (three at Köln Hbf and three at Köln
+  Neumarkt), with no `RecordedAtTime` observed in the bounded observations.
 
 - **GTFS-RT lifecycle validation — BOUNDED LIFECYCLE VALIDATION COMPLETE;
   NEUMARKT SAMPLES #1 AND #2 RECORDED.** The bounded, host-run-only tooling,
@@ -43,14 +48,28 @@ Existing GTFS-RT validation:
   The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
   remains **PARTIAL** because railway Köln Hbf is unresolved; that identity gap
   does not invalidate the completed two-sample Neumarkt lifecycle evidence.
-- **GTFS-RT historical availability audit — HOST EXECUTION PENDING.** S19
-  prepares a separate, bounded Internet Archive / Wayback point-snapshot test
-  for the exact public GTFS.de realtime URL near the 3-month and 6-month
-  calendar horizons. It does not establish provider history or continuous
-  coverage and does not approve GTFS-RT as a production source.
+- **GTFS-RT historical availability audit — BOUNDED VALIDATION COMPLETE.** S19
+  and S19.1 tested only exact-URL Internet Archive / Wayback metadata around
+  the 3-month and 6-month calendar horizons. The ±7-day run and the expanded
+  ±45-day metadata-only run each returned zero captures for both horizons.
+  This does not establish provider history or continuous coverage and does not
+  approve GTFS-RT as a production source.
 - This validation does not reopen or invalidate Stage 2, start Stage 3,
   approve GTFS-RT as a production source, or change the MDD collector,
   database, Power BI, scheduler, or Legacy repository.
+
+### Post-Stage-02 source validation package
+
+| Package | Current status |
+|---|---|
+| MDD/TRIAS source contract | **COMPLETED / APPROVED** |
+| GTFS-RT current-feed feasibility | **BOUNDED VALIDATION COMPLETE** |
+| GTFS.de identity bridge | **BOUNDED / PARTIAL** — Neumarkt current identity validated; railway Köln Hbf unresolved |
+| GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
+| GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
+| Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
+| Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
+| Actual Delay KPI | **NOT APPROVED** |
 
 ### Stage 2 substage status
 
@@ -112,6 +131,14 @@ it is not a Stage 02 blocker.
   are both present, comparable, and explicitly labelled. It does not approve
   an Actual Delay or prediction-accuracy KPI.
 - `EstimatedTime` is secondary and may later support estimated-delay and prediction-accuracy analysis.
+- MDD/TRIAS is the approved primary realtime source direction for the Cologne
+  project; GTFS-RT is complementary/secondary for operational states,
+  cross-source evidence, and broad coverage.
+- MDD and GTFS-RT must initially remain source-faithful and separate. Future
+  reconciliation is deferred until source-specific staging is designed.
+- `ObservedAt`/`CapturedAt` is a first-class future collection attribute;
+  repeated observations must preserve estimate evolution rather than only the
+  latest state.
 - The audited successful response did not contain `RecordedAtTime` or a direct
   delay value; this does not establish general MDD absence.
 - `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. It was not
@@ -124,6 +151,8 @@ it is not a Stage 02 blocker.
   is not causal evidence.
 - Full raw MDD responses are not a permanent or automated source of record by
   default; temporary diagnostic artifacts remain outside source control.
+- Permanent or automatic full raw GTFS-RT protobuf retention is likewise not
+  the default; any bounded automatic capture requires a later explicit gate.
 - Core starting modes: Stadtbahn/Tram, urban/KVB bus, and S-Bahn.
 - RE, RB, and regional/other bus require Stage 4 service-level scope validation.
 - SEV is retained as a separate analytical category.
@@ -131,6 +160,9 @@ it is not a Stage 02 blocker.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.
 - Stage 02 is **APPROVED**; Stage 03 is **NEXT / NOT STARTED**.
+- The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
+  is **READY FOR USER REVIEW — STAGE 3 NOT STARTED** and records guardrails
+  only; it does not start or approve Stage 3.
 
 ## Former open critical questions and S15/S16 refinement
 
@@ -240,7 +272,9 @@ and acceptance criteria.
 - Collector implementation is deferred, and later collector-design stages must
   begin with the [realtime collector requirements](collector-design/realtime-collector-requirements.md).
 - The [RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
-  remains `HOST EXECUTION PENDING` and does not reopen Stage 02.
+  is complete as bounded post-Stage-02 evidence: three Köln Hbf and three Köln
+  Neumarkt journeys were reviewed, with no `RecordedAtTime` observed. It does
+  not make a provider-wide absence claim or reopen Stage 02.
 - The [GTFS-RT historical availability audit](source-contracts/gtfs-rt-historical-availability-audit.md)
-  is also `HOST EXECUTION PENDING`; its evidence must be reviewed before any
-  further historical-source work is proposed.
+  is `BOUNDED VALIDATION COMPLETE`; the tested ±7-day and ±45-day metadata
+  windows recovered zero exact-URL captures at both requested horizons.

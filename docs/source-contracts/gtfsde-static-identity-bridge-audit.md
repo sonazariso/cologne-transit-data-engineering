@@ -1,6 +1,6 @@
 # GTFS.de Static Identity Bridge Audit
 
-**Status:** `PARTIAL — S18.1 host evidence recorded; Köln Hbf identity resolution pending`
+**Status:** `PARTIAL — Neumarkt current identity validated; railway Köln Hbf unresolved`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
 **APPROVED**; Stage 3 — **NOT STARTED**
 **Overall bridge status:** `PARTIAL` until Köln Hbf is resolved.
@@ -298,3 +298,18 @@ python3 scripts/gtfsde_static_identity_bridge_probe.py \
 Do not run `download-and-inspect`, S18 lifecycle, or historical S19 tooling
 automatically, and do not interpret current GTFS.de IDs as valid for historical
 snapshots without date-compatible static identity evidence.
+
+## Post-Stage-02 source-role handoff
+
+The bridge remains **BOUNDED / PARTIAL**: current GTFS.de identity is validated
+for Köln Neumarkt through parent `493082` and children `106842`, `207108`,
+`441164`, `581903`, and `96309`; railway Köln Hbf remains unresolved. The
+adjacent KVB complexes `106448` (Köln Dom/Hbf) and `437741` (Köln Breslauer
+Platz/Hbf) must not be substituted for railway Köln Hbf.
+
+This evidence supports GTFS-RT's approved **complementary** role. The GTFS.de
+namespace is not interchangeable with the project's VRS/go.Rheinland static
+namespace, and a current identity bridge does not establish historical
+identity or confirmed actual-time semantics. Future source-faithful collection
+must preserve the unresolved identity state rather than silently substituting
+an adjacent complex.

@@ -1,6 +1,6 @@
 # MDD/TRIAS Near-Event RecordedAtTime Lifecycle Validation
 
-**Status:** `POST-STAGE-02 VALIDATION — HOST EXECUTION PENDING`
+**Status:** `POST-STAGE-02 VALIDATION — BOUNDED VALIDATION COMPLETE`
 
 **Validation class:** `POST-STAGE-02 COLLECTOR-DESIGN VALIDATION`
 
@@ -34,9 +34,9 @@ The host-run diagnostic is:
 
 [`scripts/mdd_recorded_time_lifecycle_probe.py`](../../scripts/mdd_recorded_time_lifecycle_probe.py)
 
-Codex must not execute the probe. Host execution remains pending and must be
-performed manually from a normal macOS Terminal only after reviewing the
-script's safety controls.
+Codex must not execute the probe. The bounded host execution has been completed
+and is recorded below. The script remains host-run-only for any future,
+separately approved validation.
 
 ## Fixed request contract
 
@@ -124,6 +124,22 @@ The output also gives one bounded collector implication. The implication is
 about this experiment only and does not generalize one event to all operators,
 services, or MDD responses.
 
+## Bounded host result
+
+Six live MDD lifecycle journeys were reviewed: three at Köln Hbf and three at
+Köln Neumarkt. Across the bounded observations:
+
+- the selected target remained observable around and after its event window;
+- no `RecordedAtTime` was observed in `ThisCall`, `PreviousCall`, or
+  `OnwardCall`;
+- prediction evolution was observed in some journeys; and
+- no provider-wide claim was made that MDD never exposes `RecordedAtTime`.
+
+The result confirms that MDD is useful for prospective timetable and realtime
+prediction-evolution evidence, but confirmed Actual Time remains unavailable
+from the tested MDD StopEvent data. A future collector must preserve repeated
+observations rather than overwrite the latest estimate.
+
 ## Temporary evidence and safety
 
 One permission-restricted temporary directory is created outside the repository
@@ -142,11 +158,12 @@ Temporary raw artifacts are diagnostic evidence only and must not be copied
 into Git. The default source-of-record policy remains no permanent or automatic
 full raw-response retention.
 
-## Pending interpretation
+## Bounded interpretation and handoff
 
-Until host execution is complete, no lifecycle result is claimed. Afterward,
-the result must be reviewed against the [Stage 02 approved source-contract
-package](README.md) and the [collector requirements handoff](../collector-design/realtime-collector-requirements.md).
-Any newly observed actual-time field requires explicit semantic, coverage,
-identity, and operational validation before Actual Delay can be considered for
-later productionization.
+The six-journey result is additional post-Stage-02 design evidence. It does
+not reopen Stage 02, establish provider-wide `RecordedAtTime` absence, or
+approve an Actual Delay KPI. Any future observed actual-time field still
+requires explicit semantic, coverage, identity, and operational validation.
+
+The result is handed to the [approved source-contract package](README.md) and
+the [collector requirements handoff](../collector-design/realtime-collector-requirements.md).

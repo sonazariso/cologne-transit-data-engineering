@@ -1,7 +1,7 @@
 # MDD/TRIAS Field-Retention Matrix
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Document state:** Approval candidate; not user-approved<br>
+**Document state:** Approved Stage 02 source contract; synchronized with post-Stage-02 consolidation<br>
 **Semantic authority:** VDV 431-2, “EKAP-Schnittstellenbeschreibung V1.2”, 02/2017<br>
 **Controlled response:** Köln Hbf, arrival, five results, one point in time
 
@@ -100,3 +100,14 @@ The matrix applies these principles to all rows:
 
 Stage 02 does not design SQL columns or tables. The Legacy persistence column
 names above are evidence of the existing implementation only.
+
+## Post-Stage-02 cross-source staging guardrail
+
+This MDD retention matrix remains source-specific. Future GTFS-RT observations
+must be retained in a separate source-faithful staging path with their own
+timing and schedule-relationship semantics; the two sources must not initially
+be collapsed into an ambiguous common record.
+
+For both sources, `ObservedAt` / `CapturedAt` is first-class lineage, and
+repeated observations must preserve estimate evolution. Do not introduce
+`ActualTime` or `ActualDelay` merely to align the two source contracts.

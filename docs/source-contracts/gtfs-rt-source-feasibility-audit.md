@@ -52,6 +52,14 @@ particular:
 The GTFS-Realtime audit is complementary evidence and does not reopen, amend,
 or invalidate Stage 2.
 
+The post-Stage-02 source-role decision now records GTFS-RT as the approved
+**complementary/secondary** realtime source, with MDD/TRIAS as the approved
+**primary** Cologne-oriented realtime source. This audit contributes the
+complementary strengths only: broad operational coverage, TripUpdate and
+StopTimeUpdate state, `SKIPPED`, `NO_DATA`, `ServiceAlerts`, and independent
+cross-source evidence. It does not establish confirmed Actual Time and does
+not authorize a common record that erases GTFS-RT semantics.
+
 ## 4. Source under test
 
 The only network source permitted for this initial audit is:
@@ -414,6 +422,12 @@ must not be read as evidence that the live feed retains a continuous archive.
 No GTFS-RT production approval, architecture change, Stage 3 start, MDD
 collector change, database change, Power BI change, scheduler change, Legacy
 change, or final architectural decision is made by this audit.
+
+The later S20 consolidation records the project-level source-role direction
+and keeps source-faithful MDD and GTFS-RT staging separate. `ObservedAt` /
+`CapturedAt` is a required future collection attribute, and missing
+StopTimeUpdates remain unknown rather than on-time, served, cancelled, or
+skipped conclusions.
 
 ## 22. Observed current-feed inventory evidence
 

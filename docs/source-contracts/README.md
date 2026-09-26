@@ -52,8 +52,10 @@ capture is approved in Stage 02.
 The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
 are the durable Stage 02-approved design handoff; implementation is deferred.
 The [near-event RecordedAtTime lifecycle validation](mdd-trias-event-lifecycle-validation.md)
-is separate post-approval evidence for later collector design and is currently
-`HOST EXECUTION PENDING`.
+is separate post-approval evidence for later collector design and is now
+**BOUNDED VALIDATION COMPLETE**. Six live journeys were reviewed (three at
+Köln Hbf and three at Köln Neumarkt); no `RecordedAtTime` was observed in the
+bounded `ThisCall`, `PreviousCall`, or `OnwardCall` contexts.
 
 The [GTFS-RT Source Feasibility Audit](gtfs-rt-source-feasibility-audit.md) is
 also separate post-Stage-02 validation. Its current-feed inventory is complete
@@ -64,12 +66,29 @@ host-run tooling, does not approve a production GTFS-RT source, and does not
 start Stage 3.
 
 The [GTFS-RT Historical Availability Audit](gtfs-rt-historical-availability-audit.md)
-is a separate S19 post-Stage-02 validation with status **HOST EXECUTION
-PENDING**. It tests only third-party Wayback point-snapshot availability for
-the exact GTFS.de realtime URL near the requested 3-month and 6-month calendar
-horizons. It does not merge with the current-feed feasibility audit or the
-GTFS.de static identity bridge, establish provider-supported or continuous
-history, approve a collector, or start Stage 3.
+is a separate S19/S19.1 post-Stage-02 validation with status **BOUNDED
+VALIDATION COMPLETE**. The initial ±7-day exact-URL Wayback test and the
+separate ±45-day metadata-only test each returned zero captures at the
+requested 3-month and 6-month horizons. It does not merge with the current-
+feed feasibility audit or the GTFS.de static identity bridge, establish
+provider-supported or continuous history, approve a collector, or start Stage
+3.
+
+## Post-Stage-02 realtime source direction
+
+The approved source-role direction is **MDD/TRIAS primary** and **GTFS-RT
+complementary/secondary**. MDD is the core Cologne-oriented realtime
+observation source because of its source alignment, station-targeted requests,
+rich call sequence, estimate, bay, and situation evidence. GTFS-RT supplies
+complementary operational state, broad coverage, cross-source evidence, and
+explicit `SKIPPED`, `NO_DATA`, and `ServiceAlerts` capabilities.
+
+The two sources must initially remain source-faithful and separate. Future
+collection must preserve `ObservedAt`/`CapturedAt`, source identity, and
+estimate evolution before any normalization or reconciliation. Confirmed
+Actual Time is unavailable; Actual Delay remains not approved. The [Stage 3
+realtime collection design readiness document](../stage-03/realtime-collection-design-readiness.md)
+records the guardrails without starting Stage 3.
 
 ## Historical / Legacy implementation evidence
 

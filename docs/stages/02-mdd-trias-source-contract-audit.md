@@ -1964,6 +1964,45 @@ observed and validated.
 The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
 are the durable approved design handoff with implementation deferred. The
 [near-event RecordedAtTime lifecycle validation](../source-contracts/mdd-trias-event-lifecycle-validation.md)
-is separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host execution
-pending. It does not reopen Stage 02; any positive evidence requires an
-explicit source-contract amendment or refinement.
+is separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with bounded host
+validation complete. Six live journeys were reviewed (three at Köln Hbf and
+three at Köln Neumarkt), with no `RecordedAtTime` observed in the bounded call
+contexts. It does not reopen Stage 02; any future positive evidence requires
+an explicit source-contract amendment or refinement.
+
+## 26. S20 Post-Stage-02 Source Decision Consolidation
+
+The S20 consolidation preserves the approved Stage 02 MDD/TRIAS contract and
+records the post-Stage-02 source direction:
+
+```text
+MDD / TRIAS = PRIMARY REALTIME SOURCE
+GTFS-RT     = COMPLEMENTARY / SECONDARY REALTIME SOURCE
+```
+
+MDD is primary because it aligns with the Cologne/VRS source environment,
+supports station-targeted requests, exposes `PreviousCall`, `ThisCall`, and
+`OnwardCall`, provides `TimetabledTime` and `EstimatedTime`, and carries
+platform/bay and situation evidence. GTFS-RT is complementary because it
+provides broad operational coverage, trip/stop relationships, explicit
+`SKIPPED` and `NO_DATA` states, `ServiceAlerts`, independent cross-source
+evidence, and tested current Neumarkt identity compatibility.
+
+The source-role direction does not create a confirmed actual-time source.
+`RecordedAtTime` was not observed in the six bounded MDD lifecycle journeys,
+and GTFS-RT `StopTimeEvent.time` remains estimated-or-actual without an
+observed provider-specific actual semantic. Confirmed Actual Time is
+therefore unavailable, and Actual Delay remains not approved.
+
+Future collection must preserve MDD and GTFS-RT observations separately before
+normalization or reconciliation. `ObservedAt` / `CapturedAt`, source
+provenance, source-specific missingness, identity, and repeated estimate
+evolution are first-class requirements. Missing events or updates must not be
+treated as on-time, served, cancelled, skipped, or service-absent without an
+explicit source semantic. Permanent or automatic full raw XML/JSON/protobuf
+retention remains disallowed by default.
+
+The [Stage 3 realtime collection design readiness document](../stage-03/realtime-collection-design-readiness.md)
+records these entry conditions and guardrails. Stage 3 remains **NEXT / NOT
+STARTED**; this consolidation does not implement collectors, schemas,
+migrations, schedules, database objects, Power BI, or reconciliation logic.

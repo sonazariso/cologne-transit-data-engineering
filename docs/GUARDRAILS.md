@@ -6,8 +6,7 @@ The approved Stage 02 source-contract package hands future collector work to
 the [realtime collector requirements](collector-design/realtime-collector-requirements.md);
 implementation remains deferred. The separate [near-event RecordedAtTime
 lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
-is post-Stage-02 design evidence with host execution pending and is not a Stage
-02 blocker.
+is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 1. Estimated timing is not Actual Physical Delay. `Estimated Delay` may be
    derived only from comparable `EstimatedTime` and `TimetabledTime` values and
@@ -55,3 +54,22 @@ is post-Stage-02 design evidence with host execution pending and is not a Stage
 26. A near-event lifecycle result is evidence about the tested event and
     coverage scenario only; it must not be generalized to provider-wide
     `RecordedAtTime` presence or absence without further validation.
+27. MDD/TRIAS is the approved primary realtime source direction; GTFS-RT is
+    complementary/secondary. This is a design direction, not production
+    collector approval.
+28. MDD and GTFS-RT namespaces and semantics must remain distinct. Current
+    GTFS.de identity evidence must not be substituted for the project's
+    VRS/go.Rheinland static identity without validation.
+29. `StopTimeEvent.time` is estimated-or-actual by GTFS-RT schema; no
+    provider-specific actual semantic was observed. It must not be promoted to
+    confirmed Actual Time.
+30. Source-faithful MDD and GTFS-RT observations must be staged separately
+    before future normalization or reconciliation.
+31. `ObservedAt` / `CapturedAt` is first-class future lineage, and repeated
+    observations must preserve estimate evolution rather than only the latest
+    state.
+32. Missing GTFS-RT StopTimeUpdates and missing MDD events are observation
+    states, not automatic evidence of on-time service, service, cancellation,
+    skipping, or absence.
+33. Permanent or automatic full raw XML/JSON/protobuf retention is not the
+    default. Any bounded automatic raw capture requires an explicit later gate.
