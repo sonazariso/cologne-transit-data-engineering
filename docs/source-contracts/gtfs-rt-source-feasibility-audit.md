@@ -1,6 +1,6 @@
 # GTFS-Realtime Source Feasibility Audit
 
-**Status:** `LIFECYCLE VALIDATION IN PROGRESS — NEUMARKT SAMPLE #1 RECORDED`
+**Status:** `BOUNDED LIFECYCLE VALIDATION COMPLETE — NEUMARKT SAMPLES #1 AND #2 RECORDED`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
 **APPROVED**; Stage 3 — **NEXT / NOT STARTED**  
 **Validation type:** bounded, read-only source-feasibility audit  
@@ -88,9 +88,9 @@ the same as the project's current VRS/go.Rheinland static source.
 
 The current-feed inventory was successfully executed on the host. The separate
 [GTFS.de static identity bridge audit](gtfsde-static-identity-bridge-audit.md)
-resolved Köln Neumarkt through exact GTFS.de IDs, enabling the first Neumarkt
-lifecycle sample. Köln Hbf railway identity remains unresolved, so the bridge
-is still partial and Hbf lifecycle validation remains pending.
+resolved Köln Neumarkt through exact GTFS.de IDs, enabling two bounded Neumarkt
+lifecycle samples. Köln Hbf railway identity remains unresolved, so the bridge
+is still partial and no Hbf lifecycle sample is claimed.
 
 ## 6. GTFS-RT semantic guardrails
 
@@ -400,32 +400,20 @@ For standard `StopTimeEvent.time` alone, the result must remain ambiguous as
 to estimated versus actual meaning; the lifecycle label must not be upgraded
 to explicit actual semantics.
 
-## 21. Status / next action
+## 21. Status / handoff
 
 Current-feed inventory is complete from the supplied host evidence, and
-lifecycle validation is **IN PROGRESS**. One Neumarkt lifecycle sample has
-been recorded; this does not complete S18 or establish provider-wide evidence.
-The next host action is a second Neumarkt lifecycle using a positive
-source-reported-delay threshold. It must not include `--static-gtfs`, because
-static compatibility has already been validated for this target and local ZIP
-scanning must not delay lifecycle checkpoints:
+lifecycle validation is **BOUNDED LIFECYCLE VALIDATION COMPLETE** after two
+Neumarkt samples. The result is bounded to the tested feed population and two
+selected targets; it is not provider-wide retention evidence.
 
-```bash
-cd /Users/admin/Documents/cologne-transit-intelligence
-python3 scripts/gtfs_rt_feasibility_probe.py lifecycle \
-  --station-name "Köln Neumarkt" \
-  --stop-id 106842 \
-  --stop-id 207108 \
-  --stop-id 441164 \
-  --stop-id 581903 \
-  --stop-id 96309 \
-  --min-abs-initial-delay-seconds 60
-```
+No additional S18 lifecycle run is required for this bounded validation. Any
+future historical-availability work is a separate post-Stage-02 audit and
+must not be read as evidence that the live feed retains a continuous archive.
 
 No GTFS-RT production approval, architecture change, Stage 3 start, MDD
-collector change, database change, Power BI change, or final architectural
-decision is made before the lifecycle evidence is complete. Do not run the
-command automatically from repository validation.
+collector change, database change, Power BI change, scheduler change, Legacy
+change, or final architectural decision is made by this audit.
 
 ## 22. Observed current-feed inventory evidence
 
@@ -495,10 +483,72 @@ evidence.
 
 The stable reported timestamp and zero source-reported delay do not establish
 actual arrival. `StopTimeEvent.time` remains `ESTIMATED_OR_ACTUAL`, and the
-semantic classification is intentionally unchanged. Lifecycle validation is
-**IN PROGRESS**, not complete.
+semantic classification is intentionally unchanged. This sample is combined
+with sample #2 below for the bounded lifecycle conclusion.
 
-## 24. Historical station identity caveat
+## 24. Observed lifecycle sample #2 — Köln Neumarkt
+
+A second bounded GTFS-Realtime lifecycle run completed for Köln Neumarkt on
+2026-09-26. This sample was selected with a positive source-reported-delay
+threshold and is not provider-wide evidence.
+
+| Observation | Value |
+|---|---|
+| Station | Köln Neumarkt |
+| Target trip | `139935` |
+| Target stop | `106842` |
+| Target stop sequence | `0` |
+| Event context | `ARRIVAL` |
+| Initial GTFS-RT arrival time | `2026-09-26T16:57:25Z` |
+| Initial GTFS-RT departure time | `2026-09-26T16:57:25Z` |
+| Initial `arrival.delay` | `145` seconds |
+| Initial `departure.delay` | `145` seconds |
+| Initial source-reported delay | `+145` seconds |
+| Target visibility | Present at discovery, T-5, T-1, T+1, and T+5; absent by T+15 and still absent at T+30 |
+| T+15 / T+30 potential stop matches | `0` |
+| T+15 / T+30 potential trip matches | `1` |
+| Trip visibility after disappearance | TripUpdate remained observable while this StopTimeUpdate was absent |
+| Event timestamp evolution | Unchanged while the target StopTimeUpdate remained present |
+| Lifecycle classification | `TARGET_DISAPPEARED_POST_EVENT` |
+| Semantic classification | `NO_EXPLICIT_ACTUAL_SEMANTIC_OBSERVED` |
+| Cancellation / `SKIPPED` / `NO_DATA` | No transition observed for this target |
+
+The trip remaining observable while the selected StopTimeUpdate disappeared
+does not establish that the stop was served, on time, cancelled, or skipped.
+The disappearance is a visibility result for this target only.
+
+## 25. Combined bounded lifecycle evidence
+
+The two recorded Köln Neumarkt samples provide the following bounded evidence:
+
+- **Sample #1:** a zero-delay target whose StopTimeUpdate remained visible
+  through T+30, with an unchanged reported event time.
+- **Sample #2:** a target with a `+145` second source-reported delay whose
+  StopTimeUpdate remained visible through T+5, disappeared before T+15 while
+  the TripUpdate remained present, and whose reported event time was unchanged
+  while present.
+
+The combined result is **BOUNDED LIFECYCLE VALIDATION COMPLETE** for these two
+selected targets. It does not establish provider-wide retention behavior,
+confirmed physical arrivals, or a production source decision.
+
+Architecture implications:
+
+- Past StopTimeUpdates cannot be assumed to remain available for a fixed
+  period.
+- Disappearance of a StopTimeUpdate must not be interpreted as served,
+  on-time, cancelled, or skipped.
+- Prospective snapshot collection is required if lifecycle or history
+  evidence must be preserved.
+- Standard GTFS-RT `StopTimeEvent.time` remains estimated-or-actual and is not
+  approved as confirmed Actual Arrival.
+- An Actual Delay KPI remains unapproved from this source.
+- Prediction accuracy against a confirmed actual time remains blocked.
+
+No explicit actual semantic, cancellation, `SKIPPED`, or `NO_DATA` transition
+was observed for either selected target.
+
+## 26. Historical station identity caveat
 
 If S19 historical GTFS-Realtime availability tooling is added later, current
 GTFS.de stop IDs must not automatically be projected three or six months into

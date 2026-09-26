@@ -57,8 +57,8 @@ is separate post-approval evidence for later collector design and is currently
 
 The [GTFS-RT Source Feasibility Audit](gtfs-rt-source-feasibility-audit.md) is
 also separate post-Stage-02 validation. Its current-feed inventory is complete
-from supplied host evidence, and lifecycle validation is **IN PROGRESS** after
-one recorded Köln Neumarkt sample. The [GTFS.de static identity bridge](gtfsde-static-identity-bridge-audit.md)
+from supplied host evidence, and its two-sample Köln Neumarkt lifecycle check
+is **BOUNDED LIFECYCLE VALIDATION COMPLETE**. The [GTFS.de static identity bridge](gtfsde-static-identity-bridge-audit.md)
 remains `PARTIAL` because railway Köln Hbf is unresolved. It is read-only
 host-run tooling, does not approve a production GTFS-RT source, and does not
 start Stage 3.

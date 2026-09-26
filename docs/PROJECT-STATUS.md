@@ -29,12 +29,12 @@
 
 ## Post-Stage-02 validation
 
-- **GTFS-RT lifecycle validation — IN PROGRESS; NEUMARKT SAMPLE #1 RECORDED.**
-  The bounded, host-run-only tooling, inventory, and lifecycle sample are
-  documented in [the GTFS-RT audit](source-contracts/gtfs-rt-source-feasibility-audit.md).
+- **GTFS-RT lifecycle validation — BOUNDED LIFECYCLE VALIDATION COMPLETE;
+  NEUMARKT SAMPLES #1 AND #2 RECORDED.** The bounded, host-run-only tooling,
+  inventory, and two lifecycle samples are documented in [the GTFS-RT audit](source-contracts/gtfs-rt-source-feasibility-audit.md).
   The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
-  remains **PARTIAL** because railway Köln Hbf is unresolved. S18 is not fully
-  complete.
+  remains **PARTIAL** because railway Köln Hbf is unresolved; that identity gap
+  does not invalidate the completed two-sample Neumarkt lifecycle evidence.
 - This validation does not reopen or invalidate Stage 2, start Stage 3,
   approve GTFS-RT as a production source, or change the MDD collector,
   database, Power BI, scheduler, or Legacy repository.
