@@ -1,8 +1,9 @@
 # GTFS.de Static Identity Bridge Audit
 
-**Status:** `POST-STAGE-02 VALIDATION — HOST EXECUTION PENDING`  
+**Status:** `PARTIAL — S18.1 host evidence recorded; Köln Hbf identity resolution pending`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
-**APPROVED**; Stage 3 — **NEXT / NOT STARTED**  
+**APPROVED**; Stage 3 — **NOT STARTED**
+**Overall bridge status:** `PARTIAL` until Köln Hbf is resolved.
 **Production decision:** none; this audit does not approve GTFS-Realtime as a
 production source or replace the project's existing static GTFS.
 
@@ -37,8 +38,11 @@ not evidence that either feed matches the project's existing VRS/go.Rheinland
 source.
 
 The ZIP is large and must not be downloaded by Codex or committed to Git. The
-script downloads it only when the user explicitly runs `download-and-inspect`.
-The ZIP is stored under a private temporary directory of the form
+S18.1 host session already downloaded the current ZIP; the S18.2 diagnostic
+uses that existing local artifact and must not redownload it. The script still
+supports downloading only when a future host operator explicitly runs
+`download-and-inspect`. Downloaded ZIPs are stored under a private temporary
+directory of the form
 `/private/tmp/cologne-transit-gtfsde-static-XXXXXXXX/`, with directory mode 700
 and file mode 600 where the host permits it. The archive is inspected directly
 with `zipfile`; it is not extracted wholesale.
@@ -59,9 +63,20 @@ python3 scripts/gtfsde_static_identity_bridge_probe.py \
   inspect-local \
   --gtfs-zip /private/tmp/gtfsde-nv-latest.zip
 
+# S18.2: bounded Köln Hbf discovery against the already-downloaded ZIP
+python3 scripts/gtfsde_static_identity_bridge_probe.py \
+  inspect-local \
+  --gtfs-zip /private/tmp/cologne-transit-gtfsde-static-9euwatid/gtfsde-nv-latest.zip \
+  --station hbf \
+  --diagnostic-candidates
+
 python3 scripts/gtfsde_static_identity_bridge_probe.py \
   download-and-inspect
 ```
+
+The S18.2 command is local-only: it reads the supplied ZIP, does not use
+`--verify-realtime`, and makes zero HTTP requests. The temporary path above is
+for the current host diagnostic session only; it is not a durable source path.
 
 The optional `--verify-realtime` flag is off by default. If explicitly used,
 the script makes exactly one GET request to
@@ -85,6 +100,18 @@ Resolution proceeds in bounded, reviewable steps:
 4. inspect child/platform stops under a supported parent candidate; and
 5. report variant-name matches separately, without silently treating them as
    exact-name identity.
+
+When exact and configured-variant matching fails for Köln Hbf, the opt-in
+`--diagnostic-candidates` path performs a bounded token-based search in
+`stops.txt`. It requires a `Köln` token together with an `Hbf` or
+`Hauptbahnhof` token, tolerates punctuation, brackets, platform qualifiers,
+and suffixes, and does not use unrestricted fuzzy matching. Each reported
+candidate includes its normalized name and match reason. The diagnostic then
+identifies station-typed candidates, groups children by `parent_station`,
+reports child counts and all child IDs for plausible parents, and preserves the
+source names. A parent is selected only when one clearly matching station
+parent has consistent child evidence; otherwise the result is
+`STATION_MAPPING_AMBIGUOUS`.
 
 The script does not make an automatic fuzzy choice. Multiple plausible parent
 stations produce `STATION_MAPPING_AMBIGUOUS`. A clear exact or parent/child
@@ -142,23 +169,44 @@ actual by schema, time stability is not actual-arrival proof, and explicit
 provider semantics or independent evidence would be required before any
 Actual Delay KPI could be considered.
 
-## Current evidence and next action
+## S18.1 evidence and S18.2 next action
 
-The host inventory evidence is recorded in the
-[GTFS-Realtime feasibility audit](gtfs-rt-source-feasibility-audit.md): HTTP
-200, valid GTFS-RT 2.0 protobuf, numeric stop IDs, and no legacy VRS IFOPT
-prefix matches in that snapshot. The inventory remains separate from station
-identity proof.
+The S18.1 host evidence is:
 
-The next authorized host command is:
+**Neumarkt**
+
+- mapping resolved;
+- parent station: `493082`;
+- five child stop IDs found: `106842`, `207108`, `441164`, `581903`, and
+  `96309`;
+- four child IDs were observed in the current GTFS-Realtime snapshot;
+- those matches covered `252` matching TripUpdates; and
+- one child ID was not observed in that one snapshot.
+
+**Köln Hbf**
+
+- the current exact/configured-variant name resolver did not find a mapping;
+- this is an identity-resolution gap, **not** evidence that Hbf is absent from
+  GTFS.de static or GTFS-Realtime; and
+- focused static name and parent/child discovery is required.
+
+The bridge therefore remains **`PARTIAL`** until Hbf is resolved. The host
+inventory evidence remains separate from station identity proof: HTTP 200,
+valid GTFS-RT 2.0 protobuf, numeric stop IDs, and no legacy VRS IFOPT prefix
+matches were observed in that snapshot.
+
+The next authorized host command is the existing-ZIP diagnostic (no download,
+no realtime request):
 
 ```bash
 cd /Users/admin/Documents/cologne-transit-intelligence
 python3 scripts/gtfsde_static_identity_bridge_probe.py \
-  download-and-inspect \
-  --verify-realtime
+  inspect-local \
+  --gtfs-zip /private/tmp/cologne-transit-gtfsde-static-9euwatid/gtfsde-nv-latest.zip \
+  --station hbf \
+  --diagnostic-candidates
 ```
 
-Do not run S18 lifecycle automatically, do not run historical S19 tooling
+Do not run `download-and-inspect`, S18 lifecycle, or historical S19 tooling
 automatically, and do not interpret current GTFS.de IDs as valid for historical
 snapshots without date-compatible static identity evidence.

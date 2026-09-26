@@ -18,6 +18,7 @@ import csv
 import io
 import json
 import os
+import re
 import socket
 import tempfile
 import time
@@ -37,6 +38,7 @@ REQUEST_TIMEOUT_SECONDS = 60
 REALTIME_TIMEOUT_SECONDS = 30
 MAX_REALTIME_BYTES = 100 * 1024 * 1024
 MAX_EXAMPLES = 10
+MAX_HBF_DIAGNOSTIC_CANDIDATES = 100
 PROBE_NAME = "gtfsde_static_identity_bridge_probe"
 
 
@@ -84,6 +86,28 @@ def normalize_text(value: Optional[str]) -> str:
         return ""
     normalized = unicodedata.normalize("NFKC", value)
     return " ".join(normalized.split()).casefold()
+
+
+def normalized_name_tokens(value: Optional[str]) -> Set[str]:
+    """Return conservative Unicode word tokens for diagnostic name matching."""
+    normalized = normalize_text(value)
+    return set(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
+
+
+def hbf_match_reason(value: Optional[str]) -> Optional[str]:
+    """Match only Köln plus an explicit Hbf/Hauptbahnhof token pair."""
+    tokens = normalized_name_tokens(value)
+    if "köln" not in tokens:
+        return None
+
+    matched_terms = []
+    if "hbf" in tokens:
+        matched_terms.append("Hbf")
+    if "hauptbahnhof" in tokens:
+        matched_terms.append("Hauptbahnhof")
+    if not matched_terms:
+        return None
+    return "contains Köln + %s token(s)" % " + ".join(matched_terms)
 
 
 def optional_text(row: Dict[str, str], field_name: str) -> Optional[str]:
@@ -220,9 +244,198 @@ def unique_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [by_id[stop_id] for stop_id in sorted(by_id)]
 
 
+def diagnostic_candidate_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """Preserve source fields and add the normalized diagnostic explanation."""
+    if not row_stop_id(row):
+        return None
+    match_reason = hbf_match_reason(row.get("stop_name"))
+    if match_reason is None:
+        return None
+    candidate = stop_row(row)
+    candidate["normalized_stop_name"] = normalize_text(row.get("stop_name"))
+    candidate["match_reason"] = match_reason
+    return candidate
+
+
+def collect_hbf_diagnostic_candidates(
+    archive: zipfile.ZipFile,
+) -> Tuple[List[Dict[str, Any]], int, bool]:
+    """Find a bounded, deterministic set of conservative Hbf name candidates."""
+    all_candidates: List[Dict[str, Any]] = []
+    for row in iter_stop_rows(archive):
+        candidate = diagnostic_candidate_row(row)
+        if candidate is not None:
+            all_candidates.append(candidate)
+
+    candidates = unique_rows(all_candidates)
+    total = len(candidates)
+    bounded_candidates = candidates[:MAX_HBF_DIAGNOSTIC_CANDIDATES]
+    return bounded_candidates, total, total > len(bounded_candidates)
+
+
+def source_row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return only the source stop fields for parent/child summaries."""
+    if row is None:
+        return None
+    return {
+        "stop_id": row.get("stop_id"),
+        "stop_name": row.get("stop_name"),
+        "parent_station": row.get("parent_station"),
+        "location_type": row.get("location_type"),
+        "platform_code": row.get("platform_code"),
+        "stop_lat": row.get("stop_lat"),
+        "stop_lon": row.get("stop_lon"),
+    }
+
+
+def clearly_matching_hbf_parent(row: Optional[Dict[str, Any]]) -> bool:
+    """Require a station-typed parent whose own name identifies Köln Hbf."""
+    if row is None or not location_type_is_station(row):
+        return False
+    return hbf_match_reason(row.get("stop_name")) is not None
+
+
+def diagnostic_parent_analysis(
+    archive: zipfile.ZipFile,
+    candidate_rows: Sequence[Dict[str, Any]],
+    candidates_truncated: bool,
+) -> Dict[str, Any]:
+    """Build parent/child evidence and select only deterministic mappings."""
+    parent_rows, children_by_parent = inspect_parent_and_children(
+        archive,
+        candidate_rows,
+    )
+    primary_rows_by_id = {
+        str(row["stop_id"]): source_row(row)
+        for row in candidate_rows
+        if row.get("stop_id")
+    }
+
+    plausible_parent_ids: Set[str] = set()
+    for row in candidate_rows:
+        stop_id = row.get("stop_id")
+        parent_id = row.get("parent_station")
+        if parent_id:
+            plausible_parent_ids.add(str(parent_id))
+        if stop_id and (
+            location_type_is_station(row)
+            or str(stop_id) in children_by_parent
+        ):
+            plausible_parent_ids.add(str(stop_id))
+
+    parent_summaries: List[Dict[str, Any]] = []
+    clearly_matching_parent_ids: List[str] = []
+    for parent_id in sorted(plausible_parent_ids):
+        parent = source_row(parent_rows.get(parent_id))
+        if parent is None:
+            parent = primary_rows_by_id.get(parent_id)
+        if parent is None:
+            parent = {
+                "stop_id": parent_id,
+                "stop_name": None,
+                "parent_station": None,
+                "location_type": None,
+                "platform_code": None,
+                "stop_lat": None,
+                "stop_lon": None,
+            }
+        child_stops = unique_rows(children_by_parent.get(parent_id, []))
+        child_ids = [
+            str(row["stop_id"])
+            for row in child_stops
+            if row.get("stop_id")
+        ]
+        parent_summary = {
+            "parent_station": parent_id,
+            "parent_stop": parent,
+            "child_count": len(child_ids),
+            "child_stop_ids": child_ids,
+            "child_stops": child_stops,
+            "candidate_child_stop_ids": [
+                str(row["stop_id"])
+                for row in candidate_rows
+                if row.get("stop_id")
+                and row.get("parent_station") == parent_id
+            ],
+        }
+        parent_summaries.append(parent_summary)
+        if clearly_matching_hbf_parent(parent):
+            clearly_matching_parent_ids.append(parent_id)
+
+    selected_parent_id: Optional[str] = None
+    selection_note = None
+    if candidates_truncated:
+        selection_note = (
+            "candidate output reached the bounded limit; automatic selection is disabled"
+        )
+    elif len(plausible_parent_ids) > 1:
+        selection_note = (
+            "multiple plausible parent stations were found; no parent was selected"
+        )
+    elif len(clearly_matching_parent_ids) == 1:
+        candidate_parent_id = clearly_matching_parent_ids[0]
+        selected_summary = next(
+            summary
+            for summary in parent_summaries
+            if summary["parent_station"] == candidate_parent_id
+        )
+        candidate_child_rows = [
+            row
+            for row in candidate_rows
+            if str(row.get("stop_id")) != candidate_parent_id
+        ]
+        candidate_children_consistent = all(
+            row.get("parent_station") == candidate_parent_id
+            for row in candidate_child_rows
+        )
+        selected_summary["candidate_children_consistent"] = (
+            candidate_children_consistent
+        )
+        if selected_summary["child_count"] > 0 and candidate_children_consistent:
+            selected_parent_id = candidate_parent_id
+        elif not candidate_children_consistent:
+            selection_note = (
+                "relevant candidate child stops do not consistently reference "
+                "the same parent station"
+            )
+        else:
+            selection_note = (
+                "the clearly matching parent has no child stops in stops.txt"
+            )
+    elif len(clearly_matching_parent_ids) > 1:
+        selection_note = (
+            "multiple clearly matching Köln Hbf/Hauptbahnhof parent stations were found"
+        )
+    elif not parent_summaries:
+        selection_note = "no plausible parent station or parent/child group was found"
+    else:
+        selection_note = (
+            "no single clearly matching Köln Hbf/Hauptbahnhof parent station was found"
+        )
+
+    selected_summary = next(
+        (
+            summary
+            for summary in parent_summaries
+            if summary["parent_station"] == selected_parent_id
+        ),
+        None,
+    )
+    return {
+        "station_candidates": [
+            row for row in candidate_rows if location_type_is_station(row)
+        ],
+        "parent_candidates": parent_summaries,
+        "selected_parent_station_id": selected_parent_id,
+        "selected_parent_summary": selected_summary,
+        "selection_note": selection_note,
+    }
+
+
 def resolve_station(
     archive: zipfile.ZipFile,
     spec: StationSpec,
+    diagnostic_candidates: bool = False,
 ) -> Dict[str, Any]:
     exact_candidates, variant_candidates = collect_name_candidates(archive, spec)
     primary_candidates = exact_candidates if exact_candidates else variant_candidates
@@ -242,8 +455,81 @@ def resolve_station(
         "child_stop_ids": [],
         "resolved_static_stop_ids": [],
         "mapping_notes": [],
+        "diagnostic_candidates": [],
+        "diagnostic_candidate_total": 0,
+        "diagnostic_candidates_truncated": False,
+        "diagnostic_station_candidates": [],
+        "diagnostic_parent_candidates": [],
+        "diagnostic_selection_note": None,
     }
     if not primary_candidates:
+        if spec.key == "hbf" and diagnostic_candidates:
+            (
+                bounded_candidates,
+                candidate_total,
+                candidates_truncated,
+            ) = collect_hbf_diagnostic_candidates(archive)
+            diagnostic = diagnostic_parent_analysis(
+                archive,
+                bounded_candidates,
+                candidates_truncated,
+            )
+            result.update(
+                {
+                    "diagnostic_candidates": bounded_candidates,
+                    "diagnostic_candidate_total": candidate_total,
+                    "diagnostic_candidates_truncated": candidates_truncated,
+                    "diagnostic_station_candidates": diagnostic[
+                        "station_candidates"
+                    ],
+                    "diagnostic_parent_candidates": diagnostic[
+                        "parent_candidates"
+                    ],
+                    "diagnostic_selection_note": diagnostic["selection_note"],
+                }
+            )
+            selected_parent_id = diagnostic["selected_parent_station_id"]
+            selected_summary = diagnostic["selected_parent_summary"]
+            if selected_parent_id is not None and selected_summary is not None:
+                selected_parent = selected_summary["parent_stop"]
+                child_stops = selected_summary["child_stops"]
+                child_stop_ids = selected_summary["child_stop_ids"]
+                result.update(
+                    {
+                        "classification": "STATION_MAPPING_RESOLVED",
+                        "parent_candidates": [
+                            summary["parent_stop"]
+                            for summary in diagnostic["parent_candidates"]
+                        ],
+                        "selected_parent_station": selected_parent,
+                        "selected_parent_station_id": selected_parent_id,
+                        "child_stops": child_stops,
+                        "child_stop_ids": child_stop_ids,
+                        "resolved_static_stop_ids": sorted(
+                            set(child_stop_ids)
+                        ),
+                    }
+                )
+                result["mapping_notes"].append(
+                    "bounded Köln Hbf diagnostic candidates produced deterministic "
+                    "parent/child evidence"
+                )
+            else:
+                result["classification"] = (
+                    "STATION_MAPPING_NOT_FOUND"
+                    if not bounded_candidates
+                    else "STATION_MAPPING_AMBIGUOUS"
+                )
+                if diagnostic["selection_note"]:
+                    result["mapping_notes"].append(
+                        diagnostic["selection_note"]
+                    )
+            if not bounded_candidates:
+                result["mapping_notes"].append(
+                    "no conservative Köln + Hbf/Hauptbahnhof diagnostic candidate "
+                    "was found"
+                )
+            return result
         result["mapping_notes"].append("no exact or labelled variant stop_name match")
         return result
 
@@ -662,10 +948,21 @@ def aggregate_classification(station_results: Sequence[Dict[str, Any]]) -> str:
     return "GTFSDE_IDENTITY_BRIDGE_NOT_ESTABLISHED"
 
 
-def inspect_zip(path: Path) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+def inspect_zip(
+    path: Path,
+    station_specs: Sequence[StationSpec] = STATIONS,
+    diagnostic_candidates: bool = False,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     try:
         with zipfile.ZipFile(str(path), "r") as archive:
-            results = [resolve_station(archive, station) for station in STATIONS]
+            results = [
+                resolve_station(
+                    archive,
+                    station,
+                    diagnostic_candidates=diagnostic_candidates,
+                )
+                for station in station_specs
+            ]
         return results, None
     except (OSError, zipfile.BadZipFile, UnicodeError, csv.Error, ValueError, FileNotFoundError) as error:
         return [], clean_error(error)
@@ -696,6 +993,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="after local inspection, make exactly one current-feed GET",
     )
+    local_parser.add_argument(
+        "--station",
+        choices=("all", "hbf", "neumarkt"),
+        default="all",
+        help="limit local inspection to one configured station (default: all)",
+    )
+    local_parser.add_argument(
+        "--diagnostic-candidates",
+        action="store_true",
+        help=(
+            "run bounded Köln Hbf candidate discovery when exact/variant "
+            "matching fails; local-only and never combined with realtime verification"
+        ),
+    )
 
     download_parser = subparsers.add_parser(
         "download-and-inspect",
@@ -712,6 +1023,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.mode == "inspect-local":
+        if args.diagnostic_candidates and args.verify_realtime:
+            parser.error(
+                "--diagnostic-candidates is local-only and cannot be combined "
+                "with --verify-realtime"
+            )
+        if args.diagnostic_candidates and args.station == "neumarkt":
+            parser.error(
+                "--diagnostic-candidates applies only to the Köln Hbf station"
+            )
+
+    station_specs = STATIONS
+    if args.mode == "inspect-local" and args.station != "all":
+        station_specs = tuple(
+            station for station in STATIONS if station.key == args.station
+        )
 
     download: Optional[DownloadResult] = None
     if args.mode == "inspect-local":
@@ -747,7 +1075,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             return 1
 
-    station_results, inspection_error = inspect_zip(static_path)
+    station_results, inspection_error = inspect_zip(
+        static_path,
+        station_specs=station_specs,
+        diagnostic_candidates=(
+            args.diagnostic_candidates
+            if args.mode == "inspect-local"
+            else False
+        ),
+    )
     if inspection_error is not None:
         json_line(
             {
@@ -771,6 +1107,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "mode": args.mode,
         "source_static_url": STATIC_URL,
         "static_zip_path": str(static_path),
+        "station_filter": args.station if args.mode == "inspect-local" else "all",
+        "diagnostic_candidates_requested": bool(
+            args.diagnostic_candidates
+            if args.mode == "inspect-local"
+            else False
+        ),
         "temporary_directory": download.temporary_directory if download else None,
         "download": (
             {
