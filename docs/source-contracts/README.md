@@ -55,6 +55,11 @@ The [near-event RecordedAtTime lifecycle validation](mdd-trias-event-lifecycle-v
 is separate post-approval evidence for later collector design and is currently
 `HOST EXECUTION PENDING`.
 
+The [GTFS-RT Source Feasibility Audit](gtfs-rt-source-feasibility-audit.md) is
+also separate post-Stage-02 validation and is currently
+`HOST EXECUTION PENDING`. It is read-only host-run tooling, does not approve a
+production GTFS-RT source, and does not start Stage 3.
+
 ## Historical / Legacy implementation evidence
 
 The detailed audit contains historical chronology for the Legacy source audit,

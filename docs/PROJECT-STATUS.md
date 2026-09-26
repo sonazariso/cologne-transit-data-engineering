@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence  
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-09-25
+**Status date:** 2026-09-26
 
 ## Authoritative status
 
@@ -26,6 +26,15 @@
 | 15 | Post-Cutover Validation | Not started |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
+
+## Post-Stage-02 validation
+
+- **GTFS-RT Source Feasibility Audit — HOST EXECUTION PENDING.** The bounded,
+  host-run-only tooling is documented in
+  [the GTFS-RT audit](source-contracts/gtfs-rt-source-feasibility-audit.md).
+- This validation does not reopen or invalidate Stage 2, start Stage 3,
+  approve GTFS-RT as a production source, or change the MDD collector,
+  database, Power BI, scheduler, or Legacy repository.
 
 ### Stage 2 substage status
 
