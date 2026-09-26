@@ -96,6 +96,42 @@ explicit actual/recorded semantic was observed.
   and reviewed. This document does not choose final schemas, table names,
   cadence, request budgets, or reconciliation algorithms.
 
+## Cross-source reconciliation and Cologne scope guardrails
+
+The detailed contract is documented in the [cross-source reconciliation and
+Cologne scope contract](../source-contracts/cross-source-reconciliation-contract.md).
+Its mandatory Stage 3 entry guardrails are:
+
+- GTFS-RT analytical scope is **Cologne/Köln only**.
+- The Germany-wide GTFS-RT feed does not expand the project's analytical
+  scope to Germany, NRW, the complete VRS network, or the complete GTFS.de
+  network.
+- Only validated in-scope Cologne stop, service, and alert evidence enters the
+  analytical scope.
+- External portions of through-routes and cross-boundary trips are excluded
+  from Cologne KPI calculations; an in-scope stop event is not automatically
+  an in-scope full trip.
+- Long-distance rail, including ICE, IC/EC, NightJet, and equivalent services,
+  remains outside core KPI scope and must not change core KPI denominators.
+- The assumption `MDD JourneyRef == GTFS-RT trip_id` is prohibited.
+- A canonical reconciliation layer is required between source-faithful
+  observations and cross-source analytical associations.
+- HIGH-confidence matching is required for trip-level cross-source cause or
+  effect attribution. MEDIUM matches are contextual; LOW/UNMATCHED evidence is
+  not service-level attribution evidence.
+- GTFS-RT ServiceAlert scope must be preserved as trip, route, stop, or agency;
+  these scopes are not interchangeable.
+- `ReportedCause` is provider-reported evidence and is not `RootCause`.
+- Cross-source evidence must preserve source provenance, source-specific
+  semantics, observation time, and disagreement rather than blending or
+  overwriting records.
+
+The contract also requires that MDD Situation references remain associations,
+not automatic proof of a specific delay cause or amount. Core KPI language
+must remain Cologne-observed segment/service performance for cross-boundary
+services, and Actual Delay remains unapproved until confirmed actual time is
+validated.
+
 ## Unresolved issues
 
 1. Confirmed Actual Time source is unavailable.
@@ -104,6 +140,12 @@ explicit actual/recorded semantic was observed.
    scope: zero exact-URL captures at both horizons in both bounded runs.
 4. Final collector cadence and request budget are not yet designed.
 5. Final database/staging schema is not yet designed.
+6. The full Cologne GTFS.de stop-identity bridge and canonical line mapping
+   are not yet implemented.
+7. Cross-source service-event matching and GTFS-RT cause/effect population
+   quality are not yet validated across a representative sample.
+8. Final GTFS-RT alert persistence and Cologne-filtering strategy is not yet
+   designed.
 
 ## Stage boundary
 

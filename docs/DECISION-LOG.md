@@ -27,6 +27,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-021 | 2026-09-25 | Permanent/automatic full raw MDD payload retention is not the default source-of-record strategy; see the [raw-retention decision](source-contracts/mdd-trias-raw-retention.md) | Approved |
 | D-022 | 2026-09-25 | The conservative documented project request ceiling remains 250,000 requests/month until stronger provider/account evidence supersedes it; see the [Stage 02 request contract](source-contracts/mdd-trias-request-contract.md) | Approved |
 | D-023 | 2026-09-26 | Realtime source roles: **MDD/TRIAS primary; GTFS-RT complementary**; source-faithful staging remains separate before future reconciliation | Approved direction |
+| D-024 | 2026-09-26 | Cross-Source Reconciliation and Cologne Scope Contract | Approved design guardrail |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -72,3 +73,46 @@ This decision is a future design direction. It does not start Stage 3, approve
 collector production code, finalize schemas or table names, or authorize
 database, scheduler, Power BI, or runtime changes. See the [Stage 3 realtime
 collection design readiness document](stage-03/realtime-collection-design-readiness.md).
+
+## D-024 — Cross-Source Reconciliation and Cologne Scope Contract
+
+**Decision:**
+
+- MDD remains the primary realtime source.
+- GTFS-RT remains complementary.
+- GTFS-RT is filtered to the Cologne project scope before analytical use.
+- Germany-wide GTFS-RT data does not expand project scope.
+- Source records are reconciled only through validated identity evidence.
+- Trip-specific cross-source claims require HIGH-confidence reconciliation.
+- GTFS-RT `ServiceAlert` entity scope is preserved as trip, route, stop, or
+  agency context.
+- Provider-reported cause/effect is not treated as proven root cause.
+- Cross-boundary routes contribute only in-scope Cologne evidence to core KPIs.
+- Long-distance services remain outside core KPI scope.
+
+The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
+is the detailed design guardrail. It defines the conceptual canonical stop,
+line, and service-event identities; stop-event-first matching; HIGH/MEDIUM/LOW
+confidence; source-faithful storage; alert association levels; MDD Situation
+semantics; claim limits; and unresolved Stage 3 validation items.
+
+**Consequences:**
+
+- `MDD JourneyRef == GTFS-RT trip_id` is not a valid identity rule.
+- A validated canonical reconciliation layer is required before trip-level
+  cross-source attribution.
+- An in-scope Cologne stop event does not make an entire through-service or
+  cross-boundary trip a Cologne KPI subject.
+- Route-, stop-, and agency-level alerts remain context unless stronger
+  validated linkage exists; only a HIGH-confidence trip-level association may
+  support a trip-level provider-reported cause/effect claim.
+- `ReportedCause` remains distinct from `RootCause`, and MDD Situation
+  association remains distinct from proven delay causality.
+- MDD and GTFS-RT disagreement must be retained rather than overwritten.
+- Actual Delay, Actual On-Time Performance, and Prediction Accuracy vs Actual
+  remain unapproved until confirmed actual time is validated.
+
+This is an approved design guardrail, not Stage 3 approval. It does not create
+SQL tables, schemas, migrations, collector code, matching algorithms, ETL,
+Power BI changes, scheduler jobs, or production mappings. Stage 3 remains
+**NEXT / NOT STARTED**.

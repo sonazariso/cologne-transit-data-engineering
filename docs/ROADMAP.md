@@ -72,6 +72,16 @@ source's semantics and provenance separately before any normalization or
 reconciliation. Confirmed Actual Time remains unavailable and Actual Delay is
 not approved.
 
+The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
+is an approved design guardrail for the next realtime design work. GTFS-RT
+analytical scope is Cologne-only even though the source feed is Germany-wide;
+only validated Cologne stop, service, and alert evidence may enter the
+analytical scope. Cross-boundary routes contribute only in-scope Cologne
+evidence to core KPIs, long-distance rail remains outside core KPI scope, and
+`MDD JourneyRef` must not be equated with GTFS-RT `trip_id`. Trip-level
+cross-source cause/effect attribution requires HIGH-confidence reconciliation,
+while alert scope and source provenance remain distinct.
+
 ## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is
 deferred from Stage 02.
@@ -81,6 +91,8 @@ The [Stage 3 realtime collection design readiness document](stage-03/realtime-co
 is **READY FOR USER REVIEW — STAGE 3 NOT STARTED**. It records entry
 conditions and guardrails only; it does not constitute the Stage 3 design or
 approval.
+The cross-source contract is an entry guardrail for that future review; it does
+not start Stage 3 or approve implementation.
 
 ## Stage 4 — Cologne Scope & Mode Classification
 Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.

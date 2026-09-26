@@ -68,6 +68,7 @@ Existing GTFS-RT validation:
 | GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
 | GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
 | Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
+| Cross-source reconciliation and Cologne scope contract | **APPROVED DESIGN GUARDRAIL** — implementation not started |
 | Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
 | Actual Delay KPI | **NOT APPROVED** |
 
@@ -134,6 +135,19 @@ it is not a Stage 02 blocker.
 - MDD/TRIAS is the approved primary realtime source direction for the Cologne
   project; GTFS-RT is complementary/secondary for operational states,
   cross-source evidence, and broad coverage.
+- The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
+  makes GTFS-RT analytical scope Cologne-only; Germany-wide feed coverage does
+  not expand the project scope. Only validated in-scope Cologne stop, service,
+  and alert evidence may enter analytical scope.
+- Cross-boundary routes contribute only in-scope Cologne evidence to core KPIs;
+  an in-scope stop event is not an in-scope full trip. ICE, IC/EC, NightJet,
+  and equivalent long-distance services remain outside core KPI scope.
+- `MDD JourneyRef` and GTFS-RT `trip_id` must not be treated as equal. Future
+  trip-level cross-source attribution requires a canonical reconciliation layer
+  and HIGH-confidence matching, while GTFS-RT alert scope remains distinct.
+- `ReportedCause` is provider-reported evidence, not `RootCause`; MDD
+  Situation references and cross-source agreement do not by themselves prove
+  causality. Source provenance and disagreement must be preserved.
 - MDD and GTFS-RT must initially remain source-faithful and separate. Future
   reconciliation is deferred until source-specific staging is designed.
 - `ObservedAt`/`CapturedAt` is a first-class future collection attribute;
@@ -163,6 +177,9 @@ it is not a Stage 02 blocker.
 - The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
   is **READY FOR USER REVIEW — STAGE 3 NOT STARTED** and records guardrails
   only; it does not start or approve Stage 3.
+- The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
+  is an approved design guardrail for that future review; it does not start
+  Stage 3 or approve implementation.
 
 ## Former open critical questions and S15/S16 refinement
 

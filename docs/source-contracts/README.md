@@ -90,6 +90,23 @@ Actual Time is unavailable; Actual Delay remains not approved. The [Stage 3
 realtime collection design readiness document](../stage-03/realtime-collection-design-readiness.md)
 records the guardrails without starting Stage 3.
 
+## Cross-source reconciliation and Cologne scope guardrail
+
+The [Cross-Source Reconciliation Contract](cross-source-reconciliation-contract.md)
+is **APPROVED DESIGN GUARDRAIL — IMPLEMENTATION NOT STARTED**. It makes the
+GTFS-RT analytical scope Cologne-only even when the source feed is Germany-wide,
+requires validated canonical stop/line/service-event identity evidence, and
+prohibits direct equality between MDD `JourneyRef` and GTFS-RT `trip_id`.
+
+The contract requires source-faithful observations before reconciliation,
+stop-event-first matching, auditable HIGH/MEDIUM/LOW confidence, distinct
+trip/route/stop/agency alert scopes, Cologne-only KPI evidence, and explicit
+through-service and long-distance exclusions. Provider-reported cause/effect
+remains distinct from proven root cause, and MDD Situation association remains
+distinct from causality. The contract is a Stage 3 entry guardrail; it does not
+start Stage 3 or define final schemas, persistence algorithms, or production
+implementation.
+
 ## Historical / Legacy implementation evidence
 
 The detailed audit contains historical chronology for the Legacy source audit,
