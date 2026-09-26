@@ -70,6 +70,13 @@ python3 scripts/gtfsde_static_identity_bridge_probe.py \
   --station hbf \
   --diagnostic-candidates
 
+# S18.3: local-only railway-service/topology diagnostic against the same ZIP
+python3 scripts/gtfsde_static_identity_bridge_probe.py \
+  inspect-local \
+  --gtfs-zip /private/tmp/cologne-transit-gtfsde-static-9euwatid/gtfsde-nv-latest.zip \
+  --station hbf \
+  --rail-diagnostic
+
 python3 scripts/gtfsde_static_identity_bridge_probe.py \
   download-and-inspect
 ```
@@ -77,6 +84,14 @@ python3 scripts/gtfsde_static_identity_bridge_probe.py \
 The S18.2 command is local-only: it reads the supplied ZIP, does not use
 `--verify-realtime`, and makes zero HTTP requests. The temporary path above is
 for the current host diagnostic session only; it is not a durable source path.
+
+The `--rail-diagnostic` command is also local-only. It streams `stops.txt`,
+`stop_times.txt`, `trips.txt`, `routes.txt`, and `agency.txt` directly from the
+ZIP. It uses a bounded 600-metre radius around the source coordinates of the
+known `106448` and `437741` parent stops as supporting candidate evidence; it
+does not use coordinates alone, online geocoding, fuzzy matching, or any HTTP
+request. It reports exact stop-time, trip, route-type, route-label, agency, and
+parent/child evidence in deterministic JSON.
 
 The optional `--verify-realtime` flag is off by default. If explicitly used,
 the script makes exactly one GET request to
@@ -123,6 +138,55 @@ children. If no children are present, the clearly supported stop/station ID is
 retained. Candidate details and the selected parent are emitted together so the
 host operator can review the identity before lifecycle execution.
 
+## S18.3 railway Hbf service/topology diagnostic
+
+The new `--rail-diagnostic` mode keeps the two known adjacent KVB parents
+separate from the railway identity:
+
+- `106448` is `Köln Dom/Hbf`.
+- `437741` is `Köln Breslauer Platz/Hbf`.
+- They are distinct adjacent KVB stop complexes, not interchangeable railway
+  station identities.
+- Neither parent is approved or selected as equivalent to railway Köln Hbf.
+- Neumarkt remains resolved separately through parent `493082` and its five
+  child IDs; this diagnostic does not change that result.
+
+The host run against the existing ZIP used a 600-metre radius around the
+coordinates of `106448` and `437741` as supporting evidence and found `35`
+bounded candidates. It streamed the static topology and service joins through
+`stops.txt`, `stop_times.txt`, `trips.txt`, `routes.txt`, and `agency.txt`.
+No network request was made.
+
+The strongest current railway-service evidence is attached to the excluded
+KVB parent `437741`, not to a separate approved railway parent:
+
+| parent | rail-served child stop IDs | observed source route labels | agencies |
+| --- | --- | --- | --- |
+| `437741` — Köln Breslauer Platz/Hbf | `160367`, `201741`, `398532`, `590767`, `84746` | S-Bahn: `S11`, `S12`, `S19`; regional: `RB26`, `RB27`, `RB38`, `RB48`, `RE5`, `RE5X`, `RE7`, `RE8`, `RE9`, `RE9X`, `RE1X`, `RE22`, `RE22X` | `100` — National Express; `264` — Nahreisezug |
+
+The same parent also has non-rail child IDs `104653`, `246230`, `294170`,
+`379472`, `492942`, `508538`, and `594735`; those are retained separately.
+Parent `106448` has no S-Bahn/RE/RB evidence in this run; its child IDs
+`134639`, `578073`, and `84484` remain non-rail transit-side evidence.
+The source route records for the rail-labeled services carried `route_type=3`,
+so the diagnostic used the explicit S-Bahn/RE/RB source labels rather than
+assuming that `route_type=2` was the only possible rail signal. Stadtbahn and
+bus services remain classified separately.
+
+The run returned:
+
+```text
+classification: HBF_RAIL_EVIDENCE_INSUFFICIENT
+candidate_count: 35
+rail_served_candidate_count: 5
+plausible_rail_parent_count: 0
+```
+
+This is intentionally not a railway-Hbf selection: the observed rail service
+is under the explicitly excluded adjacent KVB parent `437741`, and no
+non-excluded railway parent topology was found. Railway identity therefore
+remains unresolved and requires further independent evidence.
+
 ## Output classifications
 
 Per station, the bridge emits one of:
@@ -147,6 +211,18 @@ the current feed's `StopTimeUpdate` records. It does not establish actual
 arrival semantics, historical validity, provider-wide coverage, or
 compatibility with the project's VRS/go.Rheinland feed.
 
+The local railway diagnostic uses a separate classification set:
+
+- `HBF_RAIL_MAPPING_RESOLVED`
+- `HBF_RAIL_MAPPING_AMBIGUOUS`
+- `HBF_RAIL_MAPPING_NOT_FOUND`
+- `HBF_RAIL_EVIDENCE_INSUFFICIENT`
+- `INCONCLUSIVE`
+
+`HBF_RAIL_MAPPING_RESOLVED` is permitted only when one non-excluded railway
+parent is supported by static service and parent/child topology. The two known
+KVB parents are never silently promoted by the diagnostic.
+
 ## Relationship to S18 lifecycle
 
 After reviewing the bridge output, use the exact resolved IDs explicitly:
@@ -169,7 +245,7 @@ actual by schema, time stability is not actual-arrival proof, and explicit
 provider semantics or independent evidence would be required before any
 Actual Delay KPI could be considered.
 
-## S18.1 evidence and S18.2 next action
+## S18.1 evidence, S18.2 discovery, and S18.3 status
 
 The S18.1 host evidence is:
 
@@ -188,15 +264,16 @@ The S18.1 host evidence is:
 - the current exact/configured-variant name resolver did not find a mapping;
 - this is an identity-resolution gap, **not** evidence that Hbf is absent from
   GTFS.de static or GTFS-Realtime; and
-- focused static name and parent/child discovery is required.
+- focused static name, service, and parent/child discovery was required and is
+  now recorded above.
 
 The bridge therefore remains **`PARTIAL`** until Hbf is resolved. The host
 inventory evidence remains separate from station identity proof: HTTP 200,
 valid GTFS-RT 2.0 protobuf, numeric stop IDs, and no legacy VRS IFOPT prefix
 matches were observed in that snapshot.
 
-The next authorized host command is the existing-ZIP diagnostic (no download,
-no realtime request):
+The S18.2 authorized existing-ZIP diagnostic (no download, no realtime request)
+was:
 
 ```bash
 cd /Users/admin/Documents/cologne-transit-intelligence
@@ -205,6 +282,17 @@ python3 scripts/gtfsde_static_identity_bridge_probe.py \
   --gtfs-zip /private/tmp/cologne-transit-gtfsde-static-9euwatid/gtfsde-nv-latest.zip \
   --station hbf \
   --diagnostic-candidates
+```
+
+The S18.3 local-only rail diagnostic used for the service/topology result was:
+
+```bash
+cd /Users/admin/Documents/cologne-transit-intelligence
+python3 scripts/gtfsde_static_identity_bridge_probe.py \
+  inspect-local \
+  --gtfs-zip /private/tmp/cologne-transit-gtfsde-static-9euwatid/gtfsde-nv-latest.zip \
+  --station hbf \
+  --rail-diagnostic
 ```
 
 Do not run `download-and-inspect`, S18 lifecycle, or historical S19 tooling

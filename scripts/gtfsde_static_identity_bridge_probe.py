@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# HOST-RUN ONLY.
-# Do not execute from Codex.
-# This script may download a large public static GTFS ZIP.
+# HOST-RUN ONLY for network-enabled operations.
+# Local inspect modes read only a caller-supplied ZIP and make no requests.
+# This script may download a large public static GTFS ZIP when explicitly asked.
 """Read-only bridge between GTFS.de static and realtime stop identities.
 
 The default operation is local inspection of a caller-supplied GTFS.de ZIP.
@@ -17,6 +17,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import re
 import socket
@@ -39,6 +40,10 @@ REALTIME_TIMEOUT_SECONDS = 30
 MAX_REALTIME_BYTES = 100 * 1024 * 1024
 MAX_EXAMPLES = 10
 MAX_HBF_DIAGNOSTIC_CANDIDATES = 100
+HBF_RAIL_RADIUS_METERS = 600
+MAX_HBF_RAIL_CANDIDATES = 1000
+MAX_RAIL_ROUTE_EXAMPLES = 20
+KNOWN_ADJACENT_KVB_PARENT_IDS = ("106448", "437741")
 PROBE_NAME = "gtfsde_static_identity_bridge_probe"
 
 
@@ -163,8 +168,12 @@ def archive_member(archive: zipfile.ZipFile, filename: str) -> str:
     raise ValueError("multiple %s entries found in static GTFS ZIP" % filename)
 
 
-def iter_stop_rows(archive: zipfile.ZipFile) -> Iterable[Dict[str, str]]:
-    member = archive_member(archive, "stops.txt")
+def iter_csv_rows(
+    archive: zipfile.ZipFile,
+    filename: str,
+) -> Iterable[Dict[str, str]]:
+    """Stream one GTFS CSV member without extracting or materializing it."""
+    member = archive_member(archive, filename)
     with archive.open(member, "r") as binary_stream:
         text_stream = None
         try:
@@ -179,6 +188,10 @@ def iter_stop_rows(archive: zipfile.ZipFile) -> Iterable[Dict[str, str]]:
         finally:
             if text_stream is not None:
                 text_stream.detach()
+
+
+def iter_stop_rows(archive: zipfile.ZipFile) -> Iterable[Dict[str, str]]:
+    yield from iter_csv_rows(archive, "stops.txt")
 
 
 def bounded_examples(values: Iterable[str]) -> List[str]:
@@ -430,6 +443,840 @@ def diagnostic_parent_analysis(
         "selected_parent_summary": selected_summary,
         "selection_note": selection_note,
     }
+
+
+def rail_stop_source(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return the bounded stop fields used by the Hbf rail diagnostic."""
+    if row is None:
+        return None
+    return {
+        "stop_id": row.get("stop_id"),
+        "stop_name": row.get("stop_name"),
+        "location_type": row.get("location_type"),
+        "parent_station": row.get("parent_station"),
+        "lat": row.get("stop_lat"),
+        "lon": row.get("stop_lon"),
+        "platform_code": row.get("platform_code"),
+    }
+
+
+def numeric_value(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value.strip())
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def haversine_distance_meters(
+    latitude_a: Optional[str],
+    longitude_a: Optional[str],
+    latitude_b: Optional[str],
+    longitude_b: Optional[str],
+) -> Optional[float]:
+    """Calculate a supporting distance without using any external geocoder."""
+    lat_a = numeric_value(latitude_a)
+    lon_a = numeric_value(longitude_a)
+    lat_b = numeric_value(latitude_b)
+    lon_b = numeric_value(longitude_b)
+    if None in (lat_a, lon_a, lat_b, lon_b):
+        return None
+    earth_radius_meters = 6371000.0
+    lat_a_rad = math.radians(lat_a)
+    lat_b_rad = math.radians(lat_b)
+    delta_lat = math.radians(lat_b - lat_a)
+    delta_lon = math.radians(lon_b - lon_a)
+    haversine = (
+        math.sin(delta_lat / 2.0) ** 2
+        + math.cos(lat_a_rad)
+        * math.cos(lat_b_rad)
+        * math.sin(delta_lon / 2.0) ** 2
+    )
+    return 2.0 * earth_radius_meters * math.asin(math.sqrt(haversine))
+
+
+def parse_route_type(value: Optional[str]) -> Any:
+    raw_value = value.strip() if value is not None else ""
+    if not raw_value:
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        return raw_value
+
+
+def route_source(row: Optional[Dict[str, str]], route_id: Optional[str] = None) -> Dict[str, Any]:
+    if row is None:
+        return {
+            "route_id": route_id,
+            "route_short_name": None,
+            "route_long_name": None,
+            "route_type": None,
+            "agency_id": None,
+        }
+    return {
+        "route_id": optional_text(row, "route_id") or route_id,
+        "route_short_name": optional_text(row, "route_short_name"),
+        "route_long_name": optional_text(row, "route_long_name"),
+        "route_type": parse_route_type(optional_text(row, "route_type")),
+        "agency_id": optional_text(row, "agency_id"),
+    }
+
+
+def route_type_key(route_type: Any) -> str:
+    return "null" if route_type is None else str(route_type)
+
+
+def route_type_number(route_type: Any) -> Optional[int]:
+    if isinstance(route_type, bool):
+        return None
+    if isinstance(route_type, int):
+        return route_type
+    try:
+        return int(str(route_type))
+    except (TypeError, ValueError):
+        return None
+
+
+def route_label_modes(route: Dict[str, Any]) -> Set[str]:
+    """Use conservative source-label evidence for S-Bahn/RE/RB modes."""
+    short_name = normalize_text(route.get("route_short_name"))
+    long_name = normalize_text(route.get("route_long_name"))
+    label_text = " ".join(value for value in (short_name, long_name) if value)
+    modes: Set[str] = set()
+    if (
+        re.search(r"(?:^|[^a-z])s[- ]?bahn(?:[^a-z]|$)", label_text)
+        or re.fullmatch(r"s[- ]?\d{1,3}", short_name)
+    ):
+        modes.add("S-Bahn")
+    if (
+        re.search(
+            r"(?:^|[^a-z])(?:re|rb)[- ]?\d{1,3}[a-z]?(?:[^a-z]|$)",
+            short_name,
+        )
+        or re.search(r"(?:^|[^a-z])(?:regionalbahn|regional express)(?:[^a-z]|$)", label_text)
+    ):
+        modes.add("Regional rail")
+
+    route_type = route_type_number(route.get("route_type"))
+    if route_type == 109:
+        modes.add("S-Bahn")
+    elif route_type in (103, 106, 110, 111):
+        modes.add("Regional rail")
+    return modes
+
+
+def route_is_rail(route: Dict[str, Any]) -> bool:
+    route_type = route_type_number(route.get("route_type"))
+    if route_type == 2 or (route_type is not None and 100 <= route_type <= 199):
+        return True
+    return bool(route_label_modes(route))
+
+
+def route_service_classification(route: Dict[str, Any]) -> str:
+    if route_is_rail(route):
+        modes = route_label_modes(route)
+        if modes:
+            return "/".join(sorted(modes))
+        return "Rail"
+
+    route_type = route_type_number(route.get("route_type"))
+    short_name = normalize_text(route.get("route_short_name"))
+    if route_type == 3:
+        return "Bus"
+    if route_type == 0 or short_name in {"5", "16", "18"}:
+        return "Stadtbahn"
+    if route_type == 1:
+        return "Subway"
+    if route_type == 4:
+        return "Ferry"
+    return "Other non-rail"
+
+
+def route_rail_evidence(route: Dict[str, Any]) -> List[str]:
+    evidence: List[str] = []
+    route_type = route_type_number(route.get("route_type"))
+    if route_type == 2:
+        evidence.append("GTFS route_type 2")
+    elif route_type is not None and 100 <= route_type <= 199:
+        evidence.append("GTFS extended rail route_type %s" % route_type)
+    if "S-Bahn" in route_label_modes(route):
+        evidence.append("source route label indicates S-Bahn")
+    if "Regional rail" in route_label_modes(route):
+        evidence.append("source route label indicates RE/RB/regional rail")
+    if not evidence and route_is_rail(route):
+        evidence.append("source route data indicates rail")
+    return evidence
+
+
+def collect_hbf_rail_stop_population(
+    archive: zipfile.ZipFile,
+) -> Dict[str, Any]:
+    """Find bounded Hbf-area stops and enrich them with parent/child topology."""
+    known_parent_rows: Dict[str, Dict[str, Any]] = {}
+    for row in iter_stop_rows(archive):
+        stop_id = row_stop_id(row)
+        if stop_id in KNOWN_ADJACENT_KVB_PARENT_IDS:
+            known_parent_rows[stop_id] = stop_row(row)
+
+    anchors = [
+        known_parent_rows[stop_id]
+        for stop_id in KNOWN_ADJACENT_KVB_PARENT_IDS
+        if stop_id in known_parent_rows
+    ]
+    candidate_rows_by_id: Dict[str, Dict[str, Any]] = {}
+    candidate_reasons: Dict[str, Set[str]] = defaultdict(set)
+    candidate_distances: Dict[str, float] = {}
+    name_candidate_ids: Set[str] = set()
+
+    for row in iter_stop_rows(archive):
+        stop_id = row_stop_id(row)
+        if stop_id is None:
+            continue
+        name_match = hbf_match_reason(row.get("stop_name"))
+        if name_match is not None:
+            candidate_rows_by_id[stop_id] = stop_row(row)
+            candidate_reasons[stop_id].add("name: %s" % name_match)
+            name_candidate_ids.add(stop_id)
+
+        distances = [
+            haversine_distance_meters(
+                row.get("stop_lat"),
+                row.get("stop_lon"),
+                anchor.get("stop_lat"),
+                anchor.get("stop_lon"),
+            )
+            for anchor in anchors
+        ]
+        valid_distances = [distance for distance in distances if distance is not None]
+        if valid_distances:
+            nearest_distance = min(valid_distances)
+            if nearest_distance <= HBF_RAIL_RADIUS_METERS:
+                candidate_rows_by_id[stop_id] = stop_row(row)
+                candidate_reasons[stop_id].add(
+                    "within_%dm_of_known_kvb_parent" % HBF_RAIL_RADIUS_METERS
+                )
+                candidate_distances[stop_id] = nearest_distance
+
+    candidate_total_before_limit = len(candidate_rows_by_id)
+    ordered_candidate_ids = sorted(
+        candidate_rows_by_id,
+        key=lambda stop_id: (0 if stop_id in name_candidate_ids else 1, stop_id),
+    )
+    initial_candidate_ids = ordered_candidate_ids[:MAX_HBF_RAIL_CANDIDATES]
+    candidate_population_truncated = (
+        candidate_total_before_limit > len(initial_candidate_ids)
+    )
+    candidate_rows_by_id = {
+        stop_id: candidate_rows_by_id[stop_id]
+        for stop_id in initial_candidate_ids
+    }
+
+    parent_ids_to_inspect: Set[str] = set()
+    for stop_id in initial_candidate_ids:
+        row = candidate_rows_by_id[stop_id]
+        parent_id = row.get("parent_station")
+        if parent_id:
+            parent_ids_to_inspect.add(str(parent_id))
+        if location_type_is_station(row):
+            parent_ids_to_inspect.add(stop_id)
+
+    parent_rows: Dict[str, Dict[str, Any]] = {}
+    children_by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in iter_stop_rows(archive):
+        stop_id = row_stop_id(row)
+        parent_id = row_parent_station(row)
+        if stop_id in parent_ids_to_inspect and stop_id is not None:
+            parent_rows[stop_id] = stop_row(row)
+        if parent_id in parent_ids_to_inspect and stop_id is not None:
+            children_by_parent[parent_id].append(stop_row(row))
+
+    # Parent topology is itself a bounded candidate-discovery signal. Include
+    # actual parent rows in the candidate report, while keeping missing source
+    # parents visible in the parent summaries below.
+    for parent_id, parent_row in parent_rows.items():
+        if parent_id not in candidate_rows_by_id:
+            candidate_rows_by_id[parent_id] = parent_row
+            candidate_reasons[parent_id].add("parent_of_area_candidate_stop")
+
+    candidate_ids = sorted(candidate_rows_by_id)
+    candidate_rows = [candidate_rows_by_id[stop_id] for stop_id in candidate_ids]
+    return {
+        "known_parent_rows": known_parent_rows,
+        "anchors": anchors,
+        "candidate_rows": candidate_rows,
+        "candidate_reasons": {
+            stop_id: sorted(candidate_reasons.get(stop_id, set()))
+            for stop_id in candidate_ids
+        },
+        "candidate_distances": {
+            stop_id: round(candidate_distances[stop_id], 3)
+            for stop_id in candidate_ids
+            if stop_id in candidate_distances
+        },
+        "candidate_total_before_limit": candidate_total_before_limit,
+        "candidate_population_truncated": candidate_population_truncated,
+        "parent_rows": parent_rows,
+        "children_by_parent": {
+            parent_id: unique_rows(children)
+            for parent_id, children in children_by_parent.items()
+        },
+    }
+
+
+def route_default(route_id: str) -> Dict[str, Any]:
+    return route_source(None, route_id=route_id)
+
+
+def agency_source(row: Optional[Dict[str, str]], agency_id: Optional[str]) -> Dict[str, Any]:
+    if row is None:
+        return {"agency_id": agency_id, "agency_name": None}
+    return {
+        "agency_id": optional_text(row, "agency_id") or agency_id,
+        "agency_name": optional_text(row, "agency_name"),
+    }
+
+
+def route_detail(
+    route_id: str,
+    route_rows: Dict[str, Dict[str, Any]],
+    agency_rows: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    route = route_rows.get(route_id, route_default(route_id))
+    detail = dict(route)
+    detail["service_classification"] = route_service_classification(route)
+    detail["is_rail"] = route_is_rail(route)
+    detail["rail_evidence"] = route_rail_evidence(route)
+    agency_id = route.get("agency_id")
+    detail["agency"] = agency_source(
+        agency_rows.get(agency_id) if agency_id else None,
+        agency_id,
+    )
+    return detail
+
+
+def collect_hbf_rail_service_evidence(
+    archive: zipfile.ZipFile,
+    stop_ids: Sequence[str],
+) -> Tuple[
+    Dict[str, Dict[str, Any]],
+    Dict[str, Dict[str, Any]],
+    Dict[str, Dict[str, Any]],
+]:
+    """Join stop_times, trips, routes, and agency for bounded stop IDs."""
+    wanted_stop_ids = set(stop_ids)
+    service_by_stop: Dict[str, Dict[str, Any]] = {
+        stop_id: {"number_of_stop_time_references": 0, "trip_ids": set()}
+        for stop_id in wanted_stop_ids
+    }
+    for row in iter_csv_rows(archive, "stop_times.txt"):
+        stop_id = optional_text(row, "stop_id")
+        if stop_id not in wanted_stop_ids:
+            continue
+        service = service_by_stop[stop_id]
+        service["number_of_stop_time_references"] += 1
+        trip_id = optional_text(row, "trip_id")
+        if trip_id is not None:
+            service["trip_ids"].add(trip_id)
+
+    relevant_trip_ids = {
+        trip_id
+        for service in service_by_stop.values()
+        for trip_id in service["trip_ids"]
+    }
+    route_by_trip: Dict[str, str] = {}
+    for row in iter_csv_rows(archive, "trips.txt"):
+        trip_id = optional_text(row, "trip_id")
+        if trip_id not in relevant_trip_ids:
+            continue
+        route_id = optional_text(row, "route_id")
+        if route_id is not None:
+            route_by_trip[trip_id] = route_id
+
+    route_ids: Set[str] = set()
+    for service in service_by_stop.values():
+        service["route_ids"] = {
+            route_by_trip[trip_id]
+            for trip_id in service["trip_ids"]
+            if trip_id in route_by_trip
+        }
+        route_ids.update(service["route_ids"])
+
+    route_rows: Dict[str, Dict[str, Any]] = {}
+    for row in iter_csv_rows(archive, "routes.txt"):
+        route_id = optional_text(row, "route_id")
+        if route_id in route_ids:
+            route_rows[route_id] = route_source(row, route_id=route_id)
+
+    agency_ids = {
+        route.get("agency_id")
+        for route in route_rows.values()
+        if route.get("agency_id")
+    }
+    agency_rows: Dict[str, Dict[str, Any]] = {}
+    for row in iter_csv_rows(archive, "agency.txt"):
+        agency_id = optional_text(row, "agency_id")
+        if agency_id in agency_ids:
+            agency_rows[agency_id] = agency_source(row, agency_id)
+
+    return service_by_stop, route_rows, agency_rows
+
+
+def service_summary(
+    stop_ids: Sequence[str],
+    service_by_stop: Dict[str, Dict[str, Any]],
+    route_rows: Dict[str, Dict[str, Any]],
+    agency_rows: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    selected_stop_ids = [stop_id for stop_id in stop_ids if stop_id in service_by_stop]
+    number_of_references = sum(
+        service_by_stop[stop_id].get("number_of_stop_time_references", 0)
+        for stop_id in selected_stop_ids
+    )
+    trip_ids = {
+        trip_id
+        for stop_id in selected_stop_ids
+        for trip_id in service_by_stop[stop_id].get("trip_ids", set())
+    }
+    route_ids = {
+        route_id
+        for stop_id in selected_stop_ids
+        for route_id in service_by_stop[stop_id].get("route_ids", set())
+    }
+    route_details = [
+        route_detail(route_id, route_rows, agency_rows)
+        for route_id in sorted(route_ids)
+    ]
+    rail_route_details = [route for route in route_details if route["is_rail"]]
+    route_type_counts: Dict[str, int] = defaultdict(int)
+    service_classification_counts: Dict[str, int] = defaultdict(int)
+    for route in route_details:
+        route_type_counts[route_type_key(route.get("route_type"))] += 1
+        service_classification_counts[route["service_classification"]] += 1
+
+    agency_by_id: Dict[str, Dict[str, Any]] = {}
+    for route in route_details:
+        agency = route["agency"]
+        agency_id = agency.get("agency_id")
+        if agency_id is not None:
+            agency_by_id.setdefault(str(agency_id), agency)
+
+    rail_modes = sorted(
+        {
+            mode
+            for route in rail_route_details
+            for mode in route_label_modes(route)
+        }
+    )
+    if rail_route_details and not rail_modes:
+        rail_modes = ["Rail"]
+
+    return {
+        "number_of_stop_time_references": number_of_references,
+        "unique_trip_count": len(trip_ids),
+        "unique_route_count": len(route_ids),
+        "route_type_counts": dict(sorted(route_type_counts.items())),
+        "service_classification_counts": dict(
+            sorted(service_classification_counts.items())
+        ),
+        "route_examples": route_details[:MAX_RAIL_ROUTE_EXAMPLES],
+        "rail_route_examples": rail_route_details[:MAX_RAIL_ROUTE_EXAMPLES],
+        "agency_examples": [
+            agency_by_id[agency_id]
+            for agency_id in sorted(agency_by_id)[:MAX_RAIL_ROUTE_EXAMPLES]
+        ],
+        "rail_route_ids": [route["route_id"] for route in rail_route_details],
+        "rail_modes_observed": rail_modes,
+        "is_rail_served": bool(rail_route_details),
+    }
+
+
+def candidate_with_service(
+    row: Dict[str, Any],
+    candidate_reasons: Sequence[str],
+    distance_meters: Optional[float],
+    service: Dict[str, Any],
+) -> Dict[str, Any]:
+    candidate = rail_stop_source(row)
+    if candidate is None:
+        candidate = {
+            "stop_id": row.get("stop_id"),
+            "stop_name": None,
+            "location_type": None,
+            "parent_station": None,
+            "lat": None,
+            "lon": None,
+            "platform_code": None,
+        }
+    candidate.update(
+        {
+            "candidate_reasons": list(candidate_reasons),
+            "distance_to_nearest_known_kvb_parent_meters": distance_meters,
+            **service,
+            "excluded_known_adjacent_kvb_parent": (
+                candidate.get("stop_id") in KNOWN_ADJACENT_KVB_PARENT_IDS
+                or candidate.get("parent_station") in KNOWN_ADJACENT_KVB_PARENT_IDS
+            ),
+        }
+    )
+    return candidate
+
+
+def parent_placeholder(parent_id: str) -> Dict[str, Any]:
+    return {
+        "stop_id": parent_id,
+        "stop_name": None,
+        "location_type": None,
+        "parent_station": None,
+        "lat": None,
+        "lon": None,
+        "platform_code": None,
+    }
+
+
+def build_rail_parent_summary(
+    parent_id: str,
+    parent_row: Optional[Dict[str, Any]],
+    child_rows: Sequence[Dict[str, Any]],
+    service_by_stop: Dict[str, Dict[str, Any]],
+    route_rows: Dict[str, Dict[str, Any]],
+    agency_rows: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    children = unique_rows(child_rows)
+    child_ids = [str(row["stop_id"]) for row in children if row.get("stop_id")]
+    child_service = {
+        stop_id: service_summary(
+            [stop_id],
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )
+        for stop_id in child_ids
+    }
+    rail_child_ids = [
+        stop_id
+        for stop_id in child_ids
+        if child_service[stop_id]["is_rail_served"]
+    ]
+    non_rail_child_ids = [
+        stop_id
+        for stop_id in child_ids
+        if not child_service[stop_id]["is_rail_served"]
+        and child_service[stop_id]["unique_route_count"] > 0
+    ]
+    unserved_child_ids = [
+        stop_id
+        for stop_id in child_ids
+        if child_service[stop_id]["unique_route_count"] == 0
+    ]
+    aggregate_ids = child_ids or [parent_id]
+    aggregate_service = service_summary(
+        aggregate_ids,
+        service_by_stop,
+        route_rows,
+        agency_rows,
+    )
+    child_stop_details = []
+    for row in children:
+        stop_id = row.get("stop_id")
+        detail = rail_stop_source(row)
+        if detail is None:
+            continue
+        detail.update(child_service[str(stop_id)])
+        child_stop_details.append(detail)
+
+    rail_route_ids = aggregate_service["rail_route_ids"]
+    rail_route_details = [
+        route_detail(route_id, route_rows, agency_rows)
+        for route_id in rail_route_ids[:MAX_RAIL_ROUTE_EXAMPLES]
+    ]
+    rail_route_type_counts: Dict[str, int] = defaultdict(int)
+    rail_agencies: Dict[str, Dict[str, Any]] = {}
+    for route_id in rail_route_ids:
+        route = route_rows.get(route_id, route_default(route_id))
+        rail_route_type_counts[route_type_key(route.get("route_type"))] += 1
+        agency_id = route.get("agency_id")
+        if agency_id is not None:
+            rail_agencies.setdefault(
+                str(agency_id),
+                agency_source(agency_rows.get(agency_id), agency_id),
+            )
+    return {
+        "parent_stop": rail_stop_source(parent_row) or parent_placeholder(parent_id),
+        "parent_is_location_type_1": location_type_is_station(parent_row or {}),
+        "child_stops": child_stop_details,
+        "rail_served_child_ids": rail_child_ids,
+        "non_rail_child_ids": non_rail_child_ids,
+        "unserved_child_ids": unserved_child_ids,
+        "route_type_counts": aggregate_service["route_type_counts"],
+        "rail_route_type_counts": dict(sorted(rail_route_type_counts.items())),
+        "route_label_examples": rail_route_details,
+        "agency_examples": [
+            rail_agencies[agency_id]
+            for agency_id in sorted(rail_agencies)[:MAX_RAIL_ROUTE_EXAMPLES]
+        ],
+        "rail_route_ids": rail_route_ids,
+        "rail_modes_observed": aggregate_service["rail_modes_observed"],
+        "number_of_stop_time_references": aggregate_service[
+            "number_of_stop_time_references"
+        ],
+        "unique_trip_count": aggregate_service["unique_trip_count"],
+        "unique_route_count": aggregate_service["unique_route_count"],
+        "is_known_adjacent_kvb_parent": parent_id in KNOWN_ADJACENT_KVB_PARENT_IDS,
+    }
+
+
+def inspect_hbf_rail_zip(archive: zipfile.ZipFile) -> Dict[str, Any]:
+    """Run the local-only Hbf railway identity diagnostic."""
+    population = collect_hbf_rail_stop_population(archive)
+    candidate_rows = population["candidate_rows"]
+    parent_rows = dict(population["parent_rows"])
+    candidate_rows_by_id = {
+        str(row["stop_id"]): row
+        for row in candidate_rows
+        if row.get("stop_id")
+    }
+    for stop_id, row in candidate_rows_by_id.items():
+        parent_rows.setdefault(stop_id, row)
+
+    children_by_parent = population["children_by_parent"]
+    analysis_stop_ids = {
+        str(row["stop_id"])
+        for row in candidate_rows
+        if row.get("stop_id")
+    }
+    for children in children_by_parent.values():
+        analysis_stop_ids.update(
+            str(row["stop_id"])
+            for row in children
+            if row.get("stop_id")
+        )
+
+    service_by_stop, route_rows, agency_rows = collect_hbf_rail_service_evidence(
+        archive,
+        sorted(analysis_stop_ids),
+    )
+
+    candidate_details = []
+    rail_served_candidate_ids: List[str] = []
+    for row in candidate_rows:
+        stop_id = str(row["stop_id"])
+        detail = candidate_with_service(
+            row,
+            population["candidate_reasons"].get(stop_id, []),
+            population["candidate_distances"].get(stop_id),
+            service_summary(
+                [stop_id],
+                service_by_stop,
+                route_rows,
+                agency_rows,
+            ),
+        )
+        candidate_details.append(detail)
+        if detail["is_rail_served"]:
+            rail_served_candidate_ids.append(stop_id)
+
+    # A rail-served child points to its parent station. An explicitly
+    # station-typed/direct rail stop can stand in as its own parent only when
+    # GTFS has no parent_station value; this is still service/topology evidence,
+    # never coordinate-only selection.
+    rail_parent_ids: Set[str] = set()
+    rail_service_stop_ids: Set[str] = set()
+    for stop_id, service in service_by_stop.items():
+        if not service_summary(
+            [stop_id],
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )["is_rail_served"]:
+            continue
+        row = candidate_rows_by_id.get(stop_id)
+        if row is None:
+            row = next(
+                (
+                    child
+                    for children in children_by_parent.values()
+                    for child in children
+                    if child.get("stop_id") == stop_id
+                ),
+                None,
+            )
+        if row is None:
+            continue
+        rail_service_stop_ids.add(stop_id)
+        parent_id = row.get("parent_station")
+        rail_parent_ids.add(str(parent_id) if parent_id else stop_id)
+
+    # A parent can be surfaced by a rail-served sibling even when the initial
+    # area/name candidate itself has only Stadtbahn or bus service.
+    for parent_id, children in children_by_parent.items():
+        child_ids = [str(row["stop_id"]) for row in children if row.get("stop_id")]
+        child_summary = service_summary(
+            child_ids,
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )
+        if child_summary["is_rail_served"]:
+            rail_parent_ids.add(parent_id)
+
+    excluded_parent_ids = sorted(
+        rail_parent_ids.intersection(KNOWN_ADJACENT_KVB_PARENT_IDS)
+    )
+    plausible_parent_ids = sorted(
+        rail_parent_ids.difference(KNOWN_ADJACENT_KVB_PARENT_IDS)
+    )
+
+    known_parent_summaries = [
+        build_rail_parent_summary(
+            parent_id,
+            population["known_parent_rows"].get(parent_id)
+            or parent_rows.get(parent_id),
+            children_by_parent.get(parent_id, []),
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )
+        for parent_id in KNOWN_ADJACENT_KVB_PARENT_IDS
+    ]
+
+    plausible_parent_summaries = [
+        build_rail_parent_summary(
+            parent_id,
+            parent_rows.get(parent_id),
+            children_by_parent.get(parent_id, []),
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )
+        for parent_id in plausible_parent_ids
+    ]
+
+    excluded_parent_summaries = [
+        build_rail_parent_summary(
+            parent_id,
+            population["known_parent_rows"].get(parent_id)
+            or parent_rows.get(parent_id),
+            children_by_parent.get(parent_id, []),
+            service_by_stop,
+            route_rows,
+            agency_rows,
+        )
+        for parent_id in excluded_parent_ids
+    ]
+
+    if not candidate_details:
+        classification = "HBF_RAIL_MAPPING_NOT_FOUND"
+        classification_reason = (
+            "no Köln Hbf-relevant name candidate or stop within the bounded "
+            "central-station radius was found"
+        )
+    elif len(plausible_parent_summaries) > 1:
+        classification = "HBF_RAIL_MAPPING_AMBIGUOUS"
+        classification_reason = (
+            "multiple non-excluded rail parent candidates remain; no parent was selected"
+        )
+    elif len(plausible_parent_summaries) == 1:
+        selected_summary = plausible_parent_summaries[0]
+        if population["candidate_population_truncated"]:
+            classification = "HBF_RAIL_EVIDENCE_INSUFFICIENT"
+            classification_reason = (
+                "the bounded candidate population was truncated, so deterministic "
+                "single-parent resolution is disabled"
+            )
+        elif not selected_summary["rail_served_child_ids"] and not (
+            selected_summary["parent_stop"].get("stop_id") in rail_service_stop_ids
+        ):
+            classification = "HBF_RAIL_EVIDENCE_INSUFFICIENT"
+            classification_reason = "the proposed parent has no retained rail-served stop"
+        else:
+            classification = "HBF_RAIL_MAPPING_RESOLVED"
+            classification_reason = (
+                "one non-excluded parent has source-backed rail service and consistent "
+                "static parent/child topology"
+            )
+    elif rail_service_stop_ids or excluded_parent_summaries:
+        classification = "HBF_RAIL_EVIDENCE_INSUFFICIENT"
+        classification_reason = (
+            "rail service evidence is present only on excluded adjacent KVB parents "
+            "or lacks a non-excluded parent topology"
+        )
+    else:
+        classification = "HBF_RAIL_EVIDENCE_INSUFFICIENT"
+        classification_reason = (
+            "bounded Hbf-area candidates were found, but no source-backed S-Bahn, "
+            "regional-rail, or rail route evidence was associated with them"
+        )
+
+    selected_parent = (
+        plausible_parent_summaries[0]
+        if classification == "HBF_RAIL_MAPPING_RESOLVED"
+        else None
+    )
+    report: Dict[str, Any] = {
+        "diagnostic_mode": "HBF_RAIL_IDENTITY",
+        "known_adjacent_kvb_parents": list(KNOWN_ADJACENT_KVB_PARENT_IDS),
+        "known_adjacent_kvb_parent_details": [
+            {
+                "parent_stop": summary["parent_stop"],
+                "child_stops": summary["child_stops"],
+                "rail_served_child_ids": summary["rail_served_child_ids"],
+                "non_rail_child_ids": summary["non_rail_child_ids"],
+                "unserved_child_ids": summary["unserved_child_ids"],
+                "route_type_counts": summary["route_type_counts"],
+                "route_label_examples": summary["route_label_examples"],
+                "agency_examples": summary["agency_examples"],
+                "rail_modes_observed": summary["rail_modes_observed"],
+            }
+            for summary in known_parent_summaries
+        ],
+        "central_station_radius_meters": HBF_RAIL_RADIUS_METERS,
+        "central_station_anchor_parents": [
+            rail_stop_source(row) for row in population["anchors"]
+        ],
+        "coordinate_evidence": (
+            "supporting only; rail identity requires stop_times/trips/routes "
+            "service and parent/child topology"
+        ),
+        "candidate_count": len(candidate_details),
+        "candidate_population_source_count": population["candidate_total_before_limit"],
+        "candidate_population_truncated": population["candidate_population_truncated"],
+        "candidates": candidate_details,
+        "rail_served_candidate_count": len(rail_served_candidate_ids),
+        "rail_served_candidate_ids": sorted(rail_served_candidate_ids),
+        "excluded_known_adjacent_kvb_parent_ids_with_rail_evidence": excluded_parent_ids,
+        "plausible_rail_parent_count": len(plausible_parent_summaries),
+        "plausible_rail_parents": plausible_parent_summaries,
+        "excluded_adjacent_kvb_parent_service_summaries": excluded_parent_summaries,
+        "classification": classification,
+        "classification_reason": classification_reason,
+        "network_requests_made": 0,
+    }
+    if selected_parent is not None:
+        selected_stop = selected_parent["parent_stop"]
+        report.update(
+            {
+                "selected_rail_parent_station_id": selected_stop.get("stop_id"),
+                "selected_rail_parent_stop_name": selected_stop.get("stop_name"),
+                "resolved_rail_child_stop_ids": selected_parent[
+                    "rail_served_child_ids"
+                ],
+                "rail_modes_observed": selected_parent["rail_modes_observed"],
+                "route_examples": selected_parent["route_label_examples"],
+            }
+        )
+    else:
+        report.update(
+            {
+                "selected_rail_parent_station_id": None,
+                "selected_rail_parent_stop_name": None,
+                "resolved_rail_child_stop_ids": [],
+                "rail_modes_observed": [],
+                "route_examples": [],
+            }
+        )
+    return report
 
 
 def resolve_station(
@@ -1007,6 +1854,14 @@ def build_parser() -> argparse.ArgumentParser:
             "matching fails; local-only and never combined with realtime verification"
         ),
     )
+    local_parser.add_argument(
+        "--rail-diagnostic",
+        action="store_true",
+        help=(
+            "run the bounded local-only Köln Hbf railway identity diagnostic "
+            "through stops, stop_times, trips, routes, and agency"
+        ),
+    )
 
     download_parser = subparsers.add_parser(
         "download-and-inspect",
@@ -1034,6 +1889,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error(
                 "--diagnostic-candidates applies only to the Köln Hbf station"
             )
+        if args.rail_diagnostic and args.station != "hbf":
+            parser.error("--rail-diagnostic requires --station hbf")
+        if args.rail_diagnostic and args.verify_realtime:
+            parser.error(
+                "--rail-diagnostic is local-only and cannot be combined with "
+                "--verify-realtime"
+            )
+        if args.rail_diagnostic and args.diagnostic_candidates:
+            parser.error(
+                "--rail-diagnostic cannot be combined with --diagnostic-candidates"
+            )
 
     station_specs = STATIONS
     if args.mode == "inspect-local" and args.station != "all":
@@ -1049,6 +1915,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 {
                     "probe_name": PROBE_NAME,
                     "mode": args.mode,
+                    "diagnostic_mode": (
+                        "HBF_RAIL_IDENTITY" if args.rail_diagnostic else None
+                    ),
                     "static_zip_path": str(static_path),
                     "aggregate_classification": "INCONCLUSIVE",
                     "error": "local GTFS ZIP not found",
@@ -1074,6 +1943,45 @@ def main(argv: Optional[List[str]] = None) -> int:
                 }
             )
             return 1
+
+    if args.mode == "inspect-local" and args.rail_diagnostic:
+        try:
+            with zipfile.ZipFile(str(static_path), "r") as archive:
+                rail_report = inspect_hbf_rail_zip(archive)
+        except (
+            OSError,
+            zipfile.BadZipFile,
+            UnicodeError,
+            csv.Error,
+            ValueError,
+            FileNotFoundError,
+            KeyError,
+        ) as error:
+            rail_report = {
+                "diagnostic_mode": "HBF_RAIL_IDENTITY",
+                "classification": "INCONCLUSIVE",
+                "classification_reason": clean_error(error),
+                "network_requests_made": 0,
+                "error": clean_error(error),
+            }
+        rail_output = {
+            "probe_name": PROBE_NAME,
+            "mode": args.mode,
+            "source_static_url": STATIC_URL,
+            "static_zip_path": str(static_path),
+            "station_filter": "hbf",
+            "rail_diagnostic_requested": True,
+            "realtime_verification_requested": False,
+            "realtime_verification": None,
+            "interpretation": (
+                "GTFS.de static rail identity evidence is kept separate from the "
+                "project's VRS/go.Rheinland static feed; known adjacent KVB parents "
+                "are not promoted to railway Köln Hbf."
+            ),
+            **rail_report,
+        }
+        json_line(rail_output)
+        return 0 if rail_report.get("classification") != "INCONCLUSIVE" else 1
 
     station_results, inspection_error = inspect_zip(
         static_path,
