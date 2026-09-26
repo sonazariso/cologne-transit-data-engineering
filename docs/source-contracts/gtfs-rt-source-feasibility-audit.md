@@ -1,6 +1,6 @@
 # GTFS-Realtime Source Feasibility Audit
 
-**Status:** `CURRENT-FEED INVENTORY COMPLETE — STATIC IDENTITY BRIDGE REQUIRED BEFORE LIFECYCLE`
+**Status:** `LIFECYCLE VALIDATION IN PROGRESS — NEUMARKT SAMPLE #1 RECORDED`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
 **APPROVED**; Stage 3 — **NEXT / NOT STARTED**  
 **Validation type:** bounded, read-only source-feasibility audit  
@@ -88,8 +88,9 @@ the same as the project's current VRS/go.Rheinland static source.
 
 The current-feed inventory was successfully executed on the host. The separate
 [GTFS.de static identity bridge audit](gtfsde-static-identity-bridge-audit.md)
-is required before a station lifecycle run because the realtime feed uses a
-numeric stop-ID namespace rather than the project's legacy VRS IFOPT prefixes.
+resolved Köln Neumarkt through exact GTFS.de IDs, enabling the first Neumarkt
+lifecycle sample. Köln Hbf railway identity remains unresolved, so the bridge
+is still partial and Hbf lifecycle validation remains pending.
 
 ## 6. GTFS-RT semantic guardrails
 
@@ -226,6 +227,15 @@ only. It does not fall back to the legacy VRS IFOPT prefix. The older
 `--station hbf` / `--station neumarkt` form remains available for explicitly
 legacy-prefix-based discovery, but is not a substitute for the bridge.
 
+The optional `--min-abs-initial-delay-seconds N` filter defaults to `0`, which
+preserves the existing selection behavior. When `N` is positive, an otherwise
+suitable ARRIVAL candidate must use its source-reported `arrival.delay`, and a
+DEPARTURE candidate must use its source-reported `departure.delay`; the
+absolute value must be at least `N`. A missing source delay does not satisfy a
+positive threshold, and the script never derives a delay by subtracting event
+timestamps. If no otherwise suitable candidate meets the threshold, the
+lifecycle result is `NO_SUITABLE_TARGET` rather than a zero-delay fallback.
+
 The selected identity preserves the feed entity ID, trip ID, route ID,
 direction ID, start date/time, trip relationship, stop ID, stop sequence, and
 arrival/departure context when available. The script never replaces the target
@@ -237,6 +247,13 @@ minutes relative to the selected initial event time. The maximum is seven HTTP
 attempts including discovery. A checkpoint already in the past is marked
 `SKIPPED_ALREADY_PAST` without an extra request. One lifecycle run may take
 approximately 20–50 minutes depending on target selection.
+
+When `--static-gtfs` is supplied, the local ZIP scan and compatibility
+calculation are deferred until after the realtime checkpoint loop. This keeps
+large local ZIP processing off the discovery-to-checkpoint critical path. The
+per-observation `scheduled_comparison` reports
+`STATIC_COMPARISON_DEFERRED_UNTIL_AFTER_LIFECYCLE`; the final JSON summary
+contains the unchanged static compatibility classification and measurements.
 
 For the same target, lifecycle analysis records first/last/minimum/maximum
 reported event time, distinct times, changes, first past observation, post-
@@ -274,6 +291,11 @@ classification is based on the measurements:
 - `INCONCLUSIVE`: the ZIP/feed evidence cannot support a classification.
 
 The measurements, not the label alone, are the compatibility result.
+
+For lifecycle mode, supplying `--static-gtfs` does not delay discovery or
+checkpoint scheduling: static compatibility is calculated only after the last
+realtime observation. This changes the timing of the local diagnostic work, not
+the compatibility measurements or classification.
 
 ## 14. Cancellation, SKIPPED, and NO_DATA semantics
 
@@ -364,6 +386,8 @@ raw_temp_directory: <temporary path>
 
 lifecycle_classification: <one allowed lifecycle classification>
 collector_implication: <evidence-based wording only>
+initial_source_reported_delay_seconds: <selected event's source-reported delay or null>
+minimum_required_initial_delay_seconds: <configured threshold>
 ```
 
 Lifecycle semantic classification is separate from lifecycle classification:
@@ -378,30 +402,30 @@ to explicit actual semantics.
 
 ## 21. Status / next action
 
-Current-feed inventory is complete from the supplied host evidence. The next
-action is to resolve the two GTFS.de station identities from the host terminal;
-the large static ZIP is downloaded only by explicit host execution:
+Current-feed inventory is complete from the supplied host evidence, and
+lifecycle validation is **IN PROGRESS**. One Neumarkt lifecycle sample has
+been recorded; this does not complete S18 or establish provider-wide evidence.
+The next host action is a second Neumarkt lifecycle using a positive
+source-reported-delay threshold. It must not include `--static-gtfs`, because
+static compatibility has already been validated for this target and local ZIP
+scanning must not delay lifecycle checkpoints:
 
 ```bash
 cd /Users/admin/Documents/cologne-transit-intelligence
-python3 -m pip install -r scripts/requirements-gtfs-rt-audit.txt
-python3 scripts/gtfsde_static_identity_bridge_probe.py \
-  download-and-inspect \
-  --verify-realtime
-```
-
-Only after reviewing the bridge output should the operator run S18 lifecycle
-with the resolved exact IDs, one station at a time if appropriate:
-
-```bash
 python3 scripts/gtfs_rt_feasibility_probe.py lifecycle \
-  --station-name "Köln Hbf" \
-  --stop-id <resolved_gtfsde_stop_id>
+  --station-name "Köln Neumarkt" \
+  --stop-id 106842 \
+  --stop-id 207108 \
+  --stop-id 441164 \
+  --stop-id 581903 \
+  --stop-id 96309 \
+  --min-abs-initial-delay-seconds 60
 ```
 
 No GTFS-RT production approval, architecture change, Stage 3 start, MDD
 collector change, database change, Power BI change, or final architectural
-decision is made before host evidence exists.
+decision is made before the lifecycle evidence is complete. Do not run the
+command automatically from repository validation.
 
 ## 22. Observed current-feed inventory evidence
 
@@ -441,7 +465,40 @@ establish that GTFS.de never provides either. The zero legacy-prefix result is
 classified as `COLOGNE_IDENTITY_NOT_MAPPED_TO_GTFSDE_NAMESPACE`, not as proof
 that Cologne is absent.
 
-## 23. Historical station identity caveat
+## 23. Observed lifecycle sample #1 — Köln Neumarkt
+
+One bounded GTFS-Realtime lifecycle run completed successfully for Köln
+Neumarkt on 2026-09-26. This is one lifecycle sample and is not provider-wide
+evidence.
+
+| Observation | Value |
+|---|---|
+| Station | Köln Neumarkt |
+| Target trip | `386408` |
+| Target stop | `581903` |
+| Target stop sequence | `20` |
+| Event context | `ARRIVAL` |
+| Scheduled/static time | `17:31` local |
+| Initial GTFS-RT reported time | `17:31` local |
+| Initial `gtfs_rt_arrival_delay_seconds` | `0` |
+| Initial `gtfs_rt_departure_delay_seconds` | `0` |
+| Initial source-reported delay | `0` seconds |
+| Lifecycle visibility | Target remained visible through T+30 |
+| Event timestamp evolution | Unchanged across the lifecycle observations |
+| Lifecycle classification | `TARGET_RETAINED_POST_EVENT_TIME_UNCHANGED` |
+| Semantic classification | `NO_EXPLICIT_ACTUAL_SEMANTIC_OBSERVED` |
+| Cancellation / `SKIPPED` / `NO_DATA` | None observed for this target |
+| Static identity compatibility | `STATIC_IDENTITY_HIGH_COMPATIBILITY` |
+| Static compatibility evidence | `241` relevant realtime updates; `241` exact trip-ID matches; `241` exact stop-ID matches; `241` consistent stop-sequence matches |
+| Realtime `route_id` | Absent |
+| Static identity resolution | `trip_id` resolved through the static GTFS |
+
+The stable reported timestamp and zero source-reported delay do not establish
+actual arrival. `StopTimeEvent.time` remains `ESTIMATED_OR_ACTUAL`, and the
+semantic classification is intentionally unchanged. Lifecycle validation is
+**IN PROGRESS**, not complete.
+
+## 24. Historical station identity caveat
 
 If S19 historical GTFS-Realtime availability tooling is added later, current
 GTFS.de stop IDs must not automatically be projected three or six months into

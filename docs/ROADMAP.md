@@ -48,9 +48,10 @@ execution pending and does not reopen Stage 02.
 
 The [GTFS-RT Source Feasibility Audit](source-contracts/gtfs-rt-source-feasibility-audit.md)
 is a separate post-Stage-02 validation. Its current-feed inventory is complete
-from supplied host evidence; the [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
-is still **HOST EXECUTION PENDING** before lifecycle discovery. It does not
-reopen Stage 02 or start Stage 3.
+from supplied host evidence, and lifecycle validation is **IN PROGRESS** after
+one recorded Köln Neumarkt sample. The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
+remains partial because railway Köln Hbf is unresolved. It does not reopen
+Stage 02 or start Stage 3.
 
 ## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is

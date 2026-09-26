@@ -130,6 +130,8 @@ class Target:
     initial_event_seconds: int
     stop_id_selection_mode: str
     requested_gtfsde_stop_ids: tuple[str, ...]
+    initial_source_reported_delay_seconds: Optional[int] = None
+    minimum_required_initial_delay_seconds: int = 0
 
 
 @dataclass
@@ -176,6 +178,16 @@ def epoch_to_iso(seconds: Optional[int]) -> Optional[str]:
 
 def round_number(value: float) -> float:
     return round(value, 3)
+
+
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be greater than or equal to zero")
+    return parsed
 
 
 def clean_error(exc: BaseException) -> str:
@@ -1130,6 +1142,7 @@ def select_target(
     station: StationConfig,
     discovery_timestamp: datetime,
     explicit_gtfsde_stop_ids: Optional[set[str]] = None,
+    min_abs_initial_delay_seconds: int = 0,
 ) -> Optional[Target]:
     discovery_seconds = discovery_timestamp.timestamp()
     arrival_candidates: list[tuple[float, TripUpdateRecord, StopTimeRecord, str]] = []
@@ -1152,6 +1165,12 @@ def select_target(
                 ("DEPARTURE", stop.departure, departure_candidates),
             ):
                 if event.time_seconds is None:
+                    continue
+                source_reported_delay = event.delay_seconds
+                if min_abs_initial_delay_seconds > 0 and (
+                    source_reported_delay is None
+                    or abs(source_reported_delay) < min_abs_initial_delay_seconds
+                ):
                     continue
                 delta = event.time_seconds - discovery_seconds
                 if 8 * 60 <= delta <= 25 * 60:
@@ -1200,6 +1219,12 @@ def select_target(
         identity=identity,
         event_context=context,
         initial_event_seconds=event_seconds,
+        initial_source_reported_delay_seconds=(
+            stop.arrival.delay_seconds
+            if context == "ARRIVAL"
+            else stop.departure.delay_seconds
+        ),
+        minimum_required_initial_delay_seconds=min_abs_initial_delay_seconds,
         stop_id_selection_mode=(
             "EXPLICIT_GTFSDE_STOP_IDS"
             if explicit_gtfsde_stop_ids is not None
@@ -1375,6 +1400,29 @@ def static_scheduled_comparison(
     }
 
 
+def deferred_static_scheduled_comparison(
+    target: Optional[Target],
+    static_gtfs_requested: bool,
+) -> dict[str, Any]:
+    """Describe why per-observation static comparison is not yet available."""
+
+    if not static_gtfs_requested:
+        return {
+            "status": "LOCAL_STATIC_COMPATIBILITY_NOT_TESTED",
+            "trip_id": target.identity.get("trip_id") if target else None,
+            "stop_id": target.identity.get("stop_id") if target else None,
+            "event_context": target.event_context if target else None,
+        }
+    return {
+        "status": "STATIC_COMPARISON_DEFERRED_UNTIL_AFTER_LIFECYCLE",
+        "trip_id": target.identity.get("trip_id") if target else None,
+        "stop_id": target.identity.get("stop_id") if target else None,
+        "event_context": target.event_context if target else None,
+        "static_gtfs_path": None,
+        "note": "Local static GTFS compatibility is computed after all realtime lifecycle observations.",
+    }
+
+
 def feed_header_fields(analysis: FeedAnalysis) -> dict[str, Any]:
     return {
         "feed_header_timestamp_utc": analysis.summary.get("feed_header_timestamp_utc"),
@@ -1393,6 +1441,7 @@ def make_observation_snapshot(
     static_comparison: Optional[dict[str, Any]],
     observation_status: str = "OBSERVED",
     error_message: Optional[str] = None,
+    minimum_required_initial_delay_seconds: int = 0,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "probe_name": PROBE_NAME,
@@ -1414,6 +1463,14 @@ def make_observation_snapshot(
         "target_identity": target.identity if target else None,
         "matched_target_identity": matched_identity(target, evaluation) if target and evaluation else None,
         "event_context": target.event_context if target else None,
+        "initial_source_reported_delay_seconds": (
+            target.initial_source_reported_delay_seconds if target else None
+        ),
+        "minimum_required_initial_delay_seconds": (
+            target.minimum_required_initial_delay_seconds
+            if target
+            else minimum_required_initial_delay_seconds
+        ),
         "scheduled_comparison": static_comparison,
         "gtfs_rt_arrival_time_utc": None,
         "gtfs_rt_arrival_delay_seconds": None,
@@ -1866,6 +1923,7 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
     successful_http_200_count = 0
     parse_success_count = 0
     discovery_failed = False
+    static: Optional[StaticGTFSIndex] = None
     static_result: dict[str, Any] = {
         "static_compatibility_classification": (
             "LOCAL_STATIC_COMPATIBILITY_NOT_TESTED"
@@ -1885,17 +1943,6 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
     if discovery_feed is not None and discovery_parse_error is None:
         parse_success_count += 1
         discovery_analysis = analyze_feed(discovery_feed, discovery_fetch.request_timestamp)
-        static, static_error = load_static_gtfs(
-            args.static_gtfs,
-            relevant_static_trip_ids(discovery_analysis, explicit_gtfsde_stop_ids),
-        )
-        static_result = compute_static_compatibility(
-            discovery_analysis,
-            static,
-            static_error,
-            explicit_gtfsde_stop_ids=explicit_gtfsde_stop_ids,
-            explicit_station=station,
-        )
     else:
         discovery_analysis = None
         discovery_failed = True
@@ -1907,6 +1954,7 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
             station,
             discovery_fetch.request_timestamp,
             explicit_gtfsde_stop_ids,
+            args.min_abs_initial_delay_seconds,
         )
         if discovery_analysis is not None
         else None
@@ -1917,13 +1965,10 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         explicit_gtfsde_stop_ids,
         target,
     )
-    if target is not None:
-        static_comparison = static_scheduled_comparison(static, target)
-    else:
-        static_comparison = {
-            "status": static_result.get("static_compatibility_classification"),
-            "event_context": None,
-        }
+    static_comparison = deferred_static_scheduled_comparison(
+        target,
+        static_gtfs_requested=args.static_gtfs is not None,
+    )
 
     discovery_evaluation = (
         resolve_target(discovery_analysis, target)
@@ -1940,6 +1985,7 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         evaluation=discovery_evaluation,
         static_comparison=static_comparison,
         error_message=discovery_parse_error,
+        minimum_required_initial_delay_seconds=args.min_abs_initial_delay_seconds,
     )
     json_line(discovery_snapshot)
 
@@ -1998,6 +2044,22 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
             if analysis is not None and evaluation is not None:
                 tracker.observe(observation_index, fetch_result.request_timestamp, evaluation)
 
+    # A large local static ZIP must not delay target discovery or any realtime
+    # lifecycle checkpoint. Preserve the existing compatibility calculation, but
+    # perform it only after all scheduled realtime observations are complete.
+    if discovery_analysis is not None:
+        static, static_error = load_static_gtfs(
+            args.static_gtfs,
+            relevant_static_trip_ids(discovery_analysis, explicit_gtfsde_stop_ids),
+        )
+        static_result = compute_static_compatibility(
+            discovery_analysis,
+            static,
+            static_error,
+            explicit_gtfsde_stop_ids=explicit_gtfsde_stop_ids,
+            explicit_station=station,
+        )
+
     tracker_summary = tracker.summary() if tracker is not None else {
         "first_reported_event_time": None,
         "last_reported_event_time": None,
@@ -2049,6 +2111,10 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         "selected_target_identity": target.identity if target else None,
         "initial_event_time": epoch_to_iso(target.initial_event_seconds) if target else None,
         "initial_event_context": target.event_context if target else None,
+        "initial_source_reported_delay_seconds": (
+            target.initial_source_reported_delay_seconds if target else None
+        ),
+        "minimum_required_initial_delay_seconds": args.min_abs_initial_delay_seconds,
         **tracker_summary,
         "lifecycle_classification": classification,
         "actual_time_semantic_classification": actual_semantic_classification,
@@ -2056,6 +2122,11 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         "static_compatibility_measurements": static_result.get("static_compatibility_measurements", {}),
         "static_gtfs_path": static_result.get("static_gtfs_path"),
         "static_gtfs_error": static_result.get("static_gtfs_error"),
+        "scheduled_comparison": (
+            static_scheduled_comparison(static, target)
+            if target is not None
+            else None
+        ),
         "raw_temp_directory": str(raw_directory) if raw_directory else None,
         "collector_implication": collector_implication(
             classification,
@@ -2110,6 +2181,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--static-gtfs",
         metavar="/absolute/path/to/gtfs.zip",
         help="optional local static GTFS ZIP; it is read but never modified or downloaded",
+    )
+    lifecycle_parser.add_argument(
+        "--min-abs-initial-delay-seconds",
+        type=non_negative_int,
+        default=0,
+        metavar="N",
+        help=(
+            "require the selected arrival/departure event's source-reported "
+            "GTFS-RT delay to have absolute value at least N seconds (default: 0)"
+        ),
     )
     return parser
 
