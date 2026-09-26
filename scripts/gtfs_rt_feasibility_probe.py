@@ -42,12 +42,23 @@ MAX_ERROR_LENGTH = 240
 class StationConfig:
     key: str
     display_name: str
-    stop_prefix: str
+    legacy_ifopt_prefix: str
+
+    @property
+    def stop_prefix(self) -> str:
+        """Backward-compatible access for the legacy static-compatibility code."""
+
+        return self.legacy_ifopt_prefix
 
 
 STATIONS = {
     "hbf": StationConfig("hbf", "Köln Hbf", "de:05315:11201"),
     "neumarkt": StationConfig("neumarkt", "Köln Neumarkt", "de:05315:11111"),
+}
+
+
+STATION_NAME_KEYS = {
+    station.display_name.casefold(): station.key for station in STATIONS.values()
 }
 
 
@@ -117,6 +128,8 @@ class Target:
     identity: dict[str, Any]
     event_context: str
     initial_event_seconds: int
+    stop_id_selection_mode: str
+    requested_gtfsde_stop_ids: tuple[str, ...]
 
 
 @dataclass
@@ -327,12 +340,18 @@ def field_descriptor(message: Any, field_name: str) -> Any:
     return descriptor.fields_by_name.get(field_name)
 
 
+def descriptor_is_repeated(field: Any) -> bool:
+    """Use the protobuf 6 repeated-field descriptor property."""
+
+    is_repeated = getattr(field, "is_repeated", None)
+    return bool(is_repeated) if is_repeated is not None else False
+
+
 def field_is_present(message: Any, field_name: str) -> bool:
     field = field_descriptor(message, field_name)
     if field is None:
         return False
-    repeated_label = getattr(field, "LABEL_REPEATED", 3)
-    if field.label == repeated_label:
+    if descriptor_is_repeated(field):
         try:
             return len(getattr(message, field_name)) > 0
         except (AttributeError, TypeError):
@@ -357,8 +376,7 @@ def get_repeated(message: Any, field_name: str) -> list[Any]:
     field = field_descriptor(message, field_name)
     if field is None:
         return []
-    repeated_label = getattr(field, "LABEL_REPEATED", 3)
-    if field.label != repeated_label:
+    if not descriptor_is_repeated(field):
         return []
     try:
         return list(getattr(message, field_name))
@@ -508,12 +526,24 @@ def station_match_summary(
 ) -> dict[str, Any]:
     return {
         "station_display_name": station.display_name,
-        "stop_prefix": station.stop_prefix,
+        "legacy_ifopt_prefix": station.legacy_ifopt_prefix,
+        "stop_prefix": station.legacy_ifopt_prefix,
         "count": len(exact_ids | child_ids),
         "exact_parent_count": len(exact_ids),
         "child_prefix_count": len(child_ids),
         "exact_stop_id_examples": capped_sorted(exact_ids),
         "child_stop_id_examples": capped_sorted(child_ids),
+    }
+
+
+def unmapped_gtfsde_station_identity(station: StationConfig) -> dict[str, Any]:
+    return {
+        "status": "COLOGNE_IDENTITY_NOT_MAPPED_TO_GTFSDE_NAMESPACE",
+        "station_display_name": station.display_name,
+        "resolved_stop_ids": [],
+        "exact_match_count": 0,
+        "matching_trip_update_count": 0,
+        "source": "no_explicit_gtfsde_stop_ids_supplied",
     }
 
 
@@ -733,11 +763,11 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> FeedAnalysis:
     cologne_trip_update_count = len(hbf_trip_indices | neumarkt_trip_indices)
     cologne_evidence_types: list[str] = []
     if hbf_trip_indices:
-        cologne_evidence_types.append("HBF_TRIP_UPDATE_STOP_ID_PREFIX")
+        cologne_evidence_types.append("HBF_LEGACY_IFOPT_PREFIX_TRIP_UPDATE")
     if neumarkt_trip_indices:
-        cologne_evidence_types.append("NEUMARKT_TRIP_UPDATE_STOP_ID_PREFIX")
+        cologne_evidence_types.append("NEUMARKT_LEGACY_IFOPT_PREFIX_TRIP_UPDATE")
     if alert_station_stop_ids:
-        cologne_evidence_types.append("SERVICE_ALERT_STOP_ID_PREFIX")
+        cologne_evidence_types.append("SERVICE_ALERT_LEGACY_IFOPT_PREFIX")
 
     summary = {
         "gtfs_realtime_version": gtfs_realtime_version,
@@ -785,8 +815,18 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> FeedAnalysis:
         "stop_id_examples": capped_sorted(stop_ids),
         "hbf_stop_id_matches": hbf_match_summary,
         "neumarkt_stop_id_matches": neumarkt_match_summary,
+        "legacy_ifopt_prefix_match": {
+            "hbf": hbf_match_summary,
+            "neumarkt": neumarkt_match_summary,
+        },
+        "gtfsde_station_identity_match": {
+            "hbf": unmapped_gtfsde_station_identity(STATIONS["hbf"]),
+            "neumarkt": unmapped_gtfsde_station_identity(STATIONS["neumarkt"]),
+        },
         "hbf_trip_update_count": len(hbf_trip_indices),
         "neumarkt_trip_update_count": len(neumarkt_trip_indices),
+        "hbf_legacy_ifopt_trip_update_count": len(hbf_trip_indices),
+        "neumarkt_legacy_ifopt_trip_update_count": len(neumarkt_trip_indices),
         "cologne_trip_update_count": cologne_trip_update_count,
         "cologne_evidence_types": cologne_evidence_types,
         "alert_count": alert_entity_count,
@@ -868,11 +908,21 @@ def load_static_gtfs(path_text: Optional[str], relevant_trip_ids: set[str]) -> t
     )
 
 
-def relevant_static_trip_ids(analysis: FeedAnalysis) -> set[str]:
+def relevant_static_trip_ids(
+    analysis: FeedAnalysis,
+    explicit_gtfsde_stop_ids: Optional[set[str]] = None,
+) -> set[str]:
     trip_ids: set[str] = set()
     relevant_indices = set()
-    for indices in analysis.station_trip_record_indices.values():
-        relevant_indices.update(indices)
+    if explicit_gtfsde_stop_ids is None:
+        for indices in analysis.station_trip_record_indices.values():
+            relevant_indices.update(indices)
+    else:
+        relevant_indices.update(
+            record_index
+            for record_index, record in enumerate(analysis.trip_records)
+            if any(stop.stop_id in explicit_gtfsde_stop_ids for stop in record.stops)
+        )
     for index in relevant_indices:
         trip_id = analysis.trip_records[index].trip.get("trip_id")
         if trip_id:
@@ -891,14 +941,18 @@ def has_static_parent_reference(static: StaticGTFSIndex, station: StationConfig)
 
 def static_stop_match_kind(
     static: StaticGTFSIndex,
-    station: StationConfig,
+    station: Optional[StationConfig],
     stop_id: Optional[str],
 ) -> str:
     if not stop_id:
         return "NOT_TESTABLE_MISSING_STOP_ID"
     if stop_id in static.stops:
         return "EXACT"
-    if station_match_type(stop_id, station) and has_static_parent_reference(static, station):
+    if (
+        station is not None
+        and station_match_type(stop_id, station)
+        and has_static_parent_reference(static, station)
+    ):
         return "PARENT_PREFIX_ONLY"
     return "NOT_FOUND"
 
@@ -907,6 +961,8 @@ def compute_static_compatibility(
     analysis: FeedAnalysis,
     static: Optional[StaticGTFSIndex],
     static_error: Optional[str],
+    explicit_gtfsde_stop_ids: Optional[set[str]] = None,
+    explicit_station: Optional[StationConfig] = None,
 ) -> dict[str, Any]:
     if static is None:
         classification = (
@@ -922,14 +978,30 @@ def compute_static_compatibility(
         }
 
     relevant_indices: set[int] = set()
-    for indices in analysis.station_trip_record_indices.values():
-        relevant_indices.update(indices)
+    if explicit_gtfsde_stop_ids is None:
+        for indices in analysis.station_trip_record_indices.values():
+            relevant_indices.update(indices)
+    else:
+        relevant_indices.update(
+            record_index
+            for record_index, record in enumerate(analysis.trip_records)
+            if any(stop.stop_id in explicit_gtfsde_stop_ids for stop in record.stops)
+        )
     relevant_trip_records = [analysis.trip_records[index] for index in sorted(relevant_indices)]
-    relevant_stops = [
-        (station_key, trip_record, stop_record)
-        for station_key, trip_record, stop_record in analysis.station_stop_records
-        if trip_record.entity_index in {record.entity_index for record in relevant_trip_records}
-    ]
+    relevant_record_entities = {record.entity_index for record in relevant_trip_records}
+    if explicit_gtfsde_stop_ids is None:
+        relevant_stops = [
+            (station_key, trip_record, stop_record)
+            for station_key, trip_record, stop_record in analysis.station_stop_records
+            if trip_record.entity_index in relevant_record_entities
+        ]
+    else:
+        relevant_stops = [
+            (explicit_station.key if explicit_station is not None else None, trip_record, stop_record)
+            for trip_record in relevant_trip_records
+            for stop_record in trip_record.stops
+            if stop_record.stop_id in explicit_gtfsde_stop_ids
+        ]
 
     trip_id_exact = 0
     trip_id_not_found = 0
@@ -962,7 +1034,7 @@ def compute_static_compatibility(
             route_id_not_found += 1
 
     for station_key, _record, stop in relevant_stops:
-        station = STATIONS[station_key]
+        station = STATIONS[station_key] if station_key in STATIONS else None
         match_kind = static_stop_match_kind(static, station, stop.stop_id)
         if match_kind == "EXACT":
             stop_id_exact += 1
@@ -1057,6 +1129,7 @@ def select_target(
     analysis: FeedAnalysis,
     station: StationConfig,
     discovery_timestamp: datetime,
+    explicit_gtfsde_stop_ids: Optional[set[str]] = None,
 ) -> Optional[Target]:
     discovery_seconds = discovery_timestamp.timestamp()
     arrival_candidates: list[tuple[float, TripUpdateRecord, StopTimeRecord, str]] = []
@@ -1067,7 +1140,10 @@ def select_target(
         if record.trip.get("schedule_relationship") == "CANCELED":
             continue
         for stop in record.stops:
-            if station_match_type(stop.stop_id, station) is None:
+            if explicit_gtfsde_stop_ids is None:
+                if station_match_type(stop.stop_id, station) is None:
+                    continue
+            elif stop.stop_id not in explicit_gtfsde_stop_ids:
                 continue
             if stop.schedule_relationship in {"SKIPPED", "NO_DATA"}:
                 continue
@@ -1110,6 +1186,11 @@ def select_target(
         "stop_id": stop.stop_id,
         "stop_sequence": stop.stop_sequence,
         "event_context": context,
+        "stop_id_selection_mode": (
+            "EXPLICIT_GTFSDE_STOP_IDS"
+            if explicit_gtfsde_stop_ids is not None
+            else "LEGACY_IFOPT_PREFIX"
+        ),
     }
     event_seconds = stop.arrival.time_seconds if context == "ARRIVAL" else stop.departure.time_seconds
     if event_seconds is None:
@@ -1119,6 +1200,12 @@ def select_target(
         identity=identity,
         event_context=context,
         initial_event_seconds=event_seconds,
+        stop_id_selection_mode=(
+            "EXPLICIT_GTFSDE_STOP_IDS"
+            if explicit_gtfsde_stop_ids is not None
+            else "LEGACY_IFOPT_PREFIX"
+        ),
+        requested_gtfsde_stop_ids=tuple(sorted(explicit_gtfsde_stop_ids or set())),
     )
 
 
@@ -1591,8 +1678,8 @@ def inventory_classification(fetch_result: FetchResult, analysis: Optional[FeedA
     if analysis.summary.get("trip_update_entity_count", 0) == 0:
         return "GTFS_RT_REACHABLE_NO_TRIP_UPDATES"
     if analysis.summary.get("cologne_trip_update_count", 0) > 0:
-        return "GTFS_RT_REACHABLE_WITH_COLOGNE_EVIDENCE"
-    return "GTFS_RT_REACHABLE_NO_COLOGNE_EVIDENCE_FOUND"
+        return "GTFS_RT_REACHABLE_WITH_LEGACY_IFOPT_PREFIX_EVIDENCE"
+    return "COLOGNE_IDENTITY_NOT_MAPPED_TO_GTFSDE_NAMESPACE"
 
 
 def inventory(args: argparse.Namespace, bindings: Any, semantic_surface: dict[str, Any]) -> int:
@@ -1662,8 +1749,18 @@ def inventory(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         "unique_stop_id_count": 0,
         "hbf_stop_id_matches": station_match_summary(STATIONS["hbf"], set(), set()),
         "neumarkt_stop_id_matches": station_match_summary(STATIONS["neumarkt"], set(), set()),
+        "legacy_ifopt_prefix_match": {
+            "hbf": station_match_summary(STATIONS["hbf"], set(), set()),
+            "neumarkt": station_match_summary(STATIONS["neumarkt"], set(), set()),
+        },
+        "gtfsde_station_identity_match": {
+            "hbf": unmapped_gtfsde_station_identity(STATIONS["hbf"]),
+            "neumarkt": unmapped_gtfsde_station_identity(STATIONS["neumarkt"]),
+        },
         "hbf_trip_update_count": 0,
         "neumarkt_trip_update_count": 0,
+        "hbf_legacy_ifopt_trip_update_count": 0,
+        "neumarkt_legacy_ifopt_trip_update_count": 0,
         "cologne_trip_update_count": 0,
         "cologne_evidence_types": [],
         "alert_count": 0,
@@ -1712,6 +1809,47 @@ def make_skipped_snapshot(
     )
 
 
+def lifecycle_gtfsde_identity_summary(
+    analysis: Optional[FeedAnalysis],
+    station: StationConfig,
+    explicit_gtfsde_stop_ids: Optional[set[str]],
+    target: Optional[Target],
+) -> dict[str, Any]:
+    if explicit_gtfsde_stop_ids is None:
+        return unmapped_gtfsde_station_identity(station)
+
+    matched_stop_ids: set[str] = set()
+    matching_entities: set[int] = set()
+    if analysis is not None:
+        for record in analysis.trip_records:
+            record_matches = {
+                stop.stop_id
+                for stop in record.stops
+                if stop.stop_id in explicit_gtfsde_stop_ids
+            }
+            if record_matches:
+                matched_stop_ids.update(record_matches)
+                matching_entities.add(record.entity_index)
+
+    return {
+        "status": (
+            "GTFSDE_EXACT_STOP_IDS_MATCHED"
+            if target is not None
+            else (
+                "GTFSDE_STOP_IDS_OBSERVED_NO_SUITABLE_TARGET"
+                if matched_stop_ids
+                else "GTFSDE_STOP_IDS_NOT_OBSERVED_IN_DISCOVERY"
+            )
+        ),
+        "station_display_name": station.display_name,
+        "resolved_stop_ids": sorted(explicit_gtfsde_stop_ids),
+        "matched_stop_id_examples": capped_sorted(matched_stop_ids),
+        "exact_match_count": len(matched_stop_ids),
+        "matching_trip_update_count": len(matching_entities),
+        "source": "explicit_gtfsde_stop_ids",
+    }
+
+
 def wait_until(target_time: datetime) -> None:
     while True:
         remaining = (target_time - utc_now()).total_seconds()
@@ -1722,6 +1860,7 @@ def wait_until(target_time: datetime) -> None:
 
 def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[str, Any]) -> int:
     station = STATIONS[args.station]
+    explicit_gtfsde_stop_ids = set(args.stop_id) if args.stop_id else None
     raw_directory = create_raw_temp_directory()
     total_http_attempts = 0
     successful_http_200_count = 0
@@ -1748,18 +1887,35 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         discovery_analysis = analyze_feed(discovery_feed, discovery_fetch.request_timestamp)
         static, static_error = load_static_gtfs(
             args.static_gtfs,
-            relevant_static_trip_ids(discovery_analysis),
+            relevant_static_trip_ids(discovery_analysis, explicit_gtfsde_stop_ids),
         )
-        static_result = compute_static_compatibility(discovery_analysis, static, static_error)
+        static_result = compute_static_compatibility(
+            discovery_analysis,
+            static,
+            static_error,
+            explicit_gtfsde_stop_ids=explicit_gtfsde_stop_ids,
+            explicit_station=station,
+        )
     else:
         discovery_analysis = None
         discovery_failed = True
         static_result["static_gtfs_error"] = "feed unavailable for compatibility test"
 
     target = (
-        select_target(discovery_analysis, station, discovery_fetch.request_timestamp)
+        select_target(
+            discovery_analysis,
+            station,
+            discovery_fetch.request_timestamp,
+            explicit_gtfsde_stop_ids,
+        )
         if discovery_analysis is not None
         else None
+    )
+    gtfsde_identity_summary = lifecycle_gtfsde_identity_summary(
+        discovery_analysis,
+        station,
+        explicit_gtfsde_stop_ids,
+        target,
     )
     if target is not None:
         static_comparison = static_scheduled_comparison(static, target)
@@ -1876,7 +2032,15 @@ def lifecycle(args: argparse.Namespace, bindings: Any, semantic_surface: dict[st
         "mode": "lifecycle",
         "station": station.key,
         "station_display_name": station.display_name,
-        "station_prefix": station.stop_prefix,
+        "station_prefix": station.legacy_ifopt_prefix,
+        "legacy_ifopt_prefix": station.legacy_ifopt_prefix,
+        "stop_id_selection_mode": (
+            "EXPLICIT_GTFSDE_STOP_IDS"
+            if explicit_gtfsde_stop_ids is not None
+            else "LEGACY_IFOPT_PREFIX"
+        ),
+        "requested_gtfsde_stop_ids": sorted(explicit_gtfsde_stop_ids or set()),
+        "gtfsde_station_identity_match": gtfsde_identity_summary,
         "source_url": SOURCE_URL,
         "total_http_attempts": total_http_attempts,
         "successful_http_200_count": successful_http_200_count,
@@ -1924,7 +2088,24 @@ def build_parser() -> argparse.ArgumentParser:
         "lifecycle",
         help="follow one discovered station target for at most seven requests",
     )
-    lifecycle_parser.add_argument("--station", choices=sorted(STATIONS), required=True)
+    station_group = lifecycle_parser.add_mutually_exclusive_group(required=False)
+    station_group.add_argument(
+        "--station",
+        choices=sorted(STATIONS),
+        help="legacy station key; use --station-name with explicit GTFS.de stop IDs",
+    )
+    station_group.add_argument(
+        "--station-name",
+        metavar="NAME",
+        help='station display name, for example "Köln Hbf"',
+    )
+    lifecycle_parser.add_argument(
+        "--stop-id",
+        dest="stop_id",
+        action="append",
+        metavar="ID",
+        help="exact GTFS.de stop ID; repeat for multiple platform/child IDs",
+    )
     lifecycle_parser.add_argument(
         "--static-gtfs",
         metavar="/absolute/path/to/gtfs.zip",
@@ -1936,6 +2117,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.mode == "lifecycle":
+        if args.station_name:
+            station_key = STATION_NAME_KEYS.get(" ".join(args.station_name.split()).casefold())
+            if station_key is None:
+                parser.error(
+                    "--station-name must be one of: "
+                    + ", ".join(station.display_name for station in STATIONS.values())
+                )
+            args.station = station_key
+        elif args.station is None:
+            parser.error("lifecycle requires --station or --station-name")
+
+        if args.stop_id:
+            cleaned_stop_ids = [stop_id.strip() for stop_id in args.stop_id if stop_id.strip()]
+            if not cleaned_stop_ids:
+                parser.error("--stop-id requires at least one non-empty exact GTFS.de stop ID")
+            args.stop_id = cleaned_stop_ids
+
     bindings = load_gtfs_realtime_bindings()
     if bindings is None:
         return 2

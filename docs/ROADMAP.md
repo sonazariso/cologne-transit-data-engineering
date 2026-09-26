@@ -47,8 +47,10 @@ is separately tracked as `POST-STAGE-02 COLLECTOR-DESIGN VALIDATION` with host
 execution pending and does not reopen Stage 02.
 
 The [GTFS-RT Source Feasibility Audit](source-contracts/gtfs-rt-source-feasibility-audit.md)
-is a separate post-Stage-02 validation and is **HOST EXECUTION PENDING**. It
-does not reopen Stage 02 or start Stage 3.
+is a separate post-Stage-02 validation. Its current-feed inventory is complete
+from supplied host evidence; the [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
+is still **HOST EXECUTION PENDING** before lifecycle discovery. It does not
+reopen Stage 02 or start Stage 3.
 
 ## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is

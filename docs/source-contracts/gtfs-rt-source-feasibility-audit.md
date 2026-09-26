@@ -1,6 +1,6 @@
 # GTFS-Realtime Source Feasibility Audit
 
-**Status:** `POST-STAGE-02 VALIDATION — HOST EXECUTION PENDING`  
+**Status:** `CURRENT-FEED INVENTORY COMPLETE — STATIC IDENTITY BRIDGE REQUIRED BEFORE LIFECYCLE`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
 **APPROVED**; Stage 3 — **NEXT / NOT STARTED**  
 **Validation type:** bounded, read-only source-feasibility audit  
@@ -68,6 +68,11 @@ match GTFS.de static feeds; that does **not** establish compatibility with the
 project's current VRS/go.Rheinland static GTFS. The public feed documentation
 is referenced at <https://gtfs.de/en/feeds/>.
 
+The identity-bridge phase separately uses the official GTFS.de static feed at
+<https://download.gtfs.de/germany/nv_free/latest.zip>. That large ZIP is
+host-run only, downloaded at most once when explicitly requested, and kept in
+temporary storage outside the repository. It is not a warehouse input.
+
 ## 5. Public-source provenance
 
 The feed URL and public-feed characteristics above are source-provenance
@@ -80,6 +85,11 @@ OpenService information at <https://www.vrs.de/service/openservice>.
 The public GTFS.de stream is therefore tested as a distinct source. No claim
 is made that its identifiers, coverage, retention, or provider semantics are
 the same as the project's current VRS/go.Rheinland static source.
+
+The current-feed inventory was successfully executed on the host. The separate
+[GTFS.de static identity bridge audit](gtfsde-static-identity-bridge-audit.md)
+is required before a station lifecycle run because the realtime feed uses a
+numeric stop-ID namespace rather than the project's legacy VRS IFOPT prefixes.
 
 ## 6. GTFS-RT semantic guardrails
 
@@ -142,8 +152,8 @@ does not establish that an arrival occurred.
 
 ## 10. Köln Hbf and Köln Neumarkt discovery scope
 
-The script uses the following identifiers only as structurally checked
-discovery prefixes:
+The initial S18 script uses the following identifiers only as legacy,
+structurally checked discovery prefixes:
 
 | Station | Prefix |
 |---|---|
@@ -157,6 +167,11 @@ a similar number is not accepted as a station match.
 The inventory reports exact-parent and child-prefix examples separately and
 caps printed examples. A station match is discovery evidence, not a claim that
 the public feed covers the complete Cologne network or the project's scope.
+The prefixes are not the identity namespace used by the public GTFS.de feed;
+therefore zero legacy-prefix matches must not be reported as absence of
+Cologne. Inventory output now keeps `legacy_ifopt_prefix_match` separate from
+`gtfsde_station_identity_match`, which remains unmapped until the bridge
+supplies exact GTFS.de IDs.
 
 ## 11. Inventory test procedure
 
@@ -174,13 +189,14 @@ Inventory records include:
 - timing-field counts for arrival/departure time, delay, and uncertainty;
 - trip/stop schedule relationships, cancellation, skipped-stop, `NO_DATA`,
   and `assigned_stop_id` counts;
-- bounded identifier examples and station-prefix matches; and
+- bounded identifier examples, legacy IFOPT-prefix matches, and the separate
+  unmapped GTFS.de station-identity status; and
 - structural ServiceAlert informed-entity counts without dumping alert text.
 
 The final inventory classification is exactly one of:
 
-`GTFS_RT_REACHABLE_WITH_COLOGNE_EVIDENCE`,
-`GTFS_RT_REACHABLE_NO_COLOGNE_EVIDENCE_FOUND`,
+`GTFS_RT_REACHABLE_WITH_LEGACY_IFOPT_PREFIX_EVIDENCE`,
+`COLOGNE_IDENTITY_NOT_MAPPED_TO_GTFSDE_NAMESPACE`,
 `GTFS_RT_REACHABLE_NO_TRIP_UPDATES`, `GTFS_RT_PARSE_FAILED`,
 `GTFS_RT_HTTP_FAILED`, or `INCONCLUSIVE`.
 
@@ -194,6 +210,21 @@ ID, usable arrival time 8–25 minutes in the future, non-cancelled trip state,
 and non-`SKIPPED`/non-`NO_DATA` stop state. A departure-time candidate is used
 only when no suitable arrival candidate exists, and the context is labelled
 `DEPARTURE`.
+
+After the identity bridge resolves static IDs, lifecycle accepts the station
+display name plus one or more exact GTFS.de stop IDs:
+
+```bash
+python3 scripts/gtfs_rt_feasibility_probe.py lifecycle \
+  --station-name "Köln Hbf" \
+  --stop-id ID1 \
+  --stop-id ID2
+```
+
+When `--stop-id` is supplied, target selection tests exact stop-ID equality
+only. It does not fall back to the legacy VRS IFOPT prefix. The older
+`--station hbf` / `--station neumarkt` form remains available for explicitly
+legacy-prefix-based discovery, but is not a substitute for the bridge.
 
 The selected identity preserves the feed entity ID, trip ID, route ID,
 direction ID, start date/time, trip relationship, stop ID, stop sequence, and
@@ -217,6 +248,10 @@ TripUpdate timestamps, cancellation, `SKIPPED`, and `NO_DATA` evidence.
 The public feed is documented as matching GTFS.de static feeds, while this
 project currently uses a VRS/go.Rheinland static GTFS source. Compatibility is
 therefore measured separately and is never assumed.
+
+The GTFS.de static feed is used only as an identity-bridge audit input. It is
+not integrated into the warehouse and does not replace the project's existing
+VRS/go.Rheinland static GTFS.
 
 Without `--static-gtfs`, the result is exactly
 `LOCAL_STATIC_COMPATIBILITY_NOT_TESTED`. The script does not download a static
@@ -343,24 +378,75 @@ to explicit actual semantics.
 
 ## 21. Status / next action
 
-Current status is **HOST EXECUTION PENDING**. The next action is to install the
-pinned binding and run inventory manually from the normal macOS Terminal. The
-inventory output must be reviewed before any lifecycle run is started:
+Current-feed inventory is complete from the supplied host evidence. The next
+action is to resolve the two GTFS.de station identities from the host terminal;
+the large static ZIP is downloaded only by explicit host execution:
 
 ```bash
 cd /Users/admin/Documents/cologne-transit-intelligence
 python3 -m pip install -r scripts/requirements-gtfs-rt-audit.txt
-python3 scripts/gtfs_rt_feasibility_probe.py inventory
+python3 scripts/gtfsde_static_identity_bridge_probe.py \
+  download-and-inspect \
+  --verify-realtime
 ```
 
-Only after reviewing that inventory should the operator run, one station at a
-time if appropriate:
+Only after reviewing the bridge output should the operator run S18 lifecycle
+with the resolved exact IDs, one station at a time if appropriate:
 
 ```bash
-python3 scripts/gtfs_rt_feasibility_probe.py lifecycle --station hbf
-python3 scripts/gtfs_rt_feasibility_probe.py lifecycle --station neumarkt
+python3 scripts/gtfs_rt_feasibility_probe.py lifecycle \
+  --station-name "Köln Hbf" \
+  --stop-id <resolved_gtfsde_stop_id>
 ```
 
 No GTFS-RT production approval, architecture change, Stage 3 start, MDD
 collector change, database change, Power BI change, or final architectural
 decision is made before host evidence exists.
+
+## 22. Observed current-feed inventory evidence
+
+The following values are recorded from the successful host inventory snapshot;
+they are not provider-wide guarantees:
+
+| Observation | Value |
+|---|---:|
+| HTTP status | `200` |
+| Protobuf parse | `true` |
+| GTFS-Realtime version | `2.0` |
+| Feed incrementality | `FULL_DATASET` |
+| Feed age at download | approximately `5.9` seconds |
+| TripUpdates | `53,215` |
+| StopTimeUpdates | `498,268` |
+| ServiceAlerts | `65,078` |
+| VehiclePositions | `0` |
+| `arrival.time` | `427,071` |
+| `arrival.delay` | `427,071` |
+| `arrival.uncertainty` | `0` |
+| `departure.time` | `443,705` |
+| `departure.delay` | `443,705` |
+| `departure.uncertainty` | `0` |
+| TripUpdate timestamps | `0` |
+| `SKIPPED` stop updates | `20,631` |
+| `NO_DATA` stop updates | `199` |
+| Canceled trips | `0` in this snapshot |
+| `assigned_stop_id` values | `322` |
+| Explicit actual-time semantic | none observed |
+| Realtime stop-ID namespace | numeric examples |
+| Legacy VRS IFOPT prefix matches | none observed |
+| Unique route IDs | `0` |
+
+The correct interpretation is “0 canceled trips observed in this snapshot”
+and “0 VehiclePositions observed in this feed snapshot.” The inventory did not
+establish that GTFS.de never provides either. The zero legacy-prefix result is
+classified as `COLOGNE_IDENTITY_NOT_MAPPED_TO_GTFSDE_NAMESPACE`, not as proof
+that Cologne is absent.
+
+## 23. Historical station identity caveat
+
+If S19 historical GTFS-Realtime availability tooling is added later, current
+GTFS.de stop IDs must not automatically be projected three or six months into
+the past. Without a date-compatible historical GTFS.de static feed, historical
+station identity must be reported as `HISTORICAL_STATION_IDENTITY_NOT_MAPPED`.
+Historical snapshot recoverability and historical Köln station identity are
+separate evidence questions; current station IDs must not be used to make
+archive recovery dependent on an unvalidated historical mapping.

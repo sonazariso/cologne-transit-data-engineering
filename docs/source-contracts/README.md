@@ -56,9 +56,11 @@ is separate post-approval evidence for later collector design and is currently
 `HOST EXECUTION PENDING`.
 
 The [GTFS-RT Source Feasibility Audit](gtfs-rt-source-feasibility-audit.md) is
-also separate post-Stage-02 validation and is currently
-`HOST EXECUTION PENDING`. It is read-only host-run tooling, does not approve a
-production GTFS-RT source, and does not start Stage 3.
+also separate post-Stage-02 validation. Its current-feed inventory is complete
+from supplied host evidence, but the [GTFS.de static identity bridge](gtfsde-static-identity-bridge-audit.md)
+remains `HOST EXECUTION PENDING` before lifecycle discovery. It is read-only
+host-run tooling, does not approve a production GTFS-RT source, and does not
+start Stage 3.
 
 ## Historical / Legacy implementation evidence
 

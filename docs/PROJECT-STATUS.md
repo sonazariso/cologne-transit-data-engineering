@@ -29,9 +29,12 @@
 
 ## Post-Stage-02 validation
 
-- **GTFS-RT Source Feasibility Audit — HOST EXECUTION PENDING.** The bounded,
-  host-run-only tooling is documented in
+- **GTFS-RT current-feed inventory — COMPLETE FROM HOST EVIDENCE; STATIC
+  IDENTITY BRIDGE REQUIRED BEFORE LIFECYCLE.** The bounded, host-run-only
+  tooling and the recorded inventory are documented in
   [the GTFS-RT audit](source-contracts/gtfs-rt-source-feasibility-audit.md).
+  The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
+  remains **HOST EXECUTION PENDING**. S18 is not fully complete.
 - This validation does not reopen or invalidate Stage 2, start Stage 3,
   approve GTFS-RT as a production source, or change the MDD collector,
   database, Power BI, scheduler, or Legacy repository.
