@@ -25,6 +25,7 @@ sufficient recorded/actual timing evidence.
   requests while correcting their offline analysis.
 - Stage 3 — Static GTFS Profile: **NEXT / NOT STARTED**.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or start Stage 3.
+- Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **HOST EXECUTION PENDING**. S19 tests only third-party Wayback point snapshots near the 3-month and 6-month calendar horizons for the exact GTFS.de realtime URL; it does not establish provider-supported or continuous history, approve GTFS-RT for production, or start Stage 3.
 - Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**. The audited
   request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with

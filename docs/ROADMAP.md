@@ -53,6 +53,12 @@ is **BOUNDED LIFECYCLE VALIDATION COMPLETE**. The [GTFS.de static identity bridg
 remains partial because railway Köln Hbf is unresolved. The bounded result does
 not reopen Stage 02, approve GTFS-RT as a production source, or start Stage 3.
 
+The [GTFS-RT Historical Availability Audit](source-contracts/gtfs-rt-historical-availability-audit.md)
+is the separate S19 post-Stage-02 validation and remains **HOST EXECUTION
+PENDING**. It tests only exact-URL third-party Wayback point snapshots near
+calendar-month horizons; it does not establish provider-supported or
+continuous history, change the collector design, or start Stage 3.
+
 ## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
 Resolve the authoritative GTFS feed and its coverage/update policy; this is
 deferred from Stage 02.

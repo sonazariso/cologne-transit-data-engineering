@@ -63,6 +63,14 @@ remains `PARTIAL` because railway Köln Hbf is unresolved. It is read-only
 host-run tooling, does not approve a production GTFS-RT source, and does not
 start Stage 3.
 
+The [GTFS-RT Historical Availability Audit](gtfs-rt-historical-availability-audit.md)
+is a separate S19 post-Stage-02 validation with status **HOST EXECUTION
+PENDING**. It tests only third-party Wayback point-snapshot availability for
+the exact GTFS.de realtime URL near the requested 3-month and 6-month calendar
+horizons. It does not merge with the current-feed feasibility audit or the
+GTFS.de static identity bridge, establish provider-supported or continuous
+history, approve a collector, or start Stage 3.
+
 ## Historical / Legacy implementation evidence
 
 The detailed audit contains historical chronology for the Legacy source audit,

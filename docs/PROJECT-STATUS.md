@@ -29,12 +29,25 @@
 
 ## Post-Stage-02 validation
 
+Existing GTFS-RT validation:
+
+- Current-feed inventory: **COMPLETED**.
+- Static identity bridge: **BOUNDED/PARTIAL**; current Neumarkt identity
+  validated, railway Köln Hbf unresolved.
+- GTFS-RT bounded lifecycle validation: **COMPLETE**.
+- GTFS-RT historical availability audit: **HOST EXECUTION PENDING**.
+
 - **GTFS-RT lifecycle validation — BOUNDED LIFECYCLE VALIDATION COMPLETE;
   NEUMARKT SAMPLES #1 AND #2 RECORDED.** The bounded, host-run-only tooling,
   inventory, and two lifecycle samples are documented in [the GTFS-RT audit](source-contracts/gtfs-rt-source-feasibility-audit.md).
   The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
   remains **PARTIAL** because railway Köln Hbf is unresolved; that identity gap
   does not invalidate the completed two-sample Neumarkt lifecycle evidence.
+- **GTFS-RT historical availability audit — HOST EXECUTION PENDING.** S19
+  prepares a separate, bounded Internet Archive / Wayback point-snapshot test
+  for the exact public GTFS.de realtime URL near the 3-month and 6-month
+  calendar horizons. It does not establish provider history or continuous
+  coverage and does not approve GTFS-RT as a production source.
 - This validation does not reopen or invalidate Stage 2, start Stage 3,
   approve GTFS-RT as a production source, or change the MDD collector,
   database, Power BI, scheduler, or Legacy repository.
@@ -228,3 +241,6 @@ and acceptance criteria.
   begin with the [realtime collector requirements](collector-design/realtime-collector-requirements.md).
 - The [RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
   remains `HOST EXECUTION PENDING` and does not reopen Stage 02.
+- The [GTFS-RT historical availability audit](source-contracts/gtfs-rt-historical-availability-audit.md)
+  is also `HOST EXECUTION PENDING`; its evidence must be reviewed before any
+  further historical-source work is proposed.
