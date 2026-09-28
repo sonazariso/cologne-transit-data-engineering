@@ -164,6 +164,18 @@ it is not a Stage 02 blocker.
 - `ObservedAt`/`CapturedAt` is a first-class future collection attribute;
   repeated observations must preserve estimate evolution rather than only the
   latest state.
+- The [future source-observation and persistence contract](source-contracts/future-observation-persistence-contract.md)
+  makes `TimetabledTime`, `EstimatedTime`, source-only nullable
+  `RecordedAtTime`, and `ObservedAt`/`CapturedAt` independent concepts.
+  `RecordedAtTime` is never synthesized; a first-seen non-null value remains
+  retained if a later response is NULL or omits the event.
+- Situation/Cause evidence is future append-only historical evidence: observed
+  versions, source paths, text, reason/effect fields, validity, and association
+  scope are preserved rather than reduced to one mutable cause value.
+- PostgreSQL is the intended future persistence direction for the redesigned
+  append-only observation architecture; no migration, production PostgreSQL
+  tables, or persistence implementation is approved. Database choice does not
+  change source availability.
 - The audited successful response did not contain `RecordedAtTime` or a direct
   delay value; this does not establish general MDD absence.
 - `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. It was not

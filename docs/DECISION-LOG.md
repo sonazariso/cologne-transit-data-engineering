@@ -29,6 +29,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-023 | 2026-09-26 | Realtime source roles: **MDD/TRIAS primary; GTFS-RT complementary**; source-faithful staging remains separate before future reconciliation | Approved direction |
 | D-024 | 2026-09-26 | Cross-Source Reconciliation and Cologne Scope Contract | Approved design guardrail |
 | D-025 | 2026-09-28 | Stage 3 formally started with a bounded Stage 3A disruption/cause evidence audit; no schema, cadence, cause-model, matching, or production decision is made before host evidence | Procedural status |
+| D-026 | 2026-09-28 | Future persistence preserves source timing and disruption evidence as append-only observations: `TimetabledTime`, `EstimatedTime`, nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` remain separate; PostgreSQL is the intended future direction only | Approved design guardrail |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -131,3 +132,33 @@ original two-station MDD execution is complete; the broader ten-station
 Situation discovery remains pending. No database schema, collector cadence,
 cause taxonomy, GTFS-RT production-ingestion approval, cross-source matching,
 causal attribution, scheduler, or Power BI decision is made here.
+
+## D-026 — Future Source-Observation and Persistence Contract
+
+The [future source-observation and persistence contract](source-contracts/future-observation-persistence-contract.md)
+records the timing and historical-evidence invariant for later persistence
+design:
+
+- `TimetabledTime`, `EstimatedTime`, and source-provided `RecordedAtTime` are
+  separate concepts; `RecordedAtTime` is nullable and is never derived from an
+  estimate, timetable, collector timestamp, or event disappearance.
+- `ObservedAt` / `CapturedAt` remains separate collector lineage. When a
+  non-null source `RecordedAtTime` is first observed, its exact value and the
+  conceptual first-seen observation timestamp are retained; later `NULL` or
+  disappearance does not erase it.
+- Repeated observations preserve estimate evolution, not only the latest
+  estimate. Actual-time capture is separate from continued Situation, Cause,
+  cancellation, or status tracking.
+- Situation/Cause evidence is append-only historical source evidence. Earlier
+  versions remain when a later response omits them; no normalized cause
+  taxonomy or inferred root cause is introduced.
+- PostgreSQL is recorded as the intended future persistence direction because
+  it fits the desired append-only, source-faithful, later-derived architecture
+  and JSONB use where justified. It does not change source availability.
+
+This decision does not create PostgreSQL tables, migrate SQL Server assets,
+authorize production persistence or scheduling, or advance Stage 3A. Actual
+Delay and prediction-accuracy KPIs remain **NOT APPROVED** until source
+`RecordedAtTime` is observed and validated. A future short-term raw-payload
+retention option may be evaluated for forensic reprocessing, but no duration is
+approved and permanent raw retention is not the default.

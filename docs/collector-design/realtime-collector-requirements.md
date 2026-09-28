@@ -12,7 +12,9 @@ The approved evidence and semantic boundaries remain in the [Stage 02
 source-contract package](../source-contracts/README.md) and the [detailed
 Stage 02 audit](../stages/02-mdd-trias-source-contract-audit.md). The related
 near-event validation is described in the [RecordedAtTime lifecycle
-validation](../source-contracts/mdd-trias-event-lifecycle-validation.md).
+validation](../source-contracts/mdd-trias-event-lifecycle-validation.md). The
+future timing, history, and persistence boundary is defined in the [future
+source-observation and persistence contract](../source-contracts/future-observation-persistence-contract.md).
 
 ## 0. Approved source roles and separation
 
@@ -60,7 +62,8 @@ The collector design must therefore:
 
 ## 2. Preserve source timestamps
 
-When available, retain these fields independently:
+When available, retain these fields independently and preserve their source
+semantics:
 
 - `TimetabledTime`;
 - `EstimatedTime`;
@@ -72,6 +75,13 @@ When available, retain these fields independently:
 - arrival-versus-departure timing context; and
 - call scope: `PreviousCall`, `ThisCall`, or `OnwardCall`.
 
+`RecordedAtTime` is nullable and may be populated only when the source
+explicitly supplies it. Never derive it from `EstimatedTime`, the last
+estimate, `TimetabledTime`, `ObservedAt`/`CapturedAt`, or event disappearance.
+When a non-null source value is observed, retain the exact value and the
+conceptual `RecordedAtTimeObservedAt` first-seen observation timestamp. A later
+`NULL` or disappearance must not overwrite or erase it.
+
 Never persist only a derived delay while discarding the source timestamps.
 
 ## 3. Never promote an estimate to actual
@@ -81,6 +91,8 @@ The collector must never infer either of the following:
 ```text
 last EstimatedTime == actual arrival/departure
 past EstimatedTime == RecordedAtTime
+RecordedAtTime == ObservedAt
+RecordedAtTime == disappearance time
 ```
 
 `EstimatedTime` remains a prediction even after the event has passed. Actual
@@ -96,6 +108,11 @@ questions such as:
 - prediction stability;
 - prediction accuracy if an actual timestamp later becomes available; and
 - how early delays become visible.
+
+Repeated observations must preserve the sequence of estimate revisions rather
+than only the latest `EstimatedTime`. Transport-level deduplication may remove
+an exact duplicate, but it must not remove a distinct source observation or
+estimate revision.
 
 Snapshot-retention cadence is intentionally not finalized here.
 
@@ -130,6 +147,10 @@ Preserve the distinction between:
 - provider estimated timestamp;
 - provider recorded timestamp; and
 - collector observation timestamp.
+
+`ObservedAt` / `CapturedAt` is never `RecordedAtTime` and never substitutes
+for it. It records when the collector observed a source response, not when the
+vehicle operated.
 
 For GTFS-RT, also preserve feed-header and trip-update timestamps as distinct
 source metadata; neither is an arrival time. Repeated observations of the same
@@ -168,6 +189,14 @@ Where available, preserve:
 - source;
 - priority; and
 - affected-entity association or scope.
+
+Preserve the observed sequence of Situation/Cause versions rather than only a
+single mutable `Cause` value. If a Situation, Cause, `SituationFullRef`, text,
+effect, reason, or other provider-reported evidence disappears from a later
+response, retain the earlier observation. Preserve source field/path,
+`ObservedAt` / `CapturedAt`, source-reported `ValidFrom`/`ValidTo`, and
+association scope where available. Do not synthesize validity from
+disappearance, infer root cause, or create a normalized cause taxonomy here.
 
 Situation association is not causal explanation for a delay or cancellation.
 
@@ -239,10 +268,22 @@ and cleanup.
 
 Although `RecordedAtTime` was not observed in Stage 02, future collector
 parsing must not discard it if it appears. It remains a nullable candidate
-source field. Any first observation must trigger semantic and coverage
-validation before Actual Delay becomes a production KPI.
+source field. It is source-only: any first non-null observation must preserve
+the exact value and first-seen observation timestamp, while later NULL or
+disappearance must not clear it. Any first observation must trigger semantic and
+coverage validation before Actual Delay becomes a production KPI.
 
-## 16. Lifecycle sampling
+## 16. Actual-time capture versus independent tracking
+
+The future lifecycle may distinguish `ActualTimeCaptured = false` from
+`ActualTimeCaptured = true`. The latter is reached only after a non-null,
+source-provided `RecordedAtTime` is captured. Once true, actual-time-specific
+polling for that event may stop, but collection must continue if an independent
+objective still requires Situation evolution, Cause updates, or
+cancellation/status evolution. This is a lifecycle contract only; it does not
+approve production scheduling.
+
+## 17. Lifecycle sampling
 
 Future validation must be capable of observing the **same event** repeatedly
 before and after its expected occurrence. `RecordedAtTime` could potentially
@@ -251,9 +292,25 @@ historical queries. The [near-event lifecycle validation](../source-contracts/md
 prepared with Stage 02 approval is the initial diagnostic test for this
 possibility.
 
+## 18. Future persistence direction
+
+The intended future persistence architecture is PostgreSQL-oriented and follows:
+
+```text
+SOURCE -> COLLECTOR -> APPEND-ONLY SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE
+```
+
+This is a design direction only. It does not create PostgreSQL tables, migrate
+SQL Server assets, finalize a schema, or approve production persistence. JSONB
+may be considered later where justified for source-shaped context. Database
+choice does not change source availability. A future short-term raw-payload
+retention option may support forensic reprocessing, but no retention duration is
+approved and permanent raw retention is not the default.
+
 ## Handoff gate
 
 Stage 7 collector implementation begins by reviewing this document. The review
 must explicitly address source timestamps, event identity, observation time,
-operational flags, gaps, quota, failure causality, raw-response policy, and
-RecordedAtTime coverage before any production design is approved.
+estimate history, source-reported Situation/Cause history, operational flags,
+gaps, quota, failure causality, raw-response policy, and `RecordedAtTime`
+coverage before any production design is approved.

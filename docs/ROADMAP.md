@@ -118,7 +118,12 @@ guardrail and does not authorize implementation.
 Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.
 
 ## Stage 5 — Database Architecture
-Approve grain, schemas/layers, source-faithful vs derived data, keys, collation, history strategy, indexes, and audit strategy before building.
+The intended future database direction is PostgreSQL for an append-only,
+source-faithful observation layer followed by derived analytical state. Approve
+grain, schemas/layers, source-faithful vs derived data, keys, history strategy,
+indexes, and audit strategy before building. This direction does not change
+source availability; no PostgreSQL migration or production tables are approved
+before this stage.
 
 ## Stage 6 — Static Warehouse & Analytics
 Build static dimensions/facts/views incrementally and reconcile source-to-warehouse counts.

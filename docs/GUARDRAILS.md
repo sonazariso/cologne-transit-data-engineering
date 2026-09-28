@@ -73,3 +73,34 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     skipping, or absence.
 33. Permanent or automatic full raw XML/JSON/protobuf retention is not the
     default. Any bounded automatic raw capture requires an explicit later gate.
+34. `TimetabledTime`, `EstimatedTime`, and source-provided `RecordedAtTime` are
+    independent timing concepts. `RecordedAtTime` is nullable and source-only;
+    it must never be derived from an estimate, timetable, `ObservedAt`,
+    `CapturedAt`, or event disappearance.
+35. `ObservedAt` / `CapturedAt` is collector lineage, not actual event time.
+    When a non-null source `RecordedAtTime` is first observed, retain its exact
+    value and conceptual first-seen observation timestamp. A later `NULL` or
+    source disappearance must not overwrite or erase it.
+36. Future observations must preserve `EstimatedTime` history and revisions,
+    not only the latest estimate. Transport deduplication must not discard
+    analytically distinct observations.
+37. `ActualTimeCaptured = true` is a conceptual state reached only by capturing
+    a non-null source `RecordedAtTime`. It may end actual-time-specific polling
+    for an event, but it must not stop independent Situation, Cause,
+    cancellation, or status tracking.
+38. Source-reported Situation/Cause evidence is append-only historical evidence.
+    Its disappearance must not erase earlier observations, and evolving
+    versions must not be collapsed into one mutable Cause value. Do not infer
+    root cause or create a normalized cause taxonomy in the current stage.
+39. The intended future evidence flow is `SOURCE -> COLLECTOR -> APPEND-ONLY
+    SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE`; source disappearance must
+    never erase previously observed evidence.
+40. PostgreSQL is the intended future persistence direction for this redesigned
+    architecture, with JSONB only where later justified. This does not change
+    source availability, create PostgreSQL tables, migrate SQL Server assets,
+    or authorize production persistence.
+41. A future short-term raw-payload retention option may be evaluated for
+    forensic reprocessing and parser improvements. No duration is approved;
+    storage volume, privacy/data considerations, reprocessing need, and
+    operational cost must be considered, and permanent raw retention is not the
+    default.

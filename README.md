@@ -46,6 +46,11 @@ sufficient recorded/actual timing evidence.
   [Project Status](docs/PROJECT-STATUS.md) for details.
 - [Realtime collector requirements](docs/collector-design/realtime-collector-requirements.md)
   are approved Stage 02 design inputs; implementation is deferred.
+- The [future source-observation and persistence contract](docs/source-contracts/future-observation-persistence-contract.md)
+  keeps timetable, estimate, source-provided recorded time, and collector
+  observation time separate; preserves estimate and Situation/Cause history;
+  and records PostgreSQL as a future persistence direction only. No database
+  migration or production persistence is approved.
 - The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
   is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION**. Six bounded
   live journeys were reviewed (three at Köln Hbf and three at Köln Neumarkt);

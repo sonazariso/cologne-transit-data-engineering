@@ -18,6 +18,13 @@ These documents are the current Stage 02 source-contract record:
 - [MDD/TRIAS raw-retention decision](mdd-trias-raw-retention.md)
 - [Detailed Stage 02 evidence/audit](../stages/02-mdd-trias-source-contract-audit.md)
 
+## Future architecture contract
+
+The [future source-observation and persistence contract](future-observation-persistence-contract.md)
+is a post-Stage-02 semantic/design guardrail. It preserves the independent
+timing fields, append-only estimate and Situation/Cause history, and intended
+PostgreSQL direction without creating a schema or approving implementation.
+
 Stage 02A.3 is implemented in
 [`scripts/stage_02a3_historical_actual_time_probe.py`](../../scripts/stage_02a3_historical_actual_time_probe.py).
 The previous host run completed one historical request at each of 1D, 7D,
@@ -51,6 +58,12 @@ capture is approved in Stage 02.
 
 The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
 are the durable Stage 02-approved design handoff; implementation is deferred.
+The [future source-observation and persistence contract](future-observation-persistence-contract.md)
+records the later architecture's non-negotiable separation of timetable,
+estimate, source-provided recorded time, and collector observation time. It
+also requires append-only estimate and Situation/Cause history and records
+PostgreSQL as an intended future persistence direction only; it does not create
+tables, migrate SQL Server assets, or approve production persistence.
 The [near-event RecordedAtTime lifecycle validation](mdd-trias-event-lifecycle-validation.md)
 is separate post-approval evidence for later collector design and is now
 **BOUNDED VALIDATION COMPLETE**. Six live journeys were reviewed (three at

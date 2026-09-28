@@ -72,6 +72,19 @@ Actual Arrival Delay, Actual Physical Delay, or realized delay.
 `ObservedAtUtc`; that does not make it a `RecordedAtTime` value and does not
 create actual vehicle timing.
 
+The future observation contract makes this separation explicit: `TimetabledTime`
+is scheduled time, `EstimatedTime` is a source prediction, `RecordedAtTime` is
+nullable source-provided recorded/actual time, and `ObservedAt`/`CapturedAt` is
+collector lineage. `RecordedAtTime` may be populated only when the source
+explicitly supplies it. It must never be derived from an estimate, timetable,
+collector timestamp, or event disappearance. When a non-null value is observed,
+the exact source value and its conceptual first-seen observation timestamp are
+retained; a later `NULL` or disappearance must not erase it.
+
+Repeated observations must preserve `EstimatedTime` evolution rather than only
+the latest estimate. These fields must not be collapsed into one generic event
+time.
+
 Actual Delay remains unavailable for production until a valid
 `RecordedAtTime`/actual-timing source is observed, validated, and later
 matched appropriately. Prediction Accuracy is also unavailable until
@@ -203,6 +216,12 @@ Future retained situation evidence should preserve, where available:
 - affected-entity association; and
 - relation scope, such as service-level versus call-level association.
 
+This evidence is append-only by observation: if a Situation, Cause,
+`SituationFullRef`, text, effect, or other provider-reported evidence later
+disappears, the earlier observation remains. Evolving source versions must be
+preserved rather than collapsed into one mutable Cause value. Do not infer root
+cause or create a normalized cause taxonomy at this stage.
+
 Situation evidence does **not** prove that the situation caused a delay,
 cancellation, platform change, or poor performance. Future BI may report
 “services/events associated with situation evidence.” It must not report
@@ -278,11 +297,14 @@ active callers. No new schedule is approved here.
 Full raw MDD responses are not a permanent or automated source of record by
 default. Temporary raw artifacts may be used for explicit diagnostics and
 source-contract validation outside source control, without secrets. See the
-[raw-retention decision](mdd-trias-raw-retention.md).
+[raw-retention decision](mdd-trias-raw-retention.md). A future short-term raw
+retention option may be evaluated for forensic reprocessing, but no duration is
+approved and permanent raw retention is not the default.
 
 ## Related contract artifacts
 
 - [Request contract](mdd-trias-request-contract.md)
 - [Field-retention matrix](mdd-trias-field-retention-matrix.md)
+- [Future source-observation and persistence contract](future-observation-persistence-contract.md)
 - [Raw-retention decision](mdd-trias-raw-retention.md)
 - [Detailed Stage 02 evidence/audit](../stages/02-mdd-trias-source-contract-audit.md)

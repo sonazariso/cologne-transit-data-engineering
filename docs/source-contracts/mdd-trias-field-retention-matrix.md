@@ -52,8 +52,8 @@ evidence does not establish a precise normative role.
 | Call scope | Whether a field belongs to previous, current, or onward call. | YES — structural scope in the response. | OBSERVED through separate arrays/`thisCall`; arrival/departure nested by call. | Current scope only is materialized. | No complete scope dimension is persisted. | RETAIN explicitly; never flatten away the scope. | Avoid mixing planned/estimated/flag values from different calls. | A field present in a previous call does not describe the current stop. |
 | **TIMING** |  |  |  |  |  |  |  |  |
 | `TimetabledTime` | Required scheduled/timetable time in `ServiceCallStructure`. | YES — VDV 431-2 §7.6.8 / Table 47. | OBSERVED: 209 timestamp occurrences across arrival/departure call branches. | Reads current arrival timetable time. | Persisted as `TimetabledArrivalUtc`. | RETAIN source timestamp and arrival/departure context. | Scheduled-time reporting and Estimated Delay denominator. | Do not treat a timetable timestamp as actual operation. |
-| `RecordedAtTime` | Optional actual/recorded time in `ServiceCallStructure`. | YES — VDV 431-2 §7.6.8 / Table 47. | `SPEC_DEFINED_NOT_OBSERVED`: no path in this response. | Not parsed; response timestamp is a different field. | Not persisted. | RETAIN if later observed and validated; keep nullable now. | Candidate source for Actual Delay only after coverage and matching validation. | Absence in one response does not prove provider-wide absence. |
-| `EstimatedTime` | Optional expected/predicted time in `ServiceCallStructure`. | YES — VDV 431-2 §7.6.8 / Table 47. | OBSERVED: 196 timestamp occurrences. | Reads current arrival estimate. | Persisted as `EstimatedArrivalUtc`. | RETAIN source timestamp with context. | Estimated Delay and estimate-availability reporting. | Must not be renamed Actual Delay. |
+| `RecordedAtTime` | Optional actual/recorded time in `ServiceCallStructure`. | YES — VDV 431-2 §7.6.8 / Table 47. | `SPEC_DEFINED_NOT_OBSERVED`: no path in this response. | Not parsed; response timestamp is a different field. | Not persisted. | RETAIN the exact source value only when explicitly supplied; keep nullable, retain conceptual first-seen `RecordedAtTimeObservedAt`, and never let a later `NULL` or disappearance overwrite it. | Candidate source for Actual Delay only after coverage and matching validation. | Never derive it from `EstimatedTime`, `TimetabledTime`, `ObservedAt`, or disappearance. Absence in one response does not prove provider-wide absence. |
+| `EstimatedTime` | Optional expected/predicted time in `ServiceCallStructure`. | YES — VDV 431-2 §7.6.8 / Table 47. | OBSERVED: 196 timestamp occurrences. | Reads current arrival estimate. | Persisted as `EstimatedArrivalUtc`. | RETAIN each source observation with context so estimate evolution is preserved; do not retain only the latest value. | Estimated Delay and estimate-availability reporting; future prediction analysis only where validated actual time exists. | Must not be renamed or copied into Actual Delay/`RecordedAtTime`. |
 | `EstimatedTimeLow` | Optional lower bound for expected time. | YES — VDV 431-2 §7.6.8 / Table 47. | `SPEC_DEFINED_NOT_OBSERVED`: no path in this response. | Not parsed. | Not persisted. | RETAIN nullable if later returned. | Prediction interval/range reporting if validated. | Not observed is not unsupported. |
 | `EstimatedTimeHigh` | Optional upper bound for expected time. | YES — VDV 431-2 §7.6.8 / Table 47. | `SPEC_DEFINED_NOT_OBSERVED`: no path in this response. | Not parsed. | Not persisted. | RETAIN nullable if later returned. | Prediction interval/range reporting if validated. | Not observed is not unsupported. |
 | Arrival vs departure timing context | Distinguishes `serviceArrival` and `serviceDeparture` timestamps. | YES — call timing structure; exact derivation is context-specific. | OBSERVED: arrival and departure branches; no populated current-call departure was observed. | Current arrival only. | Arrival fields only in the audited stop input. | RETAIN the context with every timing value. | Prevent arrival/departure mixing and support later fact grain. | `StopEventType=arrival` does not make all nested timing departure-free. |
@@ -96,7 +96,11 @@ The matrix applies these principles to all rows:
 - preserve situation association scope;
 - preserve arrival/departure context;
 - preserve Previous/This/Onward call scope where collected; and
-- do not persist only a derived delay while discarding its source timestamps.
+- do not persist only a derived delay while discarding its source timestamps;
+- preserve first-seen source `RecordedAtTime` lineage without allowing later
+  NULL/disappearance to erase it; and
+- preserve the observed sequence of Situation/Cause versions rather than one
+  mutable cause value.
 
 Stage 02 does not design SQL columns or tables. The Legacy persistence column
 names above are evidence of the existing implementation only.
@@ -111,3 +115,9 @@ be collapsed into an ambiguous common record.
 For both sources, `ObservedAt` / `CapturedAt` is first-class lineage, and
 repeated observations must preserve estimate evolution. Do not introduce
 `ActualTime` or `ActualDelay` merely to align the two source contracts.
+
+The detailed [future source-observation and persistence contract](future-observation-persistence-contract.md)
+defines the conceptual append-only evidence flow, source-only nullable
+`RecordedAtTime`, separate collector observation time, actual-time capture
+state, Situation/Cause history, and intended PostgreSQL direction. This matrix
+does not create a schema or approve implementation.

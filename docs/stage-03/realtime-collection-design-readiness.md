@@ -67,6 +67,29 @@ in the bounded tested responses or six live lifecycle journeys. GTFS-RT
 `StopTimeEvent.time` can mean estimated or actual, and no provider-specific
 explicit actual/recorded semantic was observed.
 
+## Future persistence direction — design only
+
+The [future source-observation and persistence contract](../source-contracts/future-observation-persistence-contract.md)
+defines the intended evidence boundary:
+
+```text
+SOURCE -> COLLECTOR -> APPEND-ONLY SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE
+```
+
+The redesigned persistence architecture is intended to move toward
+**PostgreSQL**, with JSONB considered later where justified for source-shaped
+context. This records a future database direction only. It does not migrate
+SQL Server, create PostgreSQL tables, finalize a schema, approve production
+persistence, or change source availability.
+
+The source-observation layer must retain `TimetabledTime`, `EstimatedTime`,
+nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` as separate
+concepts. A non-null source `RecordedAtTime` is retained exactly with its
+conceptual first-seen observation timestamp; later NULL or disappearance does
+not erase it. Repeated `EstimatedTime` revisions and source-reported
+Situation/Cause versions remain historical evidence rather than one mutable
+latest-state record.
+
 ## Entry conditions and guardrails
 
 - Source-faithful ingestion must remain separate conceptually and in future
@@ -81,6 +104,16 @@ explicit actual/recorded semantic was observed.
   observation. The collector must preserve repeated observations of the same
   event so estimate evolution is analytically available; it must not retain
   only the latest estimate.
+- `ObservedAt` / `CapturedAt` is never `RecordedAtTime`. `RecordedAtTime` may
+  be populated only from an explicit non-null source value; it must never be
+  derived from an estimate, timetable, collector timestamp, or disappearance.
+- Once a source-provided `RecordedAtTime` is captured, actual-time-specific
+  tracking for that event may stop, but independent Situation, Cause,
+  cancellation, and status tracking may continue. This lifecycle distinction
+  does not approve a production scheduler.
+- Source-reported Situation/Cause evidence must remain append-only by
+  observation and version. A later omission must not erase earlier evidence;
+  no normalized cause taxonomy or inferred root cause is approved here.
 - Preserve source identity and lineage, including the distinct GTFS.de and
   VRS/go.Rheinland namespaces. Current GTFS.de Neumarkt identity is bounded
   and validated; railway Köln Hbf remains unresolved. Adjacent KVB complexes

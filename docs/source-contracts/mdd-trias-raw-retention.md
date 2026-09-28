@@ -53,6 +53,13 @@ nullability, media type, or parser loss. Such an artifact must:
 The Stage 02 decision does not prescribe a number of days because no such
 period was authorized by the evidence supplied for this audit.
 
+The future architecture may evaluate a **short-term** raw-payload retention
+option for forensic reprocessing and parser improvements, particularly where a
+source field was present but not yet understood. This is a future concept, not
+an approved duration or an instruction to retain raw payloads permanently. Any
+later duration must be chosen using storage volume, privacy/data
+considerations, reprocessing need, and operational cost.
+
 ## Future exception gate
 
 If Stage 7 later establishes a justified need for **automated short-term raw
