@@ -198,14 +198,20 @@ the only primary pilot source; GTFS-RT remains complementary and is excluded
 from the one-source loop because Stage 9 owns cross-source matching.
 
 The approved target is Köln Hbf, `de:05315:11201`. The exact pilot request uses
-TRIAS 1.2 `POST`, `NumberOfResults=20`, `arrival`, previous/onward/realtime
-flags true, `TimeWindow` omitted, and `IncludeOperatingDays` omitted. The
-sampling policy is one slot every 60 seconds for at most 60 minutes and at
-most 60 scheduled requests, with a 30-second timeout, zero retries, no
-concurrency, no catch-up, explicit overlap gaps, quota accounting, and
-early-stop rules. A bounded 24-hour temporary raw-response exception and a
-protected append-only JSONL diagnostic persistence harness are approved;
-PostgreSQL remains deferred. Actual Delay remains unapproved.
+TRIAS 1.2 `POST`, a fixed pilot-start `DepArrTime` anchor reused for every
+request, `NumberOfResults=20`, `arrival`, previous/onward/realtime flags true,
+`TimeWindow` omitted, and `IncludeOperatingDays` omitted. The V2 sampling
+policy is one slot every 10 seconds for at most 60 minutes and at most 360
+scheduled logical requests and 360 normal HTTP attempts, with a 30-second
+timeout, zero retries, no concurrency, no catch-up, explicit overlap gaps,
+quota accounting, and early-stop rules. The 360-attempt ceiling is
+approximately 0.144% of the conservative 250,000-request monthly ceiling;
+this remains a bounded diagnostic cadence, not production approval, and Stage
+13 owns production cadence/readiness analysis. A bounded 24-hour temporary
+raw-response exception and a protected append-only JSONL diagnostic persistence
+harness are approved; PostgreSQL remains deferred. Ten-second sampling reduces
+but cannot mathematically guarantee capture of a transient `RecordedAtTime`.
+Actual Delay remains unapproved.
 
 ## Stage 8 — Small Realtime Pilot — NOT STARTED / NEXT
 

@@ -1,7 +1,7 @@
 # Stage 7 — Realtime Pilot Design Completion Decision
 
 **Date:** `2026-09-28`  
-**Decision:** [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)  
+**Decision:** [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction), correcting the cadence detail in [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)<br>
 **Final status:** `COMPLETE — APPROVED PILOT DESIGN`  
 **Stage 8 status:** `NOT STARTED / NEXT`
 
@@ -22,8 +22,9 @@ and remaining pilot risks.
   operational-status, Situation, and service-information structures observed
   in the documented evidence. This is not a provider-wide coverage claim.
 - The prior controlled and lifecycle evidence did not establish provider-wide
-  `RecordedAtTime` availability or absence. Repeated prospective observation
-  remains necessary for any later timing conclusion.
+  `RecordedAtTime` availability or absence, or an empirical minimum visibility
+  period. Repeated prospective observation remains necessary for any later
+  timing conclusion.
 - Stage 5 already defines the compatible logical source grains for one MDD
   response snapshot, one stop-event result, one call occurrence, one Situation
   occurrence, one stop-event/Situation association, and one service-attribute
@@ -46,40 +47,58 @@ The following Stage 8 design is approved and fixed:
 - **Request:** TRIAS 1.2 `POST` to the approved `/delfi` endpoint, XML content
   type, `MDD_API_KEY` environment variable only, `arrival`,
   `IncludePreviousCalls=true`, `IncludeOnwardCalls=true`,
-  `IncludeRealtimeData=true`, and current UTC request/reference timestamp.
+  `IncludeRealtimeData=true`, and a fixed `PilotAnchorDepArrTime` selected at
+  pilot start in UTC and reused for every request. The per-request request
+  timestamp remains lineage; the `DepArrTime` anchor does not advance with
+  wall-clock time.
 - **Result limit:** `NumberOfResults=20` for the bounded pilot only; it is not
   an HTTP request count or a production default.
 - **Time window:** omitted; semantically available but not selected for the
   pilot. `IncludeOperatingDays` is also omitted.
-- **Cadence:** one request slot every 60 seconds, at most 60 minutes, and at
-  most 60 scheduled logical MDD requests.
+- **Cadence:** one request slot every 10 seconds, at most 60 minutes, and at
+  most 360 scheduled logical MDD requests and 360 normal HTTP attempts.
 - **Concurrency:** no concurrent requests, overlap protection, no catch-up
   burst, and `SCHEDULED_SLOT_SKIPPED_OVERLAP` for an overlapping skipped slot.
+  The 30-second timeout does not permit overlap; the scheduler remains
+  slot-based and sequential.
 - **Timeout/retry:** 30-second timeout and zero retries. Every actual attempt
   is recorded.
 - **Early stop:** missing credential means zero attempts; 401/403 stops for
   authentication/authorization evidence; 429 stops for rate-limit evidence;
   three consecutive failed request slots stop the pilot. A successful request
   resets the consecutive-failure count.
+- **Quota:** the 360-attempt one-hour ceiling is approximately `0.144%` of
+  the conservative `250,000` HTTP-request monthly ceiling. This is a bounded
+  diagnostic pilot cadence, not an approved production cadence; Stage 13 owns
+  production cadence/readiness analysis and shared-caller headroom.
 - **Sampling lineage:** every observation identifies the versioned,
-  non-production policy `MDD_STAGE_8_KOELN_HBF_60S_60MIN_V1`.
+  non-production policy `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`.
 - **Retention:** the complete approved Stage 2 source-field selection is
   preserved, including independent timing fields, call scope, bays,
   operational flags, Situation/attribute/service-information evidence, errors,
   and parser/run lineage.
 - **Timing:** `TimetabledTime`, `EstimatedTime`, `RecordedAtTime`, and
-  `ObservedAt` remain distinct. Source `RecordedAtTime` is nullable, exact,
-  source-only, and never synthesized; first observation lineage is retained.
-- **History:** repeated observations and equal-valued later observations are
-  preserved; an exact replay is idempotent without collapsing legitimate later
-  observations.
+  `ObservedAt` remain distinct. If source `RecordedAtTime` is observed once in
+  any retained `THIS`, `PREVIOUS`, or `ONWARD` context for either arrival or
+  departure, its exact value is written immediately to append-only pilot
+  persistence with event/source identity, call scope, context, response
+  identity, `ObservedAt`, and first-seen observation timestamp. It is
+  nullable, source-only, never synthesized, and later `NULL` or disappearance
+  cannot erase it.
+- **History:** every successful 10-second response remains a distinct
+  observation, including when `EstimatedTime` or `RecordedAtTime` is unchanged;
+  an exact replay of the same response/run identity is idempotent without
+  collapsing legitimate later observations. The first successful response is
+  the initial cohort/baseline observation; later responses use the same fixed
+  anchor, and result additions/removals/reordering are lifecycle evidence.
 - **Situation semantics:** Situation and `IncidentCall` evidence is append-only
   context, not a normalized or proven root cause. `IncidentCall` is not
   `ErrorMessage`.
-- **Raw exception:** MDD pilot responses may be held temporarily outside Git
+- **Raw exception:** the increased V2 response count does not change the
+  approved bounded exception: MDD pilot responses remain temporary, outside Git,
   in a mode-700 directory with mode-600 files, after an API-key-content check,
-  without credentials, for at most 24 hours after the run, and must be cleaned
-  up after review.
+  without credentials, for at most 24 hours after the run, and are deleted
+  after successful Stage 8 evidence extraction/reconciliation.
 - **Pilot persistence:** protected append-only local JSONL artifacts mirror the
   approved Stage 5 source grains diagnostically. They are not PostgreSQL, a
   production database, or a mutable latest-state store.
@@ -111,8 +130,15 @@ do not change the deferred implementation boundary.
 
 ## OPEN PILOT RISK
 
-- `RecordedAtTime` may be absent in the one-hour sample. That is a valid pilot
-  result and does not prove provider-wide absence.
+- `RecordedAtTime` may be absent in the one-hour sample. The result
+  `RECORDED_AT_TIME_NOT_OBSERVED` means absence in the observed sampling window,
+  not provider-wide absence.
+- Ten-second polling materially reduces the risk of missing a transient
+  `RecordedAtTime` occurrence but cannot mathematically guarantee capture. No
+  positive lifecycle sample establishes the field's minimum visibility period.
+  If Stage 8 shows a relevant source field appearing and disappearing within
+  the 10-second interval, a separately approved shorter bounded validation may
+  be required; this does not pre-approve a 5-second production cadence.
 - One station and one bounded hour cannot establish Cologne-wide, mode-wide,
   operator-wide, or provider-wide coverage percentages.
 - Response/application error behavior, parser gaps, persistence failures,

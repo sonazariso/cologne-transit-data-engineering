@@ -85,7 +85,10 @@ semantics:
 `RecordedAtTime` is nullable and may be populated only when the source
 explicitly supplies it. Never derive it from `EstimatedTime`, the last
 estimate, `TimetabledTime`, `ObservedAt`/`CapturedAt`, or event disappearance.
-When a non-null source value is observed, retain the exact value and the
+When a non-null source value is observed in any retained `THIS`, `PREVIOUS`, or
+`ONWARD` context, for either arrival or departure, write the exact value
+immediately to append-only pilot persistence with event/source identity, call
+scope, arrival/departure context, response identity, `ObservedAt`, and the
 conceptual `RecordedAtTimeObservedAt` first-seen observation timestamp. A later
 `NULL` or disappearance must not overwrite or erase it.
 
@@ -274,18 +277,25 @@ Do not infer provider outage from a local resolver failure.
 The default is **no permanent or automatic full raw-response retention** for
 MDD XML/JSON or GTFS-RT protobuf payloads.
 Temporary raw evidence outside Git is allowed for an approved diagnostic
-experiment. If Stage 7 later requires short-term automated raw capture, that
-stage must explicitly approve its purpose, retention, storage, access control,
-and cleanup.
+experiment. The Stage 7 V2 handoff explicitly approves only the bounded
+purpose, retention, storage, access control, and cleanup described below.
+
+For the approved Stage 8 V2 diagnostic handoff, the increased response count
+does not change that boundary: raw files remain temporary and outside Git,
+with mode-600 files inside a mode-700 directory, a maximum 24-hour retention,
+and deletion after successful evidence extraction and reconciliation. This is
+not permanent raw storage.
 
 ## 15. RecordedAtTime discovery
 
 Although `RecordedAtTime` was not observed in Stage 02, future collector
 parsing must not discard it if it appears. It remains a nullable candidate
-source field. It is source-only: any first non-null observation must preserve
-the exact value and first-seen observation timestamp, while later NULL or
-disappearance must not clear it. Any first observation must trigger semantic and
-coverage validation before Actual Delay becomes a production KPI.
+source field. It is source-only: any first non-null observation in a retained
+call context and arrival/departure context must be written immediately with
+the exact value, event/source identity, response identity, `ObservedAt`, and
+first-seen observation timestamp, while later NULL or disappearance must not
+clear it. Any first observation must trigger semantic and coverage validation
+before Actual Delay becomes a production KPI.
 
 ## 16. Actual-time capture versus independent tracking
 
@@ -305,6 +315,11 @@ be exposed only during a short event-lifecycle window and disappear in later
 historical queries. The [near-event lifecycle validation](../source-contracts/mdd-trias-event-lifecycle-validation.md)
 prepared with Stage 02 approval is the initial diagnostic test for this
 possibility.
+
+For the Stage 8 pilot, use a fixed `PilotAnchorDepArrTime` selected at pilot
+start for every request. The first successful response is the initial cohort/
+baseline observation; later responses use the same anchor, and result
+additions, removals, or reordering remain lifecycle evidence.
 
 ## 18. Future persistence direction
 
@@ -333,8 +348,11 @@ Stage 7 approves a diagnostic handoff for one future Stage 8 execution:
   preflight and no secret output;
 - request: `arrival`, `NumberOfResults=20`, previous/onward/realtime flags
   true, `TimeWindow` omitted, and `IncludeOperatingDays` omitted;
-- sampling policy: `MDD_STAGE_8_KOELN_HBF_60S_60MIN_V1`, one slot every 60
-  seconds for at most 60 minutes and at most 60 scheduled requests;
+- sampling policy: `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`, one slot every 10
+  seconds for at most 60 minutes and at most 360 scheduled logical requests
+  and 360 normal HTTP attempts;
+- `DepArrTime`: fixed `PilotAnchorDepArrTime` selected at pilot start and reused
+  for every request; do not advance it with wall-clock time;
 - timeout/retries: 30 seconds and zero retries;
 - overlap: no concurrency or catch-up; an overlapping slot is recorded as
   `SCHEDULED_SLOT_SKIPPED_OVERLAP`;
@@ -345,9 +363,16 @@ Stage 7 approves a diagnostic handoff for one future Stage 8 execution:
   [the Stage 7 design](../stages/07-realtime-pilot-design.md).
 
 This handoff preserves the full Stage 2 field-retention requirements and the
-Stage 5 logical source grains. It does not authorize Stage 8 host execution,
-runtime code, PostgreSQL, GTFS-RT collection, production cadence, or Actual
-Delay. The [Stage 7 completion decision](../stages/07-realtime-pilot-design-completion-decision.md)
+Stage 5 logical source grains. The 360-attempt ceiling is approximately
+0.144% of the conservative 250,000-request monthly ceiling and is a bounded
+diagnostic pilot budget, not a production cadence approval; Stage 13 owns
+production cadence/readiness analysis. Every successful 10-second response is
+a distinct observation, even when values are unchanged. Ten-second polling
+reduces but cannot mathematically guarantee capture of a transient
+`RecordedAtTime`; `RECORDED_AT_TIME_NOT_OBSERVED` means absence in the observed
+sampling window, not provider-wide absence. It does not authorize Stage 8 host
+execution, runtime code, PostgreSQL, GTFS-RT collection, production cadence,
+or Actual Delay. The [Stage 7 completion decision](../stages/07-realtime-pilot-design-completion-decision.md)
 is the authoritative approval record.
 
 ## Handoff gate

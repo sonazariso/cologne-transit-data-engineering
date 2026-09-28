@@ -34,7 +34,8 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
 | D-029 | 2026-09-28 | Stage 5 database architecture: PostgreSQL 18 clean redesign, durable source-faithful layers, logical grains, lineage, and deferred physical implementation | Approved architecture |
 | D-030 | 2026-09-28 | Stage 6 static warehouse and analytics design contract: Cologne-scoped grains, schedule/calendar semantics, lineage, and future reconciliation baseline; physical implementation deferred by explicit user decision | Approved design; physical implementation deferred |
-| D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Approved pilot design |
+| D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Approved pilot design; cadence detail superseded by D-032 |
+| D-032 | 2026-09-28 | Stage 7 pilot-design correction: bounded 10-second fixed-anchor MDD handoff for `RecordedAtTime` visibility; D-031's 60-second cadence detail is superseded while its historical record is retained | Approved pilot-design correction |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -320,6 +321,12 @@ by this decision; it is closed by D-031 below.
 
 ## D-031 — Stage 7 Realtime Pilot Design
 
+**Historical record:** D-031's original 60-second cadence, moving
+`DepArrTime` detail, and V1 sampling-policy identifier are superseded for the
+active Stage 8 handoff by [D-032](#d-032--stage-7-pilot-cadence-and-recordedattime-correction).
+The original decision is retained so the repository does not rewrite its
+decision history.
+
 Stage 7 is **COMPLETE — APPROVED PILOT DESIGN**. It defines a bounded,
 reproducible Stage 8 diagnostic handoff without executing the pilot.
 
@@ -392,3 +399,66 @@ GTFS-RT request, network access, SQL/database access, runtime pilot, or
 PostgreSQL implementation. Stage 6 remains **COMPLETE — APPROVED DESIGN;
 PHYSICAL IMPLEMENTATION DEFERRED** and Stage 5 remains **COMPLETE — APPROVED
 ARCHITECTURE**.
+
+## D-032 — Stage 7 Pilot Cadence and RecordedAtTime Correction
+
+D-032 is the active correction to the bounded Stage 8 handoff. It supersedes
+the 60-second cadence, moving `DepArrTime` detail, and V1 policy identifier in
+D-031 while retaining D-031 as historical decision context. Stage 7 remains
+**COMPLETE — APPROVED PILOT DESIGN** and Stage 8 remains **NOT STARTED / NEXT**.
+
+The corrected handoff is:
+
+- Use **MDD/TRIAS only** for the one-source pilot at Köln Hbf,
+  `de:05315:11201`. GTFS-RT remains excluded and Stage 9 owns later
+  cross-source matching.
+- At pilot start, select `PilotAnchorDepArrTime` as the UTC reference
+  timestamp. Reuse that exact `DepArrTime` in every request for the one-hour
+  pilot; do not advance it with wall-clock time. Retain the per-request request
+  timestamp and fixed anchor as lineage.
+- The first successful response is the initial cohort/baseline observation.
+  Later responses use the same fixed search anchor. Result additions,
+  removals, and reordering are lifecycle evidence; result positions need not
+  remain identical.
+- Use the unchanged request selections: TRIAS 1.2 `POST`, XML,
+  `MDD_API_KEY` presence-only preflight, `arrival`,
+  `NumberOfResults=20`, previous/onward/realtime flags true, and `TimeWindow`
+  and `IncludeOperatingDays` omitted. The purpose of the correction is greater
+  temporal observation density, not larger result-set breadth.
+- Use the active non-production sampling policy
+  `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`: one scheduled logical request slot
+  every 10 seconds for at most 60 minutes, at most 360 scheduled logical
+  requests and 360 normal HTTP attempts. Requests remain sequential,
+  non-concurrent, with no catch-up bursts and zero retries. If an active
+  request runs into a later slot, skip and persist
+  `SCHEDULED_SLOT_SKIPPED_OVERLAP`; do not queue or compress it.
+- Keep the 30-second request timeout. It does not permit overlap even though
+  it exceeds one 10-second slot interval. The revised 360-attempt ceiling is
+  approximately `0.144%` of the conservative `250,000` HTTP-request monthly
+  ceiling. This is a bounded diagnostic pilot cadence, not a production
+  approval; Stage 13 owns production cadence/readiness analysis and
+  shared-caller headroom.
+- If source `RecordedAtTime` is observed once in any retained `THIS`,
+  `PREVIOUS`, or `ONWARD` timing context for either arrival or departure, write
+  the exact source value immediately to append-only pilot persistence with
+  event/source identity, call scope, arrival/departure context, response
+  identity, `ObservedAt`, and first-seen observation timestamp. Later `NULL` or
+  disappearance must not erase it. Every successful 10-second response remains
+  a distinct observation even when `EstimatedTime` or `RecordedAtTime` is
+  unchanged; only an exact replay of the same response/run identity is
+  idempotent.
+- If no value is observed, report `RECORDED_AT_TIME_NOT_OBSERVED` as absence in
+  the observed sampling window, not provider-wide absence. Ten-second polling
+  materially reduces but cannot mathematically guarantee capture because no
+  positive lifecycle sample establishes a minimum visibility period. A field
+  observed to appear and disappear within the 10-second interval may require a
+  separately approved shorter bounded validation; no 5-second production
+  cadence is pre-approved.
+- Retain the approved raw-response exception: temporary files outside Git,
+  mode 600 inside a mode-700 directory, maximum 24-hour retention, and
+  deletion after successful Stage 8 evidence extraction/reconciliation. This
+  is not permanent raw storage.
+
+D-032 authorizes no MDD request, GTFS-RT request, other network request, SQL or
+database work, or runtime pilot code. The documentation-only correction does
+not start Stage 8.

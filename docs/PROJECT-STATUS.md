@@ -126,15 +126,22 @@ for the authoritative closeout record.
 
 - **Stage 7 — COMPLETE — APPROVED PILOT DESIGN.** The [realtime pilot design](stages/07-realtime-pilot-design.md)
   fixes a bounded, reproducible MDD/TRIAS-only Stage 8 pilot for Köln Hbf,
-  `de:05315:11201`, with one 60-second slot per minute for at most 60 minutes,
-  at most 60 scheduled requests, `NumberOfResults=20`, `TimeWindow` omitted,
-  a 30-second timeout, and zero retries.
+  `de:05315:11201`, with the V2 policy `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`:
+  one 10-second slot for at most 60 minutes, at most 360 scheduled logical
+  requests and 360 normal HTTP attempts, a fixed pilot-start `DepArrTime`
+  anchor, `NumberOfResults=20`, `TimeWindow` omitted, a 30-second timeout,
+  and zero retries. The bounded cadence reduces but cannot mathematically
+  guarantee capture of a transient source `RecordedAtTime`.
 - The pilot preserves the approved source-field retention, timing, estimate
   history, call scope, bay, operational-flag, Situation, service-information,
-  error, parser-lineage, gap, idempotency, and reconciliation requirements.
-  It uses protected temporary raw responses only under the bounded 24-hour
-  Stage 8 exception and a diagnostic append-only JSONL harness because
-  PostgreSQL remains deferred.
+  error, parser-lineage, gap, idempotency, and reconciliation requirements,
+  including immediate append-only persistence of any observed source
+  `RecordedAtTime` and protection from later NULL erasure. The 360-attempt
+  ceiling is approximately 0.144% of the conservative 250,000-request
+  monthly ceiling; Stage 13 owns production cadence/readiness analysis. It
+  uses protected temporary raw responses only under the bounded 24-hour Stage
+  8 exception and a diagnostic append-only JSONL harness because PostgreSQL
+  remains deferred.
 - GTFS-RT is not part of the one-source pilot; Stage 9 owns cross-source
   matching. Actual Delay remains **NOT APPROVED**. One-station evidence is not
   Cologne-wide coverage.

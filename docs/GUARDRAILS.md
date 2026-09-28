@@ -179,8 +179,10 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 70. PostgreSQL migration, runtime, database/schema/table creation, SQL,
     migration, and data loading remain deferred until explicit user
     authorization.
-71. The Stage 8 pilot cadence — one MDD slot every 60 seconds for at most 60
-    minutes — is a diagnostic pilot cadence, not a production cadence.
+71. The active Stage 8 V2 pilot cadence — one MDD slot every 10 seconds for at
+    most 60 minutes, with at most 360 scheduled logical requests and 360 normal
+    HTTP attempts — is a bounded diagnostic cadence, not a production cadence;
+    Stage 13 owns production cadence/readiness analysis.
 72. One Stage 8 station, Köln Hbf, is source/parser/persistence validation
     evidence only and must not be presented as Cologne-wide coverage.
 73. `NumberOfResults` is a per-response result limit, not an HTTP request
@@ -207,3 +209,17 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 83. Actual Delay remains **NOT APPROVED**. A Stage 8 `RecordedAtTime` result is
     candidate evidence only and cannot become a production KPI without later
     semantic, coverage, matching, and operational approval.
+84. The active Stage 8 V2 pilot selects `PilotAnchorDepArrTime` at pilot start
+    and reuses that fixed `DepArrTime` for every request; it must not advance
+    with wall-clock time.
+85. If source `RecordedAtTime` is observed once in any retained `THIS`,
+    `PREVIOUS`, or `ONWARD` context for either arrival or departure, the exact
+    value and its event/source identity, call scope, context, response identity,
+    `ObservedAt`, and first-seen timestamp must be written immediately to
+    append-only pilot persistence. Later `NULL` or disappearance must not erase
+    it, and equal-valued successful responses remain distinct observations.
+86. Ten-second sampling materially reduces but cannot mathematically guarantee
+    capture of a transient `RecordedAtTime`. `RECORDED_AT_TIME_NOT_OBSERVED`
+    means absence in the observed sampling window, not provider-wide absence;
+    a shorter validation requires separate approval and no 5-second production
+    cadence is pre-approved.

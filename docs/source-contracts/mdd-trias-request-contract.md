@@ -96,7 +96,7 @@ evidence above and must not be promoted to production defaults.
 | Authentication | `x-api-key` header from `MDD_API_KEY` environment variable only |
 | RequestorRef | `CologneTransitIntelligence` |
 | StopPointRef | `de:05315:11201` (Köln Hbf) |
-| `DepArrTime` | Current request/reference timestamp in the already-approved UTC TRIAS format |
+| `DepArrTime` | Fixed `PilotAnchorDepArrTime` selected at pilot start in the already-approved UTC TRIAS format and reused for every pilot request |
 | `StopEventType` | `arrival` |
 | `NumberOfResults` | `20` for the bounded pilot only |
 | `IncludePreviousCalls` | `true` |
@@ -114,8 +114,12 @@ preflight and prints only `MDD_API_KEY: PRESENT` or `MDD_API_KEY: MISSING`.
 `NumberOfResults = 20` is justified by the bounded pilot's need for broader
 per-request event/field coverage, the previously validated 1–100 builder
 range, and existing lifecycle tooling that used 20. It remains distinct from
-HTTP request count and is not a production setting. A failed request is not
-retried in the same slot.
+HTTP request count and is not a production setting. This correction keeps the
+value at 20 because the objective is increased temporal observation density,
+not larger result-set breadth. At pilot start, select
+`PilotAnchorDepArrTime` as the UTC reference timestamp and reuse that exact
+`DepArrTime` in every request; do not advance it with wall-clock time. A failed
+request is not retried in the same slot.
 
 ## Result count, HTTP requests, retries, and quota
 
@@ -143,8 +147,12 @@ public MDD dataset description is not treated as independent proof of the
 Stage 02 uses `250,000` as the project's conservative known request ceiling.
 
 Stage 02 defines the accounting implication, not a production retry policy.
-Stage 7 approves the bounded pilot timeout, zero-retry behavior, and pilot
-quota budget in [the Stage 7 design](../stages/07-realtime-pilot-design.md).
+Stage 7 approves the bounded pilot timeout, zero-retry behavior, and revised
+V2 pilot quota budget in [the Stage 7 design](../stages/07-realtime-pilot-design.md):
+at most 360 scheduled logical requests and 360 normal HTTP attempts in one
+hour, approximately 0.144% of the conservative monthly ceiling. This remains
+a bounded diagnostic cadence, not a production approval; Stage 13 owns
+production cadence/readiness analysis.
 Stage 13 must still budget base requests, retries, concurrency/overlap, and
 all measurable active collectors using the credential for production. No
 production polling schedule is approved by this document.

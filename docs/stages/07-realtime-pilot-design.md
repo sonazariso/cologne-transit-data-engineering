@@ -1,7 +1,7 @@
 # Stage 7 — Realtime Pilot Design
 
 **Status:** `COMPLETE — APPROVED PILOT DESIGN`  
-**Decision:** [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)  
+**Decision:** [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction), correcting the cadence detail in [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)<br>
 **Date:** `2026-09-28`  
 **Next stage:** Stage 8 — `NOT STARTED / NEXT`
 
@@ -120,7 +120,7 @@ setting, not a production default.
 | Credential source | `MDD_API_KEY` environment variable only |
 | RequestorRef | `CologneTransitIntelligence` |
 | Requested StopPointRef | `de:05315:11201` |
-| `DepArrTime` | Current request/reference timestamp in the already-approved UTC TRIAS format |
+| `DepArrTime` | Fixed `PilotAnchorDepArrTime` selected at pilot start in the already-approved UTC TRIAS format and reused for every pilot request |
 | `StopEventType` | `arrival` |
 | `NumberOfResults` | `20` |
 | `IncludePreviousCalls` | `true` |
@@ -129,10 +129,16 @@ setting, not a production default.
 | `TimeWindow` | Omitted |
 | `IncludeOperatingDays` | Omitted |
 
-The body remains an XML TRIAS 1.2 request. The effective request parameters,
-request timestamp, and requested stop must be retained as lineage with every
-response attempt. `DepArrTime` is request/reference context; it is not an
-event actual time.
+The body remains an XML TRIAS 1.2 request. At pilot start, select
+`PilotAnchorDepArrTime` as the UTC reference timestamp for the pilot and reuse
+that same `DepArrTime` value in every MDD request for the one-hour run. Do not
+advance it with wall-clock time. The effective request parameters, per-request
+request timestamp, fixed anchor, and requested stop must be retained as
+lineage with every response attempt. `DepArrTime` is request/reference
+context; it is not an event actual time. The first successful response is the
+initial cohort/baseline observation. Later responses use the same fixed search
+anchor; result additions, removals, and reordering are lifecycle evidence, and
+the pilot does not require every result position to remain identical.
 
 The credential must never be hardcoded, printed, logged, placed in command
 line arguments, or written into raw artifacts. The pilot may print only the
@@ -153,7 +159,8 @@ The decision is justified because:
 
 `NumberOfResults` is not an HTTP request count and is not a production
 default. Stage 13 remains responsible for production result-limit coverage and
-readiness analysis.
+readiness analysis. This correction keeps the value at 20: the objective is
+increased temporal observation density, not larger result-set breadth.
 
 ### 4.2 `TimeWindow` decision
 
@@ -173,7 +180,7 @@ readiness stage may test it separately.
 Every observation and gap must identify the following explicitly named,
 versioned, non-production policy:
 
-`MDD_STAGE_8_KOELN_HBF_60S_60MIN_V1`
+`MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`
 
 The policy conceptually records:
 
@@ -181,9 +188,10 @@ The policy conceptually records:
 |---|---|
 | Source | MDD/TRIAS |
 | Scope | Köln Hbf / `de:05315:11201` |
-| Interval | One request slot every 60 seconds |
+| Interval | One request slot every 10 seconds |
 | Maximum duration | 60 minutes |
-| Maximum scheduled logical requests | 60 |
+| Maximum scheduled logical requests | 360 |
+| Maximum normal HTTP attempts | 360 |
 | `NumberOfResults` | 20 |
 | `StopEventType` | `arrival` |
 | Retry count | 0 |
@@ -195,7 +203,7 @@ represented as a production cadence approval.
 
 ### 5.2 Scheduling rules
 
-- Schedule one logical request slot every 60 seconds for at most 60 minutes.
+- Schedule one logical request slot every 10 seconds for at most 60 minutes.
 - Do not queue catch-up requests.
 - Do not issue requests concurrently.
 - Do not overlap an active request with another request.
@@ -204,16 +212,26 @@ represented as a production cadence approval.
 - Record the planned slot, actual attempt state, and outcome separately.
 - A failed slot is not silently converted into a successful observation.
 
-This cadence is intentionally denser than a later production candidate so the
-pilot can observe estimate evolution and potentially short-lived fields. It
-is not production cadence.
+The 30-second request timeout exceeds one 10-second slot interval but does not
+permit overlap. The scheduler remains slot-based and sequential: if a request
+is still running when a later slot arrives, that slot is skipped and recorded
+explicitly rather than queued or compressed.
+
+This is a bounded diagnostic pilot cadence intended to increase temporal
+observation density for estimate evolution and potentially short-lived fields.
+It is not an approved production cadence; Stage 13 owns production cadence,
+shared-quota, and readiness analysis.
 
 ### 5.3 Quota accounting
 
 The conservative project ceiling remains **250,000 MDD HTTP requests per
-month**. The Stage 8 maximum normal HTTP attempts are **60** because retries
-are zero. Every actual HTTP attempt must be recorded, including failed
-attempts. `NumberOfResults` never counts as HTTP attempts.
+month**. The revised one-hour Stage 8 maximum is **360 scheduled logical
+requests** and **360 normal HTTP attempts** because retries are zero. This is
+approximately **0.144%** of the conservative monthly ceiling. Every actual
+HTTP attempt must be recorded, including failed attempts.
+`NumberOfResults` never counts as HTTP attempts. This is a bounded diagnostic
+pilot budget, not a production cadence approval; Stage 13 owns production
+cadence/readiness analysis and shared-caller headroom.
 
 The pilot does not claim knowledge of total account usage by other external
 callers sharing the credential. Stage 13 remains responsible for production
@@ -339,11 +357,15 @@ The invariant is:
 TimetabledTime != EstimatedTime != RecordedAtTime != ObservedAt
 ```
 
-`RecordedAtTime` is source-only and exact. If a non-null source value appears,
-retain it and record the first collector observation timestamp as
-`RecordedAtTimeObservedAt`. A later NULL or disappearance must not overwrite
-or erase the prior captured evidence. Never derive it from an estimate,
-timetable, request timestamp, `ObservedAt`, or event disappearance.
+`RecordedAtTime` is source-only and exact. If it is observed once in any
+retained `THIS`, `PREVIOUS`, or `ONWARD` timing context, and for either arrival
+or departure, write it immediately to append-only pilot persistence with the
+exact source value, event/source identity, call scope, arrival/departure
+context, response identity, `ObservedAt`, and first-seen observation
+timestamp (`RecordedAtTimeObservedAt`). A later `NULL` or disappearance must
+not overwrite or erase the prior captured evidence; later responses may
+independently contain `NULL`. Never derive it from an estimate, timetable,
+request timestamp, `ObservedAt`, or event disappearance.
 
 ### 7.5 Platform/bay and operational flags
 
@@ -402,9 +424,11 @@ ObservedAt 10:10 -> EstimatedTime 10:17
 ```
 
 The harness must preserve all three observations, even when a later estimate
-equals an earlier estimate. It must not collapse them into one mutable latest
-row. Exact replay duplication is handled separately in Section 12; a later
-scheduled observation is a new observation.
+equals an earlier estimate. Every successful 10-second response remains a
+distinct observation and must not be deduplicated merely because
+`EstimatedTime` or `RecordedAtTime` did not change. Exact replay of the exact
+same response/run identity is the only replay-idempotency case already defined
+by Stage 7; a later scheduled observation is a new observation.
 
 ## 9. Actual Delay gate
 
@@ -416,15 +440,22 @@ If Stage 8 observes a non-null source `RecordedAtTime`, it is
 semantics and context are comparable, but it must not become a production KPI.
 Later semantic, coverage, matching, and operational approval is required.
 
-If zero `RecordedAtTime` values are observed, that is a valid result. The
-report must say:
+If zero `RecordedAtTime` values are observed, that is a valid bounded result.
+The report must say:
 
 ```text
-RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT
+RECORDED_AT_TIME_NOT_OBSERVED
 ```
 
-It must not say `MDD_DOES_NOT_SUPPORT_RECORDED_AT_TIME` and must not make a
-provider-wide absence claim.
+This means absence in the observed sampling window, not provider-wide
+absence. Ten-second polling materially reduces the risk of missing a
+transient `RecordedAtTime` occurrence but cannot mathematically guarantee
+capture. No positive `RecordedAtTime` lifecycle sample currently establishes
+the field's minimum visibility period. If Stage 8 shows that a relevant source
+field can appear and disappear within the 10-second sampling interval, a
+separately approved shorter bounded validation may be required. This does not
+pre-approve a 5-second production cadence. The report must not say
+`MDD_DOES_NOT_SUPPORT_RECORDED_AT_TIME`.
 
 ## 10. Situation and cause semantics
 
@@ -442,8 +473,9 @@ Situation caused a measured delay or cancellation.
 Stage 7 approves one narrow raw-response exception for MDD Stage 8 pilot
 responses only. Its purpose is to compare raw response structure with parser
 output, detect parser field loss, and support offline forensic review if an
-unexpected field appears. It does not change the default project policy of no
-permanent raw MDD archive.
+unexpected field appears. The revised V2 cadence increases the response
+count, but it does not change the default project policy of no permanent raw
+MDD archive.
 
 ### 11.1 Storage and access
 
@@ -460,10 +492,12 @@ permanent raw MDD archive.
 
 ### 11.2 Retention and cleanup
 
-Raw payloads may exist only during Stage 8 execution and review, with a
-maximum retention of **24 hours after the pilot run ends**. Delete them earlier
-immediately after successful offline verification and Stage 8 evidence
-extraction when possible. Cleanup must run on normal completion.
+Raw payloads remain temporary and may exist only during Stage 8 execution and
+review, outside Git, with mode-600 files inside a mode-700 directory and a
+maximum retention of **24 hours after the pilot run ends**. Delete them after
+successful Stage 8 evidence extraction and parser-to-persistence
+reconciliation, or earlier after successful offline verification when
+possible. Cleanup must run on normal completion.
 
 The Stage 8 final report must state whether cleanup succeeded. A cleanup
 failure is an explicit pilot quality result and must not be hidden. The
@@ -621,8 +655,11 @@ The Stage 8 report must explicitly list, for every observed non-null source
 
 - occurrence count;
 - distinct event count;
+- event/source identity;
 - call scope: `THIS`, `PREVIOUS`, or `ONWARD`;
 - arrival/departure context;
+- response identity;
+- `ObservedAt`;
 - first collector observation time;
 - exact source value; and
 - whether later responses retained or omitted the value.
@@ -630,10 +667,11 @@ The Stage 8 report must explicitly list, for every observed non-null source
 If the count is zero, the report must include the exact bounded result:
 
 ```text
-RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT
+RECORDED_AT_TIME_NOT_OBSERVED
 ```
 
-This is a sample result, not a provider-wide support or absence conclusion.
+This means absence in the observed sampling window, not a provider-wide
+support or absence conclusion.
 
 ## 18. Representativeness and source boundaries
 
@@ -667,8 +705,9 @@ Stage 8 may begin only as a separately identified host-execution stage. Its
 implementation handoff is:
 
 1. perform the safe credential-presence preflight;
-2. use the exact request contract in Section 4;
-3. apply the named sampling policy, 60-second slot boundary, no-retry rule,
+2. at pilot start, select `PilotAnchorDepArrTime` and use that fixed anchor in
+   the exact request contract in Section 4 for every request;
+3. apply the named V2 sampling policy, 10-second slot boundary, no-retry rule,
    timeout, overlap, quota, and early-stop controls;
 4. capture only the approved bounded raw exception and protected JSONL
    artifacts;
@@ -692,7 +731,7 @@ PostgreSQL implementation are not part of this Stage 7 closeout.
 | 3 | The exact request contract is fixed. | PASS — Section 4. |
 | 4 | `NumberOfResults` is fixed and justified. | PASS — 20 for the bounded pilot only. |
 | 5 | The `TimeWindow` decision is explicit. | PASS — omitted; semantically available but not selected. |
-| 6 | Cadence, duration, and request ceiling are explicit. | PASS — 60-second slots, 60-minute maximum, 60 scheduled requests. |
+| 6 | Cadence, duration, and request ceiling are explicit. | PASS — V2 10-second slots, 60-minute maximum, 360 scheduled requests and normal HTTP attempts. |
 | 7 | Timeout and retry behavior are explicit. | PASS — 30 seconds, zero retries. |
 | 8 | Quota accounting is explicit. | PASS — actual attempts counted; 250,000/month remains conservative ceiling. |
 | 9 | Overlap and catch-up behavior are explicit. | PASS — no concurrency or catch-up; overlap slot skipped. |
@@ -700,7 +739,7 @@ PostgreSQL implementation are not part of this Stage 7 closeout.
 | 11 | Field retention is tied to approved prior contracts. | PASS — Sections 2 and 7. |
 | 12 | Timing semantics remain unchanged. | PASS — source fields remain independent. |
 | 13 | Estimate history is explicitly preserved. | PASS — repeated observations remain distinct. |
-| 14 | The `RecordedAtTime` validation rule is explicit. | PASS — source-only, exact, nullable, first-seen lineage, never synthesized. |
+| 14 | The `RecordedAtTime` validation rule is explicit. | PASS — source-only, exact, nullable, immediately append-only when observed in any retained call/arrival-departure context, first-seen lineage, later NULL-safe, never synthesized. |
 | 15 | Situation/cause semantics remain non-causal by default. | PASS — association/context only. |
 | 16 | Raw-capture purpose, storage, access, retention, and cleanup are explicit. | PASS — bounded external exception, 700/600 permissions, maximum 24 hours, cleanup required. |
 | 17 | Pilot persistence works without PostgreSQL by design. | PASS — protected append-only JSONL harness. |
@@ -713,7 +752,7 @@ PostgreSQL implementation are not part of this Stage 7 closeout.
 | 24 | Actual Delay remains unapproved. | PASS — Section 9. |
 | 25 | Stage 8 was not started. | PASS — this document is a design handoff only. |
 | 26 | No network, database, SQL, or runtime execution occurred. | PASS — documentation-only Stage 7 work. |
-| 27 | Documentation/status synchronization is required. | PASS — closeout files and status documents are updated with D-031. |
+| 27 | Documentation/status synchronization is required. | PASS — closeout files and status documents are updated with D-032; D-031's original cadence detail remains historical and superseded. |
 | 28 | `git diff --check` passes. | PASS — local validation completed successfully. |
 
 ## 21. Final Stage 7 decision
