@@ -26,7 +26,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import Message
@@ -51,8 +51,42 @@ REQUEST_TIMEOUT_SECONDS = 30
 MAX_GTFS_RT_RESPONSE_BYTES = 100 * 1024 * 1024
 MAX_MDD_RESPONSE_BYTES = 25 * 1024 * 1024
 MAX_TEXT_EXAMPLES = 10
+MAX_MDD_FIELD_EXAMPLES = 5
 MAX_SHORT_TEXT_CHARS = 240
 RAW_TEMP_PREFIX = "cologne-transit-stage-03a-"
+
+MDD_REASON_FIELD_TERMS = (
+    "situation",
+    "reason",
+    "cause",
+    "incident",
+    "info",
+    "message",
+    "summary",
+    "description",
+    "detail",
+    "advice",
+    "text",
+    "content",
+    "effect",
+    "impact",
+    "consequence",
+    "severity",
+    "affect",
+    "valid",
+    "disruption",
+    "problem",
+    "fullref",
+)
+
+MDD_REFERENCE_TYPE_NAMES = {
+    "situationfullref": "SituationFullRef",
+    "situationref": "SituationRef",
+    "incidentcall": "IncidentCall",
+    "infocall": "InfoCall",
+}
+
+MDD_ERROR_FIELD_NAMES = {"errormessage", "errorcode"}
 
 NEUMARKT_STOP_IDS = frozenset(
     ("106842", "207108", "441164", "581903", "96309")
@@ -406,6 +440,14 @@ def descriptor_is_repeated(field: Any) -> bool:
 
 
 def field_is_present(message: Any, field_name: str) -> bool:
+    """Return serialized presence without treating a protobuf default as set.
+
+    GTFS-Realtime's optional enum fields have default values.  Reading an
+    enum attribute is therefore not a presence test.  Prefer HasField and
+    use ListFields only as a compatibility fallback; never compare the
+    returned value with the descriptor default.
+    """
+
     field = field_descriptor(message, field_name)
     if field is None:
         return False
@@ -418,8 +460,11 @@ def field_is_present(message: Any, field_name: str) -> bool:
         return bool(message.HasField(field_name))
     except (AttributeError, TypeError, ValueError):
         try:
-            return getattr(message, field_name) != field.default_value
-        except (AttributeError, TypeError):
+            return any(
+                descriptor.name == field_name
+                for descriptor, _value in message.ListFields()
+            )
+        except (AttributeError, TypeError, ValueError):
             return False
 
 
@@ -503,17 +548,38 @@ def translated_texts(message: Any) -> List[Tuple[str, Optional[str]]]:
     return values
 
 
+def alert_translated_texts(alert: Any, field_name: str) -> List[Tuple[str, Optional[str]]]:
+    """Extract non-empty translated values from a present Alert field."""
+
+    return translated_texts(get_message(alert, field_name))
+
+
 @dataclass
 class AlertAudit:
     entity_index: int
     entity_id: Optional[str]
+    cause_explicitly_present: bool
     cause_name: Optional[str]
     cause_numeric_value: Optional[int]
+    effect_explicitly_present: bool
     effect_name: Optional[str]
     effect_numeric_value: Optional[int]
+    severity_level_explicitly_present: bool
+    severity_level_name: Optional[str]
+    severity_level_numeric_value: Optional[int]
+    cause_detail_explicitly_present: bool
+    effect_detail_explicitly_present: bool
+    url_explicitly_present: bool
+    header_text_explicitly_present: bool
+    description_text_explicitly_present: bool
     header_texts: List[Tuple[str, Optional[str]]]
     description_texts: List[Tuple[str, Optional[str]]]
+    cause_detail_texts: List[Tuple[str, Optional[str]]]
+    effect_detail_texts: List[Tuple[str, Optional[str]]]
     active_period_present: bool
+    communication_period_present: bool
+    impact_period_present: bool
+    informed_entity_present: bool
     informed_entity_count: int
     selectors: List[Dict[str, Optional[str]]]
     scope_types: Set[str]
@@ -657,6 +723,9 @@ def enum_distribution(
         elif field_name == "effect":
             name = alert.effect_name
             numeric_value = alert.effect_numeric_value
+        elif field_name == "severity_level":
+            name = alert.severity_level_name
+            numeric_value = alert.severity_level_numeric_value
         else:
             raise ValueError("unsupported alert enum field")
         if name is None or numeric_value is None:
@@ -665,7 +734,7 @@ def enum_distribution(
     all_count = len(alerts)
     present_count = sum(counter.values())
     output: List[Dict[str, Any]] = []
-    coverage_field = "cause" if field_name == "cause" else "effect"
+    coverage_field = field_name
     for (name, numeric_value), count in sorted(counter.items(), key=lambda item: item[0]):
         output.append(
             {
@@ -680,6 +749,160 @@ def enum_distribution(
             }
         )
     return output
+
+
+def enum_presence_value_matrix(
+    alerts: Sequence[AlertAudit],
+    field_name: str,
+    unknown_name: str,
+    other_name: str,
+) -> Dict[str, Any]:
+    """Separate absent, explicit default, OTHER, and observed known values."""
+
+    present_attribute = field_name + "_explicitly_present"
+    name_attribute = field_name + "_name"
+    absent_count = 0
+    unknown_count = 0
+    other_count = 0
+    specific_counts: Counter[str] = Counter()
+    unrecognized_counts: Counter[str] = Counter()
+    for alert in alerts:
+        if not getattr(alert, present_attribute):
+            absent_count += 1
+            continue
+        name = getattr(alert, name_attribute)
+        if name == unknown_name:
+            unknown_count += 1
+        elif name == other_name:
+            other_count += 1
+        elif name is not None and name.startswith("UNRECOGNIZED_"):
+            unrecognized_counts[name] += 1
+        else:
+            specific_counts[name or "UNNAMED_ENUM_VALUE"] += 1
+
+    total = len(alerts)
+    rows = [
+        {
+            "category": "FIELD_ABSENT",
+            "count": absent_count,
+            "percentage_of_alerts": percentage(absent_count, total),
+        },
+        {
+            "category": "FIELD_PRESENT_UNKNOWN",
+            "count": unknown_count,
+            "percentage_of_alerts": percentage(unknown_count, total),
+        },
+        {
+            "category": "FIELD_PRESENT_OTHER",
+            "count": other_count,
+            "percentage_of_alerts": percentage(other_count, total),
+        },
+        {
+            "category": "FIELD_PRESENT_SPECIFIC_KNOWN",
+            "count": sum(specific_counts.values()),
+            "percentage_of_alerts": percentage(sum(specific_counts.values()), total),
+            "observed_values": [
+                {
+                    "value": name,
+                    "count": count,
+                    "percentage_of_alerts": percentage(count, total),
+                }
+                for name, count in sorted(specific_counts.items())
+            ],
+        },
+    ]
+    return {
+        "field_name": field_name,
+        "unknown_enum_name": unknown_name,
+        "other_enum_name": other_name,
+        "matrix": rows,
+        "unrecognized_values": [
+            {
+                "value": name,
+                "count": count,
+                "percentage_of_alerts": percentage(count, total),
+            }
+            for name, count in sorted(unrecognized_counts.items())
+        ],
+    }
+
+
+def normalized_source_text(value: Any) -> str:
+    """Normalize only outer and repeated whitespace for exact text statistics."""
+
+    return re.sub(r"\s+", " ", str(value).strip())
+
+
+def alert_text_attribute(field_name: str) -> str:
+    return {
+        "header_text": "header_texts",
+        "description_text": "description_texts",
+        "cause_detail": "cause_detail_texts",
+        "effect_detail": "effect_detail_texts",
+    }[field_name]
+
+
+def text_frequency_statistics(
+    alerts: Sequence[AlertAudit],
+    field_name: str,
+    top_n: int = 20,
+) -> Dict[str, Any]:
+    """Count each normalized text once per alert and retain source wording."""
+
+    counts: Counter[str] = Counter()
+    for alert in alerts:
+        values = getattr(alert, alert_text_attribute(field_name))
+        per_alert_values = {
+            normalized_source_text(text)
+            for text, _language in values
+            if normalized_source_text(text)
+        }
+        counts.update(per_alert_values)
+    total_alerts = len(alerts)
+    top_values = [
+        {
+            "text": text,
+            "count": count,
+            "percentage_of_alerts": percentage(count, total_alerts),
+        }
+        for text, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
+            :top_n
+        ]
+    ]
+    return {
+        "distinct_%s_count" % field_name: len(counts),
+        "top_%d_%ss" % (top_n, field_name): top_values,
+    }
+
+
+def translation_quality_statistics(
+    alerts: Sequence[AlertAudit],
+    field_name: str,
+) -> Dict[str, Any]:
+    values = [
+        (text, language)
+        for alert in alerts
+        for text, language in getattr(alert, alert_text_attribute(field_name))
+    ]
+    languages, missing_language_count = language_counts(values)
+    return {
+        "translation_count": len(values),
+        "language_counts": languages,
+        "without_explicit_language_count": missing_language_count,
+        "character_length_statistics": length_statistics(
+            [len(text) for text, _language in values]
+        ),
+        "max_sanitized_examples": [
+            short_text(text) for text, _language in values[:MAX_TEXT_EXAMPLES]
+        ],
+    }
+
+
+def alert_field_support(alert: Any, field_names: Sequence[str]) -> Dict[str, bool]:
+    return {
+        field_name: field_descriptor(alert, field_name) is not None
+        for field_name in field_names
+    }
 
 
 def alert_text_examples(
@@ -718,6 +941,21 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
     entities = get_repeated(feed, "entity")
     alerts: List[AlertAudit] = []
     entity_type_counts: Counter[str] = Counter()
+    alert_field_names = (
+        "active_period",
+        "communication_period",
+        "impact_period",
+        "informed_entity",
+        "cause",
+        "effect",
+        "severity_level",
+        "cause_detail",
+        "effect_detail",
+        "url",
+        "header_text",
+        "description_text",
+    )
+    field_support: Dict[str, bool] = {}
     for entity_index, entity in enumerate(entities):
         present_types: List[str] = []
         for field_name in ("alert", "trip_update", "vehicle"):
@@ -731,23 +969,59 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         alert = get_message(entity, "alert")
         if alert is None:
             continue
+        if not field_support:
+            field_support = alert_field_support(alert, alert_field_names)
         selectors = [alert_selector(item) for item in get_repeated(alert, "informed_entity")]
         scope_types = scope_types_for_selectors(selectors)
         cause = enum_value(alert, "cause")
         effect = enum_value(alert, "effect")
-        header_text_values = translated_texts(get_message(alert, "header_text"))
-        description_text_values = translated_texts(get_message(alert, "description_text"))
+        severity_level = enum_value(alert, "severity_level")
+        header_text_values = alert_translated_texts(alert, "header_text")
+        description_text_values = alert_translated_texts(alert, "description_text")
+        cause_detail_text_values = alert_translated_texts(alert, "cause_detail")
+        effect_detail_text_values = alert_translated_texts(alert, "effect_detail")
         alerts.append(
             AlertAudit(
                 entity_index=entity_index,
                 entity_id=text_field(entity, "id"),
+                cause_explicitly_present=field_is_present(alert, "cause"),
                 cause_name=cause[0] if cause is not None else None,
                 cause_numeric_value=cause[1] if cause is not None else None,
+                effect_explicitly_present=field_is_present(alert, "effect"),
                 effect_name=effect[0] if effect is not None else None,
                 effect_numeric_value=effect[1] if effect is not None else None,
+                severity_level_explicitly_present=field_is_present(
+                    alert, "severity_level"
+                ),
+                severity_level_name=(
+                    severity_level[0] if severity_level is not None else None
+                ),
+                severity_level_numeric_value=(
+                    severity_level[1] if severity_level is not None else None
+                ),
+                cause_detail_explicitly_present=field_is_present(
+                    alert, "cause_detail"
+                ),
+                effect_detail_explicitly_present=field_is_present(
+                    alert, "effect_detail"
+                ),
+                url_explicitly_present=field_is_present(alert, "url"),
+                header_text_explicitly_present=field_is_present(
+                    alert, "header_text"
+                ),
+                description_text_explicitly_present=field_is_present(
+                    alert, "description_text"
+                ),
                 header_texts=header_text_values,
                 description_texts=description_text_values,
-                active_period_present=bool(get_repeated(alert, "active_period")),
+                cause_detail_texts=cause_detail_text_values,
+                effect_detail_texts=effect_detail_text_values,
+                active_period_present=field_is_present(alert, "active_period"),
+                communication_period_present=field_is_present(
+                    alert, "communication_period"
+                ),
+                impact_period_present=field_is_present(alert, "impact_period"),
+                informed_entity_present=field_is_present(alert, "informed_entity"),
                 informed_entity_count=len(selectors),
                 selectors=selectors,
                 scope_types=scope_types,
@@ -755,11 +1029,42 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         )
 
     total_alert_count = len(alerts)
-    cause_present_count = sum(alert.cause_name is not None for alert in alerts)
-    effect_present_count = sum(alert.effect_name is not None for alert in alerts)
-    header_present_count = sum(bool(alert.header_texts) for alert in alerts)
-    description_present_count = sum(bool(alert.description_texts) for alert in alerts)
+    cause_present_count = sum(
+        alert.cause_explicitly_present for alert in alerts
+    )
+    effect_present_count = sum(
+        alert.effect_explicitly_present for alert in alerts
+    )
+    severity_level_present_count = sum(
+        alert.severity_level_explicitly_present for alert in alerts
+    )
+    cause_detail_present_count = sum(
+        alert.cause_detail_explicitly_present for alert in alerts
+    )
+    effect_detail_present_count = sum(
+        alert.effect_detail_explicitly_present for alert in alerts
+    )
+    url_present_count = sum(alert.url_explicitly_present for alert in alerts)
+    header_present_count = sum(
+        alert.header_text_explicitly_present for alert in alerts
+    )
+    description_present_count = sum(
+        alert.description_text_explicitly_present for alert in alerts
+    )
+    header_nonempty_text_count = sum(bool(alert.header_texts) for alert in alerts)
+    description_nonempty_text_count = sum(
+        bool(alert.description_texts) for alert in alerts
+    )
     active_period_present_count = sum(alert.active_period_present for alert in alerts)
+    communication_period_present_count = sum(
+        alert.communication_period_present for alert in alerts
+    )
+    impact_period_present_count = sum(
+        alert.impact_period_present for alert in alerts
+    )
+    informed_entity_present_count = sum(
+        alert.informed_entity_present for alert in alerts
+    )
     all_header_values = [value for alert in alerts for value in alert.header_texts]
     all_description_values = [
         value for alert in alerts for value in alert.description_texts
@@ -797,6 +1102,43 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
             )
         except (OverflowError, OSError, ValueError):
             feed_age_seconds = None
+    repeated_field_counts = {
+        "active_period": active_period_present_count,
+        "communication_period": communication_period_present_count,
+        "impact_period": impact_period_present_count,
+        "informed_entity": informed_entity_present_count,
+    }
+    repeated_field_presence = {
+        field_name: {
+            "supported_by_installed_binding": field_support.get(field_name, False),
+            "non_zero_length_alert_count": count,
+            "zero_length_alert_count": total_alert_count - count,
+            "percentage_of_alerts": percentage(count, total_alert_count),
+        }
+        for field_name, count in repeated_field_counts.items()
+    }
+    cause_matrix = enum_presence_value_matrix(
+        alerts, "cause", "UNKNOWN_CAUSE", "OTHER_CAUSE"
+    )
+    effect_matrix = enum_presence_value_matrix(
+        alerts, "effect", "UNKNOWN_EFFECT", "OTHER_EFFECT"
+    )
+    text_frequencies: Dict[str, Any] = {}
+    for field_name in (
+        "header_text",
+        "description_text",
+        "cause_detail",
+        "effect_detail",
+    ):
+        text_frequencies.update(text_frequency_statistics(alerts, field_name))
+    gtfsde_prefix = "Echtzeitdaten aufbereitet von GTFS.de"
+    gtfsde_provenance_description_count = sum(
+        any(
+            normalized_source_text(text).startswith(gtfsde_prefix)
+            for text, _language in alert.description_texts
+        )
+        for alert in alerts
+    )
     summary: Dict[str, Any] = {
         "audit_status": "PARSED",
         "gtfs_realtime_version": text_field(feed_header, "gtfs_realtime_version"),
@@ -805,14 +1147,38 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         "feed_entity_count": len(entities),
         "entity_type_counts": dict(sorted(entity_type_counts.items())),
         "total_alert_count": total_alert_count,
+        "cause_explicitly_present_count": cause_present_count,
+        "cause_explicitly_absent_count": total_alert_count - cause_present_count,
         "cause_present_count": cause_present_count,
         "cause_missing_count": total_alert_count - cause_present_count,
+        "effect_explicitly_present_count": effect_present_count,
+        "effect_explicitly_absent_count": total_alert_count - effect_present_count,
         "effect_present_count": effect_present_count,
         "effect_missing_count": total_alert_count - effect_present_count,
+        "severity_level_explicitly_present_count": severity_level_present_count,
+        "severity_level_explicitly_absent_count": total_alert_count
+        - severity_level_present_count,
+        "cause_detail_explicitly_present_count": cause_detail_present_count,
+        "cause_detail_explicitly_absent_count": total_alert_count
+        - cause_detail_present_count,
+        "effect_detail_explicitly_present_count": effect_detail_present_count,
+        "effect_detail_explicitly_absent_count": total_alert_count
+        - effect_detail_present_count,
+        "url_explicitly_present_count": url_present_count,
+        "url_explicitly_absent_count": total_alert_count - url_present_count,
+        "header_text_explicitly_present_count": header_present_count,
+        "header_text_explicitly_absent_count": total_alert_count - header_present_count,
+        "description_text_explicitly_present_count": description_present_count,
+        "description_text_explicitly_absent_count": total_alert_count
+        - description_present_count,
         "header_text_present_count": header_present_count,
         "header_text_missing_count": total_alert_count - header_present_count,
         "description_text_present_count": description_present_count,
         "description_text_missing_count": total_alert_count - description_present_count,
+        "header_text_nonempty_translation_alert_count": header_nonempty_text_count,
+        "description_text_nonempty_translation_alert_count": description_nonempty_text_count,
+        "field_support": field_support,
+        "repeated_field_presence": repeated_field_presence,
         "active_period_present_count": active_period_present_count,
         "active_period_missing_count": total_alert_count - active_period_present_count,
         "informed_entity_count": sum(alert.informed_entity_count for alert in alerts),
@@ -831,10 +1197,30 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         "coverage_percentages": {
             "cause": percentage(cause_present_count, total_alert_count),
             "effect": percentage(effect_present_count, total_alert_count),
+            "severity_level": percentage(
+                severity_level_present_count, total_alert_count
+            ),
+            "cause_detail": percentage(cause_detail_present_count, total_alert_count),
+            "effect_detail": percentage(
+                effect_detail_present_count, total_alert_count
+            ),
+            "url": percentage(url_present_count, total_alert_count),
             "header_text": header_coverage,
             "description_text": description_coverage,
             "active_period": percentage(active_period_present_count, total_alert_count),
+            "communication_period": percentage(
+                communication_period_present_count, total_alert_count
+            ),
+            "impact_period": percentage(
+                impact_period_present_count, total_alert_count
+            ),
+            "informed_entity": percentage(
+                informed_entity_present_count, total_alert_count
+            ),
         },
+        "cause_presence_value_matrix": cause_matrix,
+        "effect_presence_value_matrix": effect_matrix,
+        "severity_level_distribution": enum_distribution(alerts, "severity_level"),
         "header_language_counts": header_language_counts,
         "header_text_without_explicit_language_count": header_missing_language_count,
         "description_language_counts": description_language_counts,
@@ -843,6 +1229,23 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         "description_text_character_length_statistics": length_statistics(
             description_lengths
         ),
+        "cause_detail": {
+            "source_label": "SOURCE-REPORTED CAUSE DETAIL",
+            "supported_by_installed_binding": field_support.get("cause_detail", False),
+            "explicit_field_presence_count": cause_detail_present_count,
+            **translation_quality_statistics(alerts, "cause_detail"),
+        },
+        "effect_detail": {
+            "source_label": "SOURCE-REPORTED EFFECT DETAIL",
+            "supported_by_installed_binding": field_support.get("effect_detail", False),
+            "explicit_field_presence_count": effect_detail_present_count,
+            **translation_quality_statistics(alerts, "effect_detail"),
+        },
+        "gtfsde_provenance_description_count": gtfsde_provenance_description_count,
+        "gtfsde_provenance_description_percentage": percentage(
+            gtfsde_provenance_description_count, total_alert_count
+        ),
+        **text_frequencies,
         "max_sanitized_short_examples": alert_text_examples(alerts),
     }
 
@@ -895,14 +1298,34 @@ def empty_feed_summary(status: str) -> Dict[str, Any]:
         "feed_entity_count": 0,
         "entity_type_counts": {},
         "total_alert_count": 0,
+        "cause_explicitly_present_count": 0,
+        "cause_explicitly_absent_count": 0,
         "cause_present_count": 0,
         "cause_missing_count": 0,
+        "effect_explicitly_present_count": 0,
+        "effect_explicitly_absent_count": 0,
         "effect_present_count": 0,
         "effect_missing_count": 0,
+        "severity_level_explicitly_present_count": 0,
+        "severity_level_explicitly_absent_count": 0,
+        "cause_detail_explicitly_present_count": 0,
+        "cause_detail_explicitly_absent_count": 0,
+        "effect_detail_explicitly_present_count": 0,
+        "effect_detail_explicitly_absent_count": 0,
+        "url_explicitly_present_count": 0,
+        "url_explicitly_absent_count": 0,
+        "header_text_explicitly_present_count": 0,
+        "header_text_explicitly_absent_count": 0,
+        "description_text_explicitly_present_count": 0,
+        "description_text_explicitly_absent_count": 0,
         "header_text_present_count": 0,
         "header_text_missing_count": 0,
         "description_text_present_count": 0,
         "description_text_missing_count": 0,
+        "header_text_nonempty_translation_alert_count": 0,
+        "description_text_nonempty_translation_alert_count": 0,
+        "field_support": {},
+        "repeated_field_presence": {},
         "active_period_present_count": 0,
         "active_period_missing_count": 0,
         "informed_entity_count": 0,
@@ -917,16 +1340,48 @@ def empty_feed_summary(status: str) -> Dict[str, Any]:
         "coverage_percentages": {
             "cause": None,
             "effect": None,
+            "severity_level": None,
+            "cause_detail": None,
+            "effect_detail": None,
+            "url": None,
             "header_text": None,
             "description_text": None,
             "active_period": None,
+            "communication_period": None,
+            "impact_period": None,
+            "informed_entity": None,
         },
+        "cause_presence_value_matrix": {},
+        "effect_presence_value_matrix": {},
+        "severity_level_distribution": [],
         "header_language_counts": {},
         "header_text_without_explicit_language_count": 0,
         "description_language_counts": {},
         "description_text_without_explicit_language_count": 0,
         "header_text_character_length_statistics": length_statistics([]),
         "description_text_character_length_statistics": length_statistics([]),
+        "cause_detail": {
+            "source_label": "SOURCE-REPORTED CAUSE DETAIL",
+            "supported_by_installed_binding": False,
+            "explicit_field_presence_count": 0,
+            **translation_quality_statistics([], "cause_detail"),
+        },
+        "effect_detail": {
+            "source_label": "SOURCE-REPORTED EFFECT DETAIL",
+            "supported_by_installed_binding": False,
+            "explicit_field_presence_count": 0,
+            **translation_quality_statistics([], "effect_detail"),
+        },
+        "gtfsde_provenance_description_count": 0,
+        "gtfsde_provenance_description_percentage": None,
+        "distinct_header_text_count": 0,
+        "distinct_description_text_count": 0,
+        "distinct_cause_detail_count": 0,
+        "distinct_effect_detail_count": 0,
+        "top_20_header_texts": [],
+        "top_20_description_texts": [],
+        "top_20_cause_details": [],
+        "top_20_effect_details": [],
         "max_sanitized_short_examples": [],
     }
 
@@ -934,8 +1389,12 @@ def empty_feed_summary(status: str) -> Dict[str, Any]:
 def cause_effect_distribution_for_alerts(
     alerts: Sequence[AlertAudit],
 ) -> Dict[str, Any]:
-    cause_present_count = sum(alert.cause_name is not None for alert in alerts)
-    effect_present_count = sum(alert.effect_name is not None for alert in alerts)
+    cause_present_count = sum(
+        alert.cause_explicitly_present for alert in alerts
+    )
+    effect_present_count = sum(
+        alert.effect_explicitly_present for alert in alerts
+    )
     return {
         "linked_alert_count": len(alerts),
         "cause_present_count": cause_present_count,
@@ -1035,21 +1494,186 @@ def path_for_key(parent_path: str, key: Any) -> str:
     return parent_path + "[" + json.dumps(key_text, ensure_ascii=False) + "]"
 
 
-def iter_dict_entries(
+def json_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return type(value).__name__
+
+
+def iter_dict_entries_with_context(
     value: Any,
     path: str = "$",
-) -> Iterator[Tuple[str, str, Any]]:
+) -> Iterator[Tuple[str, str, Any, str, Any]]:
+    """Yield object-key paths with the containing object for structural audits."""
+
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = path_for_key(path, key)
-            yield child_path, str(key), child
-            for item in iter_dict_entries(child, child_path):
+            yield child_path, str(key), child, path, value
+            for item in iter_dict_entries_with_context(child, child_path):
                 yield item
     elif isinstance(value, list):
         list_path = path + "[*]"
         for child in value:
-            for item in iter_dict_entries(child, list_path):
+            for item in iter_dict_entries_with_context(child, list_path):
                 yield item
+
+
+def iter_dict_entries(
+    value: Any,
+    path: str = "$",
+) -> Iterator[Tuple[str, str, Any]]:
+    for child_path, key, child, _parent_path, _parent in iter_dict_entries_with_context(
+        value, path
+    ):
+        yield child_path, key, child
+
+
+def path_component_names(path: str) -> List[str]:
+    return [normalized_key(component) for component in re.findall(r"[A-Za-z0-9_]+", path)]
+
+
+def flatten_scalar_values(value: Any) -> Iterator[Any]:
+    if isinstance(value, dict):
+        for child in value.values():
+            for item in flatten_scalar_values(child):
+                yield item
+    elif isinstance(value, list):
+        for child in value:
+            for item in flatten_scalar_values(child):
+                yield item
+    elif value is not None:
+        yield value
+
+
+def json_path_inventory(value: Any) -> List[Dict[str, Any]]:
+    """Inventory every observed object key path and its value types."""
+
+    inventory: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"occurrence_count": 0, "value_types": Counter()}
+    )
+    for path, _key, child, _parent_path, _parent in iter_dict_entries_with_context(value):
+        record = inventory[path]
+        record["occurrence_count"] += 1
+        record["value_types"][json_value_type(child)] += 1
+    output: List[Dict[str, Any]] = []
+    for path in sorted(inventory):
+        record = inventory[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+            }
+        )
+    return output
+
+
+def path_inventory_by_path(
+    inventory: Sequence[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    return {record["path"]: record for record in inventory}
+
+
+def field_semantic_category(key: str, path: str) -> str:
+    """Apply only source-field semantics that are explicit in the field name."""
+
+    normalized = normalized_key(key)
+    if "textualcontent" in path_component_names(path):
+        return "GENERAL_INFORMATION_TEXT"
+    if "error" in normalized:
+        return "UNCLASSIFIED_SOURCE_TEXT"
+    if normalized in {"reason", "reasoncontent", "reasonname"}:
+        return "REASON_TEXT"
+    if normalized in {"effect", "effecttext", "impact", "consequence"}:
+        return "EFFECT_TEXT"
+    if normalized in {"advice", "advicetext"}:
+        return "ADVICE_TEXT"
+    if normalized in {"textualcontent", "customerinformation"}:
+        return "GENERAL_INFORMATION_TEXT"
+    return "UNCLASSIFIED_SOURCE_TEXT"
+
+
+def reason_like_field_inventory(value: Any) -> List[Dict[str, Any]]:
+    """Discover candidate reason/information fields without semantic guessing."""
+
+    inventory: Dict[str, Dict[str, Any]] = {}
+    for path, key, child, _parent_path, _parent in iter_dict_entries_with_context(value):
+        components = path_component_names(path)
+        matched_terms = sorted(
+            {
+                term
+                for term in MDD_REASON_FIELD_TERMS
+                if any(term in component for component in components)
+            }
+        )
+        if not matched_terms:
+            continue
+        record = inventory.setdefault(
+            path,
+            {
+                "path": path,
+                "occurrence_count": 0,
+                "value_types": Counter(),
+                "matched_terms": set(),
+                "sanitized_value_examples": [],
+                "field_name": key,
+                "semantic_category": field_semantic_category(key, path),
+            },
+        )
+        record["occurrence_count"] += 1
+        record["value_types"][json_value_type(child)] += 1
+        record["matched_terms"].update(matched_terms)
+        existing_examples = record["sanitized_value_examples"]
+        if len(existing_examples) < MAX_MDD_FIELD_EXAMPLES:
+            for scalar in flatten_scalar_values(child):
+                example = short_text(scalar)
+                if example is None:
+                    continue
+                if example not in existing_examples:
+                    existing_examples.append(example)
+                if len(existing_examples) >= MAX_MDD_FIELD_EXAMPLES:
+                    break
+
+    output: List[Dict[str, Any]] = []
+    for path in sorted(inventory):
+        record = inventory[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "field_name": record["field_name"],
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+                "matched_terms": sorted(record["matched_terms"]),
+                "semantic_category": record["semantic_category"],
+                "sanitized_value_examples": record["sanitized_value_examples"],
+            }
+        )
+    return output
 
 
 def direct_named_values(value: Any, names: Set[str]) -> List[Any]:
@@ -1157,17 +1781,186 @@ def parse_mdd_json(
         return None, "JSON_PARSE_ERROR"
 
 
-REFERENCE_TYPE_NAMES = {
-    "situationfullref": "SituationFullRef",
-    "situationref": "SituationRef",
-    "incidentcall": "IncidentCall",
-}
+def path_object_name(path: str) -> Optional[str]:
+    components = re.findall(r"[A-Za-z0-9_]+", path)
+    return components[-1] if components else None
+
+
+def source_identity_key(
+    participant_ref: Any,
+    situation_number: Any,
+    version: Any,
+    identifier: Any,
+    fallback_value: Any,
+) -> Tuple[str, bool, Optional[str], Optional[str], Optional[str], Optional[str]]:
+    participant_text = (
+        str(participant_ref) if participant_ref is not None else None
+    )
+    situation_number_text = (
+        str(situation_number) if situation_number is not None else None
+    )
+    version_text = str(version) if version is not None else None
+    identifier_text = str(identifier) if identifier is not None else None
+    if participant_text and situation_number_text:
+        base_key = "PARTICIPANT_AND_SITUATION_NUMBER|%s|%s" % (
+            participant_text,
+            situation_number_text,
+        )
+        identity_key = base_key + ("|VERSION|" + version_text if version_text else "")
+        return (
+            identity_key,
+            True,
+            participant_text,
+            situation_number_text,
+            version_text,
+            identifier_text,
+        )
+    if identifier_text:
+        return (
+            "IDENTIFIER|" + identifier_text,
+            True,
+            participant_text,
+            situation_number_text,
+            version_text,
+            identifier_text,
+        )
+    try:
+        canonical = json.dumps(fallback_value, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        canonical = str(fallback_value)
+    return (
+        "UNIDENTIFIED|" + canonical,
+        False,
+        participant_text,
+        situation_number_text,
+        version_text,
+        identifier_text,
+    )
+
+
+def reference_identity(
+    value: Any,
+    path: str,
+) -> Dict[str, Any]:
+    participant = None
+    situation_number = None
+    version = None
+    identifier = None
+    if isinstance(value, dict):
+        participant = source_scalar(direct_named_value(value, {"participantref"}))
+        situation_number = source_scalar(
+            direct_named_value(value, {"situationnumber"})
+        )
+        version = source_scalar(direct_named_value(value, {"version"}))
+        identifier = source_scalar(
+            direct_named_value(value, {"identifier", "id", "value", "ref"})
+        )
+    else:
+        identifier = source_scalar(value)
+    (
+        identity_key,
+        identifiable,
+        participant_text,
+        situation_number_text,
+        version_text,
+        identifier_text,
+    ) = source_identity_key(
+        participant,
+        situation_number,
+        version,
+        identifier,
+        value,
+    )
+    base_key = identity_key
+    if "|VERSION|" in base_key:
+        base_key = base_key.split("|VERSION|", 1)[0]
+    return {
+        "identity_key": identity_key,
+        "identity_key_without_version": base_key,
+        "identifiable": identifiable,
+        "participant_ref": participant_text,
+        "situation_number": situation_number_text,
+        "version": version_text,
+        "identifier": identifier_text,
+        "path": path,
+    }
+
+
+def reference_origin_for_path(path: str) -> str:
+    components = path_component_names(path)
+    if any(component in {"errormessage", "errorcode"} for component in components):
+        return "ERROR_STRUCTURE"
+    if any(
+        component in {"situationfullref", "situationref"}
+        for component in components
+    ):
+        return "SITUATION_FULL_REF_OR_SITUATION_REF"
+    if "service" in components:
+        return "SERVICE_INFORMATION"
+    if any(
+        component in {"previouscall", "thiscall", "onwardcall", "callatstop"}
+        for component in components
+    ):
+        return "CALL_INFORMATION"
+    return "OTHER_SOURCE_STRUCTURE"
+
+
+def reference_parent_context(
+    parent_path: str,
+    parent: Any,
+    key: str,
+) -> Dict[str, Any]:
+    sibling_fields: List[str] = []
+    if isinstance(parent, dict):
+        sibling_fields = sorted(str(name) for name in parent if str(name) != key)
+    return {
+        "nearest_enclosing_object_path": parent_path,
+        "nearest_enclosing_object_type": path_object_name(parent_path),
+        "sibling_field_names": sibling_fields,
+    }
+
+
+def collect_reference_records(parsed: Any) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
+        reference_type = MDD_REFERENCE_TYPE_NAMES.get(normalized_key(key))
+        if reference_type is None:
+            continue
+        items: List[Tuple[str, Any]]
+        if isinstance(child, list):
+            items = [
+                (path + "[%d]" % index, item)
+                for index, item in enumerate(child)
+                if item is not None and item != {} and item != ""
+            ]
+        elif child is not None and child != {} and child != "":
+            items = [(path, child)]
+        else:
+            items = []
+        for item_path, item in items:
+            record = {
+                "path": item_path,
+                "reference_type": reference_type,
+                "value_type": json_value_type(item),
+                "source_origin": reference_origin_for_path(item_path),
+                "sanitized_value_examples": [
+                    short_text(scalar)
+                    for scalar in list(flatten_scalar_values(item))[:MAX_MDD_FIELD_EXAMPLES]
+                    if short_text(scalar) is not None
+                ],
+            }
+            record.update(reference_parent_context(parent_path, parent, key))
+            record.update(reference_identity(item, item_path))
+            records.append(record)
+    return records
 
 
 def collect_reference_entries(parsed: Any) -> List[Tuple[str, str, Any]]:
+    """Return the raw reference-entry view used by older helper callers."""
+
     entries: List[Tuple[str, str, Any]] = []
-    for path, key, child in iter_dict_entries(parsed):
-        reference_type = REFERENCE_TYPE_NAMES.get(normalized_key(key))
+    for path, key, child, _parent_path, _parent in iter_dict_entries_with_context(parsed):
+        reference_type = MDD_REFERENCE_TYPE_NAMES.get(normalized_key(key))
         if reference_type is None:
             continue
         if isinstance(child, list):
@@ -1179,15 +1972,137 @@ def collect_reference_entries(parsed: Any) -> List[Tuple[str, str, Any]]:
     return entries
 
 
+def error_field_inventory(parsed: Any) -> List[Dict[str, Any]]:
+    records: Dict[str, Dict[str, Any]] = {}
+    for path, key, child, _parent_path, _parent in iter_dict_entries_with_context(parsed):
+        if normalized_key(key) not in MDD_ERROR_FIELD_NAMES:
+            continue
+        scalar_values = [
+            short_text(value)
+            for value in flatten_scalar_values(child)
+            if short_text(value) is not None
+        ]
+        record = records.setdefault(
+            path,
+            {
+                "path": path,
+                "field_name": key,
+                "occurrence_count": 0,
+                "value_types": Counter(),
+                "non_empty_value_count": 0,
+                "sanitized_value_examples": [],
+            },
+        )
+        record["occurrence_count"] += 1
+        record["value_types"][json_value_type(child)] += 1
+        record["non_empty_value_count"] += len(scalar_values)
+        for example in scalar_values:
+            if example not in record["sanitized_value_examples"]:
+                record["sanitized_value_examples"].append(example)
+            if len(record["sanitized_value_examples"]) >= MAX_MDD_FIELD_EXAMPLES:
+                break
+    output: List[Dict[str, Any]] = []
+    for path in sorted(records):
+        record = records[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "field_name": record["field_name"],
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+                "non_empty_value_count": record["non_empty_value_count"],
+                "sanitized_value_examples": record["sanitized_value_examples"],
+            }
+        )
+    return output
+
+
+def collect_incident_info_occurrences(parsed: Any) -> List[Dict[str, Any]]:
+    token_pattern = re.compile(r"(?:IncidentCall|InfoCall)", re.IGNORECASE)
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
+        matched_in: Set[str] = set()
+        if token_pattern.search(str(key)):
+            matched_in.add("FIELD_NAME")
+        if isinstance(child, (str, int, float, bool)) and token_pattern.search(
+            str(child)
+        ):
+            matched_in.add("VALUE")
+        if isinstance(child, list) and any(
+            isinstance(item, (str, int, float, bool))
+            and token_pattern.search(str(item))
+            for item in child
+        ):
+            matched_in.add("VALUE")
+        if not matched_in:
+            continue
+        candidate_values = [
+            short_text(item)
+            for item in flatten_scalar_values(child)
+            if token_pattern.search(str(item))
+        ]
+        if token_pattern.search(str(key)) and not candidate_values:
+            candidate_values = [short_text(item) for item in flatten_scalar_values(child)]
+        record = grouped.setdefault(
+            path,
+            {
+                "path": path,
+                "occurrence_count": 0,
+                "matched_in": set(),
+                "sample_identifiers": [],
+                "source_origin": reference_origin_for_path(path),
+            },
+        )
+        record["occurrence_count"] += 1
+        record["matched_in"].update(matched_in)
+        for candidate in candidate_values:
+            if candidate and candidate not in record["sample_identifiers"]:
+                record["sample_identifiers"].append(candidate)
+            if len(record["sample_identifiers"]) >= MAX_MDD_FIELD_EXAMPLES:
+                break
+        record.update(reference_parent_context(parent_path, parent, key))
+    output: List[Dict[str, Any]] = []
+    for path in sorted(grouped):
+        record = grouped[path]
+        output.append(
+            {
+                "path": path,
+                "occurrence_count": record["occurrence_count"],
+                "matched_in": sorted(record["matched_in"]),
+                "sample_identifiers": record["sample_identifiers"][:MAX_MDD_FIELD_EXAMPLES],
+                "parent_object_path": record["nearest_enclosing_object_path"],
+                "parent_object_type": record["nearest_enclosing_object_type"],
+                "sibling_field_names": record["sibling_field_names"],
+                "source_origin": record["source_origin"],
+            }
+        )
+    return output
+
+
 def relation_scope_for_reference(path: str) -> str:
-    lowered = path.lower()
-    if re.search(r"(?:^|\.)service(?:\.|\[)", lowered):
+    components = path_component_names(path)
+    if "service" in components:
         return "SERVICE"
     if any(
-        re.search(r"(?:^|\.)" + marker + r"(?:\.|\[)", lowered)
-        for marker in ("previouscall", "thiscall", "onwardcall", "callatstop")
+        component in {"previouscall", "thiscall", "onwardcall", "callatstop"}
+        for component in components
     ):
         return "CALL"
+    if any("journey" in component for component in components):
+        return "JOURNEY"
+    if any(component in {"stopevent", "stopeventresult"} for component in components):
+        return "STOP_EVENT"
+    if any(
+        component in {"stopeventresponsecontext", "responsecontext", "situations"}
+        for component in components
+    ):
+        return "RESPONSE_CONTEXT"
     return "OTHER_OR_UNCLASSIFIED"
 
 
@@ -1217,32 +2132,20 @@ def situation_validity_values(
 def situation_identity(
     situation: Dict[str, Any],
     path: str,
-) -> Tuple[str, bool, Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[str, bool, Optional[str], Optional[str], Optional[str], Optional[str]]:
     participant = source_scalar(direct_named_value(situation, {"participantref"}))
     situation_number = source_scalar(
         direct_named_value(situation, {"situationnumber"})
     )
+    version = source_scalar(direct_named_value(situation, {"version"}))
     identifier = source_scalar(direct_named_value(situation, {"identifier", "id"}))
-    participant_text = str(participant) if participant is not None else None
-    situation_number_text = (
-        str(situation_number) if situation_number is not None else None
+    return source_identity_key(
+        participant,
+        situation_number,
+        version,
+        identifier,
+        situation,
     )
-    identifier_text = str(identifier) if identifier is not None else None
-    if participant_text and situation_number_text:
-        return (
-            "PARTICIPANT_AND_SITUATION_NUMBER|" + participant_text + "|" + situation_number_text,
-            True,
-            participant_text,
-            situation_number_text,
-            identifier_text,
-        )
-    if identifier_text:
-        return "IDENTIFIER|" + identifier_text, True, participant_text, situation_number_text, identifier_text
-    try:
-        canonical = json.dumps(situation, ensure_ascii=False, sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        canonical = path
-    return "UNIDENTIFIED|" + canonical, False, participant_text, situation_number_text, identifier_text
 
 
 def source_field_paths(
@@ -1262,7 +2165,14 @@ def situation_record(
     situation: Dict[str, Any],
     secret: Optional[str],
 ) -> Dict[str, Any]:
-    identity_key, identifiable, participant, situation_number, identifier = situation_identity(
+    (
+        identity_key,
+        identifiable,
+        participant,
+        situation_number,
+        version,
+        identifier,
+    ) = situation_identity(
         situation, entry_path
     )
     summary_values = source_text_values(direct_named_value(situation, {"summary"}))
@@ -1282,7 +2192,19 @@ def situation_record(
         "identifiable": identifiable,
         "participant_ref": short_text(participant, secret),
         "situation_number": short_text(situation_number, secret),
+        "version": short_text(version, secret),
         "identifier": short_text(identifier, secret),
+        "identity_key_without_version": (
+            identity_key.split("|VERSION|", 1)[0]
+            if "|VERSION|" in identity_key
+            else identity_key
+        ),
+        "all_observed_field_paths": sorted(
+            {
+                path
+                for path, _key, _child in iter_dict_entries(situation, entry_path)
+            }
+        ),
         "summary_values": summary_values,
         "description_values": description_values,
         "detail_values": detail_values,
@@ -1303,6 +2225,38 @@ def situation_record(
         )
         + validity_paths,
     }
+
+
+def situation_object_field_inventory(
+    situation_entries: Sequence[Tuple[str, Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Inventory every field below each observed inline Situation object."""
+
+    inventory: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"occurrence_count": 0, "value_types": Counter()}
+    )
+    for entry_path, situation in situation_entries:
+        for path, _key, child in iter_dict_entries(situation, entry_path):
+            record = inventory[path]
+            record["occurrence_count"] += 1
+            record["value_types"][json_value_type(child)] += 1
+    output: List[Dict[str, Any]] = []
+    for path in sorted(inventory):
+        record = inventory[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+            }
+        )
+    return output
 
 
 def aggregate_situation_content(
@@ -1376,6 +2330,7 @@ def aggregate_situation_content(
     situation_number_presence = sum(
         record["situation_number"] is not None for record in records
     )
+    version_presence = sum(record.get("version") is not None for record in records)
     identifier_presence = sum(record["identifier"] is not None for record in records)
     return {
         "situation_count": total,
@@ -1383,6 +2338,7 @@ def aggregate_situation_content(
         "unidentified_situation_count": unidentified_count,
         "participant_ref_present_count": participant_presence,
         "situation_number_present_count": situation_number_presence,
+        "version_present_count": version_presence,
         "identifier_present_count": identifier_presence,
         "situation_identity_present_count": sum(
             record["identifiable"] for record in records
@@ -1395,6 +2351,7 @@ def aggregate_situation_content(
         "coverage_percentages": {
             "participant_ref": percentage(participant_presence, total),
             "situation_number": percentage(situation_number_presence, total),
+            "version": percentage(version_presence, total),
             "identifier": percentage(identifier_presence, total),
             "summary": percentage(summary_presence, total),
             "description": percentage(description_presence, total),
@@ -1422,6 +2379,117 @@ def aggregate_situation_content(
     }
 
 
+def merge_path_inventories(
+    inventories: Sequence[Sequence[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for inventory in inventories:
+        for item in inventory:
+            record = merged.setdefault(
+                item["path"],
+                {
+                    "path": item["path"],
+                    "occurrence_count": 0,
+                    "value_types": Counter(),
+                },
+            )
+            record["occurrence_count"] += item.get("occurrence_count", 0)
+            record["value_types"].update(item.get("value_types", {}))
+    output: List[Dict[str, Any]] = []
+    for path in sorted(merged):
+        record = merged[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+            }
+        )
+    return output
+
+
+def merge_reason_like_inventories(
+    inventories: Sequence[Sequence[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for inventory in inventories:
+        for item in inventory:
+            record = merged.setdefault(
+                item["path"],
+                {
+                    "path": item["path"],
+                    "field_name": item.get("field_name"),
+                    "occurrence_count": 0,
+                    "value_types": Counter(),
+                    "matched_terms": set(),
+                    "semantic_category": item.get(
+                        "semantic_category", "UNCLASSIFIED_SOURCE_TEXT"
+                    ),
+                    "sanitized_value_examples": [],
+                },
+            )
+            record["occurrence_count"] += item.get("occurrence_count", 0)
+            record["value_types"].update(item.get("value_types", {}))
+            record["matched_terms"].update(item.get("matched_terms", []))
+            for example in item.get("sanitized_value_examples", []):
+                if example not in record["sanitized_value_examples"]:
+                    record["sanitized_value_examples"].append(example)
+                if len(record["sanitized_value_examples"]) >= MAX_MDD_FIELD_EXAMPLES:
+                    break
+    output: List[Dict[str, Any]] = []
+    for path in sorted(merged):
+        record = merged[path]
+        value_types = dict(sorted(record["value_types"].items()))
+        output.append(
+            {
+                "path": path,
+                "field_name": record["field_name"],
+                "occurrence_count": record["occurrence_count"],
+                "value_type": (
+                    next(iter(value_types))
+                    if len(value_types) == 1
+                    else "MIXED"
+                ),
+                "value_types": value_types,
+                "matched_terms": sorted(record["matched_terms"]),
+                "semantic_category": record["semantic_category"],
+                "sanitized_value_examples": record["sanitized_value_examples"],
+            }
+        )
+    return output
+
+
+def sanitize_reference_record(
+    record: Dict[str, Any],
+    secret: Optional[str],
+) -> Dict[str, Any]:
+    output = dict(record)
+    for field_name in (
+        "participant_ref",
+        "situation_number",
+        "version",
+        "identifier",
+        "identity_key",
+        "identity_key_without_version",
+    ):
+        if field_name in output:
+            output[field_name] = short_text(output[field_name], secret)
+    output["sanitized_value_examples"] = [
+        short_text(value, secret)
+        for value in output.get("sanitized_value_examples", [])
+        if short_text(value, secret) is not None
+    ][:MAX_MDD_FIELD_EXAMPLES]
+    output.pop("path", None)
+    output["full_json_path"] = record.get("path")
+    return output
+
+
 def analyze_mdd_response(
     station: MddStation,
     result: FetchResult,
@@ -1430,29 +2498,81 @@ def analyze_mdd_response(
     parsed, parse_failure = parse_mdd_json(result)
     results: List[Dict[str, Any]] = []
     situation_entries: List[Tuple[str, Dict[str, Any]]] = []
-    references: List[Tuple[str, str, Any]] = []
+    reference_records: List[Dict[str, Any]] = []
+    json_inventory: List[Dict[str, Any]] = []
+    reason_like_inventory: List[Dict[str, Any]] = []
+    incident_info_occurrences: List[Dict[str, Any]] = []
+    error_inventory: List[Dict[str, Any]] = []
     if parsed is not None:
         results = named_results(parsed)
         situation_entries = named_object_entries(
             parsed,
-            {"ptsituation", "roadsituation", "situation"},
+            {"ptsituation", "ptsituationelement", "roadsituation", "situation"},
         )
-        references = collect_reference_entries(parsed)
+        reference_records = collect_reference_records(parsed)
+        json_inventory = json_path_inventory(parsed)
+        reason_like_inventory = reason_like_field_inventory(parsed)
+        incident_info_occurrences = collect_incident_info_occurrences(parsed)
+        error_inventory = error_field_inventory(parsed)
     situation_records = [
         situation_record(path, item, secret) for path, item in situation_entries
     ]
+    situation_object_inventory = situation_object_field_inventory(situation_entries)
     situation_references = [
         reference
-        for reference in references
-        if reference[1] in {"SituationFullRef", "SituationRef"}
+        for reference in reference_records
+        if reference["reference_type"] in {"SituationFullRef", "SituationRef"}
     ]
     relation_counts: Counter[str] = Counter(
-        relation_scope_for_reference(path) for path, _reference_type, _value in situation_references
+        relation_scope_for_reference(reference["path"])
+        for reference in situation_references
     )
     reference_type_counts: Counter[str] = Counter(
-        reference_type for _path, reference_type, _value in references
+        reference["reference_type"] for reference in reference_records
     )
     content = aggregate_situation_content(situation_records, secret)
+    inline_identity_keys = {
+        identity_key
+        for record in situation_records
+        for identity_key in (
+            record["identity_key"],
+            record.get("identity_key_without_version"),
+        )
+        if identity_key
+    }
+    full_ref_records = [
+        reference
+        for reference in reference_records
+        if reference["reference_type"] == "SituationFullRef"
+    ]
+    unique_full_ref_keys = {
+        reference["identity_key"] for reference in full_ref_records
+    }
+    resolved_full_ref_records = [
+        reference
+        for reference in full_ref_records
+        if reference["identity_key"] in inline_identity_keys
+        or reference["identity_key_without_version"] in inline_identity_keys
+    ]
+    sanitized_full_ref_records = [
+        dict(sanitize_reference_record(reference, secret), **{
+            "association_scope": relation_scope_for_reference(reference["path"]),
+            "resolution_status": (
+                "RESOLVED_INLINE_SITUATION"
+                if reference in resolved_full_ref_records
+                else "UNRESOLVED_INLINE_SITUATION"
+            ),
+        })
+        for reference in full_ref_records
+    ]
+    relation_scope_keys = (
+        "CALL",
+        "SERVICE",
+        "JOURNEY",
+        "STOP_EVENT",
+        "RESPONSE_CONTEXT",
+        "OTHER_OR_UNCLASSIFIED",
+    )
     status = "PARSED" if parsed is not None else (parse_failure or "NOT_PARSED")
     output: Dict[str, Any] = {
         "station": station.display_name,
@@ -1467,23 +2587,47 @@ def analyze_mdd_response(
         "response_audit_status": status,
         "result_count": len(results),
         "situation_count": len(situation_entries),
-        "reference_entry_count": len(references),
+        "reference_entry_count": len(reference_records),
         "situation_reference_count": len(situation_references),
         "reference_type_counts": dict(sorted(reference_type_counts.items())),
         "incident_call_reference_count": reference_type_counts.get("IncidentCall", 0),
+        "info_call_reference_count": reference_type_counts.get("InfoCall", 0),
         "unique_situation_count": content["unique_situation_count"],
+        "relation_scope_counts": {
+            key: relation_counts.get(key, 0) for key in relation_scope_keys
+        },
         "call_level_situation_link_count": relation_counts.get("CALL", 0),
         "service_level_situation_link_count": relation_counts.get("SERVICE", 0),
         "other_unclassified_relation_count": relation_counts.get(
             "OTHER_OR_UNCLASSIFIED", 0
         ),
-        "relation_scope_counts": {
-            "CALL": relation_counts.get("CALL", 0),
-            "SERVICE": relation_counts.get("SERVICE", 0),
-            "OTHER_OR_UNCLASSIFIED": relation_counts.get(
-                "OTHER_OR_UNCLASSIFIED", 0
-            ),
-        },
+        "situation_full_ref_count": len(full_ref_records),
+        "unique_situation_full_ref_count": len(unique_full_ref_keys),
+        "resolved_inline_situation_ref_count": len(resolved_full_ref_records),
+        "unresolved_situation_ref_count": len(full_ref_records)
+        - len(resolved_full_ref_records),
+        "situation_full_ref_records": sanitized_full_ref_records,
+        "situation_reference_records": [
+            dict(
+                sanitize_reference_record(reference, secret),
+                association_scope=relation_scope_for_reference(reference["path"]),
+            )
+            for reference in situation_references
+        ],
+        "json_path_inventory": json_inventory,
+        "reason_like_field_inventory": reason_like_inventory,
+        "incident_info_occurrences": incident_info_occurrences,
+        "error_message_field_inventory": error_inventory,
+        "error_message_non_empty_value_count": len(
+            {
+                example
+                for item in error_inventory
+                if normalized_key(item["field_name"]) == "errormessage"
+                for example in item.get("sanitized_value_examples", [])
+            }
+        ),
+        "situation_object_field_inventory": situation_object_inventory,
+        "situation_object_entry_paths": [path for path, _item in situation_entries],
         "summary_present_count": content["summary_present_count"],
         "description_present_count": content["description_present_count"],
         "detail_present_count": content["detail_present_count"],
@@ -1501,6 +2645,7 @@ def analyze_mdd_response(
         ],
         "situation_content": content,
         "_situation_records": situation_records,
+        "_reference_records": reference_records,
     }
     return output
 
@@ -1525,15 +2670,51 @@ def aggregate_mdd_summaries(
     reference_type_counts: Counter[str] = Counter()
     for summary in station_summaries:
         reference_type_counts.update(summary.get("reference_type_counts", {}))
-    relation_keys = ("CALL", "SERVICE", "OTHER_OR_UNCLASSIFIED")
+    relation_keys = (
+        "CALL",
+        "SERVICE",
+        "JOURNEY",
+        "STOP_EVENT",
+        "RESPONSE_CONTEXT",
+        "OTHER_OR_UNCLASSIFIED",
+    )
     relation_counts = {
-        key: sum(summary.get("relation_scope_counts", {}).get(key, 0) for summary in station_summaries)
+        key: sum(
+            summary.get("relation_scope_counts", {}).get(key, 0)
+            for summary in station_summaries
+        )
         for key in relation_keys
     }
+    all_reference_records = [
+        reference
+        for summary in station_summaries
+        for reference in summary.get("_reference_records", [])
+    ]
+    all_full_ref_records = [
+        reference
+        for reference in all_reference_records
+        if reference["reference_type"] == "SituationFullRef"
+    ]
+    unique_full_ref_keys = {
+        reference["identity_key"] for reference in all_full_ref_records
+    }
+    json_path_inventory = merge_path_inventories(
+        [summary.get("json_path_inventory", []) for summary in station_summaries]
+    )
+    reason_like_inventory = merge_reason_like_inventories(
+        [summary.get("reason_like_field_inventory", []) for summary in station_summaries]
+    )
+    situation_object_field_inventory = merge_path_inventories(
+        [
+            summary.get("situation_object_field_inventory", [])
+            for summary in station_summaries
+        ]
+    )
     station_views = []
     for summary in station_summaries:
         view = dict(summary)
         view.pop("_situation_records", None)
+        view.pop("_reference_records", None)
         station_views.append(view)
     return {
         "sample_station_count": len(station_summaries),
@@ -1543,11 +2724,58 @@ def aggregate_mdd_summaries(
         "situation_reference_count": situation_reference_count,
         "reference_type_counts": dict(sorted(reference_type_counts.items())),
         "incident_call_reference_count": reference_type_counts.get("IncidentCall", 0),
+        "info_call_reference_count": reference_type_counts.get("InfoCall", 0),
         "unique_situation_count": content["unique_situation_count"],
+        "situation_full_ref_count": len(all_full_ref_records),
+        "unique_situation_full_ref_count": len(unique_full_ref_keys),
+        "resolved_inline_situation_ref_count": sum(
+            summary.get("resolved_inline_situation_ref_count", 0)
+            for summary in station_summaries
+        ),
+        "unresolved_situation_ref_count": sum(
+            summary.get("unresolved_situation_ref_count", 0)
+            for summary in station_summaries
+        ),
         "call_level_situation_link_count": relation_counts["CALL"],
         "service_level_situation_link_count": relation_counts["SERVICE"],
         "other_unclassified_relation_count": relation_counts["OTHER_OR_UNCLASSIFIED"],
         "relation_scope_counts": relation_counts,
+        "json_path_inventory": json_path_inventory,
+        "reason_like_field_inventory": reason_like_inventory,
+        "situation_object_field_inventory": situation_object_field_inventory,
+        "situation_full_ref_records": [
+            dict(
+                sanitize_reference_record(reference, secret),
+                station_key=next(
+                    (
+                        summary.get("station_key")
+                        for summary in station_summaries
+                        if reference in summary.get("_reference_records", [])
+                    ),
+                    None,
+                ),
+                association_scope=relation_scope_for_reference(reference["path"]),
+            )
+            for reference in all_full_ref_records
+        ],
+        "incident_info_occurrences": [
+            {
+                "station_key": summary.get("station_key"),
+                "occurrences": summary.get("incident_info_occurrences", []),
+            }
+            for summary in station_summaries
+        ],
+        "error_message_field_inventory": [
+            {
+                "station_key": summary.get("station_key"),
+                "fields": summary.get("error_message_field_inventory", []),
+            }
+            for summary in station_summaries
+        ],
+        "error_message_non_empty_value_count": sum(
+            summary.get("error_message_non_empty_value_count", 0)
+            for summary in station_summaries
+        ),
         "summary_present_count": content["summary_present_count"],
         "description_present_count": content["description_present_count"],
         "detail_present_count": content["detail_present_count"],
@@ -1658,9 +2886,50 @@ def final_summary(
         "http_attempts_by_source": dict(sorted(tracker.attempts_by_source.items())),
         "http_budget_compliance": tracker.total_http_attempts <= MAX_HTTP_ATTEMPTS,
         "gtfs_rt_cause_population_percentage": cause_percentage,
+        "gtfs_rt_cause_explicit_presence_count": feed_summary.get(
+            "cause_explicitly_present_count", 0
+        ),
+        "gtfs_rt_cause_explicit_absence_count": feed_summary.get(
+            "cause_explicitly_absent_count", 0
+        ),
+        "gtfs_rt_cause_presence_value_matrix": feed_summary.get(
+            "cause_presence_value_matrix", {}
+        ),
         "gtfs_rt_cause_evidence_statement": cause_statement,
         "gtfs_rt_effect_population_percentage": effect_percentage,
+        "gtfs_rt_effect_explicit_presence_count": feed_summary.get(
+            "effect_explicitly_present_count", 0
+        ),
+        "gtfs_rt_effect_explicit_absence_count": feed_summary.get(
+            "effect_explicitly_absent_count", 0
+        ),
+        "gtfs_rt_effect_presence_value_matrix": feed_summary.get(
+            "effect_presence_value_matrix", {}
+        ),
         "gtfs_rt_effect_evidence_statement": effect_statement,
+        "gtfs_rt_severity_level_explicit_presence_count": feed_summary.get(
+            "severity_level_explicitly_present_count", 0
+        ),
+        "gtfs_rt_cause_detail": feed_summary.get("cause_detail", {}),
+        "gtfs_rt_effect_detail": feed_summary.get("effect_detail", {}),
+        "gtfs_rt_url_explicit_presence_count": feed_summary.get(
+            "url_explicitly_present_count", 0
+        ),
+        "gtfs_rt_text_frequency": {
+            key: feed_summary.get(key)
+            for key in (
+                "distinct_header_text_count",
+                "distinct_description_text_count",
+                "distinct_cause_detail_count",
+                "distinct_effect_detail_count",
+                "top_20_header_texts",
+                "top_20_description_texts",
+                "top_20_cause_details",
+                "top_20_effect_details",
+                "gtfsde_provenance_description_count",
+                "gtfsde_provenance_description_percentage",
+            )
+        },
         "gtfs_rt_alert_scope_type_counts": scope_counts,
         "gtfs_rt_alert_scope_evidence_statement": scope_statement,
         "neumarkt_directly_linked_alert_count": local_summary.get(
@@ -1679,14 +2948,41 @@ def final_summary(
         "mdd_incident_call_reference_count": mdd_summary.get(
             "incident_call_reference_count", 0
         ),
+        "mdd_info_call_reference_count": mdd_summary.get(
+            "info_call_reference_count", 0
+        ),
+        "mdd_situation_full_ref_count": mdd_summary.get(
+            "situation_full_ref_count", 0
+        ),
+        "mdd_unique_situation_full_ref_count": mdd_summary.get(
+            "unique_situation_full_ref_count", 0
+        ),
+        "mdd_resolved_inline_situation_ref_count": mdd_summary.get(
+            "resolved_inline_situation_ref_count", 0
+        ),
+        "mdd_unresolved_situation_ref_count": mdd_summary.get(
+            "unresolved_situation_ref_count", 0
+        ),
+        "mdd_incident_info_occurrence_count": sum(
+            len(item.get("occurrences", []))
+            for item in mdd_summary.get("incident_info_occurrences", [])
+        ),
+        "mdd_error_message_non_empty_value_count": mdd_summary.get(
+            "error_message_non_empty_value_count", 0
+        ),
         "mdd_association_scope_counts": mdd_summary.get("relation_scope_counts", {}),
         "mdd_association_scope_statement": (
             "MDD association counts are retained by relation scope: CALL=%s, "
-            "SERVICE=%s, OTHER_OR_UNCLASSIFIED=%s. Association does not establish "
-            "causality."
+            "SERVICE=%s, JOURNEY=%s, STOP_EVENT=%s, RESPONSE_CONTEXT=%s, "
+            "OTHER_OR_UNCLASSIFIED=%s. Association does not establish causality."
             % (
                 mdd_summary.get("call_level_situation_link_count", 0),
                 mdd_summary.get("service_level_situation_link_count", 0),
+                mdd_summary.get("relation_scope_counts", {}).get("JOURNEY", 0),
+                mdd_summary.get("relation_scope_counts", {}).get("STOP_EVENT", 0),
+                mdd_summary.get("relation_scope_counts", {}).get(
+                    "RESPONSE_CONTEXT", 0
+                ),
                 mdd_summary.get("other_unclassified_relation_count", 0),
             )
         ),
@@ -1835,6 +3131,78 @@ def main() -> int:
             "effect_present_count": feed_summary.get("effect_present_count", 0),
             "effect_missing_count": feed_summary.get("effect_missing_count", 0),
             "distribution": enum_distribution(alerts, "effect"),
+        },
+    )
+    emit(
+        "gtfs_rt_presence_matrix",
+        {
+            "total_alert_count": feed_summary.get("total_alert_count", 0),
+            "cause_explicitly_present_count": feed_summary.get(
+                "cause_explicitly_present_count", 0
+            ),
+            "cause_explicitly_absent_count": feed_summary.get(
+                "cause_explicitly_absent_count", 0
+            ),
+            "effect_explicitly_present_count": feed_summary.get(
+                "effect_explicitly_present_count", 0
+            ),
+            "effect_explicitly_absent_count": feed_summary.get(
+                "effect_explicitly_absent_count", 0
+            ),
+            "cause_presence_value_matrix": feed_summary.get(
+                "cause_presence_value_matrix", {}
+            ),
+            "effect_presence_value_matrix": feed_summary.get(
+                "effect_presence_value_matrix", {}
+            ),
+        },
+    )
+    emit(
+        "gtfs_rt_detail_fields",
+        {
+            "total_alert_count": feed_summary.get("total_alert_count", 0),
+            "severity_level_explicitly_present_count": feed_summary.get(
+                "severity_level_explicitly_present_count", 0
+            ),
+            "cause_detail": feed_summary.get("cause_detail", {}),
+            "effect_detail": feed_summary.get("effect_detail", {}),
+            "url_explicitly_present_count": feed_summary.get(
+                "url_explicitly_present_count", 0
+            ),
+        },
+    )
+    emit(
+        "gtfs_rt_text_frequency",
+        {
+            "total_alert_count": feed_summary.get("total_alert_count", 0),
+            "distinct_header_text_count": feed_summary.get(
+                "distinct_header_text_count", 0
+            ),
+            "distinct_description_text_count": feed_summary.get(
+                "distinct_description_text_count", 0
+            ),
+            "distinct_cause_detail_count": feed_summary.get(
+                "distinct_cause_detail_count", 0
+            ),
+            "distinct_effect_detail_count": feed_summary.get(
+                "distinct_effect_detail_count", 0
+            ),
+            "top_20_header_texts": feed_summary.get("top_20_header_texts", []),
+            "top_20_description_texts": feed_summary.get(
+                "top_20_description_texts", []
+            ),
+            "top_20_cause_details": feed_summary.get(
+                "top_20_cause_details", []
+            ),
+            "top_20_effect_details": feed_summary.get(
+                "top_20_effect_details", []
+            ),
+            "gtfsde_provenance_description_count": feed_summary.get(
+                "gtfsde_provenance_description_count", 0
+            ),
+            "gtfsde_provenance_description_percentage": feed_summary.get(
+                "gtfsde_provenance_description_percentage"
+            ),
         },
     )
     emit(
