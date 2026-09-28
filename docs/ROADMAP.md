@@ -128,8 +128,8 @@ scope, and non-causal alert/Situation association. It preserves the unresolved
 railway Köln Hbf identity and does not implement matching.
 
 The [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
-is the authoritative closeout record. Stage 4 was subsequently completed and
-approved under its own static-source validation gate below.
+is the authoritative closeout record. Stage 4 was subsequently revalidated and
+approved under its own current static-source validation gate below.
 
 Authoritative-feed coverage, canonical bridge construction, final collector
 readiness, and implementation validation remain later work. The cross-source
@@ -138,26 +138,34 @@ implementation.
 
 ## Stage 4 — Cologne Scope & Mode Classification — COMPLETE — APPROVED
 
-The official VRS Global-ID GTFS snapshot was validated with the direct
-`stop_id` prefix rule `de:05315:`. The approved analytical scope is
-stop-event-first; an internal segment requires both consecutive endpoints to
-be validated Cologne stops. Source route/trip identity remains separate from
-geographical KPI scope, so cross-boundary services contribute only their
-Cologne events and Cologne-internal segments.
+The current official VRS Global-ID GTFS snapshot from
+`https://download.vrs.de/gtfs/google_transit_goR.zip` was validated with the
+direct `stop_id` prefix rule `de:05315:`. Its feed version is
+`VERSION__20260928_0042`, its validity is `2026-09-02` through `2026-12-12`,
+and its ZIP SHA-256 is
+`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`. The
+freshness classification is `CURRENT_OR_OPERATIONALLY_RELEVANT` for the
+2026-09-28 project date. The approved analytical scope is stop-event-first; an
+internal segment requires both consecutive endpoints to be validated Cologne
+stops. Source route/trip identity remains separate from geographical KPI
+scope, so cross-boundary services contribute only their Cologne events and
+Cologne-internal segments.
 
-The current snapshot contains 862 distinct Cologne stop IDs, 448,755 Cologne
-scheduled stop events, 421,999 internal segments, 26,692 Cologne-serving
-trips, 13,268 Cologne-internal trips, 13,424 cross-boundary trips, 1,187
-touch-only trips, and 136 Cologne-serving route IDs. The approved source-
-faithful classifier includes Stadtbahn/Tram, Urban/KVB Bus, S-Bahn, RE, RB,
-and Regional/Other Bus as core modes for in-Cologne evidence; SEV remains a
-separate category; long-distance and unresolved/unsupported values remain
-outside core scope.
+The current snapshot contains 3,137 distinct Cologne stop IDs, 1,144,295
+Cologne scheduled stop events, 1,082,490 internal segments, 61,805
+Cologne-serving trips, 39,566 Cologne-internal trips, 22,239 cross-boundary
+trips, 1,606 touch-only trips, and 137 Cologne-serving route IDs. The approved
+source-faithful classifier includes Stadtbahn/Tram, Urban/KVB Bus, S-Bahn, RE,
+RB, and Regional/Other Bus as core modes for in-Cologne evidence; SEV remains
+a separate category; long-distance and unresolved/unsupported values remain
+outside core scope. The observed `route_type=4` ferry row is retained as
+explicit `OTHER_MODE` and has no Cologne events.
 
 The [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
-and [deterministic evidence JSON](stages/04-cologne-scope-mode-evidence.json)
-are authoritative. Stage 4 does not implement a database, collector,
-matching layer, warehouse, or Power BI model.
+and [current deterministic evidence JSON](stages/04-cologne-scope-mode-evidence.json)
+are authoritative. The [historical/legacy evidence JSON](stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json)
+is preserved for comparison and is not current authority. Stage 4 does not
+implement a database, collector, matching layer, warehouse, or Power BI model.
 
 ## Stage 5 — Database Architecture — NOT STARTED / NEXT
 The intended future database direction is PostgreSQL for an append-only,

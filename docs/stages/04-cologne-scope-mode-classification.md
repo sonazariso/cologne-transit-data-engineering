@@ -4,12 +4,15 @@
 **Completion date:** 2026-09-28  
 **Scope:** static-source validation and analytical design contract only
 
-This document is the authoritative Stage 4 closeout. It defines the technical
-Cologne boundary, separates source route identity from geographical KPI scope,
-re-proves the observed mode inventory from the current authoritative VRS
-Global-ID feed, and records the unresolved/unsupported cases explicitly. It
-does not implement PostgreSQL, collectors, matching, Power BI, or production
-analytics.
+This document is the authoritative current Stage 4 approval snapshot. The
+previous 2025-expired snapshot is preserved separately as historical/legacy
+evidence in
+[`04-cologne-scope-mode-evidence-historical-2026-09-28.json`](04-cologne-scope-mode-evidence-historical-2026-09-28.json).
+It defines the technical Cologne boundary, separates source route identity
+from geographical KPI scope, re-proves the observed mode inventory from the
+current official VRS Global-ID feed, and records unresolved/unsupported cases
+explicitly. It does not implement PostgreSQL, collectors, matching, Power BI,
+or production analytics.
 
 ## 1. Goal and authoritative source
 
@@ -22,14 +25,19 @@ Stage 4 was authorized to:
 4. approve a deterministic mode-classification contract; and
 5. document source-quality limitations without inventing classifications.
 
-The authoritative source for this validation is the official VRS OpenData
-Global-ID GTFS ZIP:
+The authoritative source for this approval is the current official VRS
+OpenData Global-ID GTFS ZIP:
 
-`https://www.vrs.de/fileadmin/05_Zukunftsmobilitaet/Fuer_Unternehmen/GTFS_VRS_mit_SPNV_hID_GlobalID.zip`
+`https://download.vrs.de/gtfs/google_transit_goR.zip`
 
-The ZIP was retrieved once on 2026-09-28 and audited locally. No VRS HTML
-page, MDD endpoint, GTFS-RT endpoint, API key, SQL Server, database, or Power
-BI system was accessed for this stage. The reproducible audit is
+The official source page is:
+`https://www.vrs.de/fuer-unternehmen/open-data-service`.
+It identifies the mast-level Global-ID GTFS as the recommended dataset and
+states that the VRS GTFS datasets are updated daily.
+
+The current ZIP was retrieved once on 2026-09-28 and audited locally. No MDD
+endpoint, GTFS-RT endpoint, API key, SQL Server, database, or Power BI system
+was accessed for this stage. The reproducible audit is
 [`scripts/stage_04_cologne_scope_mode_audit.py`](../../scripts/stage_04_cologne_scope_mode_audit.py);
 the summary evidence is
 [`04-cologne-scope-mode-evidence.json`](04-cologne-scope-mode-evidence.json).
@@ -39,23 +47,27 @@ the summary evidence is
 | Field | Recorded value |
 |---|---|
 | Source profile | VRS Global-ID GTFS |
-| Retrieval timestamp | `2026-09-28T13:04:20Z` |
-| ZIP size | 15,638,946 bytes |
-| ZIP SHA-256 | `d702c82cb1f274c8cc7ab8ec6e547920f92e1325b82baf533d9a7e52a59604d1` |
+| Retrieval timestamp | `2026-09-28T13:44:03Z` |
+| ZIP size | 35,127,041 bytes |
+| ZIP SHA-256 | `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b` |
 | `feed_publisher_name` | `VRS` |
 | `feed_publisher_url` | `http://www.vrs.de` |
 | `feed_lang` | `de` |
-| `feed_start_date` | `20240821` |
-| `feed_end_date` | `20250330` |
-| `feed_version` | `VERSION__20250114_2330` |
+| `feed_start_date` | `20260902` |
+| `feed_end_date` | `20261212` |
+| `feed_version` | `VERSION__20260928_0042` |
+| Earliest service/calendar date | `20260902` |
+| Latest service/calendar date | `20261212` |
+| Freshness classification | `CURRENT_OR_OPERATIONALLY_RELEVANT` |
 | Network retrieval operations | 1 official ZIP download; no retry |
 
 The archive contained `agency.txt`, `calendar.txt`, `calendar_dates.txt`,
 `feed_info.txt`, `frequencies.txt`, `routes.txt`, `shapes.txt`, `stops.txt`,
 `stop_times.txt`, `transfers.txt`, and `trips.txt`. All required files were
-parsed. The optional files were inventoried; `frequencies.txt` was present
-with zero data rows, while `calendar.txt`, `calendar_dates.txt`, `shapes.txt`,
-and `transfers.txt` were present with data. No raw ZIP was copied into Git.
+parsed. `calendar.txt` had 4,616 data rows and `calendar_dates.txt` had 124,061
+data rows; both covered `20260902` through `20261212` with no invalid date
+values. The feed therefore overlaps the 2026-09-28 project date and also
+contains forward schedule validity. No raw ZIP was copied into Git.
 
 ## 2. Exact Cologne scope rule
 
@@ -91,85 +103,89 @@ The actual `stop_id` referenced by `stop_times.txt` controls stop-event scope.
 
 | Source population | Count |
 |---|---:|
-| Agencies | 27 |
-| Route rows | 618 |
-| Distinct `route_id` values | 618 |
-| Stop rows | 6,892 |
-| Distinct `stop_id` values | 6,892 |
-| Parent stations (`location_type=1`) | 0 |
-| Stop positions (`location_type=0`) | 6,892 |
-| Trip rows | 74,615 |
-| Distinct `trip_id` values | 74,615 |
-| Stop-time rows | 1,795,448 |
+| Agencies | 33 |
+| Route rows | 957 |
+| Distinct `route_id` values | 957 |
+| Stop rows | 30,364 |
+| Distinct `stop_id` values | 30,364 |
+| Parent stations (`location_type=1`) | 9,903 |
+| Stop positions (`location_type=0`) | 20,461 |
+| Trip rows | 126,160 |
+| Distinct `trip_id` values | 126,160 |
+| Stop-time rows | 2,943,746 |
 
 The complete current `route_type` inventory is:
 
 | `route_type` | Route rows | Distinct route IDs | Preliminary source-row classification |
 |---:|---:|---:|---|
-| `0` | 20 | 20 | Stadtbahn / Tram: 20 |
-| `2` | 25 | 25 | S-Bahn: 5; Regional Express: 10; Regional Bahn: 10 |
-| `3` | 573 | 573 | Urban / KVB Bus: 55; Regional / Other Bus: 516; SEV: 2 |
+| `0` | 18 | 18 | Stadtbahn / Tram: 18 |
+| `2` | 31 | 31 | S-Bahn: 6; Regional Express: 11; Regional Bahn: 14 |
+| `3` | 907 | 907 | Urban / KVB Bus: 58; Regional / Other Bus: 849 |
+| `4` | 1 | 1 | `OTHER_MODE` / unsupported in this classifier: 1 |
 
-The complete `location_type` inventory is `0: 6,892`. No source row used
-`location_type=1`, so this feed snapshot has no parent-station rows to which
-child records could be attached.
+The complete `location_type` inventory is `0: 20,461; 1: 9,903`. The current
+feed contains explicit parent-station rows and child stop positions; the
+actual stop ID referenced by `stop_times.txt` remains the controlling
+geographical identity.
 
 ### Parent/child results
 
 | Check | Result |
 |---|---:|
-| Cologne-prefix parent-station rows | 0 |
-| Cologne-prefix child/stop-position rows | 862 |
-| Cologne child rows whose parent is also Cologne | 0 |
+| Cologne-prefix parent-station rows | 864 |
+| Cologne-prefix child/stop-position rows | 2,273 |
+| Cologne child rows whose parent is also Cologne | 2,273 |
 | Cologne child rows whose parent is outside Cologne | 0 |
-| Cologne child rows without a parent | 862 |
+| Cologne child rows without a parent | 0 |
 | Non-Cologne child rows whose parent is Cologne | 0 |
 | Orphan `parent_station` references | 0 |
 | `stop_times` rows referencing unknown `stop_id` | 0 |
 
-The absence of parent records is retained as a source-quality observation; it
-does not justify reconstructing parent stations from coordinates or names.
+The current hierarchy is retained as source evidence, but parent/child
+relationships do not silently override the actual `stop_id` referenced by
+`stop_times.txt`.
 
 ## 4. Cologne scope measurements
 
-The feed contains 862 Cologne stop rows and 862 distinct Cologne stop IDs.
+The feed contains 3,137 Cologne stop rows and 3,137 distinct Cologne stop IDs.
 The stop-time partition is complete:
 
 | Stop-time scope | Rows |
 |---|---:|
-| Validated Cologne stop events | 448,755 |
-| Known non-Cologne stop events | 1,346,693 |
+| Validated Cologne stop events | 1,144,295 |
+| Known non-Cologne stop events | 1,799,451 |
 | Unknown stop ID references | 0 |
-| Total stop-time rows | 1,795,448 |
+| Total stop-time rows | 2,943,746 |
 
 The resulting trip/route populations are:
 
 | Population | Count |
 |---|---:|
-| Cologne scheduled stop events | 448,755 |
-| Cologne internal consecutive segments | 421,999 |
-| Cologne-serving trips | 26,692 |
-| Cologne-internal trips | 13,268 |
-| Cross-boundary Cologne trips | 13,424 |
-| Cross-boundary trips with an internal Cologne segment | 12,237 |
-| Touch-only Cologne trips | 1,187 |
+| Cologne scheduled stop events | 1,144,295 |
+| Cologne internal consecutive segments | 1,082,490 |
+| Cologne-serving trips | 61,805 |
+| Cologne-internal trips | 39,566 |
+| Cross-boundary Cologne trips | 22,239 |
+| Cross-boundary trips with an internal Cologne segment | 20,633 |
+| Touch-only Cologne trips | 1,606 |
 | Unresolved stop-scope trips | 0 |
-| Cologne-serving routes | 136 |
-| Cross-boundary share of Cologne-serving trips | 50.292222% |
+| Cologne-serving routes | 137 |
+| Cross-boundary share of Cologne-serving trips | 35.982526% |
 
 The formal cross-boundary and touch-only populations are intentionally
 overlapping definitions. The mutually exclusive trip buckets reconcile exactly
-to all 26,692 Cologne-serving trip IDs:
+to all 61,805 Cologne-serving trip IDs:
 
 | Exclusive bucket | Count |
 |---|---:|
-| Cologne-internal with an internal segment | 13,268 |
-| Cross-boundary with an internal segment | 12,237 |
-| Cross-boundary touch-only | 1,187 |
-| **Total** | **26,692** |
+| Cologne-internal with an internal segment | 39,566 |
+| Cross-boundary with an internal segment | 20,633 |
+| Cross-boundary touch-only | 1,606 |
+| **Total** | **61,805** |
 
-No external stop event was included merely because a parent station might have
-had a Cologne identity; this feed had no parent-station records in any case.
+No external stop event was included merely because a parent station had a
+Cologne identity. The current feed's parent/child hierarchy was measured, but
+the actual stop ID in `stop_times.txt` remains authoritative.
 
 ## 5. Route identity versus analytical scope
 
@@ -224,32 +240,31 @@ source fields used; the analytical class does not replace them.
 
 | Analytical class | `route_id` | `route_short_name` | `route_long_name` | Agency | `route_type` | Evidence |
 |---|---|---|---|---|---:|---|
-| S-Bahn | `501206` | `S6` | *(blank)* | DB DB - Regio AG, Region NRW | 2 | bounded `S-number` label |
-| S-Bahn | `501211` | `S11` | *(blank)* | DB DB - Regio AG, Region NRW | 2 | bounded `S-number` label |
-| Regional Express (RE) | `13901001` | *(blank)* | `RE1 (RRX)` | NX National Express Rail GmbH | 2 | bounded `RE-number` in `route_long_name` |
-| Regional Express (RE) | `13901007` | `RE7` | *(blank)* | NX National Express Rail GmbH | 2 | bounded `RE-number` label |
-| Regional Bahn (RB) | `13001026` | `RB26` | *(blank)* | TR trans regio Deutsche Regionalbahn GmbH | 2 | bounded `RB-number` label |
-| Regional Bahn (RB) | `13901048` | `RB48` | *(blank)* | NX National Express Rail GmbH | 2 | bounded `RB-number` label |
+| S-Bahn | `de:nrw:s11:` | `S11` | *(blank)* | DB DB Regio AG | 2 | bounded `S-number` label |
+| S-Bahn | `be:sncb:S41:` | `S41` | *(blank)* | SNCB Belgische Eisenbahn | 2 | bounded `S-number` label |
+| Regional Express (RE) | `de:nrw:re1:` | *(blank)* | `RE1 (RRX)` | NX National Express Rail GmbH | 2 | bounded `RE-number` in `route_long_name` |
+| Regional Express (RE) | `de:nrw:re12:` | `RE12` | *(blank)* | DB DB Regio AG | 2 | bounded `RE-number` label |
+| Regional Bahn (RB) | `de:nrw:rb20:` | `RB20` | *(blank)* | DB DB Regio AG | 2 | bounded `RB-number` label |
+| Regional Bahn (RB) | `de:nrw:rb21:` | `RB21` | *(blank)* | RTB Rurtalbahn GmbH | 2 | bounded `RB-number` label |
 | Long-distance | — | — | — | — | — | No ICE, IC, EC, NightJet/NJ, FlixTrain/FLX, Thalys, or Eurostar-equivalent label was observed in current rail rows. |
-| Other Rail | — | — | — | — | — | All 25 current rail rows matched S-Bahn, RE, or RB evidence; no residual Other Rail row remained. |
+| Other Rail | — | — | — | — | — | All 31 current rail rows matched S-Bahn, RE, or RB evidence; no residual Other Rail row remained. |
 
 ### Bus, Regional / Other Bus, and SEV
 
 - `route_type=3` plus the validated KVB agency produces `Urban / KVB Bus`.
-  This yields 55 source route rows, 55 Cologne-serving routes, and 256,408
+  This yields 58 source route rows, 58 Cologne-serving routes, and 580,028
   Cologne scheduled stop events.
 - A non-KVB `route_type=3` row is `Regional / Other Bus` unless bounded SEV
-  evidence takes precedence. This is approved as a core mode only for its
-  validated in-Cologne events and segments; external trip portions remain
+  evidence takes precedence. This is a core mode only for its validated
+  in-Cologne events and segments; external trip portions remain
   outside Cologne KPI scope.
 - SEV evidence uses exact bounded labels/phrases in source route labels,
-  including `SEV`, `Schienenersatzverkehr`, or `Ersatzverkehr`. Two source
-  route rows matched `SEV` in `route_short_name`: `15101298` (HLB) and
-  `19901298` (agency name `SEV Schienenersatzverkehr Deutsche Bahn AG`).
-  Neither was Cologne-serving in this snapshot, so SEV has 0 Cologne-serving
-  routes, 0 Cologne-serving trips, and 0 Cologne scheduled stop events. It
-  remains a separate analytical category rather than being treated as an
-  ordinary bus.
+  including `SEV`, `Schienenersatzverkehr`, or `Ersatzverkehr`. No current
+  route row matched those bounded route-label patterns, so SEV has 0 source
+  route rows, 0 Cologne-serving routes, 0 Cologne-serving trips, and 0
+  Cologne scheduled stop events. It remains a separate analytical category
+  rather than being treated as an ordinary bus. Agencies whose names contain
+  `SEV` were not used as a substitute for route-label evidence.
 - The classifier did not classify all non-KVB buses as SEV.
 
 ### Mode-level results
@@ -260,25 +275,27 @@ includes all source `stop_times` rows associated with trips in that mode.
 
 | Mode | Scope status | Source route rows | Distinct route IDs | Cologne-serving routes | Scheduled events total | Cologne events | Cologne events % | Serving trips | Internal trips | Cross-boundary trips | Touch-only trips | Internal segments |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Stadtbahn / Tram | CORE_KPI | 20 | 20 | 13 | 221,576 | 131,497 | 59.346229% | 6,242 | 3,882 | 2,360 | 26 | 125,255 |
-| Urban / KVB Bus | CORE_KPI | 55 | 55 | 55 | 266,295 | 256,408 | 96.287200% | 10,624 | 9,147 | 1,477 | 1 | 245,784 |
-| S-Bahn | CORE_KPI | 5 | 5 | 4 | 71,981 | 31,311 | 43.498979% | 2,953 | 6 | 2,947 | 0 | 28,358 |
-| Regional Express (RE) | CORE_KPI | 10 | 10 | 9 | 36,377 | 6,030 | 16.576408% | 1,871 | 3 | 1,868 | 57 | 4,159 |
-| Regional Bahn (RB) | CORE_KPI | 10 | 10 | 6 | 31,385 | 4,654 | 14.828740% | 1,245 | 0 | 1,245 | 66 | 3,409 |
-| Regional / Other Bus | CORE_KPI | 516 | 516 | 49 | 1,167,464 | 18,855 | 1.615039% | 3,757 | 230 | 3,527 | 1,037 | 15,034 |
-| Rail Replacement Bus (SEV) | SEPARATE_ANALYTICAL | 2 | 2 | 0 | 370 | 0 | 0.000000% | 0 | 0 | 0 | 0 | 0 |
+| Stadtbahn / Tram | CORE_KPI | 18 | 18 | 12 | 700,388 | 507,354 | 72.438991% | 25,436 | 16,001 | 9,435 | 102 | 481,918 |
+| Urban / KVB Bus | CORE_KPI | 58 | 58 | 58 | 606,427 | 580,028 | 95.646797% | 25,917 | 23,001 | 2,916 | 0 | 554,111 |
+| S-Bahn | CORE_KPI | 6 | 6 | 4 | 54,591 | 26,345 | 48.258871% | 2,543 | 315 | 2,228 | 58 | 23,802 |
+| Regional Express (RE) | CORE_KPI | 11 | 11 | 8 | 31,860 | 4,650 | 14.595104% | 1,460 | 4 | 1,456 | 112 | 3,190 |
+| Regional Bahn (RB) | CORE_KPI | 14 | 14 | 7 | 50,606 | 6,061 | 11.976841% | 1,542 | 0 | 1,542 | 66 | 4,519 |
+| Regional / Other Bus | CORE_KPI | 849 | 849 | 48 | 1,499,608 | 19,857 | 1.324146% | 4,907 | 245 | 4,662 | 1,268 | 14,950 |
+| Rail Replacement Bus (SEV) | SEPARATE_ANALYTICAL | 0 | 0 | 0 | 0 | 0 | — | 0 | 0 | 0 | 0 | 0 |
 | Long-distance | OUTSIDE_CORE | 0 | 0 | 0 | 0 | 0 | — | 0 | 0 | 0 | 0 | 0 |
 | Other Rail | OUTSIDE_CORE | 0 | 0 | 0 | 0 | 0 | — | 0 | 0 | 0 | 0 | 0 |
+| `OTHER_MODE` | OUTSIDE_CORE | 1 | 1 | 0 | 266 | 0 | 0.000000% | 0 | 0 | 0 | 0 | 0 |
 
-Unsupported/ambiguous/unresolved buckets were all zero in this snapshot. The
-mode-level sums reconcile exactly to 448,755 Cologne events, 26,692 serving
-trips, 136 serving route IDs, and 421,999 internal segments.
+No Cologne-scoped events were unclassified or ambiguous. The unsupported
+`route_type=4` row is retained explicitly as `OTHER_MODE`; it has no Cologne
+events. Mode-level sums reconcile exactly to 1,144,295 Cologne events, 61,805
+serving trips, 137 serving route IDs, and 1,082,490 internal segments.
 
 The agency distribution and full representative source rows are retained in
 the JSON evidence file. The largest current serving populations are KVB
-(`agency_id=1`: 68 serving route IDs, 16,866 serving trips, 387,905 Cologne
-events), DB Regio NRW (`agency_id=5`: 12, 4,224, 35,943), and NX National
-Express (`agency_id=139`: 11, 1,743, 5,092). Agency presence does not expand
+(`agency_id=1`: 70 serving route IDs, 51,353 serving trips, 1,087,382 Cologne
+events), DB Regio (`agency_id=5`: 13, 3,863, 31,516), and NX National Express
+(`agency_id=139`: 5, 1,439, 4,562). Agency presence does not expand
 geographical scope or override the route-type classifier.
 
 ## 7. Duplicate IDs and unresolved source-quality cases
@@ -303,29 +320,76 @@ The current anomaly measurements are:
 | Duplicate stop sequences | 0 |
 | Unclassified/ambiguous Cologne events | 0 |
 
+The observed unsupported route-type inventory is explicit: one `route_type=4`
+row (`de:vrs:993:RF`, `F93`, a ferry) is classified as `OTHER_MODE`, has 266
+scheduled events outside Cologne, and contributes no Cologne KPI evidence. No
+unsupported or ambiguous row was forced into a core mode.
+
 If a future feed contains conflicting duplicate route rows, the audit will
 preserve all rows and place affected route/trip/event inheritance in
 `AMBIGUOUS_ROUTE_ID` or `AMBIGUOUS_TRIP_ID` rather than choosing a row.
 
-## 8. Legacy comparison and limitations
+## 8. Current approval snapshot and legacy comparison
 
-Historical comparison values supplied by the restart evidence were:
+The previous static evidence is retained as an explicitly historical snapshot;
+it is not the current authoritative source:
 
-| Measure | Current Stage 4 feed | Historical comparison only |
-|---|---:|---:|
-| Cologne stop records | 862 | 3,156 |
-| Parent stations | 0 | 866 |
-| Stop positions | 862 | 2,290 |
-| Cologne-serving routes | 136 | 153 |
-| Cologne-serving trips | 26,692 | 90,331 |
-| Cologne scheduled stop-event patterns | 448,755 | 1,551,343 |
+| Field | Current Stage 4 approval snapshot | Historical/legacy snapshot |
+|---|---|---|
+| Source URL | `https://download.vrs.de/gtfs/google_transit_goR.zip` | `https://www.vrs.de/fileadmin/05_Zukunftsmobilitaet/Fuer_Unternehmen/GTFS_VRS_mit_SPNV_hID_GlobalID.zip` |
+| Retrieval timestamp | `2026-09-28T13:44:03Z` | `2026-09-28T13:04:20Z` |
+| ZIP SHA-256 | `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b` | `d702c82cb1f274c8cc7ab8ec6e547920f92e1325b82baf533d9a7e52a59604d1` |
+| Feed version | `VERSION__20260928_0042` | `VERSION__20250114_2330` |
+| Feed date range | `2026-09-02` through `2026-12-12` | `2024-08-21` through `2025-03-30` |
+| Freshness | `CURRENT_OR_OPERATIONALLY_RELEVANT` | Historical/stale relative to the project date |
 
-These values are not a pass/fail equality test. The current feed has a
-different snapshot/version, date range, source profile, hierarchy shape, and
-static counting population from the historical evidence. The current VRS
-Global-ID results above are authoritative for this Stage 4 decision. No raw
-legacy feed was available in this repository for a second independent
-recalculation.
+### Scope-count comparison
+
+| Measure | Current | Historical/legacy | Difference (current − historical) |
+|---|---:|---:|---:|
+| Cologne stop rows / distinct IDs | 3,137 | 862 | +2,275 |
+| Cologne scheduled stop events | 1,144,295 | 448,755 | +695,540 |
+| Cologne internal consecutive segments | 1,082,490 | 421,999 | +660,491 |
+| Cologne-serving trips | 61,805 | 26,692 | +35,113 |
+| Cologne-internal trips | 39,566 | 13,268 | +26,298 |
+| Cross-boundary Cologne trips | 22,239 | 13,424 | +8,815 |
+| Touch-only trips | 1,606 | 1,187 | +419 |
+| Cologne-serving routes | 137 | 136 | +1 |
+| Cologne parent-station rows | 864 | 0 | +864 |
+| Unknown stop-time references | 0 | 0 | 0 |
+
+### Mode-count comparison
+
+| Mode | Current source route rows | Historical source route rows | Current Cologne events | Historical Cologne events | Current serving trips | Historical serving trips |
+|---|---:|---:|---:|---:|---:|---:|
+| Stadtbahn / Tram | 18 | 20 | 507,354 | 131,497 | 25,436 | 6,242 |
+| Urban / KVB Bus | 58 | 55 | 580,028 | 256,408 | 25,917 | 10,624 |
+| S-Bahn | 6 | 5 | 26,345 | 31,311 | 2,543 | 2,953 |
+| Regional Express (RE) | 11 | 10 | 4,650 | 6,030 | 1,460 | 1,871 |
+| Regional Bahn (RB) | 14 | 10 | 6,061 | 4,654 | 1,542 | 1,245 |
+| Regional / Other Bus | 849 | 516 | 19,857 | 18,855 | 4,907 | 3,757 |
+| Rail Replacement Bus (SEV) | 0 | 2 | 0 | 0 | 0 | 0 |
+| Long-distance | 0 | 0 | 0 | 0 | 0 | 0 |
+| Other Rail | 0 | 0 | 0 | 0 | 0 | 0 |
+| `OTHER_MODE` | 1 | 0 | 0 | 0 | 0 | 0 |
+
+### Structural differences and interpretation
+
+The count changes are expected and are not treated as failures. The current
+feed is a different version with a current/future service window, a larger
+Global-ID network snapshot, explicit parent-station hierarchy, a different
+route/trip population, and one observed `route_type=4` ferry row that is
+explicitly outside core scope. The previous snapshot contained two bounded
+SEV-labelled source rows; the current snapshot contains no route-label SEV
+matches, so no current row was silently reclassified as SEV. All current
+Cologne events, serving trips, serving routes, and internal segments reconcile
+to their mode buckets, and no current rows disappeared without an explicit
+classification or scope reason.
+
+The historical evidence file is
+[`04-cologne-scope-mode-evidence-historical-2026-09-28.json`](04-cologne-scope-mode-evidence-historical-2026-09-28.json).
+The current evidence file has exactly one role:
+`CURRENT STAGE 4 APPROVAL SNAPSHOT`.
 
 This stage describes the current authoritative VRS Global-ID GTFS feed only.
 It does not prove:
@@ -342,40 +406,47 @@ It does not prove:
 
 All automatic Stage 4 audit checks passed, including:
 
-1. official VRS Global-ID source and VRS `feed_info` provenance recorded;
+1. current official VRS Global-ID source and VRS `feed_info` provenance
+   recorded;
 2. ZIP size, SHA-256, archive file list, and feed metadata recorded;
-3. direct `de:05315:` identity rule measured against `stops.txt` and
+3. `calendar.txt` and `calendar_dates.txt` inspected, with the latest
+   represented service/calendar date recorded;
+4. freshness classified as `CURRENT_OR_OPERATIONALLY_RELEVANT` against the
+   2026-09-28 project date;
+5. direct `de:05315:` identity rule measured against `stops.txt` and
    `stop_times.txt`;
-4. parent/child anomalies and unknown references measured;
-5. stop-event and both-endpoints segment scope measured;
-6. internal, cross-boundary, and touch-only populations measured;
-7. route identity explicitly separated from event/segment geography;
-8. every observed `route_type` inventoried;
-9. deterministic classifier precedence documented;
-10. S-Bahn, RE, RB, KVB bus, Regional/Other Bus, and SEV source evidence
-    retained, with long-distance and residual Other Rail explicitly absent in
-    this feed;
-11. duplicate-ID ambiguity handling is explicit and no current duplicate was
+6. parent/child anomalies and unknown references measured;
+7. stop-event and both-endpoints segment scope measured;
+8. internal, cross-boundary, and touch-only populations measured;
+9. route identity explicitly separated from event/segment geography;
+10. every observed `route_type` inventoried, including explicit `OTHER_MODE`
+    handling for `route_type=4`;
+11. deterministic classifier precedence documented;
+12. S-Bahn, RE, RB, KVB bus, and Regional/Other Bus source evidence retained;
+    SEV, long-distance, and residual Other Rail remain explicit separate or
+    outside-core categories;
+13. duplicate-ID ambiguity handling is explicit and no current duplicate was
     silently resolved;
-12. unknown/unclassified values remain visible;
-13. mode-level route/trip/event/segment counts reconcile with overall totals;
-14. no static evidence is described as realtime or actual performance;
-15. the audit is standard-library-only and does not require a database.
+14. unknown/unclassified values remain visible;
+15. mode-level route/trip/event/segment counts reconcile with overall totals;
+16. no static evidence is described as realtime or actual performance;
+17. the audit is standard-library-only and does not require a database;
+18. the historical snapshot is explicitly separated from the current approval
+    snapshot.
 
 Repository-level checks completed after documentation synchronization:
 
-- Python compilation succeeded with the bytecode cache redirected to
-  `/private/tmp`.
-- AST parsing, `--help`, local ZIP parsing, JSON parsing, and a second offline
-  repeat run passed.
+- Python compilation, AST parsing, `--help`, current local ZIP parsing, JSON
+  validation, and a byte-for-byte deterministic second offline pass passed.
 - `git diff --check` passed.
-- No MDD or GTFS-RT request was made; no SQL/database, production collector,
-  scheduler, Power BI, or legacy-repository change was made.
+- Exactly one current official ZIP retrieval occurred; no MDD or GTFS-RT
+  request was made, and no SQL/database, production collector, scheduler,
+  Power BI, or legacy-repository change was made.
 
 ## 10. Final Stage 4 decision
 
-Stage 4 is **COMPLETE — APPROVED** for the static-source scope and mode
-contract documented here.
+Stage 4 is **COMPLETE — APPROVED** for the current static-source scope and
+mode contract documented here.
 
 The approval is specifically for:
 

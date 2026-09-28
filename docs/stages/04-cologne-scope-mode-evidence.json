@@ -11,6 +11,11 @@
       "passed": true
     },
     {
+      "detail": "freshness=CURRENT_OR_OPERATIONALLY_RELEVANT; The reference date falls within the represented service/calendar validity",
+      "id": "service_calendar_freshness_gate",
+      "passed": true
+    },
+    {
       "detail": "Actual stop IDs and stop_times references use the direct prefix rule",
       "id": "cologne_prefix_measured",
       "passed": true
@@ -56,22 +61,22 @@
       "passed": true
     },
     {
-      "detail": "mode event sum=448755; overall=448755",
+      "detail": "mode event sum=1144295; overall=1144295",
       "id": "mode_event_reconciliation",
       "passed": true
     },
     {
-      "detail": "mode trip sum=26692; overall=26692",
+      "detail": "mode trip sum=61805; overall=61805",
       "id": "mode_trip_reconciliation",
       "passed": true
     },
     {
-      "detail": "mode route sum=136; overall=136",
+      "detail": "mode route sum=137; overall=137",
       "id": "mode_route_reconciliation",
       "passed": true
     },
     {
-      "detail": "mode segment sum=421999; overall=421999",
+      "detail": "mode segment sum=1082490; overall=1082490",
       "id": "mode_segment_reconciliation",
       "passed": true
     },
@@ -87,9 +92,9 @@
       "agency_names": [
         "KVB Kölner Verkehrs-Betriebe AG"
       ],
-      "cologne_scheduled_stop_events": 387905,
-      "cologne_serving_routes": 68,
-      "cologne_serving_trips": 16866,
+      "cologne_scheduled_stop_events": 1087382,
+      "cologne_serving_routes": 70,
+      "cologne_serving_trips": 51353,
       "modes": [
         "Stadtbahn / Tram",
         "Urban / KVB Bus"
@@ -100,11 +105,10 @@
       "agency_names": [
         "TR trans regio Deutsche Regionalbahn GmbH"
       ],
-      "cologne_scheduled_stop_events": 1347,
-      "cologne_serving_routes": 2,
-      "cologne_serving_trips": 345,
+      "cologne_scheduled_stop_events": 978,
+      "cologne_serving_routes": 1,
+      "cologne_serving_trips": 243,
       "modes": [
-        "Regional / Other Bus",
         "Regional Bahn (RB)"
       ]
     },
@@ -113,11 +117,10 @@
       "agency_names": [
         "NX National Express Rail GmbH"
       ],
-      "cologne_scheduled_stop_events": 5092,
-      "cologne_serving_routes": 11,
-      "cologne_serving_trips": 1743,
+      "cologne_scheduled_stop_events": 4562,
+      "cologne_serving_routes": 5,
+      "cologne_serving_trips": 1439,
       "modes": [
-        "Regional / Other Bus",
         "Regional Bahn (RB)",
         "Regional Express (RE)"
       ]
@@ -127,23 +130,11 @@
       "agency_names": [
         "RVK Regionalverkehr Köln GmbH NL Berg.Gladb."
       ],
-      "cologne_scheduled_stop_events": 735,
+      "cologne_scheduled_stop_events": 879,
       "cologne_serving_routes": 2,
-      "cologne_serving_trips": 230,
+      "cologne_serving_trips": 302,
       "modes": [
         "Regional / Other Bus"
-      ]
-    },
-    {
-      "agency_id": "152",
-      "agency_names": [
-        "TRI Train Rental GmbH"
-      ],
-      "cologne_scheduled_stop_events": 26,
-      "cologne_serving_routes": 1,
-      "cologne_serving_trips": 20,
-      "modes": [
-        "Regional Express (RE)"
       ]
     },
     {
@@ -151,9 +142,9 @@
       "agency_names": [
         "RVK Regionalverkehr Köln GmbH NL Wermelsk."
       ],
-      "cologne_scheduled_stop_events": 3000,
+      "cologne_scheduled_stop_events": 2820,
       "cologne_serving_routes": 2,
-      "cologne_serving_trips": 205,
+      "cologne_serving_trips": 190,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -163,9 +154,21 @@
       "agency_names": [
         "REVG Rhein-Erft-Verkehrsgesellschaft mbH"
       ],
-      "cologne_scheduled_stop_events": 3543,
-      "cologne_serving_routes": 12,
-      "cologne_serving_trips": 843,
+      "cologne_scheduled_stop_events": 4000,
+      "cologne_serving_routes": 11,
+      "cologne_serving_trips": 1099,
+      "modes": [
+        "Regional / Other Bus"
+      ]
+    },
+    {
+      "agency_id": "198",
+      "agency_names": [
+        "SEV NX SEV National Express Rail GmbH"
+      ],
+      "cologne_scheduled_stop_events": 1141,
+      "cologne_serving_routes": 7,
+      "cologne_serving_trips": 527,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -173,11 +176,11 @@
     {
       "agency_id": "199",
       "agency_names": [
-        "SEV Schienenersatzverkehr Deutsche Bahn AG"
+        "SEV DB SEV DB Regio AG"
       ],
-      "cologne_scheduled_stop_events": 2480,
-      "cologne_serving_routes": 11,
-      "cologne_serving_trips": 605,
+      "cologne_scheduled_stop_events": 4903,
+      "cologne_serving_routes": 15,
+      "cologne_serving_trips": 1473,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -187,9 +190,9 @@
       "agency_names": [
         "wupsi wupsi GmbH"
       ],
-      "cologne_scheduled_stop_events": 6646,
-      "cologne_serving_routes": 9,
-      "cologne_serving_trips": 1015,
+      "cologne_scheduled_stop_events": 4450,
+      "cologne_serving_routes": 8,
+      "cologne_serving_trips": 842,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -197,11 +200,11 @@
     {
       "agency_id": "5",
       "agency_names": [
-        "DB DB - Regio AG, Region NRW"
+        "DB DB Regio AG"
       ],
-      "cologne_scheduled_stop_events": 35943,
-      "cologne_serving_routes": 12,
-      "cologne_serving_trips": 4224,
+      "cologne_scheduled_stop_events": 31516,
+      "cologne_serving_routes": 13,
+      "cologne_serving_trips": 3863,
       "modes": [
         "Regional Bahn (RB)",
         "Regional Express (RE)",
@@ -213,21 +216,9 @@
       "agency_names": [
         "SWB Stadtwerke Bonn Verkehrs GmbH"
       ],
-      "cologne_scheduled_stop_events": 303,
+      "cologne_scheduled_stop_events": 182,
       "cologne_serving_routes": 1,
-      "cologne_serving_trips": 201,
-      "modes": [
-        "Regional / Other Bus"
-      ]
-    },
-    {
-      "agency_id": "70",
-      "agency_names": [
-        "BVR Busverkehr Rheinland GmbH"
-      ],
-      "cologne_scheduled_stop_events": 259,
-      "cologne_serving_routes": 3,
-      "cologne_serving_trips": 45,
+      "cologne_serving_trips": 122,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -237,9 +228,9 @@
       "agency_names": [
         "RSVG Rhein-Sieg-Verkehrsgesellschaft mbH"
       ],
-      "cologne_scheduled_stop_events": 1476,
+      "cologne_scheduled_stop_events": 1482,
       "cologne_serving_routes": 2,
-      "cologne_serving_trips": 350,
+      "cologne_serving_trips": 352,
       "modes": [
         "Regional / Other Bus"
       ]
@@ -249,7 +240,7 @@
     "input_mode": "local_zip_only",
     "name": "stage_04_cologne_scope_mode_audit",
     "read_only_source_zip": true,
-    "version": "stage-04-audit-1.0"
+    "version": "stage-04-audit-1.1"
   },
   "duplicate_id_findings": {
     "agency_ids": {
@@ -276,8 +267,10 @@
       "duplicate_row_excess_count": 0
     }
   },
+  "evidence_role": "CURRENT STAGE 4 APPROVAL SNAPSHOT",
   "location_type_distribution": {
-    "0": 6892
+    "0": 20461,
+    "1": 9903
   },
   "mode_classification": {
     "kvb_source_evidence": {
@@ -294,55 +287,34 @@
       ]
     },
     "mode_examples": {
-      "Rail Replacement Bus (SEV)": [
+      "OTHER_MODE": [
         {
-          "agency_id": "151",
+          "agency_id": "193",
           "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
+            "RfKöwi Rheinfähre Königswinter GmbH"
           ],
           "classification_evidence": [
             {
-              "field": "route_short_name",
-              "pattern": "SEV",
-              "value": "SEV"
+              "field": "route_type",
+              "pattern": "unsupported route_type",
+              "value": "4"
             }
           ],
-          "preliminary_mode": "Rail Replacement Bus (SEV)",
-          "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-          "route_desc": "",
-          "route_id": "15101298",
+          "preliminary_mode": "OTHER_MODE",
+          "resolved_route_id_mode": "OTHER_MODE",
+          "route_desc": "H:Königwinter Fähranleger - Bonn-Mehlem Fähranleger | R:Bonn-Mehlem Fähranleger - Königwinter Fähranleger",
+          "route_id": "de:vrs:993:RF",
           "route_long_name": "",
-          "route_short_name": "SEV",
-          "route_type": "3",
-          "source_row_number": 232
-        },
-        {
-          "agency_id": "199",
-          "agency_names": [
-            "SEV Schienenersatzverkehr Deutsche Bahn AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "SEV",
-              "value": "SEV"
-            }
-          ],
-          "preliminary_mode": "Rail Replacement Bus (SEV)",
-          "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-          "route_desc": "",
-          "route_id": "19901298",
-          "route_long_name": "",
-          "route_short_name": "SEV",
-          "route_type": "3",
-          "source_row_number": 312
+          "route_short_name": "F93",
+          "route_type": "4",
+          "source_row_number": 953
         }
       ],
       "Regional / Other Bus": [
         {
-          "agency_id": "11",
+          "agency_id": "48",
           "agency_names": [
-            "OVAG Oberbergische Verkehrsgesellschaft mbH"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
             {
@@ -353,17 +325,17 @@
           ],
           "preliminary_mode": "Regional / Other Bus",
           "resolved_route_id_mode": "Regional / Other Bus",
-          "route_desc": "H:Gummersbach - Derschlag - Bergneustadt - Pernze - (Drolshagen - Olpe) | R:(Olpe - Drolshagen) - Pernze - Bergneustadt - Derschlag - Gummersbach",
-          "route_id": "1100301",
+          "route_desc": "H:Aachen Siegel - Burtscheid - Drimborn - Forster Linde - Arlintonstraße - Brand | R:Brand - Arlintonstraße - Forster Linde - Drimborn - Burtscheid - Aachen Siegel",
+          "route_id": "de:aac:05334|10:aseag",
           "route_long_name": "",
-          "route_short_name": "301",
+          "route_short_name": "10",
           "route_type": "3",
-          "source_row_number": 70
+          "source_row_number": 3
         },
         {
-          "agency_id": "11",
+          "agency_id": "48",
           "agency_names": [
-            "OVAG Oberbergische Verkehrsgesellschaft mbH"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
             {
@@ -374,17 +346,17 @@
           ],
           "preliminary_mode": "Regional / Other Bus",
           "resolved_route_id_mode": "Regional / Other Bus",
-          "route_desc": "H:Gummersbach - Wiehl - Nümbrecht - Waldbröl | R:Waldbröl - Nümbrecht - Wiehl - Gummersbach",
-          "route_id": "1100302",
+          "route_desc": "H:(Schmithof -) Walheim - Lichtenbusch - Burtscheid - Aachen Hbf - Bushof - Haaren - Weiden - Alsdorf Mariadorf - Hoengen | R:Hoengen - Mariadorf - Weiden - Haaren - Aachen Bushof - Hbf. - Burtscheid - Lichtenbusch - Schleckheim - Walheim",
+          "route_id": "de:aac:05334|11:aseag",
           "route_long_name": "",
-          "route_short_name": "302",
+          "route_short_name": "11",
           "route_type": "3",
-          "source_row_number": 71
+          "source_row_number": 4
         },
         {
-          "agency_id": "11",
+          "agency_id": "48",
           "agency_names": [
-            "OVAG Oberbergische Verkehrsgesellschaft mbH"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
             {
@@ -395,17 +367,17 @@
           ],
           "preliminary_mode": "Regional / Other Bus",
           "resolved_route_id_mode": "Regional / Other Bus",
-          "route_desc": "H:Gummersbach - Eckenhagen - Denklingen - Waldbröl | R:Waldbröl - Denklingen - Eckenhagen - Gummersbach",
-          "route_id": "1100303",
+          "route_desc": "",
+          "route_id": "de:aac:05334|11E:aseag",
           "route_long_name": "",
-          "route_short_name": "303",
+          "route_short_name": "11E",
           "route_type": "3",
-          "source_row_number": 72
+          "source_row_number": 5
         },
         {
-          "agency_id": "11",
+          "agency_id": "48",
           "agency_names": [
-            "OVAG Oberbergische Verkehrsgesellschaft mbH"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
             {
@@ -416,17 +388,17 @@
           ],
           "preliminary_mode": "Regional / Other Bus",
           "resolved_route_id_mode": "Regional / Other Bus",
-          "route_desc": "H:Gummersbach - Wiehl - Denklingen Rathaus - Morsbach | R:Morsbach - Denklingen Rathaus - Wiehl - Gummersbach",
-          "route_id": "1100304",
+          "route_desc": "",
+          "route_id": "de:aac:05334|11V:aseag",
           "route_long_name": "",
-          "route_short_name": "304",
+          "route_short_name": "11V",
           "route_type": "3",
-          "source_row_number": 73
+          "source_row_number": 6
         },
         {
-          "agency_id": "11",
+          "agency_id": "48",
           "agency_names": [
-            "OVAG Oberbergische Verkehrsgesellschaft mbH"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
             {
@@ -437,56 +409,35 @@
           ],
           "preliminary_mode": "Regional / Other Bus",
           "resolved_route_id_mode": "Regional / Other Bus",
-          "route_desc": "H:Gummersbach - Dieringhausen - Marienhagen - Berghausen - Wiehl | R:Wiehl - Berghausen - Marienhagen - Dieringhausen - Gummersbach",
-          "route_id": "1100306",
+          "route_desc": "H:Campus Melaten - Hörn - Muffet - Aachen Bushof - Eilendorf - Münsterbusch - Stolberg Mühlener Bf (- Donnerberg) | R:(Donnerberg-) Stolberg Mühlener Bf - Münsterbusch - Eilendorf - Aachen Bushof - Muffet - Hörn - Campus Melaten",
+          "route_id": "de:aac:05334|12:aseag",
           "route_long_name": "",
-          "route_short_name": "306",
+          "route_short_name": "12",
           "route_type": "3",
-          "source_row_number": 74
+          "source_row_number": 7
         }
       ],
       "Regional Bahn (RB)": [
         {
-          "agency_id": "130",
+          "agency_id": "5",
           "agency_names": [
-            "TR trans regio Deutsche Regionalbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB26"
+              "value": "RB20"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Köln - Brühl - Bonn - Remagen - Koblenz | R:Koblenz - Remagen - Bonn - Brühl - Köln",
-          "route_id": "13001026",
+          "route_desc": "H:Stolberg / Alsdorf - Herzogenrath - Aachen - Stolberg - Stolberg Altstadt / Langerwehe - Düren | R:Stolberg Altstadt / Langerwehe / Düren - Stolberg - Aachen - Herzogenrath - Stolberg / Alsdorf",
+          "route_id": "de:nrw:rb20:",
           "route_long_name": "",
-          "route_short_name": "RB26",
+          "route_short_name": "RB20",
           "route_type": "2",
-          "source_row_number": 151
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RB-number-label",
-              "value": "RB48"
-            }
-          ],
-          "preliminary_mode": "Regional Bahn (RB)",
-          "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Wuppertal - Solingen - Köln - Bonn - Bonn-Mehlem | R:Bonn-Mehlem - Bonn - Köln - Solingen - Wuppertal",
-          "route_id": "13901048",
-          "route_long_name": "",
-          "route_short_name": "RB48",
-          "route_type": "2",
-          "source_row_number": 202
+          "source_row_number": 315
         },
         {
           "agency_id": "141",
@@ -497,62 +448,104 @@
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB28"
+              "value": "RB21"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Düren - Zülpich - Euskirchen | R:Euskirchen - Zülpich - Düren",
-          "route_id": "14101028",
+          "route_desc": "H:Heimbach - Düren - Jülich - Linnich | R:Linnich - Jülich - Düren - Heimbach",
+          "route_id": "de:nrw:rb21:",
           "route_long_name": "",
-          "route_short_name": "RB28",
+          "route_short_name": "RB21",
           "route_type": "2",
-          "source_row_number": 228
+          "source_row_number": 317
         },
         {
-          "agency_id": "151",
+          "agency_id": "5",
           "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB90"
+              "value": "RB24"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Siegen - Betzdorf - Au (Sieg) - Altenkirchen - Westerburg | R:Westerburg - Altenkirchen - Au (Sieg) - Betzdorf - Siegen",
-          "route_id": "15101090",
+          "route_desc": "H:Köln - Erftstadt - Euskirchen - Kall - Jünkerath - Gerolstein - Trier | R:Trier - Gerolstein - Jünkerath - Kall - Euskirchen - Erftstadt - Köln",
+          "route_id": "de:nrw:rb24:",
           "route_long_name": "",
-          "route_short_name": "RB90",
+          "route_short_name": "RB24",
           "route_type": "2",
-          "source_row_number": 229
+          "source_row_number": 319
         },
         {
-          "agency_id": "151",
+          "agency_id": "5",
           "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB93"
+              "value": "RB25"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Bad Berleburg - Erndtebrück - Hilchenbach - Siegen - Betzdorf | R:Betzdorf - Siegen - Hilchenbach - Erndtebrück - Bad Berleburg",
-          "route_id": "15101093",
+          "route_desc": "H:(Lüdenscheid) - Meinerzhagen - Gummersbach - Overath - Rösrath - Köln | R:Köln - Rösrath - Overath - Gummersbach - Meinerzhagen - (Lüdenscheid)",
+          "route_id": "de:nrw:rb25:",
           "route_long_name": "",
-          "route_short_name": "RB93",
+          "route_short_name": "RB25",
           "route_type": "2",
-          "source_row_number": 230
+          "source_row_number": 321
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RB-number-label",
+              "value": "RB27"
+            }
+          ],
+          "preliminary_mode": "Regional Bahn (RB)",
+          "resolved_route_id_mode": "Regional Bahn (RB)",
+          "route_desc": "H:Mönchengladbach - Grevenbroich - Köln - Bonn-Beuel - Linz - Neuwied - Koblenz | R:Koblenz - Neuwied - Linz - Bonn-Beuel - Köln - Grevenboich - Mönchengladbach",
+          "route_id": "de:nrw:rb27:",
+          "route_long_name": "",
+          "route_short_name": "RB27",
+          "route_type": "2",
+          "source_row_number": 324
         }
       ],
       "Regional Express (RE)": [
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE12"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Köln - Euskirchen - Mechernich - Kall - Jünkerath - Gerolstein - Trier | R:Trier - Gerolstein - Jünkerath - Kall - Mechernich - Euskirchen - Köln",
+          "route_id": "de:nrw:re12:",
+          "route_long_name": "",
+          "route_short_name": "RE12",
+          "route_type": "2",
+          "source_row_number": 340
+        },
         {
           "agency_id": "139",
           "agency_names": [
@@ -568,11 +561,53 @@
           "preliminary_mode": "Regional Express (RE)",
           "resolved_route_id_mode": "Regional Express (RE)",
           "route_desc": "H:Aachen - Köln - Düsseldorf - Duisburg - Essen - Dortmund - Hamm | R:Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Köln - Aachen",
-          "route_id": "13901001",
+          "route_id": "de:nrw:re1:",
           "route_long_name": "RE1 (RRX)",
           "route_short_name": "",
           "route_type": "2",
-          "source_row_number": 198
+          "source_row_number": 342
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE22"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Köln - Euskirchen - Mechernich - Kall - Gerolstein - Trier | R:Trier - Gerolstein - Kall - Mechernich - Euskirchen - Köln",
+          "route_id": "de:nrw:re22:",
+          "route_long_name": "",
+          "route_short_name": "RE22",
+          "route_type": "2",
+          "source_row_number": 345
+        },
+        {
+          "agency_id": "139",
+          "agency_names": [
+            "NX National Express Rail GmbH"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE4"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Aachen - Mönchengladbach - Düsseldorf - Wuppertal - Hagen - Dortmund | R:Dortmund - Hagen - Wuppertal - Düsseldorf - Mönchengladbach - Aachen",
+          "route_id": "de:nrw:re4:",
+          "route_long_name": "",
+          "route_short_name": "RE4",
+          "route_type": "2",
+          "source_row_number": 348
         },
         {
           "agency_id": "139",
@@ -589,102 +624,39 @@
           "preliminary_mode": "Regional Express (RE)",
           "resolved_route_id_mode": "Regional Express (RE)",
           "route_desc": "H:Wesel - Oberhausen - Duisburg - Düsseldorf - Köln - Bonn - Koblenz | R:Koblenz - Bonn - Köln - Düsseldorf - Duisburg - Oberhausen - Wesel",
-          "route_id": "13901005",
+          "route_id": "de:nrw:re5:",
           "route_long_name": "RE5 (RRX)",
           "route_short_name": "",
           "route_type": "2",
-          "source_row_number": 199
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_long_name",
-              "pattern": "RE-number-label",
-              "value": "RE6 (RRX)"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Köln - Dormagen - Neuss - Düsseldorf  - Duisburg - Essen - Dortmund - Hamm - Bielefeld - Minden | R:Minden - Bielefeld - Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Neuss - Dormagen - Köln",
-          "route_id": "13901006",
-          "route_long_name": "RE6 (RRX)",
-          "route_short_name": "",
-          "route_type": "2",
-          "source_row_number": 200
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RE-number-label",
-              "value": "RE7"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Rheine - Münster - Hamm - Hagen - Wuppertal - Köln - Neuss - Krefeld | R:Krefeld - Neuss - Köln - Wuppertal - Hagen - Hamm - Münster - Rheine",
-          "route_id": "13901007",
-          "route_long_name": "",
-          "route_short_name": "RE7",
-          "route_type": "2",
-          "source_row_number": 201
-        },
-        {
-          "agency_id": "151",
-          "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RE-number-label",
-              "value": "RE99"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Siegen - Haiger - Gießen - Frankfurt | R:Frankfurt - Gießen - Haiger - Siegen",
-          "route_id": "15101099",
-          "route_long_name": "",
-          "route_short_name": "RE99",
-          "route_type": "2",
-          "source_row_number": 231
+          "source_row_number": 350
         }
       ],
       "S-Bahn": [
         {
-          "agency_id": "5",
+          "agency_id": "159",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "SNCB Belgische Eisenbahn"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "S-number",
-              "value": "S6"
+              "value": "S41"
             }
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Köln - Leverkusen - Langenfeld - Düsseldorf - Essen | R:Essen - Düsseldorf - Langenfeld - Leverkusen - Köln",
-          "route_id": "501206",
+          "route_desc": "H:Lüttich - Pepinster - Welkenraedt - Aachen | R:Aachen - Welkenraedt - Pepinster - Lüttich",
+          "route_id": "be:sncb:S41:",
           "route_long_name": "",
-          "route_short_name": "S6",
+          "route_short_name": "S41",
           "route_type": "2",
-          "source_row_number": 474
+          "source_row_number": 2
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -696,16 +668,16 @@
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
           "route_desc": "H:Düsseldorf Flughafen - Düsseldorf - Neuss - Dormagen - Köln - Bergisch Gladbach | R:Bergisch Gladbach - Köln - Dormagen - Neuss - Düsseldorf - Düsseldorf Flughafen",
-          "route_id": "501211",
+          "route_id": "de:nrw:s11:",
           "route_long_name": "",
           "route_short_name": "S11",
           "route_type": "2",
-          "source_row_number": 475
+          "source_row_number": 366
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -716,17 +688,17 @@
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Au (Sieg) - Eitorf - Hennef - Siegburg - Troisdorf - Köln - Horrem | R:Horrem - Köln - Troisdorf - Siegburg - Hennef - Eitorf - Au (Sieg)",
-          "route_id": "501212",
+          "route_desc": "H:Horrem - Köln - Troisdorf - Siegburg - Hennef - Eitorf - Au (Sieg) | R:Au (Sieg) - Eitorf - Hennef - Siegburg - Troisdorf - Köln - Horrem",
+          "route_id": "de:nrw:s12:",
           "route_long_name": "",
           "route_short_name": "S12",
           "route_type": "2",
-          "source_row_number": 476
+          "source_row_number": 368
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -737,17 +709,17 @@
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Au (Sieg) - Hennef - Siegburg/Bonn - Troisdorf - Köln/Bonn Flughafen - Köln - Horrem - Düren | R:Düren - Horrem - Köln - Köln/Bonn Flughafen - Troisdorf - Siegburg/Bonn - Hennef - Au (Sieg)",
-          "route_id": "501219",
+          "route_desc": "H:Düren - Horrem - Köln - Köln/Bonn Flughafen - Troisdorf - Siegburg/Bonn - Hennef - Au (Sieg) | R:Au (Sieg) - Hennef - Siegburg/Bonn - Troisdorf - Köln/Bonn Flughafen - Köln - Horrem - Düren",
+          "route_id": "de:nrw:s19:",
           "route_long_name": "",
           "route_short_name": "S19",
           "route_type": "2",
-          "source_row_number": 477
+          "source_row_number": 370
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -759,11 +731,11 @@
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
           "route_desc": "H:Bad Münstereifel - Euskirchen - Rheinbach - Meckenheim - Bonn | R:Bonn - Meckenheim - Rheinbach - Euskirchen - Bad Münstereifel",
-          "route_id": "501223",
+          "route_id": "de:nrw:s23:",
           "route_long_name": "",
           "route_short_name": "S23",
           "route_type": "2",
-          "source_row_number": 478
+          "source_row_number": 373
         }
       ],
       "Stadtbahn / Tram": [
@@ -781,12 +753,12 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln-Weiden West - Weiden Zentrum - Junkersdorf - Rheinenergie-Stadion - Braunsfeld - Rudolfplatz - Neumarkt - Bf Deutz/Messe - Kalk - Höhenberg - Merheim - Köln-Brück - Bergisch Gladbach-Lustheide - Refrath - Kippekausen - Frankenforst - Bergisch Gladbach-Bensberg | R:Bergisch Gladbach-Bensberg - Frankenforst - Kippekausen - Refrath - Bergisch Gladbach-Lustheide - Köln-Brück - Merheim - Höhenberg - Kalk - Bf Deutz/Messe - Neumarkt - Rudolfplatz - Braunsfeld - Rheinenergie-Stadion - Junkersdorf - Weiden Zentrum - Köln-Weiden West",
-          "route_id": "100001",
+          "route_desc": "H:Köln-Zollstock - Eifelstr. - Barbarossaplatz - Zülpicher Platz - Rudolfplatz - Friesenplatz - Hansaring - Ebertplatz - Nippes - Weidenpesch - Niehl Nord - Fordwerke - Köln-Merkenich | R:Köln-Merkenich - Fordwerke - Niehl Nord - Weidenpesch - Nippes - Ebertplatz - Hansaring - Friesenplatz - Rudolfplatz - Zülpicher Platz - Barbarossaplatz - Eifelstr. - Köln-Zollstock",
+          "route_id": "de:vrs:12:104",
           "route_long_name": "",
-          "route_short_name": "1",
+          "route_short_name": "12",
           "route_type": "0",
-          "source_row_number": 2
+          "source_row_number": 399
         },
         {
           "agency_id": "1",
@@ -802,12 +774,12 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln Görlinger Zentrum - Bocklemünd - Bickendorf - Bf Ehrenfeld - Friesenplatz - Neumarkt - Severinstr. - Bf Deutz/LANXESS arena S - Koelnmesse - Stegerwaldsiedlung - Buchforst - Buchheim - Holweide - Dellbrück - Köln Thielenbruch | R:Köln Thielenbruch - Dellbrück - Holweide - Buchheim - Buchforst - Stegerwaldsiedlung - Koelnmesse - Bf Deutz/LANXESS arena S - Severinstr. - Neumarkt - Friesenplatz - Bf Ehrenfeld - Bickendorf - Bocklemünd - Köln Görlinger Zentrum",
-          "route_id": "100003",
+          "route_desc": "H:Köln Sülzgürtel - Lindenthalgürtel - Stadtwaldgürtel - Melatengürtel - Ehrenfeldgürtel - Geldernstr./Parkgürtel - Neusser Str./Gürtel - Riehl - Mülheim Wiener Platz - Bf Mülheim - Buchheim - Holweide Vischeringstr. - Köln Thielenbruch | R:Köln Thielenbruch - Holweide Vischeringstr. - Buchheim - Bf Mülheim - Mülheim Wiener Platz - Riehl - Neusser Str./Gürtel - Geldernstr./Parkgürtel - Ehrenfeldgürtel - Melatengürtel - Stadtwaldgürtel - Lindenthalgürtel - Köln Sülzgürtel",
+          "route_id": "de:vrs:13:104",
           "route_long_name": "",
-          "route_short_name": "3",
+          "route_short_name": "13",
           "route_type": "0",
-          "source_row_number": 3
+          "source_row_number": 409
         },
         {
           "agency_id": "1",
@@ -823,12 +795,12 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln-Bocklemünd - Bickendorf - Bf Ehrenfeld - Friesenplatz - Neumarkt - Severinstr. - Bf Deutz/LANXESS arena S - Koelnmesse  - Stegerwaldsiedlung - Mülheim Wiener Platz - Höhenhaus - Köln-Dünnwald - Schlebusch | R:Schlebusch - Köln-Dünnwald - Höhenhaus - Mülheim Wiener Platz - Stegerwaldsiedlung - Koelnmesse  - Bf Deutz/LANXESS arena S - Severinstr. - Neumarkt - Friesenplatz - Bf Ehrenfeld - Bickendorf - Köln-Bocklemünd",
-          "route_id": "100004",
+          "route_desc": "H:Köln Ubierring - Chlodwigplatz - Barbarossaplatz - Zülpicher Platz - Rudolfplatz - Friesenplatz - Hansaring - Ebertplatz - Nippes - Weidenpesch - Longerich - Köln-Chorweiler | R:Köln-Chorweiler - Longerich - Weidenpesch - Nippes - Ebertplatz - Hansaring - Friesenplatz - Rudolfplatz - Zülpicher Platz - Barbarossaplatz - Chlodwigplatz - Köln Ubierring",
+          "route_id": "de:vrs:15:104",
           "route_long_name": "",
-          "route_short_name": "4",
+          "route_short_name": "15",
           "route_type": "0",
-          "source_row_number": 4
+          "source_row_number": 461
         },
         {
           "agency_id": "1",
@@ -844,12 +816,12 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln Sparkasse Am Butzweilerhof - Ossendorf - Subbelrather Str. - Friesenplatz - Dom/Hbf - Rathaus - Köln Heumarkt | R:Köln Heumarkt - Rathaus - Dom/Hbf - Friesenplatz - Subbelrather Str. - Ossendorf - Köln Sparkasse Am Butzweilerhof",
-          "route_id": "100005",
+          "route_desc": "H:Bonn-Bad Godesberg - Heussallee/Museumsmeile - Bonn Hbf - Tannenbusch - Bornheim-Hersel - Urfeld - Wesseling - Rodenkirchen - Ubierring - Chlodwigplatz - Barbarossaplatz - Neumarkt - Dom/Hbf - Ebertplatz - Kinderkrankenhaus - Amsterdamer Str. - Köln-Niehl Sebastianstr. | R:Köln-Niehl Sebastianstr. - Amsterdamer Str. - Kinderkrankenhaus - Ebertplatz - Dom/Hbf - Neumarkt - Barbarossaplatz - Chlodwigplatz - Ubierring - Rodenkirchen - Wesseling - Urfeld - Bornheim-Hersel - Tannenbusch - Bonn Hbf - Heussallee/Museumsmeile - Bonn-Bad Godesberg",
+          "route_id": "de:vrs:16:104",
           "route_long_name": "",
-          "route_short_name": "5",
+          "route_short_name": "16",
           "route_type": "0",
-          "source_row_number": 5
+          "source_row_number": 473
         },
         {
           "agency_id": "1",
@@ -865,12 +837,12 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Frechen-Benzelrath - Frechen Rathaus - Köln-Marsdorf - Lindenthal - Stadtwaldgürtel - Melaten - Rudolfplatz - Neumarkt - Heumarkt - Deutz - Siegburger Str. - Poll - Westhoven - Ensen - Porz - Köln-Zündorf | R:Köln-Zündorf - Porz - Ensen - Westhoven - Poll - Siegburger Str. - Deutz - Heumarkt - Neumarkt - Rudolfplatz - Melaten - Stadtwaldgürtel - Lindenthal - Köln-Marsdorf - Frechen Rathaus - Frechen-Benzelrath",
-          "route_id": "100007",
+          "route_desc": "H:Köln Severinstraße - Chlodwigplatz - Bayenthal - Marienburg - Köln-Rodenkirchen - Sürth | R:Sürth - Köln-Rodenkirchen - Marienburg - Bayenthal - Chlodwigplatz - Köln Severinstraße",
+          "route_id": "de:vrs:17:104",
           "route_long_name": "",
-          "route_short_name": "7",
+          "route_short_name": "17",
           "route_type": "0",
-          "source_row_number": 6
+          "source_row_number": 478
         }
       ],
       "Urban / KVB Bus": [
@@ -893,12 +865,38 @@
           ],
           "preliminary_mode": "Urban / KVB Bus",
           "resolved_route_id_mode": "Urban / KVB Bus",
+          "route_desc": "",
+          "route_id": "de:vrs:101:104",
+          "route_long_name": "",
+          "route_short_name": "101",
+          "route_type": "3",
+          "source_row_number": 385
+        },
+        {
+          "agency_id": "1",
+          "agency_names": [
+            "KVB Kölner Verkehrs-Betriebe AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "agency_id",
+              "pattern": "validated KVB agency",
+              "value": "1"
+            },
+            {
+              "field": "route_type",
+              "pattern": "GTFS 3",
+              "value": "3"
+            }
+          ],
+          "preliminary_mode": "Urban / KVB Bus",
+          "resolved_route_id_mode": "Urban / KVB Bus",
           "route_desc": "H:Leuchterstr. - Wiener Platz",
-          "route_id": "100104",
+          "route_id": "de:vrs:104:104",
           "route_long_name": "",
           "route_short_name": "104",
           "route_type": "3",
-          "source_row_number": 15
+          "source_row_number": 386
         },
         {
           "agency_id": "1",
@@ -920,11 +918,11 @@
           "preliminary_mode": "Urban / KVB Bus",
           "resolved_route_id_mode": "Urban / KVB Bus",
           "route_desc": "H:Köln-Marienburg Südpark - Bayenthalgürtel - Bonntor - Chlodwigplatz - Severinstr. - Waidmarkt - Köln Heumarkt | R:Köln Heumarkt - Waidmarkt - Severinstr. - Chlodwigplatz - Bonntor - Bayenthalgürtel - Köln-Marienburg Südpark",
-          "route_id": "100106",
+          "route_id": "de:vrs:106:104",
           "route_long_name": "",
           "route_short_name": "106",
           "route_type": "3",
-          "source_row_number": 16
+          "source_row_number": 387
         },
         {
           "agency_id": "1",
@@ -945,12 +943,12 @@
           ],
           "preliminary_mode": "Urban / KVB Bus",
           "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Bonn Hbf - Beuel - Mondorf - Rheidt - Niederkassel - Lülsdorf - Köln-Porz-Langel - Zündorf - Wahn S | R:Wahn S - Zündorf - Köln-Porz-Langel - Lülsdorf - Niederkassel - Rheidt - Mondorf - Beuel - Bonn Hbf",
-          "route_id": "100117",
+          "route_desc": "",
+          "route_id": "de:vrs:113:104",
           "route_long_name": "",
-          "route_short_name": "117",
+          "route_short_name": "113",
           "route_type": "3",
-          "source_row_number": 17
+          "source_row_number": 388
         },
         {
           "agency_id": "1",
@@ -971,38 +969,12 @@
           ],
           "preliminary_mode": "Urban / KVB Bus",
           "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Mülheim Wiener Platz - Stegerwaldsiedlung - Zoo/Flora - Kinderkrankenhaus - Nippes - Neusser Str./Gürtel | R:Neusser Str./Gürtel - Nippes - Amsterdamer Str./Gürtel - Zoo/Flora - Stegerwaldsiedlung - Mülheim Wiener Platz",
-          "route_id": "100118",
+          "route_desc": "",
+          "route_id": "de:vrs:116:104",
           "route_long_name": "",
-          "route_short_name": "118",
+          "route_short_name": "116",
           "route_type": "3",
-          "source_row_number": 18
-        },
-        {
-          "agency_id": "1",
-          "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
-            {
-              "field": "route_type",
-              "pattern": "GTFS 3",
-              "value": "3"
-            }
-          ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Köln-Blumenberg - Köln-Chorweiler - Fühlingen - Worringen S - Köln-Roggendorf/Thenhoven | R:Köln-Roggendorf/Thenhoven -  Worringen S - Fühlingen - Köln-Chorweiler - Köln-Blumenberg",
-          "route_id": "100120",
-          "route_long_name": "",
-          "route_short_name": "120",
-          "route_type": "3",
-          "source_row_number": 19
+          "source_row_number": 389
         }
       ]
     },
@@ -1056,11 +1028,11 @@
         "cologne_serving_routes": 0,
         "cologne_serving_trips": 0,
         "cross_boundary_trips": 0,
-        "distinct_source_route_ids": 0,
-        "percentage_mode_events_in_cologne": null,
-        "scheduled_stop_events_total": 0,
+        "distinct_source_route_ids": 1,
+        "percentage_mode_events_in_cologne": 0.0,
+        "scheduled_stop_events_total": 266,
         "scope_status": "OUTSIDE_CORE",
-        "source_route_rows": 0,
+        "source_route_rows": 1,
         "touch_only_trips": 0
       },
       "Other Rail": {
@@ -1084,82 +1056,82 @@
         "cologne_serving_routes": 0,
         "cologne_serving_trips": 0,
         "cross_boundary_trips": 0,
-        "distinct_source_route_ids": 2,
-        "percentage_mode_events_in_cologne": 0.0,
-        "scheduled_stop_events_total": 370,
+        "distinct_source_route_ids": 0,
+        "percentage_mode_events_in_cologne": null,
+        "scheduled_stop_events_total": 0,
         "scope_status": "SEPARATE_ANALYTICAL",
-        "source_route_rows": 2,
+        "source_route_rows": 0,
         "touch_only_trips": 0
       },
       "Regional / Other Bus": {
-        "cologne_internal_segments": 15034,
-        "cologne_internal_trips": 230,
-        "cologne_scheduled_stop_events": 18855,
-        "cologne_serving_routes": 49,
-        "cologne_serving_trips": 3757,
-        "cross_boundary_trips": 3527,
-        "distinct_source_route_ids": 516,
-        "percentage_mode_events_in_cologne": 1.615039,
-        "scheduled_stop_events_total": 1167464,
+        "cologne_internal_segments": 14950,
+        "cologne_internal_trips": 245,
+        "cologne_scheduled_stop_events": 19857,
+        "cologne_serving_routes": 48,
+        "cologne_serving_trips": 4907,
+        "cross_boundary_trips": 4662,
+        "distinct_source_route_ids": 849,
+        "percentage_mode_events_in_cologne": 1.324146,
+        "scheduled_stop_events_total": 1499608,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 516,
-        "touch_only_trips": 1037
+        "source_route_rows": 849,
+        "touch_only_trips": 1268
       },
       "Regional Bahn (RB)": {
-        "cologne_internal_segments": 3409,
+        "cologne_internal_segments": 4519,
         "cologne_internal_trips": 0,
-        "cologne_scheduled_stop_events": 4654,
-        "cologne_serving_routes": 6,
-        "cologne_serving_trips": 1245,
-        "cross_boundary_trips": 1245,
-        "distinct_source_route_ids": 10,
-        "percentage_mode_events_in_cologne": 14.82874,
-        "scheduled_stop_events_total": 31385,
+        "cologne_scheduled_stop_events": 6061,
+        "cologne_serving_routes": 7,
+        "cologne_serving_trips": 1542,
+        "cross_boundary_trips": 1542,
+        "distinct_source_route_ids": 14,
+        "percentage_mode_events_in_cologne": 11.976841,
+        "scheduled_stop_events_total": 50606,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 10,
+        "source_route_rows": 14,
         "touch_only_trips": 66
       },
       "Regional Express (RE)": {
-        "cologne_internal_segments": 4159,
-        "cologne_internal_trips": 3,
-        "cologne_scheduled_stop_events": 6030,
-        "cologne_serving_routes": 9,
-        "cologne_serving_trips": 1871,
-        "cross_boundary_trips": 1868,
-        "distinct_source_route_ids": 10,
-        "percentage_mode_events_in_cologne": 16.576408,
-        "scheduled_stop_events_total": 36377,
+        "cologne_internal_segments": 3190,
+        "cologne_internal_trips": 4,
+        "cologne_scheduled_stop_events": 4650,
+        "cologne_serving_routes": 8,
+        "cologne_serving_trips": 1460,
+        "cross_boundary_trips": 1456,
+        "distinct_source_route_ids": 11,
+        "percentage_mode_events_in_cologne": 14.595104,
+        "scheduled_stop_events_total": 31860,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 10,
-        "touch_only_trips": 57
+        "source_route_rows": 11,
+        "touch_only_trips": 112
       },
       "S-Bahn": {
-        "cologne_internal_segments": 28358,
-        "cologne_internal_trips": 6,
-        "cologne_scheduled_stop_events": 31311,
+        "cologne_internal_segments": 23802,
+        "cologne_internal_trips": 315,
+        "cologne_scheduled_stop_events": 26345,
         "cologne_serving_routes": 4,
-        "cologne_serving_trips": 2953,
-        "cross_boundary_trips": 2947,
-        "distinct_source_route_ids": 5,
-        "percentage_mode_events_in_cologne": 43.498979,
-        "scheduled_stop_events_total": 71981,
+        "cologne_serving_trips": 2543,
+        "cross_boundary_trips": 2228,
+        "distinct_source_route_ids": 6,
+        "percentage_mode_events_in_cologne": 48.258871,
+        "scheduled_stop_events_total": 54591,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 5,
-        "touch_only_trips": 0
+        "source_route_rows": 6,
+        "touch_only_trips": 58
       },
       "Stadtbahn / Tram": {
-        "cologne_internal_segments": 125255,
-        "cologne_internal_trips": 3882,
-        "cologne_scheduled_stop_events": 131497,
-        "cologne_serving_routes": 13,
-        "cologne_serving_trips": 6242,
-        "cross_boundary_trips": 2360,
-        "distinct_source_route_ids": 20,
-        "percentage_mode_events_in_cologne": 59.346229,
-        "scheduled_stop_events_total": 221576,
+        "cologne_internal_segments": 481918,
+        "cologne_internal_trips": 16001,
+        "cologne_scheduled_stop_events": 507354,
+        "cologne_serving_routes": 12,
+        "cologne_serving_trips": 25436,
+        "cross_boundary_trips": 9435,
+        "distinct_source_route_ids": 18,
+        "percentage_mode_events_in_cologne": 72.438991,
+        "scheduled_stop_events_total": 700388,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 20,
-        "touch_only_trips": 26
+        "source_route_rows": 18,
+        "touch_only_trips": 102
       },
       "UNCLASSIFIED_MODE": {
         "cologne_internal_segments": 0,
@@ -1190,18 +1162,18 @@
         "touch_only_trips": 0
       },
       "Urban / KVB Bus": {
-        "cologne_internal_segments": 245784,
-        "cologne_internal_trips": 9147,
-        "cologne_scheduled_stop_events": 256408,
-        "cologne_serving_routes": 55,
-        "cologne_serving_trips": 10624,
-        "cross_boundary_trips": 1477,
-        "distinct_source_route_ids": 55,
-        "percentage_mode_events_in_cologne": 96.2872,
-        "scheduled_stop_events_total": 266295,
+        "cologne_internal_segments": 554111,
+        "cologne_internal_trips": 23001,
+        "cologne_scheduled_stop_events": 580028,
+        "cologne_serving_routes": 58,
+        "cologne_serving_trips": 25917,
+        "cross_boundary_trips": 2916,
+        "distinct_source_route_ids": 58,
+        "percentage_mode_events_in_cologne": 95.646797,
+        "scheduled_stop_events_total": 606427,
         "scope_status": "CORE_KPI",
-        "source_route_rows": 55,
-        "touch_only_trips": 1
+        "source_route_rows": 58,
+        "touch_only_trips": 0
       }
     },
     "mode_statuses": {
@@ -1232,46 +1204,25 @@
       "Other Rail": [],
       "Regional Bahn (RB)": [
         {
-          "agency_id": "130",
+          "agency_id": "5",
           "agency_names": [
-            "TR trans regio Deutsche Regionalbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB26"
+              "value": "RB20"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Köln - Brühl - Bonn - Remagen - Koblenz | R:Koblenz - Remagen - Bonn - Brühl - Köln",
-          "route_id": "13001026",
+          "route_desc": "H:Stolberg / Alsdorf - Herzogenrath - Aachen - Stolberg - Stolberg Altstadt / Langerwehe - Düren | R:Stolberg Altstadt / Langerwehe / Düren - Stolberg - Aachen - Herzogenrath - Stolberg / Alsdorf",
+          "route_id": "de:nrw:rb20:",
           "route_long_name": "",
-          "route_short_name": "RB26",
+          "route_short_name": "RB20",
           "route_type": "2",
-          "source_row_number": 151
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RB-number-label",
-              "value": "RB48"
-            }
-          ],
-          "preliminary_mode": "Regional Bahn (RB)",
-          "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Wuppertal - Solingen - Köln - Bonn - Bonn-Mehlem | R:Bonn-Mehlem - Bonn - Köln - Solingen - Wuppertal",
-          "route_id": "13901048",
-          "route_long_name": "",
-          "route_short_name": "RB48",
-          "route_type": "2",
-          "source_row_number": 202
+          "source_row_number": 315
         },
         {
           "agency_id": "141",
@@ -1282,62 +1233,104 @@
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB28"
+              "value": "RB21"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Düren - Zülpich - Euskirchen | R:Euskirchen - Zülpich - Düren",
-          "route_id": "14101028",
+          "route_desc": "H:Heimbach - Düren - Jülich - Linnich | R:Linnich - Jülich - Düren - Heimbach",
+          "route_id": "de:nrw:rb21:",
           "route_long_name": "",
-          "route_short_name": "RB28",
+          "route_short_name": "RB21",
           "route_type": "2",
-          "source_row_number": 228
+          "source_row_number": 317
         },
         {
-          "agency_id": "151",
+          "agency_id": "5",
           "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB90"
+              "value": "RB24"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Siegen - Betzdorf - Au (Sieg) - Altenkirchen - Westerburg | R:Westerburg - Altenkirchen - Au (Sieg) - Betzdorf - Siegen",
-          "route_id": "15101090",
+          "route_desc": "H:Köln - Erftstadt - Euskirchen - Kall - Jünkerath - Gerolstein - Trier | R:Trier - Gerolstein - Jünkerath - Kall - Euskirchen - Erftstadt - Köln",
+          "route_id": "de:nrw:rb24:",
           "route_long_name": "",
-          "route_short_name": "RB90",
+          "route_short_name": "RB24",
           "route_type": "2",
-          "source_row_number": 229
+          "source_row_number": 319
         },
         {
-          "agency_id": "151",
+          "agency_id": "5",
           "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB93"
+              "value": "RB25"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Bad Berleburg - Erndtebrück - Hilchenbach - Siegen - Betzdorf | R:Betzdorf - Siegen - Hilchenbach - Erndtebrück - Bad Berleburg",
-          "route_id": "15101093",
+          "route_desc": "H:(Lüdenscheid) - Meinerzhagen - Gummersbach - Overath - Rösrath - Köln | R:Köln - Rösrath - Overath - Gummersbach - Meinerzhagen - (Lüdenscheid)",
+          "route_id": "de:nrw:rb25:",
           "route_long_name": "",
-          "route_short_name": "RB93",
+          "route_short_name": "RB25",
           "route_type": "2",
-          "source_row_number": 230
+          "source_row_number": 321
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RB-number-label",
+              "value": "RB27"
+            }
+          ],
+          "preliminary_mode": "Regional Bahn (RB)",
+          "resolved_route_id_mode": "Regional Bahn (RB)",
+          "route_desc": "H:Mönchengladbach - Grevenbroich - Köln - Bonn-Beuel - Linz - Neuwied - Koblenz | R:Koblenz - Neuwied - Linz - Bonn-Beuel - Köln - Grevenboich - Mönchengladbach",
+          "route_id": "de:nrw:rb27:",
+          "route_long_name": "",
+          "route_short_name": "RB27",
+          "route_type": "2",
+          "source_row_number": 324
         }
       ],
       "Regional Express (RE)": [
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE12"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Köln - Euskirchen - Mechernich - Kall - Jünkerath - Gerolstein - Trier | R:Trier - Gerolstein - Jünkerath - Kall - Mechernich - Euskirchen - Köln",
+          "route_id": "de:nrw:re12:",
+          "route_long_name": "",
+          "route_short_name": "RE12",
+          "route_type": "2",
+          "source_row_number": 340
+        },
         {
           "agency_id": "139",
           "agency_names": [
@@ -1353,11 +1346,53 @@
           "preliminary_mode": "Regional Express (RE)",
           "resolved_route_id_mode": "Regional Express (RE)",
           "route_desc": "H:Aachen - Köln - Düsseldorf - Duisburg - Essen - Dortmund - Hamm | R:Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Köln - Aachen",
-          "route_id": "13901001",
+          "route_id": "de:nrw:re1:",
           "route_long_name": "RE1 (RRX)",
           "route_short_name": "",
           "route_type": "2",
-          "source_row_number": 198
+          "source_row_number": 342
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE22"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Köln - Euskirchen - Mechernich - Kall - Gerolstein - Trier | R:Trier - Gerolstein - Kall - Mechernich - Euskirchen - Köln",
+          "route_id": "de:nrw:re22:",
+          "route_long_name": "",
+          "route_short_name": "RE22",
+          "route_type": "2",
+          "source_row_number": 345
+        },
+        {
+          "agency_id": "139",
+          "agency_names": [
+            "NX National Express Rail GmbH"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RE-number-label",
+              "value": "RE4"
+            }
+          ],
+          "preliminary_mode": "Regional Express (RE)",
+          "resolved_route_id_mode": "Regional Express (RE)",
+          "route_desc": "H:Aachen - Mönchengladbach - Düsseldorf - Wuppertal - Hagen - Dortmund | R:Dortmund - Hagen - Wuppertal - Düsseldorf - Mönchengladbach - Aachen",
+          "route_id": "de:nrw:re4:",
+          "route_long_name": "",
+          "route_short_name": "RE4",
+          "route_type": "2",
+          "source_row_number": 348
         },
         {
           "agency_id": "139",
@@ -1374,102 +1409,39 @@
           "preliminary_mode": "Regional Express (RE)",
           "resolved_route_id_mode": "Regional Express (RE)",
           "route_desc": "H:Wesel - Oberhausen - Duisburg - Düsseldorf - Köln - Bonn - Koblenz | R:Koblenz - Bonn - Köln - Düsseldorf - Duisburg - Oberhausen - Wesel",
-          "route_id": "13901005",
+          "route_id": "de:nrw:re5:",
           "route_long_name": "RE5 (RRX)",
           "route_short_name": "",
           "route_type": "2",
-          "source_row_number": 199
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_long_name",
-              "pattern": "RE-number-label",
-              "value": "RE6 (RRX)"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Köln - Dormagen - Neuss - Düsseldorf  - Duisburg - Essen - Dortmund - Hamm - Bielefeld - Minden | R:Minden - Bielefeld - Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Neuss - Dormagen - Köln",
-          "route_id": "13901006",
-          "route_long_name": "RE6 (RRX)",
-          "route_short_name": "",
-          "route_type": "2",
-          "source_row_number": 200
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RE-number-label",
-              "value": "RE7"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Rheine - Münster - Hamm - Hagen - Wuppertal - Köln - Neuss - Krefeld | R:Krefeld - Neuss - Köln - Wuppertal - Hagen - Hamm - Münster - Rheine",
-          "route_id": "13901007",
-          "route_long_name": "",
-          "route_short_name": "RE7",
-          "route_type": "2",
-          "source_row_number": 201
-        },
-        {
-          "agency_id": "151",
-          "agency_names": [
-            "HLB Hessische Landesbahn GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_short_name",
-              "pattern": "RE-number-label",
-              "value": "RE99"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Siegen - Haiger - Gießen - Frankfurt | R:Frankfurt - Gießen - Haiger - Siegen",
-          "route_id": "15101099",
-          "route_long_name": "",
-          "route_short_name": "RE99",
-          "route_type": "2",
-          "source_row_number": 231
+          "source_row_number": 350
         }
       ],
       "S-Bahn": [
         {
-          "agency_id": "5",
+          "agency_id": "159",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "SNCB Belgische Eisenbahn"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "S-number",
-              "value": "S6"
+              "value": "S41"
             }
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Köln - Leverkusen - Langenfeld - Düsseldorf - Essen | R:Essen - Düsseldorf - Langenfeld - Leverkusen - Köln",
-          "route_id": "501206",
+          "route_desc": "H:Lüttich - Pepinster - Welkenraedt - Aachen | R:Aachen - Welkenraedt - Pepinster - Lüttich",
+          "route_id": "be:sncb:S41:",
           "route_long_name": "",
-          "route_short_name": "S6",
+          "route_short_name": "S41",
           "route_type": "2",
-          "source_row_number": 474
+          "source_row_number": 2
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -1481,16 +1453,16 @@
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
           "route_desc": "H:Düsseldorf Flughafen - Düsseldorf - Neuss - Dormagen - Köln - Bergisch Gladbach | R:Bergisch Gladbach - Köln - Dormagen - Neuss - Düsseldorf - Düsseldorf Flughafen",
-          "route_id": "501211",
+          "route_id": "de:nrw:s11:",
           "route_long_name": "",
           "route_short_name": "S11",
           "route_type": "2",
-          "source_row_number": 475
+          "source_row_number": 366
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -1501,17 +1473,17 @@
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Au (Sieg) - Eitorf - Hennef - Siegburg - Troisdorf - Köln - Horrem | R:Horrem - Köln - Troisdorf - Siegburg - Hennef - Eitorf - Au (Sieg)",
-          "route_id": "501212",
+          "route_desc": "H:Horrem - Köln - Troisdorf - Siegburg - Hennef - Eitorf - Au (Sieg) | R:Au (Sieg) - Eitorf - Hennef - Siegburg - Troisdorf - Köln - Horrem",
+          "route_id": "de:nrw:s12:",
           "route_long_name": "",
           "route_short_name": "S12",
           "route_type": "2",
-          "source_row_number": 476
+          "source_row_number": 368
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -1522,17 +1494,17 @@
           ],
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
-          "route_desc": "H:Au (Sieg) - Hennef - Siegburg/Bonn - Troisdorf - Köln/Bonn Flughafen - Köln - Horrem - Düren | R:Düren - Horrem - Köln - Köln/Bonn Flughafen - Troisdorf - Siegburg/Bonn - Hennef - Au (Sieg)",
-          "route_id": "501219",
+          "route_desc": "H:Düren - Horrem - Köln - Köln/Bonn Flughafen - Troisdorf - Siegburg/Bonn - Hennef - Au (Sieg) | R:Au (Sieg) - Hennef - Siegburg/Bonn - Troisdorf - Köln/Bonn Flughafen - Köln - Horrem - Düren",
+          "route_id": "de:nrw:s19:",
           "route_long_name": "",
           "route_short_name": "S19",
           "route_type": "2",
-          "source_row_number": 477
+          "source_row_number": 370
         },
         {
           "agency_id": "5",
           "agency_names": [
-            "DB DB - Regio AG, Region NRW"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
@@ -1544,109 +1516,54 @@
           "preliminary_mode": "S-Bahn",
           "resolved_route_id_mode": "S-Bahn",
           "route_desc": "H:Bad Münstereifel - Euskirchen - Rheinbach - Meckenheim - Bonn | R:Bonn - Meckenheim - Rheinbach - Euskirchen - Bad Münstereifel",
-          "route_id": "501223",
+          "route_id": "de:nrw:s23:",
           "route_long_name": "",
           "route_short_name": "S23",
           "route_type": "2",
-          "source_row_number": 478
+          "source_row_number": 373
         }
       ]
     },
-    "sev_routes": [
-      {
-        "cologne_serving": false,
-        "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-        "route_id": "15101298",
-        "source_rows": [
-          {
-            "agency_id": "151",
-            "agency_names": [
-              "HLB Hessische Landesbahn GmbH"
-            ],
-            "classification_evidence": [
-              {
-                "field": "route_short_name",
-                "pattern": "SEV",
-                "value": "SEV"
-              }
-            ],
-            "preliminary_mode": "Rail Replacement Bus (SEV)",
-            "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-            "route_desc": "",
-            "route_id": "15101298",
-            "route_long_name": "",
-            "route_short_name": "SEV",
-            "route_type": "3",
-            "source_row_number": 232
-          }
-        ]
-      },
-      {
-        "cologne_serving": false,
-        "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-        "route_id": "19901298",
-        "source_rows": [
-          {
-            "agency_id": "199",
-            "agency_names": [
-              "SEV Schienenersatzverkehr Deutsche Bahn AG"
-            ],
-            "classification_evidence": [
-              {
-                "field": "route_short_name",
-                "pattern": "SEV",
-                "value": "SEV"
-              }
-            ],
-            "preliminary_mode": "Rail Replacement Bus (SEV)",
-            "resolved_route_id_mode": "Rail Replacement Bus (SEV)",
-            "route_desc": "",
-            "route_id": "19901298",
-            "route_long_name": "",
-            "route_short_name": "SEV",
-            "route_type": "3",
-            "source_row_number": 312
-          }
-        ]
-      }
-    ],
-    "unclassified_route_type_values": []
+    "sev_routes": [],
+    "unclassified_route_type_values": [
+      "4"
+    ]
   },
   "reconciliation": {
     "cologne_internal_segments": {
       "matches": true,
-      "overall": 421999,
-      "sum_mode_buckets": 421999
+      "overall": 1082490,
+      "sum_mode_buckets": 1082490
     },
     "cologne_scheduled_stop_events": {
       "explicit_unresolved_or_ambiguous_event_count": 0,
       "matches": true,
-      "overall": 448755,
-      "sum_mode_buckets": 448755
+      "overall": 1144295,
+      "sum_mode_buckets": 1144295
     },
     "cologne_serving_routes": {
       "matches": true,
-      "overall": 136,
-      "sum_mode_buckets": 136
+      "overall": 137,
+      "sum_mode_buckets": 137
     },
     "cologne_serving_trips": {
       "matches": true,
-      "overall": 26692,
-      "sum_mode_buckets": 26692
+      "overall": 61805,
+      "sum_mode_buckets": 61805
     },
     "source_stop_time_scope_partition": {
-      "known_non_cologne": 1346693,
+      "known_non_cologne": 1799451,
       "matches_stop_times_rows": true,
-      "sum": 1795448,
+      "sum": 2943746,
       "unknown_stop_id": 0,
-      "validated_cologne": 448755
+      "validated_cologne": 1144295
     }
   },
   "route_type_distribution": {
     "0": {
-      "distinct_route_ids": 20,
+      "distinct_route_ids": 18,
       "preliminary_modes": {
-        "Stadtbahn / Tram": 20
+        "Stadtbahn / Tram": 18
       },
       "representative_source_rows": [
         {
@@ -1663,370 +1580,374 @@
           ],
           "preliminary_mode": "Stadtbahn / Tram",
           "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln-Weiden West - Weiden Zentrum - Junkersdorf - Rheinenergie-Stadion - Braunsfeld - Rudolfplatz - Neumarkt - Bf Deutz/Messe - Kalk - Höhenberg - Merheim - Köln-Brück - Bergisch Gladbach-Lustheide - Refrath - Kippekausen - Frankenforst - Bergisch Gladbach-Bensberg | R:Bergisch Gladbach-Bensberg - Frankenforst - Kippekausen - Refrath - Bergisch Gladbach-Lustheide - Köln-Brück - Merheim - Höhenberg - Kalk - Bf Deutz/Messe - Neumarkt - Rudolfplatz - Braunsfeld - Rheinenergie-Stadion - Junkersdorf - Weiden Zentrum - Köln-Weiden West",
-          "route_id": "100001",
+          "route_desc": "H:Köln-Zollstock - Eifelstr. - Barbarossaplatz - Zülpicher Platz - Rudolfplatz - Friesenplatz - Hansaring - Ebertplatz - Nippes - Weidenpesch - Niehl Nord - Fordwerke - Köln-Merkenich | R:Köln-Merkenich - Fordwerke - Niehl Nord - Weidenpesch - Nippes - Ebertplatz - Hansaring - Friesenplatz - Rudolfplatz - Zülpicher Platz - Barbarossaplatz - Eifelstr. - Köln-Zollstock",
+          "route_id": "de:vrs:12:104",
           "route_long_name": "",
-          "route_short_name": "1",
+          "route_short_name": "12",
           "route_type": "0",
+          "source_row_number": 399
+        },
+        {
+          "agency_id": "1",
+          "agency_names": [
+            "KVB Kölner Verkehrs-Betriebe AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_type",
+              "pattern": "GTFS 0",
+              "value": "0"
+            }
+          ],
+          "preliminary_mode": "Stadtbahn / Tram",
+          "resolved_route_id_mode": "Stadtbahn / Tram",
+          "route_desc": "H:Köln Sülzgürtel - Lindenthalgürtel - Stadtwaldgürtel - Melatengürtel - Ehrenfeldgürtel - Geldernstr./Parkgürtel - Neusser Str./Gürtel - Riehl - Mülheim Wiener Platz - Bf Mülheim - Buchheim - Holweide Vischeringstr. - Köln Thielenbruch | R:Köln Thielenbruch - Holweide Vischeringstr. - Buchheim - Bf Mülheim - Mülheim Wiener Platz - Riehl - Neusser Str./Gürtel - Geldernstr./Parkgürtel - Ehrenfeldgürtel - Melatengürtel - Stadtwaldgürtel - Lindenthalgürtel - Köln Sülzgürtel",
+          "route_id": "de:vrs:13:104",
+          "route_long_name": "",
+          "route_short_name": "13",
+          "route_type": "0",
+          "source_row_number": 409
+        },
+        {
+          "agency_id": "1",
+          "agency_names": [
+            "KVB Kölner Verkehrs-Betriebe AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_type",
+              "pattern": "GTFS 0",
+              "value": "0"
+            }
+          ],
+          "preliminary_mode": "Stadtbahn / Tram",
+          "resolved_route_id_mode": "Stadtbahn / Tram",
+          "route_desc": "H:Köln Ubierring - Chlodwigplatz - Barbarossaplatz - Zülpicher Platz - Rudolfplatz - Friesenplatz - Hansaring - Ebertplatz - Nippes - Weidenpesch - Longerich - Köln-Chorweiler | R:Köln-Chorweiler - Longerich - Weidenpesch - Nippes - Ebertplatz - Hansaring - Friesenplatz - Rudolfplatz - Zülpicher Platz - Barbarossaplatz - Chlodwigplatz - Köln Ubierring",
+          "route_id": "de:vrs:15:104",
+          "route_long_name": "",
+          "route_short_name": "15",
+          "route_type": "0",
+          "source_row_number": 461
+        },
+        {
+          "agency_id": "1",
+          "agency_names": [
+            "KVB Kölner Verkehrs-Betriebe AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_type",
+              "pattern": "GTFS 0",
+              "value": "0"
+            }
+          ],
+          "preliminary_mode": "Stadtbahn / Tram",
+          "resolved_route_id_mode": "Stadtbahn / Tram",
+          "route_desc": "H:Bonn-Bad Godesberg - Heussallee/Museumsmeile - Bonn Hbf - Tannenbusch - Bornheim-Hersel - Urfeld - Wesseling - Rodenkirchen - Ubierring - Chlodwigplatz - Barbarossaplatz - Neumarkt - Dom/Hbf - Ebertplatz - Kinderkrankenhaus - Amsterdamer Str. - Köln-Niehl Sebastianstr. | R:Köln-Niehl Sebastianstr. - Amsterdamer Str. - Kinderkrankenhaus - Ebertplatz - Dom/Hbf - Neumarkt - Barbarossaplatz - Chlodwigplatz - Ubierring - Rodenkirchen - Wesseling - Urfeld - Bornheim-Hersel - Tannenbusch - Bonn Hbf - Heussallee/Museumsmeile - Bonn-Bad Godesberg",
+          "route_id": "de:vrs:16:104",
+          "route_long_name": "",
+          "route_short_name": "16",
+          "route_type": "0",
+          "source_row_number": 473
+        },
+        {
+          "agency_id": "1",
+          "agency_names": [
+            "KVB Kölner Verkehrs-Betriebe AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_type",
+              "pattern": "GTFS 0",
+              "value": "0"
+            }
+          ],
+          "preliminary_mode": "Stadtbahn / Tram",
+          "resolved_route_id_mode": "Stadtbahn / Tram",
+          "route_desc": "H:Köln Severinstraße - Chlodwigplatz - Bayenthal - Marienburg - Köln-Rodenkirchen - Sürth | R:Sürth - Köln-Rodenkirchen - Marienburg - Bayenthal - Chlodwigplatz - Köln Severinstraße",
+          "route_id": "de:vrs:17:104",
+          "route_long_name": "",
+          "route_short_name": "17",
+          "route_type": "0",
+          "source_row_number": 478
+        }
+      ],
+      "route_rows": 18
+    },
+    "2": {
+      "distinct_route_ids": 31,
+      "preliminary_modes": {
+        "Regional Bahn (RB)": 14,
+        "Regional Express (RE)": 11,
+        "S-Bahn": 6
+      },
+      "representative_source_rows": [
+        {
+          "agency_id": "159",
+          "agency_names": [
+            "SNCB Belgische Eisenbahn"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "S-number",
+              "value": "S41"
+            }
+          ],
+          "preliminary_mode": "S-Bahn",
+          "resolved_route_id_mode": "S-Bahn",
+          "route_desc": "H:Lüttich - Pepinster - Welkenraedt - Aachen | R:Aachen - Welkenraedt - Pepinster - Lüttich",
+          "route_id": "be:sncb:S41:",
+          "route_long_name": "",
+          "route_short_name": "S41",
+          "route_type": "2",
           "source_row_number": 2
         },
         {
-          "agency_id": "1",
+          "agency_id": "5",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_type",
-              "pattern": "GTFS 0",
-              "value": "0"
-            }
-          ],
-          "preliminary_mode": "Stadtbahn / Tram",
-          "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln Görlinger Zentrum - Bocklemünd - Bickendorf - Bf Ehrenfeld - Friesenplatz - Neumarkt - Severinstr. - Bf Deutz/LANXESS arena S - Koelnmesse - Stegerwaldsiedlung - Buchforst - Buchheim - Holweide - Dellbrück - Köln Thielenbruch | R:Köln Thielenbruch - Dellbrück - Holweide - Buchheim - Buchforst - Stegerwaldsiedlung - Koelnmesse - Bf Deutz/LANXESS arena S - Severinstr. - Neumarkt - Friesenplatz - Bf Ehrenfeld - Bickendorf - Bocklemünd - Köln Görlinger Zentrum",
-          "route_id": "100003",
-          "route_long_name": "",
-          "route_short_name": "3",
-          "route_type": "0",
-          "source_row_number": 3
-        },
-        {
-          "agency_id": "1",
-          "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_type",
-              "pattern": "GTFS 0",
-              "value": "0"
-            }
-          ],
-          "preliminary_mode": "Stadtbahn / Tram",
-          "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln-Bocklemünd - Bickendorf - Bf Ehrenfeld - Friesenplatz - Neumarkt - Severinstr. - Bf Deutz/LANXESS arena S - Koelnmesse  - Stegerwaldsiedlung - Mülheim Wiener Platz - Höhenhaus - Köln-Dünnwald - Schlebusch | R:Schlebusch - Köln-Dünnwald - Höhenhaus - Mülheim Wiener Platz - Stegerwaldsiedlung - Koelnmesse  - Bf Deutz/LANXESS arena S - Severinstr. - Neumarkt - Friesenplatz - Bf Ehrenfeld - Bickendorf - Köln-Bocklemünd",
-          "route_id": "100004",
-          "route_long_name": "",
-          "route_short_name": "4",
-          "route_type": "0",
-          "source_row_number": 4
-        },
-        {
-          "agency_id": "1",
-          "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_type",
-              "pattern": "GTFS 0",
-              "value": "0"
-            }
-          ],
-          "preliminary_mode": "Stadtbahn / Tram",
-          "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Köln Sparkasse Am Butzweilerhof - Ossendorf - Subbelrather Str. - Friesenplatz - Dom/Hbf - Rathaus - Köln Heumarkt | R:Köln Heumarkt - Rathaus - Dom/Hbf - Friesenplatz - Subbelrather Str. - Ossendorf - Köln Sparkasse Am Butzweilerhof",
-          "route_id": "100005",
-          "route_long_name": "",
-          "route_short_name": "5",
-          "route_type": "0",
-          "source_row_number": 5
-        },
-        {
-          "agency_id": "1",
-          "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_type",
-              "pattern": "GTFS 0",
-              "value": "0"
-            }
-          ],
-          "preliminary_mode": "Stadtbahn / Tram",
-          "resolved_route_id_mode": "Stadtbahn / Tram",
-          "route_desc": "H:Frechen-Benzelrath - Frechen Rathaus - Köln-Marsdorf - Lindenthal - Stadtwaldgürtel - Melaten - Rudolfplatz - Neumarkt - Heumarkt - Deutz - Siegburger Str. - Poll - Westhoven - Ensen - Porz - Köln-Zündorf | R:Köln-Zündorf - Porz - Ensen - Westhoven - Poll - Siegburger Str. - Deutz - Heumarkt - Neumarkt - Rudolfplatz - Melaten - Stadtwaldgürtel - Lindenthal - Köln-Marsdorf - Frechen Rathaus - Frechen-Benzelrath",
-          "route_id": "100007",
-          "route_long_name": "",
-          "route_short_name": "7",
-          "route_type": "0",
-          "source_row_number": 6
-        }
-      ],
-      "route_rows": 20
-    },
-    "2": {
-      "distinct_route_ids": 25,
-      "preliminary_modes": {
-        "Regional Bahn (RB)": 10,
-        "Regional Express (RE)": 10,
-        "S-Bahn": 5
-      },
-      "representative_source_rows": [
-        {
-          "agency_id": "130",
-          "agency_names": [
-            "TR trans regio Deutsche Regionalbahn GmbH"
+            "DB DB Regio AG"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
               "pattern": "RB-number-label",
-              "value": "RB26"
+              "value": "RB20"
             }
           ],
           "preliminary_mode": "Regional Bahn (RB)",
           "resolved_route_id_mode": "Regional Bahn (RB)",
-          "route_desc": "H:Köln - Brühl - Bonn - Remagen - Koblenz | R:Koblenz - Remagen - Bonn - Brühl - Köln",
-          "route_id": "13001026",
+          "route_desc": "H:Stolberg / Alsdorf - Herzogenrath - Aachen - Stolberg - Stolberg Altstadt / Langerwehe - Düren | R:Stolberg Altstadt / Langerwehe / Düren - Stolberg - Aachen - Herzogenrath - Stolberg / Alsdorf",
+          "route_id": "de:nrw:rb20:",
           "route_long_name": "",
-          "route_short_name": "RB26",
+          "route_short_name": "RB20",
           "route_type": "2",
-          "source_row_number": 151
+          "source_row_number": 315
         },
         {
-          "agency_id": "139",
+          "agency_id": "141",
           "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_long_name",
-              "pattern": "RE-number-label",
-              "value": "RE1 (RRX)"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Aachen - Köln - Düsseldorf - Duisburg - Essen - Dortmund - Hamm | R:Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Köln - Aachen",
-          "route_id": "13901001",
-          "route_long_name": "RE1 (RRX)",
-          "route_short_name": "",
-          "route_type": "2",
-          "source_row_number": 198
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_long_name",
-              "pattern": "RE-number-label",
-              "value": "RE5 (RRX)"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Wesel - Oberhausen - Duisburg - Düsseldorf - Köln - Bonn - Koblenz | R:Koblenz - Bonn - Köln - Düsseldorf - Duisburg - Oberhausen - Wesel",
-          "route_id": "13901005",
-          "route_long_name": "RE5 (RRX)",
-          "route_short_name": "",
-          "route_type": "2",
-          "source_row_number": 199
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
-          ],
-          "classification_evidence": [
-            {
-              "field": "route_long_name",
-              "pattern": "RE-number-label",
-              "value": "RE6 (RRX)"
-            }
-          ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Köln - Dormagen - Neuss - Düsseldorf  - Duisburg - Essen - Dortmund - Hamm - Bielefeld - Minden | R:Minden - Bielefeld - Hamm - Dortmund - Essen - Duisburg - Düsseldorf - Neuss - Dormagen - Köln",
-          "route_id": "13901006",
-          "route_long_name": "RE6 (RRX)",
-          "route_short_name": "",
-          "route_type": "2",
-          "source_row_number": 200
-        },
-        {
-          "agency_id": "139",
-          "agency_names": [
-            "NX National Express Rail GmbH"
+            "RTB Rurtalbahn GmbH"
           ],
           "classification_evidence": [
             {
               "field": "route_short_name",
-              "pattern": "RE-number-label",
-              "value": "RE7"
+              "pattern": "RB-number-label",
+              "value": "RB21"
             }
           ],
-          "preliminary_mode": "Regional Express (RE)",
-          "resolved_route_id_mode": "Regional Express (RE)",
-          "route_desc": "H:Rheine - Münster - Hamm - Hagen - Wuppertal - Köln - Neuss - Krefeld | R:Krefeld - Neuss - Köln - Wuppertal - Hagen - Hamm - Münster - Rheine",
-          "route_id": "13901007",
+          "preliminary_mode": "Regional Bahn (RB)",
+          "resolved_route_id_mode": "Regional Bahn (RB)",
+          "route_desc": "H:Heimbach - Düren - Jülich - Linnich | R:Linnich - Jülich - Düren - Heimbach",
+          "route_id": "de:nrw:rb21:",
           "route_long_name": "",
-          "route_short_name": "RE7",
+          "route_short_name": "RB21",
           "route_type": "2",
-          "source_row_number": 201
+          "source_row_number": 317
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RB-number-label",
+              "value": "RB24"
+            }
+          ],
+          "preliminary_mode": "Regional Bahn (RB)",
+          "resolved_route_id_mode": "Regional Bahn (RB)",
+          "route_desc": "H:Köln - Erftstadt - Euskirchen - Kall - Jünkerath - Gerolstein - Trier | R:Trier - Gerolstein - Jünkerath - Kall - Euskirchen - Erftstadt - Köln",
+          "route_id": "de:nrw:rb24:",
+          "route_long_name": "",
+          "route_short_name": "RB24",
+          "route_type": "2",
+          "source_row_number": 319
+        },
+        {
+          "agency_id": "5",
+          "agency_names": [
+            "DB DB Regio AG"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_short_name",
+              "pattern": "RB-number-label",
+              "value": "RB25"
+            }
+          ],
+          "preliminary_mode": "Regional Bahn (RB)",
+          "resolved_route_id_mode": "Regional Bahn (RB)",
+          "route_desc": "H:(Lüdenscheid) - Meinerzhagen - Gummersbach - Overath - Rösrath - Köln | R:Köln - Rösrath - Overath - Gummersbach - Meinerzhagen - (Lüdenscheid)",
+          "route_id": "de:nrw:rb25:",
+          "route_long_name": "",
+          "route_short_name": "RB25",
+          "route_type": "2",
+          "source_row_number": 321
         }
       ],
-      "route_rows": 25
+      "route_rows": 31
     },
     "3": {
-      "distinct_route_ids": 573,
+      "distinct_route_ids": 907,
       "preliminary_modes": {
-        "Rail Replacement Bus (SEV)": 2,
-        "Regional / Other Bus": 516,
-        "Urban / KVB Bus": 55
+        "Regional / Other Bus": 849,
+        "Urban / KVB Bus": 58
       },
       "representative_source_rows": [
         {
-          "agency_id": "1",
+          "agency_id": "48",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
             {
               "field": "route_type",
               "pattern": "GTFS 3",
               "value": "3"
             }
           ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Leuchterstr. - Wiener Platz",
-          "route_id": "100104",
+          "preliminary_mode": "Regional / Other Bus",
+          "resolved_route_id_mode": "Regional / Other Bus",
+          "route_desc": "H:Aachen Siegel - Burtscheid - Drimborn - Forster Linde - Arlintonstraße - Brand | R:Brand - Arlintonstraße - Forster Linde - Drimborn - Burtscheid - Aachen Siegel",
+          "route_id": "de:aac:05334|10:aseag",
           "route_long_name": "",
-          "route_short_name": "104",
+          "route_short_name": "10",
           "route_type": "3",
-          "source_row_number": 15
+          "source_row_number": 3
         },
         {
-          "agency_id": "1",
+          "agency_id": "48",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
             {
               "field": "route_type",
               "pattern": "GTFS 3",
               "value": "3"
             }
           ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Köln-Marienburg Südpark - Bayenthalgürtel - Bonntor - Chlodwigplatz - Severinstr. - Waidmarkt - Köln Heumarkt | R:Köln Heumarkt - Waidmarkt - Severinstr. - Chlodwigplatz - Bonntor - Bayenthalgürtel - Köln-Marienburg Südpark",
-          "route_id": "100106",
+          "preliminary_mode": "Regional / Other Bus",
+          "resolved_route_id_mode": "Regional / Other Bus",
+          "route_desc": "H:(Schmithof -) Walheim - Lichtenbusch - Burtscheid - Aachen Hbf - Bushof - Haaren - Weiden - Alsdorf Mariadorf - Hoengen | R:Hoengen - Mariadorf - Weiden - Haaren - Aachen Bushof - Hbf. - Burtscheid - Lichtenbusch - Schleckheim - Walheim",
+          "route_id": "de:aac:05334|11:aseag",
           "route_long_name": "",
-          "route_short_name": "106",
+          "route_short_name": "11",
           "route_type": "3",
-          "source_row_number": 16
+          "source_row_number": 4
         },
         {
-          "agency_id": "1",
+          "agency_id": "48",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
             {
               "field": "route_type",
               "pattern": "GTFS 3",
               "value": "3"
             }
           ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Bonn Hbf - Beuel - Mondorf - Rheidt - Niederkassel - Lülsdorf - Köln-Porz-Langel - Zündorf - Wahn S | R:Wahn S - Zündorf - Köln-Porz-Langel - Lülsdorf - Niederkassel - Rheidt - Mondorf - Beuel - Bonn Hbf",
-          "route_id": "100117",
+          "preliminary_mode": "Regional / Other Bus",
+          "resolved_route_id_mode": "Regional / Other Bus",
+          "route_desc": "",
+          "route_id": "de:aac:05334|11E:aseag",
           "route_long_name": "",
-          "route_short_name": "117",
+          "route_short_name": "11E",
           "route_type": "3",
-          "source_row_number": 17
+          "source_row_number": 5
         },
         {
-          "agency_id": "1",
+          "agency_id": "48",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
             {
               "field": "route_type",
               "pattern": "GTFS 3",
               "value": "3"
             }
           ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Mülheim Wiener Platz - Stegerwaldsiedlung - Zoo/Flora - Kinderkrankenhaus - Nippes - Neusser Str./Gürtel | R:Neusser Str./Gürtel - Nippes - Amsterdamer Str./Gürtel - Zoo/Flora - Stegerwaldsiedlung - Mülheim Wiener Platz",
-          "route_id": "100118",
+          "preliminary_mode": "Regional / Other Bus",
+          "resolved_route_id_mode": "Regional / Other Bus",
+          "route_desc": "",
+          "route_id": "de:aac:05334|11V:aseag",
           "route_long_name": "",
-          "route_short_name": "118",
+          "route_short_name": "11V",
           "route_type": "3",
-          "source_row_number": 18
+          "source_row_number": 6
         },
         {
-          "agency_id": "1",
+          "agency_id": "48",
           "agency_names": [
-            "KVB Kölner Verkehrs-Betriebe AG"
+            "ASEAG Aachener Straßenbahn und Energievers. AG"
           ],
           "classification_evidence": [
-            {
-              "field": "agency_id",
-              "pattern": "validated KVB agency",
-              "value": "1"
-            },
             {
               "field": "route_type",
               "pattern": "GTFS 3",
               "value": "3"
             }
           ],
-          "preliminary_mode": "Urban / KVB Bus",
-          "resolved_route_id_mode": "Urban / KVB Bus",
-          "route_desc": "H:Köln-Blumenberg - Köln-Chorweiler - Fühlingen - Worringen S - Köln-Roggendorf/Thenhoven | R:Köln-Roggendorf/Thenhoven -  Worringen S - Fühlingen - Köln-Chorweiler - Köln-Blumenberg",
-          "route_id": "100120",
+          "preliminary_mode": "Regional / Other Bus",
+          "resolved_route_id_mode": "Regional / Other Bus",
+          "route_desc": "H:Campus Melaten - Hörn - Muffet - Aachen Bushof - Eilendorf - Münsterbusch - Stolberg Mühlener Bf (- Donnerberg) | R:(Donnerberg-) Stolberg Mühlener Bf - Münsterbusch - Eilendorf - Aachen Bushof - Muffet - Hörn - Campus Melaten",
+          "route_id": "de:aac:05334|12:aseag",
           "route_long_name": "",
-          "route_short_name": "120",
+          "route_short_name": "12",
           "route_type": "3",
-          "source_row_number": 19
+          "source_row_number": 7
         }
       ],
-      "route_rows": 573
+      "route_rows": 907
+    },
+    "4": {
+      "distinct_route_ids": 1,
+      "preliminary_modes": {
+        "OTHER_MODE": 1
+      },
+      "representative_source_rows": [
+        {
+          "agency_id": "193",
+          "agency_names": [
+            "RfKöwi Rheinfähre Königswinter GmbH"
+          ],
+          "classification_evidence": [
+            {
+              "field": "route_type",
+              "pattern": "unsupported route_type",
+              "value": "4"
+            }
+          ],
+          "preliminary_mode": "OTHER_MODE",
+          "resolved_route_id_mode": "OTHER_MODE",
+          "route_desc": "H:Königwinter Fähranleger - Bonn-Mehlem Fähranleger | R:Bonn-Mehlem Fähranleger - Königwinter Fähranleger",
+          "route_id": "de:vrs:993:RF",
+          "route_long_name": "",
+          "route_short_name": "F93",
+          "route_type": "4",
+          "source_row_number": 953
+        }
+      ],
+      "route_rows": 1
     }
   },
   "scope_anomalies": {
     "ambiguous_route_id_cologne_serving_trip_count": 0,
     "hierarchy": {
-      "cologne_child_parent_also_cologne_distinct_ids": 0,
-      "cologne_child_parent_also_cologne_rows": 0,
+      "cologne_child_parent_also_cologne_distinct_ids": 2273,
+      "cologne_child_parent_also_cologne_rows": 2273,
       "cologne_child_parent_outside_cologne_distinct_ids": 0,
       "cologne_child_parent_outside_cologne_rows": 0,
-      "cologne_child_without_parent_rows": 862,
-      "cologne_prefix_child_stop_position_distinct_ids": 862,
-      "cologne_prefix_child_stop_position_rows": 862,
-      "cologne_prefix_parent_station_distinct_ids": 0,
-      "cologne_prefix_parent_station_rows": 0,
+      "cologne_child_without_parent_rows": 0,
+      "cologne_prefix_child_stop_position_distinct_ids": 2273,
+      "cologne_prefix_child_stop_position_rows": 2273,
+      "cologne_prefix_parent_station_distinct_ids": 864,
+      "cologne_prefix_parent_station_rows": 864,
       "non_cologne_child_parent_cologne_distinct_ids": 0,
       "non_cologne_child_parent_cologne_rows": 0,
       "orphan_parent_station_reference_distinct_values": 0,
@@ -2059,62 +1980,62 @@
     "validated_cologne_stop_definition": "stop_id has the prefix and exists in stops.txt; duplicate source rows are retained and reported"
   },
   "scope_counts": {
-    "cologne_distinct_stop_ids": 862,
+    "cologne_distinct_stop_ids": 3137,
     "cologne_events_with_missing_trip_id": 0,
     "cologne_events_with_unknown_trip_row": 0,
-    "cologne_internal_consecutive_segments": 421999,
-    "cologne_internal_trips": 13268,
-    "cologne_parent_station_rows": 0,
-    "cologne_scheduled_stop_events": 448755,
-    "cologne_serving_routes": 136,
-    "cologne_serving_trips": 26692,
+    "cologne_internal_consecutive_segments": 1082490,
+    "cologne_internal_trips": 39566,
+    "cologne_parent_station_rows": 864,
+    "cologne_scheduled_stop_events": 1144295,
+    "cologne_serving_routes": 137,
+    "cologne_serving_trips": 61805,
     "cologne_serving_trips_with_unknown_trip_row": 0,
-    "cologne_stop_position_rows": 862,
-    "cologne_stop_rows": 862,
-    "cross_boundary_cologne_trips": 13424,
-    "cross_boundary_trips_with_internal_segments": 12237,
-    "percentage_cologne_serving_trips_cross_boundary": 50.292222,
-    "touch_only_cologne_trips": 1187,
+    "cologne_stop_position_rows": 2273,
+    "cologne_stop_rows": 3137,
+    "cross_boundary_cologne_trips": 22239,
+    "cross_boundary_trips_with_internal_segments": 20633,
+    "percentage_cologne_serving_trips_cross_boundary": 35.982526,
+    "touch_only_cologne_trips": 1606,
     "unresolved_stop_scope_trips": 0
   },
   "source_counts": {
-    "agencies": 27,
-    "distinct_agency_ids": 27,
-    "distinct_route_ids": 618,
-    "distinct_stop_ids": 6892,
-    "distinct_trip_ids": 74615,
+    "agencies": 33,
+    "distinct_agency_ids": 33,
+    "distinct_route_ids": 957,
+    "distinct_stop_ids": 30364,
+    "distinct_trip_ids": 126160,
     "missing_identifier_rows": {
       "agency_id": 0,
       "route_id": 0,
       "stop_id": 0,
       "trip_id": 0
     },
-    "parent_stations": 0,
-    "route_rows": 618,
-    "stop_positions": 6892,
-    "stop_times": 1795448,
-    "stops": 6892,
-    "trips": 74615
+    "parent_stations": 9903,
+    "route_rows": 957,
+    "stop_positions": 20461,
+    "stop_times": 2943746,
+    "stops": 30364,
+    "trips": 126160
   },
   "source_metadata": {
     "archive_files": [
       {
-        "compressed_bytes": 955,
+        "compressed_bytes": 1101,
         "name": "agency.txt",
-        "uncompressed_bytes": 2637
+        "uncompressed_bytes": 3176
       },
       {
-        "compressed_bytes": 7570,
+        "compressed_bytes": 17018,
         "name": "calendar.txt",
-        "uncompressed_bytes": 75218
+        "uncompressed_bytes": 175213
       },
       {
-        "compressed_bytes": 332321,
+        "compressed_bytes": 206657,
         "name": "calendar_dates.txt",
-        "uncompressed_bytes": 3444063
+        "uncompressed_bytes": 2101617
       },
       {
-        "compressed_bytes": 118,
+        "compressed_bytes": 117,
         "name": "feed_info.txt",
         "uncompressed_bytes": 158
       },
@@ -2124,53 +2045,54 @@
         "uncompressed_bytes": 53
       },
       {
-        "compressed_bytes": 19878,
+        "compressed_bytes": 28995,
         "name": "routes.txt",
-        "uncompressed_bytes": 104939
+        "uncompressed_bytes": 158895
       },
       {
-        "compressed_bytes": 594205,
+        "compressed_bytes": 8517594,
         "name": "shapes.txt",
-        "uncompressed_bytes": 3100029
+        "uncompressed_bytes": 37271808
       },
       {
-        "compressed_bytes": 12928876,
+        "compressed_bytes": 22902867,
         "name": "stop_times.txt",
-        "uncompressed_bytes": 215003156
+        "uncompressed_bytes": 406046687
       },
       {
-        "compressed_bytes": 129282,
+        "compressed_bytes": 697069,
         "name": "stops.txt",
-        "uncompressed_bytes": 450064
+        "uncompressed_bytes": 2404607
       },
       {
-        "compressed_bytes": 7694,
+        "compressed_bytes": 8612,
         "name": "transfers.txt",
-        "uncompressed_bytes": 54493
+        "uncompressed_bytes": 60286
       },
       {
-        "compressed_bytes": 1616477,
+        "compressed_bytes": 2745441,
         "name": "trips.txt",
-        "uncompressed_bytes": 8100169
+        "uncompressed_bytes": 14701820
       }
     ],
     "feed_info": {
-      "feed_end_date": "20250330",
+      "feed_end_date": "20261212",
       "feed_lang": "de",
       "feed_publisher_name": "VRS",
       "feed_publisher_url": "http://www.vrs.de",
-      "feed_start_date": "20240821",
-      "feed_version": "VERSION__20250114_2330"
+      "feed_start_date": "20260902",
+      "feed_version": "VERSION__20260928_0042"
     },
     "network_request_count": 1,
+    "official_source_page_url": "https://www.vrs.de/fuer-unternehmen/open-data-service",
     "optional_file_inventory": {
       "calendar.txt": {
         "present": true,
-        "row_count": 1971
+        "row_count": 4616
       },
       "calendar_dates.txt": {
         "present": true,
-        "row_count": 200701
+        "row_count": 124061
       },
       "frequencies.txt": {
         "present": true,
@@ -2178,19 +2100,43 @@
       },
       "shapes.txt": {
         "present": true,
-        "row_count": 122304
+        "row_count": 1167322
       },
       "transfers.txt": {
         "present": true,
-        "row_count": 1521
+        "row_count": 1691
       }
     },
-    "retrieval_timestamp_utc": "2026-09-28T13:04:20Z",
+    "retrieval_timestamp_utc": "2026-09-28T13:44:03Z",
+    "service_calendar": {
+      "calendar": {
+        "invalid_date_value_count": 0,
+        "max_end_date": "20261212",
+        "min_start_date": "20260902",
+        "present": true,
+        "row_count": 4616
+      },
+      "calendar_dates": {
+        "invalid_date_value_count": 0,
+        "max_date": "20261212",
+        "min_date": "20260902",
+        "present": true,
+        "row_count": 124061
+      },
+      "earliest_service_calendar_date": "20260902",
+      "feed_end_date": "20261212",
+      "feed_start_date": "20260902",
+      "freshness_classification": "CURRENT_OR_OPERATIONALLY_RELEVANT",
+      "freshness_reason": "The reference date falls within the represented service/calendar validity",
+      "freshness_reference_date": "2026-09-28",
+      "invalid_date_value_count": 0,
+      "latest_service_calendar_date": "20261212"
+    },
     "source_profile": "VRS Global-ID GTFS",
-    "source_url": "https://www.vrs.de/fileadmin/05_Zukunftsmobilitaet/Fuer_Unternehmen/GTFS_VRS_mit_SPNV_hID_GlobalID.zip",
-    "zip_bytes": 15638946,
-    "zip_filename": "vrs-global-id.zip",
-    "zip_sha256": "d702c82cb1f274c8cc7ab8ec6e547920f92e1325b82baf533d9a7e52a59604d1"
+    "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+    "zip_bytes": 35127041,
+    "zip_filename": "vrs-global-id-current.zip",
+    "zip_sha256": "6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b"
   },
   "trip_scope_reconciliation": {
     "definitions": {
@@ -2200,19 +2146,19 @@
       "unresolved_stop_scope_trip": "the trip has a Cologne event and at least one stop_times reference to an unknown stop_id"
     },
     "formal_population_counts": {
-      "cologne_internal_trips": 13268,
-      "cologne_serving_trips": 26692,
-      "cross_boundary_cologne_trips": 13424,
-      "touch_only_cologne_trips": 1187,
+      "cologne_internal_trips": 39566,
+      "cologne_serving_trips": 61805,
+      "cross_boundary_cologne_trips": 22239,
+      "touch_only_cologne_trips": 1606,
       "unresolved_stop_scope_trips": 0
     },
     "formal_populations_are_intentionally_overlapping": true,
     "matches_cologne_serving_trips": true,
-    "mutually_exclusive_bucket_sum": 26692,
+    "mutually_exclusive_bucket_sum": 61805,
     "mutually_exclusive_buckets": {
-      "COLOGNE_INTERNAL_WITH_SEGMENT": 13268,
-      "CROSS_BOUNDARY_TOUCH_ONLY": 1187,
-      "CROSS_BOUNDARY_WITH_INTERNAL_SEGMENT": 12237
+      "COLOGNE_INTERNAL_WITH_SEGMENT": 39566,
+      "CROSS_BOUNDARY_TOUCH_ONLY": 1606,
+      "CROSS_BOUNDARY_WITH_INTERNAL_SEGMENT": 20633
     }
   }
 }

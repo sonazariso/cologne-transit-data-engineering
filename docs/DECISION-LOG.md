@@ -31,7 +31,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-025 | 2026-09-28 | Stage 3 formally started with a bounded Stage 3A disruption/cause evidence audit; no schema, cadence, cause-model, matching, or production decision is made before host evidence | Procedural status |
 | D-026 | 2026-09-28 | Future persistence preserves source timing and disruption evidence as append-only observations: `TimetabledTime`, `EstimatedTime`, nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` remain separate; PostgreSQL is the intended future direction only | Approved design guardrail |
 | D-027 | 2026-09-28 | Stage 3 is complete: Stage 3A approved from bounded evidence; Stage 3B collection/cadence policy approved without activation; Stage 3C stop-event-first reconciliation design approved without implementation | Approved stage completion |
-| D-028 | 2026-09-28 | Stage 4 is complete: official VRS Global-ID Cologne stop scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier approved | Approved stage completion |
+| D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -199,11 +199,16 @@ Stage 3 is **COMPLETE** as a source-evidence and design/contract stage. The
 authoritative closeout record. Production implementation and the next project
 stage remain separately gated.
 
-## D-028 — Stage 4 Completion — Cologne Scope and Mode Classification
+## D-028 — Stage 4 Scope and Mode Contract; Current Snapshot Approval
 
-Stage 4 is **COMPLETE — APPROVED** for the bounded static-source validation
-recorded in the [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
-and [summary evidence](stages/04-cologne-scope-mode-evidence.json).
+The approved Stage 4 semantic decisions remain in force, and Stage 4 is
+**COMPLETE — APPROVED** for the current official VRS Global-ID snapshot at
+`https://download.vrs.de/gtfs/google_transit_goR.zip`. The snapshot carries
+feed version `VERSION__20260928_0042`, validity `2026-09-02` through
+`2026-12-12`, and ZIP SHA-256
+`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`.
+The previous 2025-expired snapshot and evidence remain explicitly historical
+and are not current authority.
 
 The approved decisions are:
 
@@ -229,7 +234,8 @@ The approved decisions are:
     than forcing them into a core category.
 
 The current feed had no duplicate route, stop, or trip IDs, no unknown
-stop-time stop references, and no unclassified Cologne events. This approval is
-static-feed scope evidence only. It does not claim realtime operation or
-actual performance and does not authorize PostgreSQL, collectors, matching,
-Power BI, or Stage 5 implementation.
+stop-time stop references, and no unclassified Cologne events. Its one
+unsupported `route_type=4` ferry row remains explicit as `OTHER_MODE` and has
+no Cologne events. This approval is static-feed scope evidence only. It does
+not claim realtime operation or actual performance and does not authorize
+PostgreSQL, collectors, matching, Power BI, or Stage 5 implementation.

@@ -46,8 +46,13 @@ for the authoritative closeout record.
 
 ### Stage 4 closeout
 
-- **Stage 4 — COMPLETE — APPROVED.** The authoritative VRS Global-ID static
-  snapshot was inspected from the official Global-ID ZIP.
+- **Stage 4 — COMPLETE — APPROVED.** The current official VRS Global-ID ZIP
+  was retrieved once, checked for service-calendar freshness, and audited
+  locally. The previous stale snapshot is retained as historical/legacy
+  evidence and is not current authority.
+- Current approval snapshot: feed version `VERSION__20260928_0042`, validity
+  `2026-09-02` through `2026-12-12`, and ZIP SHA-256
+  `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`.
 - The validated Cologne identity is the direct source rule
   `stop_id LIKE 'de:05315:%'`; parent-station relationships do not override
   the actual stop ID referenced by `stop_times.txt`.
@@ -61,7 +66,8 @@ for the authoritative closeout record.
 - The [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
   and [Stage 4 evidence](stages/04-cologne-scope-mode-evidence.json) contain
   the snapshot metadata, counts, classifier examples, anomalies, and
-  reconciliation checks.
+  reconciliation checks. The historical/legacy evidence is preserved in
+  [the separately named historical JSON](stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json).
 - Stage 4 completion does not authorize PostgreSQL, warehouse, collector,
   scheduler, matching, or Power BI implementation. Stage 5 is next and not
   started.

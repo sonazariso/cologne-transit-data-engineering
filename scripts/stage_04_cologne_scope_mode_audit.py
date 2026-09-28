@@ -36,11 +36,9 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 
-SCRIPT_VERSION = "stage-04-audit-1.0"
-OFFICIAL_SOURCE_URL = (
-    "https://www.vrs.de/fileadmin/05_Zukunftsmobilitaet/"
-    "Fuer_Unternehmen/GTFS_VRS_mit_SPNV_hID_GlobalID.zip"
-)
+SCRIPT_VERSION = "stage-04-audit-1.1"
+OFFICIAL_SOURCE_URL = "https://download.vrs.de/gtfs/google_transit_goR.zip"
+OFFICIAL_SOURCE_PAGE_URL = "https://www.vrs.de/fuer-unternehmen/open-data-service"
 COLOGNE_PREFIX = "de:05315:"
 
 REQUIRED_FILES = (
@@ -129,6 +127,113 @@ def parse_int(value: Any) -> int | None:
         return int(text)
     except ValueError:
         return None
+
+
+def parse_gtfs_date(value: Any) -> dt.date | None:
+    text = clean(value)
+    if not re.fullmatch(r"\d{8}", text):
+        return None
+    try:
+        return dt.date(int(text[0:4]), int(text[4:6]), int(text[6:8]))
+    except ValueError:
+        return None
+
+
+def gtfs_date_text(value: dt.date | None) -> str | None:
+    return value.strftime("%Y%m%d") if value else None
+
+
+def service_calendar_summary(
+    archive: zipfile.ZipFile, feed_info: dict[str, str]
+) -> dict[str, Any]:
+    """Summarize static service validity without changing scope classification."""
+
+    feed_start = parse_gtfs_date(feed_info.get("feed_start_date"))
+    feed_end = parse_gtfs_date(feed_info.get("feed_end_date"))
+    calendar_summary: dict[str, Any] = {
+        "present": "calendar.txt" in archive.namelist(),
+        "row_count": 0,
+        "min_start_date": None,
+        "max_end_date": None,
+        "invalid_date_value_count": 0,
+    }
+    calendar_dates_summary: dict[str, Any] = {
+        "present": "calendar_dates.txt" in archive.namelist(),
+        "row_count": 0,
+        "min_date": None,
+        "max_date": None,
+        "invalid_date_value_count": 0,
+    }
+
+    if calendar_summary["present"]:
+        start_dates: list[dt.date] = []
+        end_dates: list[dt.date] = []
+        for row in iter_csv_rows(archive, "calendar.txt"):
+            calendar_summary["row_count"] += 1
+            start_date = parse_gtfs_date(row.get("start_date"))
+            end_date = parse_gtfs_date(row.get("end_date"))
+            if start_date:
+                start_dates.append(start_date)
+            else:
+                calendar_summary["invalid_date_value_count"] += 1
+            if end_date:
+                end_dates.append(end_date)
+            else:
+                calendar_summary["invalid_date_value_count"] += 1
+        calendar_summary["min_start_date"] = gtfs_date_text(min(start_dates)) if start_dates else None
+        calendar_summary["max_end_date"] = gtfs_date_text(max(end_dates)) if end_dates else None
+
+    if calendar_dates_summary["present"]:
+        dates: list[dt.date] = []
+        for row in iter_csv_rows(archive, "calendar_dates.txt"):
+            calendar_dates_summary["row_count"] += 1
+            date_value = parse_gtfs_date(row.get("date"))
+            if date_value:
+                dates.append(date_value)
+            else:
+                calendar_dates_summary["invalid_date_value_count"] += 1
+        calendar_dates_summary["min_date"] = gtfs_date_text(min(dates)) if dates else None
+        calendar_dates_summary["max_date"] = gtfs_date_text(max(dates)) if dates else None
+
+    lower_bounds = [date for date in (
+        feed_start,
+        parse_gtfs_date(calendar_summary["min_start_date"]),
+        parse_gtfs_date(calendar_dates_summary["min_date"]),
+    ) if date]
+    upper_bounds = [date for date in (
+        feed_end,
+        parse_gtfs_date(calendar_summary["max_end_date"]),
+        parse_gtfs_date(calendar_dates_summary["max_date"]),
+    ) if date]
+    invalid_values = (
+        calendar_summary["invalid_date_value_count"]
+        + calendar_dates_summary["invalid_date_value_count"]
+    )
+    return {
+        "feed_start_date": clean(feed_info.get("feed_start_date")) or None,
+        "feed_end_date": clean(feed_info.get("feed_end_date")) or None,
+        "calendar": calendar_summary,
+        "calendar_dates": calendar_dates_summary,
+        "earliest_service_calendar_date": gtfs_date_text(min(lower_bounds)) if lower_bounds else None,
+        "latest_service_calendar_date": gtfs_date_text(max(upper_bounds)) if upper_bounds else None,
+        "invalid_date_value_count": invalid_values,
+    }
+
+
+def classify_freshness(
+    service_calendar: dict[str, Any], reference_date: dt.date | None
+) -> tuple[str, str]:
+    if reference_date is None:
+        return "UNDETERMINED", "No freshness reference date was supplied"
+    earliest = parse_gtfs_date(service_calendar.get("earliest_service_calendar_date"))
+    latest = parse_gtfs_date(service_calendar.get("latest_service_calendar_date"))
+    if not earliest or not latest or service_calendar.get("invalid_date_value_count", 0):
+        return "UNDETERMINED", "Service/calendar date coverage is incomplete or invalid"
+    if latest < reference_date:
+        return "STALE", "The entire represented service/calendar validity ended before the reference date"
+    if earliest > reference_date:
+        return "FUTURE_OR_CURRENT_SCHEDULE", "Represented service/calendar validity begins after the reference date"
+    return "CURRENT_OR_OPERATIONALLY_RELEVANT", "The reference date falls within the represented service/calendar validity"
 
 
 def utc_iso_from_mtime(path: Path) -> str:
@@ -395,6 +500,10 @@ def main() -> int:
         default=0,
         help="Externally performed retrieval count to record in evidence",
     )
+    parser.add_argument(
+        "--freshness-reference-date",
+        help="Reference date in YYYY-MM-DD form for static service-validity classification",
+    )
     args = parser.parse_args()
 
     zip_path = args.gtfs_zip.expanduser().resolve()
@@ -402,6 +511,13 @@ def main() -> int:
         parser.error(f"GTFS ZIP does not exist: {zip_path}")
     if args.network_request_count < 0:
         parser.error("--network-request-count must be non-negative")
+
+    freshness_reference_date = None
+    if args.freshness_reference_date:
+        try:
+            freshness_reference_date = dt.date.fromisoformat(args.freshness_reference_date)
+        except ValueError:
+            parser.error("--freshness-reference-date must be YYYY-MM-DD")
 
     retrieved_at_utc = args.retrieved_at_utc or utc_iso_from_mtime(zip_path)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", retrieved_at_utc):
@@ -440,6 +556,10 @@ def main() -> int:
 
         feed_info_rows = list(iter_csv_rows(archive, "feed_info.txt"))
         feed_info = feed_info_rows[0] if feed_info_rows else {}
+        service_calendar = service_calendar_summary(archive, feed_info)
+        freshness_classification, freshness_reason = classify_freshness(
+            service_calendar, freshness_reference_date
+        )
 
         agency_rows = list(iter_csv_rows(archive, "agency.txt"))
         agencies_by_id: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -1087,6 +1207,7 @@ def main() -> int:
 
         source_metadata = {
             "source_url": args.source_url,
+            "official_source_page_url": OFFICIAL_SOURCE_PAGE_URL,
             "source_profile": "VRS Global-ID GTFS",
             "retrieval_timestamp_utc": retrieved_at_utc,
             "network_request_count": args.network_request_count,
@@ -1095,6 +1216,14 @@ def main() -> int:
             "zip_sha256": zip_hash,
             "archive_files": archive_files,
             "feed_info": feed_info,
+            "service_calendar": {
+                **service_calendar,
+                "freshness_reference_date": (
+                    freshness_reference_date.isoformat() if freshness_reference_date else None
+                ),
+                "freshness_classification": freshness_classification,
+                "freshness_reason": freshness_reason,
+            },
             "optional_file_inventory": optional_inventory,
         }
 
@@ -1227,6 +1356,14 @@ def main() -> int:
                 "detail": "ZIP SHA-256, byte size, file list, and feed_info are present",
             },
             {
+                "id": "service_calendar_freshness_gate",
+                "passed": freshness_classification in {
+                    "CURRENT_OR_OPERATIONALLY_RELEVANT",
+                    "FUTURE_OR_CURRENT_SCHEDULE",
+                },
+                "detail": f"freshness={freshness_classification}; {freshness_reason}",
+            },
+            {
                 "id": "cologne_prefix_measured",
                 "passed": COLOGNE_PREFIX == "de:05315:" and len(cologne_stop_ids) >= 0,
                 "detail": "Actual stop IDs and stop_times references use the direct prefix rule",
@@ -1317,6 +1454,7 @@ def main() -> int:
         ]
 
         output = {
+            "evidence_role": "CURRENT STAGE 4 APPROVAL SNAPSHOT",
             "audit_tool": {
                 "name": "stage_04_cologne_scope_mode_audit",
                 "version": SCRIPT_VERSION,
