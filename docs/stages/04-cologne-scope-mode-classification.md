@@ -463,6 +463,8 @@ The approval is specifically for:
 9. long-distance rail remaining outside core KPI scope; and
 10. unknown, unsupported, and ambiguous source values remaining explicit.
 
-Stage 5 — Database Architecture is **NOT STARTED / NEXT**. This closeout does
-not create a PostgreSQL schema, migrate SQL Server, build a warehouse,
-implement collectors or matching, modify Power BI, or start Stage 5.
+Stage 5 — Database Architecture is now **COMPLETE — APPROVED ARCHITECTURE**.
+Its closeout approves the future PostgreSQL architecture only; it does not
+create a PostgreSQL schema, migrate SQL Server, build a warehouse, implement
+collectors or matching, modify Power BI, or start Stage 6. Stage 6 is
+**NOT STARTED / NEXT**.

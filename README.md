@@ -27,7 +27,9 @@ sufficient recorded/actual timing evidence.
 - Stage 3A — [Disruption Cause & Alert Evidence Audit](docs/stage-03/03a-disruption-cause-alert-evidence-audit.md): **COMPLETE — APPROVED**. The bounded ten-station MDD discovery contains positive Situation/reason text evidence; approval preserves its evidence limits and does not authorize production implementation.
 - Stage 3B — [Collection Strategy & Cadence Contract](docs/stage-03/03b-collection-strategy-cadence-contract.md): **COMPLETE — APPROVED DESIGN; ACTIVATION DEFERRED**. The cadence policy does not activate a fixed station schedule.
 - Stage 3C — [Cross-Source Matching Design](docs/stage-03/03c-cross-source-matching-design.md): **COMPLETE — APPROVED DESIGN; IMPLEMENTATION NOT STARTED**.
-- Stage 4 — [Cologne Scope & Mode Classification](docs/stages/04-cologne-scope-mode-classification.md): **COMPLETE — APPROVED**. The current official VRS Global-ID static feed validates the direct `de:05315:` stop rule, stop-event-first scope, both-endpoints internal segments, cross-boundary handling, and the source-faithful mode classifier. Stage 5 remains not started.
+- Stage 4 — [Cologne Scope & Mode Classification](docs/stages/04-cologne-scope-mode-classification.md): **COMPLETE — APPROVED**. The current official VRS Global-ID static feed validates the direct `de:05315:` stop rule, stop-event-first scope, both-endpoints internal segments, cross-boundary handling, and the source-faithful mode classifier.
+- Stage 5 — [Database Architecture](docs/stages/05-database-architecture.md): **COMPLETE — APPROVED ARCHITECTURE**. PostgreSQL 18 is approved as the future authoritative platform direction using a clean redesign with durable source-faithful evidence, explicit grains, lineage, and deferred physical implementation. [Completion decision](docs/stages/05-database-architecture-completion-decision.md) and [table/grain catalog](docs/stages/05-table-grain-catalog.md) are authoritative. Stage 6 is **NOT STARTED / NEXT**.
+- Stage 6 — Static Warehouse & Analytics: **NOT STARTED / NEXT**. It owns the first physical static warehouse implementation under the approved Stage 5 architecture.
 - Stage 4 evidence: [current approval snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The current snapshot contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Current ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
 - Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history or approve GTFS-RT for production; Stage 3A now separately validates current disruption evidence.
@@ -60,7 +62,9 @@ sufficient recorded/actual timing evidence.
   live journeys were reviewed (three at Köln Hbf and three at Köln Neumarkt);
   no `RecordedAtTime` was observed, and the result does not make a
   provider-wide absence claim or reopen Stage 02.
-- No new database, collector, or Power BI implementation is authoritative yet.
+- No physical PostgreSQL database, schema, table, migration, collector, or
+  Power BI implementation is authoritative yet; Stage 5 approves architecture
+  only and Stage 6 owns the first static warehouse implementation.
 - The legacy collector/database must remain untouched until explicitly reviewed.
 - Confirmed Actual Time is unavailable; Actual Delay and prediction accuracy
   against confirmed actual timing remain unapproved/unavailable.
@@ -86,6 +90,9 @@ See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/
    and gate; quota and permission constraints are documented here but no
    production schedule is approved by Stage 02.
 8. Keep secrets, database dumps, large raw payload archives, PBIX files, and local runtime state out of Git.
+9. Architecture approval does not imply physical database creation, SQL
+   execution, collector activation, or Power BI implementation; each remains
+   owned by its explicitly approved stage.
 
 ## Working environment
 

@@ -167,15 +167,20 @@ are authoritative. The [historical/legacy evidence JSON](stages/04-cologne-scope
 is preserved for comparison and is not current authority. Stage 4 does not
 implement a database, collector, matching layer, warehouse, or Power BI model.
 
-## Stage 5 — Database Architecture — NOT STARTED / NEXT
-The intended future database direction is PostgreSQL for an append-only,
-source-faithful observation layer followed by derived analytical state. Approve
-grain, schemas/layers, source-faithful vs derived data, keys, history strategy,
-indexes, and audit strategy before building. This direction does not change
-source availability; no PostgreSQL migration or production tables are approved
-before this stage.
+## Stage 5 — Database Architecture — COMPLETE — APPROVED ARCHITECTURE
+PostgreSQL 18 is approved as the future authoritative platform direction,
+using the latest supported PostgreSQL 18 minor available at implementation
+time. The approved strategy is a clean PostgreSQL redesign with `ctl`, `src`,
+`wrk`, `core`, `dw`, and `analytics` layers. The Stage 5 architecture,
+42-entry table/grain catalog, and completion decision define source-faithful
+boundaries, static content-hash snapshots, MDD observation history, the bounded
+GTFS-RT persistence boundary, keys/types/history/idempotency, indexing,
+partition direction, lineage, security, backup/recovery, and legacy import
+policy. No PostgreSQL database, schema, table, migration, SQL execution, or
+runtime implementation was created. Stage 6 owns the first static warehouse
+implementation and is **NOT STARTED / NEXT**.
 
-## Stage 6 — Static Warehouse & Analytics
+## Stage 6 — Static Warehouse & Analytics — NOT STARTED / NEXT
 Build static dimensions/facts/views incrementally and reconcile source-to-warehouse counts.
 
 ## Stage 7 — Realtime Pilot Design

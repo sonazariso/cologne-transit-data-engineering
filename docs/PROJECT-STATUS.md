@@ -13,8 +13,8 @@
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
 | 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
 | 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
-| 5 | Database Architecture | NOT STARTED / NEXT |
-| 6 | Static Warehouse & Analytics | Not started |
+| 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
+| 6 | Static Warehouse & Analytics | NOT STARTED / NEXT |
 | 7 | Realtime Pilot Design | Not started |
 | 8 | Small Realtime Pilot | Not started |
 | 9 | Matching & Data Quality | Not started |
@@ -68,9 +68,32 @@ for the authoritative closeout record.
   the snapshot metadata, counts, classifier examples, anomalies, and
   reconciliation checks. The historical/legacy evidence is preserved in
   [the separately named historical JSON](stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json).
-- Stage 4 completion does not authorize PostgreSQL, warehouse, collector,
-  scheduler, matching, or Power BI implementation. Stage 5 is next and not
-  started.
+- Stage 4 completion did not authorize physical PostgreSQL, warehouse,
+  collector, scheduler, matching, or Power BI implementation. Stage 5 has now
+  completed its architecture approval; Stage 6 is next and not started.
+
+### Stage 5 closeout
+
+- **Stage 5 — COMPLETE — APPROVED ARCHITECTURE.** PostgreSQL 18 is the future
+  authoritative platform direction, with the latest supported PostgreSQL 18
+  minor selected at implementation time. The approved migration strategy is a
+  clean PostgreSQL redesign, not a 1:1 SQL Server lift-and-shift.
+- The approved logical layers are `ctl`, `src`, `wrk`, `core`, `dw`, and
+  `analytics`. `src` is durable source-faithful evidence; `wrk`, `core`, `dw`,
+  and `analytics` are derived or validated layers with explicit ownership and
+  lineage boundaries.
+- The [Stage 5 architecture document](stages/05-database-architecture.md),
+  [42-entry table/grain catalog](stages/05-table-grain-catalog.md), and
+  [completion decision](stages/05-database-architecture-completion-decision.md)
+  are authoritative. They approve the static GTFS content-hash snapshot
+  strategy, append-only MDD observation history, bounded GTFS-RT persistence,
+  keys/types/idempotency, evidence-driven indexes, future monthly realtime
+  partitioning, control/sampling lineage, least-privilege roles, and the
+  backup/recovery requirement.
+- Stage 5 created no database, schema, table, migration, SQL execution,
+  collector, scheduler, matching, warehouse, or Power BI implementation.
+  Stage 6 owns the first static warehouse implementation and remains **NOT
+  STARTED / NEXT**.
 
 ## Post-Stage-02 validation
 
@@ -209,9 +232,10 @@ it is not a Stage 02 blocker.
   versions, source paths, text, reason/effect fields, validity, and association
   scope are preserved rather than reduced to one mutable cause value.
 - PostgreSQL is the intended future persistence direction for the redesigned
-  append-only observation architecture; no migration, production PostgreSQL
-  tables, or persistence implementation is approved. Database choice does not
-  change source availability.
+  append-only observation architecture. Stage 5 now approves PostgreSQL 18 as
+  the future authoritative platform direction and the clean redesign, but no
+  migration, production PostgreSQL tables, or persistence implementation has
+  been created. Database choice does not change source availability.
 - The audited successful response did not contain `RecordedAtTime` or a direct
   delay value; this does not establish general MDD absence.
 - `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. It was not

@@ -32,6 +32,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-026 | 2026-09-28 | Future persistence preserves source timing and disruption evidence as append-only observations: `TimetabledTime`, `EstimatedTime`, nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` remain separate; PostgreSQL is the intended future direction only | Approved design guardrail |
 | D-027 | 2026-09-28 | Stage 3 is complete: Stage 3A approved from bounded evidence; Stage 3B collection/cadence policy approved without activation; Stage 3C stop-event-first reconciliation design approved without implementation | Approved stage completion |
 | D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
+| D-029 | 2026-09-28 | Stage 5 database architecture: PostgreSQL 18 clean redesign, durable source-faithful layers, logical grains, lineage, and deferred physical implementation | Approved architecture |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -239,3 +240,39 @@ unsupported `route_type=4` ferry row remains explicit as `OTHER_MODE` and has
 no Cologne events. This approval is static-feed scope evidence only. It does
 not claim realtime operation or actual performance and does not authorize
 PostgreSQL, collectors, matching, Power BI, or Stage 5 implementation.
+
+## D-029 — Stage 5 Database Architecture
+
+Stage 5 is **COMPLETE — APPROVED ARCHITECTURE**. PostgreSQL 18 is approved as
+the future authoritative database platform, with the latest supported
+PostgreSQL 18 minor selected at implementation time. The approved strategy is
+a **CLEAN POSTGRESQL REDESIGN**, not a 1:1 SQL Server lift-and-shift; legacy
+SQL Server remains evidence and is not mutated or copied wholesale.
+
+The approved logical flow is:
+
+```text
+SOURCE -> ctl / src -> wrk -> core where reconciliation is needed -> dw -> analytics -> Power BI
+```
+
+The approved schemas/layers are `ctl`, `src`, `wrk`, `core`, `dw`, and
+`analytics`. `src` is durable source-faithful parsed evidence, not disposable
+staging. It preserves complete content-identified VRS GTFS snapshots, duplicate
+source rows, NULL semantics, MDD response/stop-event/call/Situation history,
+and later-approved in-scope GTFS-RT observations. `RecordedAtTime` remains
+nullable source-only evidence and is never synthesized from estimates,
+timetables, collector time, or disappearance.
+
+The [Stage 5 architecture](stages/05-database-architecture.md),
+[table/grain catalog](stages/05-table-grain-catalog.md), and
+[completion decision](stages/05-database-architecture-completion-decision.md)
+define 42 named logical entity contracts, key and data-type conventions,
+idempotency, JSONB limits, evidence-driven indexes, future monthly realtime
+partitioning by `ObservedAtUtc`, audit/sampling-policy lineage,
+least-privilege roles, the realtime backup/recovery requirement, and the
+source-lineaged legacy-import policy.
+
+This is an architecture approval only. It created no PostgreSQL database,
+schema, table, migration, SQL execution, collector, scheduler, matching,
+warehouse, or Power BI implementation. Stage 6 is **NOT STARTED / NEXT** and
+owns the first static warehouse implementation.

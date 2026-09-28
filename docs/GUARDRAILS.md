@@ -95,10 +95,10 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 39. The intended future evidence flow is `SOURCE -> COLLECTOR -> APPEND-ONLY
     SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE`; source disappearance must
     never erase previously observed evidence.
-40. PostgreSQL is the intended future persistence direction for this redesigned
-    architecture, with JSONB only where later justified. This does not change
-    source availability, create PostgreSQL tables, migrate SQL Server assets,
-    or authorize production persistence.
+40. PostgreSQL 18 is the approved future authoritative platform direction for
+    the redesigned architecture, with JSONB only where later justified. This
+    does not change source availability, create PostgreSQL tables, migrate SQL
+    Server assets, or authorize production persistence.
 41. A future short-term raw-payload retention option may be evaluated for
     forensic reprocessing and parser improvements. No duration is approved;
     storage volume, privacy/data considerations, reprocessing need, and
@@ -122,3 +122,35 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 48. Static GTFS mode and scope evidence describes scheduled source coverage
     only. It is not realtime operation, actual delay, cancellation, or current
     performance evidence.
+49. `src` is durable source-faithful evidence, not disposable staging. Derived
+    current state belongs in rebuildable or validated layers and must not
+    replace source history.
+50. Source natural IDs are not universal cross-source keys. Source duplicates
+    must remain visible until a validated layer establishes a documented grain.
+51. `RecordedAtTime` is nullable source-only evidence and is never synthesized
+    from `EstimatedTime`, `TimetabledTime`, `ObservedAt`, collector time, or
+    event disappearance.
+52. `NULL` is not false, zero, on-time, served, cancelled, skipped, or
+    unchanged. A later NULL or disappearance must not erase prior evidence.
+53. Static source snapshots are content-identified. Re-fetching the same
+    approved ZIP/hash adds retrieval/audit evidence but must not duplicate all
+    parsed source rows.
+54. JSONB is bounded to provider extensions, rare/unmodeled source fragments,
+    and source-shaped metadata; it must not replace relational fields or hold
+    credentials.
+55. Full Germany-wide GTFS-RT snapshots are not approved for permanent
+    storage by default. GTFS-RT persistence must be explicitly selected and
+    scoped before implementation.
+56. Large append-only realtime tables may use monthly range partitioning by
+    `ObservedAtUtc` after implementation design accounts for PostgreSQL
+    uniqueness and foreign-key requirements; tables are not partitioned merely
+    for completeness.
+57. Every realtime observation must retain source, collector-run,
+    sampling-policy/era, and `ObservedAt` lineage. Changing cadence must not
+    rewrite history.
+58. Once production realtime collection begins, the durable source layer must
+    have tested backup/recovery protection appropriate to irrecoverable
+    observations.
+59. Stage 5 approved a clean PostgreSQL redesign only. Legacy SQL Server is not
+    copied 1:1; any later import must preserve source IDs/timestamps/NULLs and
+    distinguish legacy rows from PostgreSQL-native observations.
