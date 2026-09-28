@@ -117,7 +117,7 @@ This is an approved design guardrail, not production implementation approval.
 It does not create SQL tables, schemas, migrations, collector code, matching
 algorithms, ETL, Power BI changes, scheduler jobs, or production mappings.
 Stage 3 is now **IN PROGRESS** through Stage 3A, whose status is **PARTIAL HOST
-EVIDENCE — MDD EXECUTION PENDING**.
+EVIDENCE — MDD SITUATION DISCOVERY PENDING**.
 
 ## D-025 — Stage 3A Procedural Start
 
@@ -126,7 +126,8 @@ Evidence Audit](stage-03/03a-disruption-cause-alert-evidence-audit.md). The
 substage measures current GTFS-RT ServiceAlert population and two sampled MDD
 Situation responses using exactly one GTFS-RT GET and two MDD POST requests.
 
-This is a procedural status entry, not a final analytical decision. MDD
-execution is still pending. No database schema, collector cadence, cause
-taxonomy, GTFS-RT production-ingestion approval, cross-source matching,
+This is a procedural status entry, not a final analytical decision. The
+original two-station MDD execution is complete; the broader ten-station
+Situation discovery remains pending. No database schema, collector cadence,
+cause taxonomy, GTFS-RT production-ingestion approval, cross-source matching,
 causal attribution, scheduler, or Power BI decision is made here.

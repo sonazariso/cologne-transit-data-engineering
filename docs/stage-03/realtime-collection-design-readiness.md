@@ -1,6 +1,6 @@
 # Realtime Collection Design Readiness
 
-**Status:** `STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING`
+**Status:** `STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **IN PROGRESS**
 **Purpose:** approved entry guardrails while Stage 3A validates disruption and
@@ -14,7 +14,7 @@ runtime changes.
 
 Stage 3A is the current bounded substage. The [Disruption Cause & Alert
 Evidence Audit](03a-disruption-cause-alert-evidence-audit.md) is **PARTIAL
-HOST EVIDENCE — MDD EXECUTION PENDING** and measures current GTFS-RT alert
+HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING** and measures current GTFS-RT alert
 population and two sampled MDD Situation responses. Its result is an evidence
 gate, not a production approval.
 
@@ -149,17 +149,18 @@ validated.
 5. Final database/staging schema is not yet designed.
 6. The full Cologne GTFS.de stop-identity bridge and canonical line mapping
    are not yet implemented.
-7. Cross-source service-event matching is not yet validated. GTFS-RT
-   cause/effect population quality is pending the bounded Stage 3A host run
-   and remains unvalidated across a representative sample.
+7. Cross-source service-event matching is not yet validated. The retained
+   GTFS-RT snapshot has bounded cause/effect evidence, while broader MDD
+   Situation discovery remains pending and neither source has representative
+   repeated-sample coverage.
 8. Final GTFS-RT alert persistence and Cologne-filtering strategy is not yet
    designed.
 
 ## Stage boundary
 
 Stage 3 is **IN PROGRESS** through Stage 3A. Stage 3A remains **PARTIAL HOST
-EVIDENCE — MDD EXECUTION PENDING** until the MDD portion of the bounded probe
-is executed and its JSONL evidence is reviewed. Do not write collector production code, create SQL tables or
+EVIDENCE — MDD SITUATION DISCOVERY PENDING** until the broader MDD-only
+discovery mode is executed and its JSONL evidence is reviewed. Do not write collector production code, create SQL tables or
 migrations, add scheduler jobs, create services, change Power BI, modify
 environment variables, query external endpoints from Codex, or design the
 final reconciliation layer as part of this substage.

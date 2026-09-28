@@ -1,6 +1,6 @@
 # Stage 3A — Disruption Cause & Alert Evidence Audit
 
-**Status:** `PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING`
+**Status:** `PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **IN PROGRESS**
 **Purpose:** bounded evidence validation before any Stage 3 production design
@@ -57,6 +57,34 @@ Each MDD request uses the established TRIAS 1.2 StopEvent request contract:
 `IncludePreviousCalls=true`, `IncludeOnwardCalls=true`, and
 `IncludeRealtimeData=true`.
 
+### Broader MDD-only discovery mode
+
+The existing two-station audit remains the completed baseline. The probe also
+now has an explicit host-only discovery mode for the broader bounded question
+of whether current MDD responses expose Situation/reason evidence elsewhere.
+This mode makes **no GTFS-RT request** and uses exactly one MDD POST per listed
+diagnostic station, up to ten total attempts. These locations are diagnostic
+only and do not define production scope or cadence:
+
+| Station | `StopPointRef` |
+|---|---|
+| Köln Bf Mülheim | `de:05315:19201` |
+| Köln Heumarkt | `de:05315:11110` |
+| Köln Breslauer Platz/Hbf | `de:05315:11212` |
+| Köln Mülheim Wiener Platz | `de:05315:19211` |
+| Köln Hbf | `de:05315:11201` |
+| Köln Messe/Deutz Bf | `de:05315:11901` |
+| Köln Bf Ehrenfeld | `de:05315:14201` |
+| Köln Wahn S-Bahn | `de:05315:17701` |
+| Köln Hansaring | `de:05315:11801` |
+| Köln Bf Lövenich | `de:05315:13701` |
+
+The mode preserves the established request contract (`NumberOfResults=5`,
+`IncludePreviousCalls=true`, `IncludeOnwardCalls=true`, and
+`IncludeRealtimeData=true`), performs no retries or concurrency, and stops on
+the first `401`/`403`. A missing `MDD_API_KEY` causes zero HTTP requests and a
+clear `MDD_API_KEY_MISSING` JSONL status.
+
 ## GTFS-RT audit scope
 
 Every `ServiceAlert` in the one retrieved snapshot is inspected. The JSONL
@@ -72,6 +100,8 @@ output measures:
 - alert counts with trip, route, stop, agency, and multiple scope types;
 - exact scope combinations, including `NO_IDENTIFYING_SCOPE` and
   `MULTI_SCOPE`; and
+- non-provenance description counts, distinct non-provenance values, bounded
+  top non-provenance values, and the Neumarkt trip-linked subset; and
 - no more than ten sanitized short text examples containing source wording,
   source cause/effect values, and alert entity scope.
 
@@ -120,6 +150,16 @@ up to ten sanitized short examples. Situation text is labelled
 `SituationFullRef`, `SituationRef`, and their CALL/SERVICE locations remain
 associations. Association does not establish that a Situation caused a
 particular delay, cancellation, or service effect.
+
+The JSONL station output also reports, when present, journey-level and
+call-level `SituationFullRef` counts, `Attribute`/`GeneralAttribute` details,
+operational status flags (`Cancelled`, `Deviation`, `Unplanned`,
+`NotServicedStop`, `UnplannedStop`, `NoBoardingAtStop`, `NoAlightingAtStop`,
+and `DemandStop`), populated `Extension` paths/keys, and populated
+`ErrorMessage` values. Operational flags remain effect/status evidence and
+are not interpreted as reasons. Attributes are labelled
+`PASSENGER_INFORMATION_ATTRIBUTE` unless source semantics explicitly prove
+otherwise.
 
 ## Output and temporary raw artifacts
 
@@ -221,7 +261,12 @@ The exact observed provenance prefix
 `Echtzeitdaten aufbereitet von GTFS.de` occurred at the start of 85,916
 description values, or **89.891% of Alerts**. The remaining descriptions were
 not automatically classified as disruptions; many were service or passenger
-information.
+information. The corrected output also reports **9,662** alerts with
+non-provenance description text, **540** distinct non-provenance descriptions,
+and the top non-provenance values. The Neumarkt trip-linked subset contained
+**0** alerts with non-provenance description text in this artifact; its cause
+summary was **269 `UNKNOWN_CAUSE`** and **0 known-or-other causes**. These are
+bounded snapshot observations, not semantic classifications.
 
 ### MDD raw JSON structure
 
@@ -312,17 +357,78 @@ when identities permit, preserves association scope, separates incident/info
 identifiers from real errors, and retains source paths without becoming a
 production raw-document store.
 
+### Required evidence-location coverage verification
+
+The current implementation was checked before adding the broader discovery
+mode. The status below distinguishes existing recursive coverage from the
+narrow reporting additions required for the new sample:
+
+| Evidence location/category | Verification status | Current output or correction |
+|---|---|---|
+| Response-context `Situation` objects | **ALREADY_COVERED** | Recursive inline Situation detection and full populated-field inventory were already present. |
+| `DatedJourney` → `SituationFullRef` | **MISSING_COVERAGE_FIXED** | Recursive reference detection already existed; journey-level counts and structural association output are now explicit. |
+| `CallAtStop` → `SituationFullRef` | **MISSING_COVERAGE_FIXED** | Recursive reference detection already existed; call-level counts and structural association output are now explicit. |
+| Journey/service `Attribute` / `GeneralAttribute` | **MISSING_COVERAGE_FIXED** | Populated objects now emit exact paths, `Text`, `Code`, `AllFacilities`, `Mandatory`, `Importance`, `InfoURL`, and `Status` values as `PASSENGER_INFORMATION_ATTRIBUTE`. |
+| Operational status fields | **MISSING_COVERAGE_FIXED** | True values now emit exact paths and separate per-field counts; they remain effect/status evidence. |
+| `ErrorMessage` | **ALREADY_COVERED** | Error fields and populated values were already inventoried separately from references. A direct `error_message_count` is now also emitted. |
+| `Extension` / provider-specific extension structures | **MISSING_COVERAGE_FIXED** | Populated extension paths, direct keys, nested paths, and bounded sanitized scalar examples are now inventoried. |
+| GTFS non-provenance text and Neumarkt linked-text metrics | **MISSING_COVERAGE_FIXED** | The existing global text inventory was retained and explicit non-provenance and trip-linked counts/top values were added without NLP classification. |
+
+The generic reason-like inventory, exact JSON path inventory, Situation
+identity capture, reference resolution, and IncidentCall/InfoCall structural
+inventory were already present and were reused rather than duplicated.
+
+### Historical IncidentCall/InfoCall search
+
+Before preparing the broader run, the repository diagnostic locations and
+`/private/tmp/cologne-transit-recorded-time-lifecycle-*` were searched
+offline. The historical lifecycle logs do contain flattened diagnostic
+occurrences: `hbf-lifecycle-1.log` and `hbf-lifecycle-2.log` contain 169
+`IncidentCall` identifier occurrences across 14 JSONL records and 30 distinct
+identifiers. In those flattened records the identifier is located at
+`$.application_errors[*]`, with the record object `$` as its flattened parent;
+the surrounding diagnostic siblings include `journey_ref`, `stop_point_ref`,
+`observation_label`, `http_status`, and `raw_artifact_path`. The three
+Neumarkt lifecycle logs contain no `IncidentCall` or `InfoCall` identifier.
+No `InfoCall` identifier was found in any searched repository log.
+
+The `raw_artifact_path` values in the historical records point to 35 files
+under the requested `/private/tmp/cologne-transit-recorded-time-lifecycle-*`
+prefixes, but every referenced file was absent when checked. The flattened
+`application_errors` array therefore cannot be treated as the original MDD
+JSON container, and the raw parent/sibling structure and semantic origin of
+the identifiers cannot be recovered. The bounded result is:
+
+`RAW_SOURCE_STRUCTURE_UNAVAILABLE_FOR_HISTORICAL_IDENTIFIER`
+
+The old `application_errors` name is not treated as evidence that those
+identifiers were errors. The current MDD analyzer reports any future
+occurrence by exact raw path, parent object, sibling fields, and structural
+origin when the raw response is available; genuine `ErrorMessage` values
+remain a separate output.
+
+### Existing GTFS-RT artifact check
+
+The retained artifact
+`/private/tmp/cologne-transit-stage-03a-wzv9x1qc/gtfs-rt-snapshot.pb` and
+the two retained MDD JSON files remain available for offline inspection. No
+new GTFS-RT download was made. The output now explicitly covers the
+non-provenance description count, distinct values, top values, Neumarkt
+trip-linked non-provenance alerts, and known-versus-`UNKNOWN_CAUSE` counts;
+the existing protobuf presence/detail logic was reused and no duplicate GTFS
+implementation was added.
+
 Remaining unknowns are temporal stability across repeated snapshots, whether
-other provider responses contain populated Situation content, the future
-location and semantics of any IncidentCall/InfoCall structures, and any
-cross-source attribution. This bounded offline finding set does not close
-Stage 3A or authorize production implementation.
+other provider responses contain populated Situation content, the raw
+location and semantics of the historical `IncidentCall` identifiers,
+`InfoCall` structures, and any cross-source attribution. This bounded offline
+finding set does not close Stage 3A or authorize production implementation.
 
 ## Decision gate after host evidence
 
-Stage 3A remains `PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING` until the
-MDD portion of the probe is executed and the resulting JSONL is reviewed.
-After host evidence, the next decision may
+Stage 3A remains `PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
+until the broader MDD-only discovery mode is executed and its resulting JSONL
+is reviewed. After host evidence, the next decision may
 classify source-evidence usability and identify remaining validation gaps. It
 must not be treated as approval of production implementation or as proof of
 root cause.
@@ -338,4 +444,7 @@ not be executed from Codex.
 cd /Users/admin/Documents/cologne-transit-intelligence
 
 python3 scripts/stage_03a_disruption_evidence_probe.py
+
+# Broader MDD-only discovery; do not run from Codex.
+python3 scripts/stage_03a_disruption_evidence_probe.py --mode mdd-discovery
 ```

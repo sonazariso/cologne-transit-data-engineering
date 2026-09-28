@@ -44,6 +44,7 @@ VALIDATED_HOST_RUNTIME = "Python 3.9.6"
 MAX_HTTP_ATTEMPTS = 3
 GTFS_RT_MAX_HTTP_ATTEMPTS = 1
 MDD_MAX_HTTP_ATTEMPTS = 2
+MDD_DISCOVERY_MAX_HTTP_ATTEMPTS = 10
 RETRIES = 0
 CONCURRENCY = "none"
 FALLBACK_ENDPOINTS: Tuple[str, ...] = ()
@@ -54,6 +55,7 @@ MAX_TEXT_EXAMPLES = 10
 MAX_MDD_FIELD_EXAMPLES = 5
 MAX_SHORT_TEXT_CHARS = 240
 RAW_TEMP_PREFIX = "cologne-transit-stage-03a-"
+GTFSDE_PROVENANCE_DESCRIPTION_PREFIX = "Echtzeitdaten aufbereitet von GTFS.de"
 
 MDD_REASON_FIELD_TERMS = (
     "situation",
@@ -87,6 +89,18 @@ MDD_REFERENCE_TYPE_NAMES = {
 }
 
 MDD_ERROR_FIELD_NAMES = {"errormessage", "errorcode"}
+MDD_GENERAL_ATTRIBUTE_FIELD_NAMES = frozenset({"attribute", "generalattribute"})
+MDD_EXTENSION_FIELD_MARKER = "extension"
+MDD_OPERATIONAL_STATUS_FIELDS = {
+    "cancelled": "Cancelled",
+    "deviation": "Deviation",
+    "unplanned": "Unplanned",
+    "notservicedstop": "NotServicedStop",
+    "unplannedstop": "UnplannedStop",
+    "noboardingatstop": "NoBoardingAtStop",
+    "noalightingatstop": "NoAlightingAtStop",
+    "demandstop": "DemandStop",
+}
 
 NEUMARKT_STOP_IDS = frozenset(
     ("106842", "207108", "441164", "581903", "96309")
@@ -103,6 +117,29 @@ class MddStation:
 MDD_STATIONS: Tuple[MddStation, ...] = (
     MddStation("koeln_neumarkt", "Köln Neumarkt", "de:05315:11111"),
     MddStation("koeln_bf_muelheim", "Köln Bf Mülheim", "de:05315:19201"),
+)
+
+# Diagnostic discovery locations only.  This list does not define production
+# monitoring scope, station cadence, or a future collector panel.
+MDD_DISCOVERY_STATIONS: Tuple[MddStation, ...] = (
+    MddStation("koeln_bf_muelheim", "Köln Bf Mülheim", "de:05315:19201"),
+    MddStation("koeln_heumarkt", "Köln Heumarkt", "de:05315:11110"),
+    MddStation(
+        "koeln_breslauer_platz_hbf",
+        "Köln Breslauer Platz/Hbf",
+        "de:05315:11212",
+    ),
+    MddStation(
+        "koeln_muelheim_wiener_platz",
+        "Köln Mülheim Wiener Platz",
+        "de:05315:19211",
+    ),
+    MddStation("koeln_hbf", "Köln Hbf", "de:05315:11201"),
+    MddStation("koeln_messe_deutz_bf", "Köln Messe/Deutz Bf", "de:05315:11901"),
+    MddStation("koeln_bf_ehrenfeld", "Köln Bf Ehrenfeld", "de:05315:14201"),
+    MddStation("koeln_wahn_sbahn", "Köln Wahn S-Bahn", "de:05315:17701"),
+    MddStation("koeln_hansaring", "Köln Hansaring", "de:05315:11801"),
+    MddStation("koeln_bf_loevenich", "Köln Bf Lövenich", "de:05315:13701"),
 )
 
 
@@ -124,6 +161,7 @@ class FetchResult:
 class AttemptTracker:
     total_http_attempts: int = 0
     attempts_by_source: Dict[str, int] = None  # type: ignore[assignment]
+    max_http_attempts: int = MAX_HTTP_ATTEMPTS
 
     def __post_init__(self) -> None:
         if self.attempts_by_source is None:
@@ -132,7 +170,7 @@ class AttemptTracker:
     def begin(self, source: str) -> None:
         """Count before opening the socket, including failures and timeouts."""
 
-        if self.total_http_attempts >= MAX_HTTP_ATTEMPTS:
+        if self.total_http_attempts >= self.max_http_attempts:
             raise RuntimeError("HTTP attempt budget would be exceeded")
         self.total_http_attempts += 1
         self.attempts_by_source[source] = self.attempts_by_source.get(source, 0) + 1
@@ -875,6 +913,74 @@ def text_frequency_statistics(
     }
 
 
+def non_provenance_description_values(alert: AlertAudit) -> Set[str]:
+    return {
+        normalized_source_text(text)
+        for text, _language in alert.description_texts
+        if normalized_source_text(text)
+        and not normalized_source_text(text).startswith(
+            GTFSDE_PROVENANCE_DESCRIPTION_PREFIX
+        )
+    }
+
+
+def non_provenance_description_statistics(
+    alerts: Sequence[AlertAudit],
+    top_n: int = 20,
+) -> Dict[str, Any]:
+    """Count non-provenance description values without classifying their meaning."""
+
+    counts: Counter[str] = Counter()
+    non_provenance_alert_count = 0
+    for alert in alerts:
+        values = non_provenance_description_values(alert)
+        if values:
+            non_provenance_alert_count += 1
+            counts.update(values)
+    top_values = [
+        {
+            "text": text,
+            "count": count,
+            "percentage_of_alerts": percentage(count, len(alerts)),
+            "percentage_of_non_provenance_alerts": percentage(
+                count, non_provenance_alert_count
+            ),
+        }
+        for text, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
+            :top_n
+        ]
+    ]
+    return {
+        "non_provenance_description_alert_count": non_provenance_alert_count,
+        "non_provenance_description_value_count": sum(counts.values()),
+        "distinct_non_provenance_description_text_count": len(counts),
+        "top_%d_non_provenance_description_texts" % top_n: top_values,
+    }
+
+
+def known_unknown_cause_counts(alerts: Sequence[AlertAudit]) -> Dict[str, int]:
+    unknown_count = sum(
+        alert.cause_explicitly_present and alert.cause_name == "UNKNOWN_CAUSE"
+        for alert in alerts
+    )
+    known_or_other_count = sum(
+        alert.cause_explicitly_present and alert.cause_name != "UNKNOWN_CAUSE"
+        for alert in alerts
+    )
+    specific_known_count = sum(
+        alert.cause_explicitly_present
+        and alert.cause_name not in {"UNKNOWN_CAUSE", "OTHER_CAUSE"}
+        for alert in alerts
+    )
+    return {
+        "cause_field_absent_count": len(alerts)
+        - sum(alert.cause_explicitly_present for alert in alerts),
+        "unknown_cause_count": unknown_count,
+        "known_or_other_cause_count": known_or_other_count,
+        "specific_known_cause_count": specific_known_count,
+    }
+
+
 def translation_quality_statistics(
     alerts: Sequence[AlertAudit],
     field_name: str,
@@ -1131,10 +1237,11 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         "effect_detail",
     ):
         text_frequencies.update(text_frequency_statistics(alerts, field_name))
-    gtfsde_prefix = "Echtzeitdaten aufbereitet von GTFS.de"
     gtfsde_provenance_description_count = sum(
         any(
-            normalized_source_text(text).startswith(gtfsde_prefix)
+            normalized_source_text(text).startswith(
+                GTFSDE_PROVENANCE_DESCRIPTION_PREFIX
+            )
             for text, _language in alert.description_texts
         )
         for alert in alerts
@@ -1245,6 +1352,7 @@ def analyze_feed(feed: Any, request_timestamp: datetime) -> Tuple[Dict[str, Any]
         "gtfsde_provenance_description_percentage": percentage(
             gtfsde_provenance_description_count, total_alert_count
         ),
+        **non_provenance_description_statistics(alerts),
         **text_frequencies,
         "max_sanitized_short_examples": alert_text_examples(alerts),
     }
@@ -1374,6 +1482,10 @@ def empty_feed_summary(status: str) -> Dict[str, Any]:
         },
         "gtfsde_provenance_description_count": 0,
         "gtfsde_provenance_description_percentage": None,
+        "non_provenance_description_alert_count": 0,
+        "non_provenance_description_value_count": 0,
+        "distinct_non_provenance_description_text_count": 0,
+        "top_20_non_provenance_description_texts": [],
         "distinct_header_text_count": 0,
         "distinct_description_text_count": 0,
         "distinct_cause_detail_count": 0,
@@ -1418,6 +1530,7 @@ def local_neumarkt_summary(
     route_link_count = 0
     link_type_counts: Counter[str] = Counter()
     direct_link_type_sets: List[Set[str]] = []
+    trip_linked_alerts: List[AlertAudit] = []
     for alert in alerts:
         link_types_set: Set[str] = set()
         if any(
@@ -1444,6 +1557,7 @@ def local_neumarkt_summary(
         ]
         if "TRIP" in link_types_set:
             trip_link_count += 1
+            trip_linked_alerts.append(alert)
         if "STOP" in link_types_set:
             stop_link_count += 1
         if "ROUTE" in link_types_set:
@@ -1453,6 +1567,14 @@ def local_neumarkt_summary(
             link_type_counts["_".join(link_types)] += 1
 
     linked_distribution = cause_effect_distribution_for_alerts(linked_alerts)
+    linked_non_provenance_alerts = [
+        alert for alert in linked_alerts if non_provenance_description_values(alert)
+    ]
+    trip_linked_non_provenance_alerts = [
+        alert
+        for alert in trip_linked_alerts
+        if non_provenance_description_values(alert)
+    ]
     return {
         "neumarkt_trip_count": local_context["neumarkt_trip_count"],
         "neumarkt_stop_time_update_count": local_context[
@@ -1477,8 +1599,17 @@ def local_neumarkt_summary(
         "linked_alert_effect_distribution": linked_distribution["effect_distribution"],
         "linked_alert_cause_present_count": linked_distribution["cause_present_count"],
         "linked_alert_cause_missing_count": linked_distribution["cause_missing_count"],
+        "linked_alert_known_vs_unknown_cause_counts": known_unknown_cause_counts(
+            linked_alerts
+        ),
         "linked_alert_effect_present_count": linked_distribution["effect_present_count"],
         "linked_alert_effect_missing_count": linked_distribution["effect_missing_count"],
+        "linked_alerts_with_non_provenance_description_text": len(
+            linked_non_provenance_alerts
+        ),
+        "trip_linked_alerts_with_non_provenance_description_text": len(
+            trip_linked_non_provenance_alerts
+        ),
         "identity_use": local_context["identity_use"],
     }
 
@@ -1558,14 +1689,16 @@ def flatten_scalar_values(value: Any) -> Iterator[Any]:
         yield value
 
 
-def json_path_inventory(value: Any) -> List[Dict[str, Any]]:
+def json_path_inventory(value: Any, path: str = "$") -> List[Dict[str, Any]]:
     """Inventory every observed object key path and its value types."""
 
     inventory: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {"occurrence_count": 0, "value_types": Counter()}
     )
-    for path, _key, child, _parent_path, _parent in iter_dict_entries_with_context(value):
-        record = inventory[path]
+    for child_path, _key, child, _parent_path, _parent in iter_dict_entries_with_context(
+        value, path
+    ):
+        record = inventory[child_path]
         record["occurrence_count"] += 1
         record["value_types"][json_value_type(child)] += 1
     output: List[Dict[str, Any]] = []
@@ -1601,7 +1734,7 @@ def field_semantic_category(key: str, path: str) -> str:
         return "GENERAL_INFORMATION_TEXT"
     if "error" in normalized:
         return "UNCLASSIFIED_SOURCE_TEXT"
-    if normalized in {"reason", "reasoncontent", "reasonname"}:
+    if normalized in {"reason", "reasongroup", "reasoncontent", "reasonname"}:
         return "REASON_TEXT"
     if normalized in {"effect", "effecttext", "impact", "consequence"}:
         return "EFFECT_TEXT"
@@ -1612,7 +1745,10 @@ def field_semantic_category(key: str, path: str) -> str:
     return "UNCLASSIFIED_SOURCE_TEXT"
 
 
-def reason_like_field_inventory(value: Any) -> List[Dict[str, Any]]:
+def reason_like_field_inventory(
+    value: Any,
+    secret: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Discover candidate reason/information fields without semantic guessing."""
 
     inventory: Dict[str, Dict[str, Any]] = {}
@@ -1645,7 +1781,7 @@ def reason_like_field_inventory(value: Any) -> List[Dict[str, Any]]:
         existing_examples = record["sanitized_value_examples"]
         if len(existing_examples) < MAX_MDD_FIELD_EXAMPLES:
             for scalar in flatten_scalar_values(child):
-                example = short_text(scalar)
+                example = short_text(scalar, secret)
                 if example is None:
                     continue
                 if example not in existing_examples:
@@ -1743,6 +1879,209 @@ def as_object_list(value: Any) -> List[Dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def is_populated_source_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def source_value_is_true(value: Any) -> bool:
+    scalar = source_scalar(value)
+    if scalar is True:
+        return True
+    return isinstance(scalar, str) and scalar.strip().lower() == "true"
+
+
+def named_object_items(
+    path: str,
+    child: Any,
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Yield non-empty object items while preserving their exact JSON paths."""
+
+    if isinstance(child, dict):
+        if child:
+            yield path, child
+        return
+    if isinstance(child, list):
+        for index, item in enumerate(child):
+            if isinstance(item, dict) and item:
+                yield path + "[%d]" % index, item
+
+
+def direct_attribute_field(
+    value: Dict[str, Any],
+    object_path: str,
+    names: Set[str],
+) -> Optional[Tuple[str, Any]]:
+    for key, child in value.items():
+        if normalized_key(key) in names and is_populated_source_value(child):
+            return path_for_key(object_path, key), child
+    return None
+
+
+def sanitized_attribute_value(
+    value: Any,
+    field_name: str,
+    secret: Optional[str],
+) -> Any:
+    if field_name in {"Text", "InfoURL"}:
+        values = [
+            short_text(item, secret)
+            for item, _language in source_text_values(value)
+            if short_text(item, secret) is not None
+        ]
+        if not values:
+            return None
+        return values[0] if len(values) == 1 else values[:MAX_MDD_FIELD_EXAMPLES]
+    scalar = source_scalar(value)
+    if scalar is not None:
+        return short_text(scalar, secret)
+    examples = [
+        short_text(item, secret)
+        for item in flatten_scalar_values(value)
+        if short_text(item, secret) is not None
+    ]
+    return examples[:MAX_MDD_FIELD_EXAMPLES] or None
+
+
+def collect_general_attribute_records(
+    parsed: Any,
+    secret: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Inventory populated TRIAS Attribute/GeneralAttribute objects.
+
+    These are deliberately labelled passenger information attributes.  Their
+    presence does not establish a disruption cause.
+    """
+
+    output: List[Dict[str, Any]] = []
+    field_specs = (
+        ("Text", {"text"}),
+        ("Code", {"code"}),
+        ("AllFacilities", {"allfacilities"}),
+        ("Mandatory", {"mandatory"}),
+        ("Importance", {"importance"}),
+        ("InfoURL", {"infourl"}),
+        ("Status", {"status"}),
+    )
+    for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
+        if normalized_key(key) not in MDD_GENERAL_ATTRIBUTE_FIELD_NAMES:
+            continue
+        for object_path, attribute in named_object_items(path, child):
+            if not any(
+                is_populated_source_value(field_value)
+                for field_value in attribute.values()
+            ):
+                continue
+            fields: Dict[str, Any] = {}
+            field_paths: Dict[str, str] = {}
+            for field_name, names in field_specs:
+                field = direct_attribute_field(attribute, object_path, names)
+                if field is None:
+                    continue
+                field_path, field_value = field
+                sanitized = sanitized_attribute_value(field_value, field_name, secret)
+                if sanitized is None:
+                    continue
+                fields[field_name] = sanitized
+                field_paths[field_name] = field_path
+            output.append(
+                {
+                    "path": object_path,
+                    "field_name": key,
+                    "classification": "PASSENGER_INFORMATION_ATTRIBUTE",
+                    "present_fields": sorted(fields),
+                    "fields": fields,
+                    "field_paths": field_paths,
+                    "direct_object_keys": sorted(str(name) for name in attribute),
+                    "nearest_enclosing_object_path": parent_path,
+                    "nearest_enclosing_object_type": path_object_name(parent_path),
+                    "sibling_field_names": sorted(
+                        str(name) for name in parent if str(name) != str(key)
+                    )
+                    if isinstance(parent, dict)
+                    else [],
+                }
+            )
+    return output
+
+
+def collect_extension_records(
+    parsed: Any,
+    secret: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Inventory populated Extension/provider-extension structures only."""
+
+    output: List[Dict[str, Any]] = []
+    for path, key, child, _parent_path, _parent in iter_dict_entries_with_context(parsed):
+        if MDD_EXTENSION_FIELD_MARKER not in normalized_key(key):
+            continue
+        items: List[Tuple[str, Any]] = []
+        if isinstance(child, list):
+            items = [
+                (path + "[%d]" % index, item)
+                for index, item in enumerate(child)
+                if is_populated_source_value(item)
+            ]
+        elif is_populated_source_value(child):
+            items = [(path, child)]
+        for item_path, item in items:
+            nested_paths = [
+                inventory_item["path"]
+                for inventory_item in json_path_inventory(item, item_path)
+            ]
+            output.append(
+                {
+                    "path": item_path,
+                    "field_name": key,
+                    "value_type": json_value_type(item),
+                    "direct_object_keys": sorted(str(name) for name in item)
+                    if isinstance(item, dict)
+                    else [],
+                    "nested_populated_paths": nested_paths,
+                    "sanitized_value_examples": [
+                        short_text(value, secret)
+                        for value in list(flatten_scalar_values(item))[
+                            :MAX_MDD_FIELD_EXAMPLES
+                        ]
+                        if short_text(value, secret) is not None
+                    ],
+                }
+            )
+    return output
+
+
+def collect_operational_status_records(parsed: Any) -> List[Dict[str, Any]]:
+    """Inventory source-reported operational/status flags set to true."""
+
+    records: List[Dict[str, Any]] = []
+    for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
+        status_name = MDD_OPERATIONAL_STATUS_FIELDS.get(normalized_key(key))
+        if status_name is None or not source_value_is_true(child):
+            continue
+        records.append(
+            {
+                "path": path,
+                "field_name": key,
+                "status_field": status_name,
+                "value": True,
+                "association_scope": relation_scope_for_reference(path),
+                "nearest_enclosing_object_path": parent_path,
+                "nearest_enclosing_object_type": path_object_name(parent_path),
+                "sibling_field_names": sorted(
+                    str(name) for name in parent if str(name) != str(key)
+                )
+                if isinstance(parent, dict)
+                else [],
+            }
+        )
+    return records
 
 
 def named_object_entries(
@@ -1920,7 +2259,10 @@ def reference_parent_context(
     }
 
 
-def collect_reference_records(parsed: Any) -> List[Dict[str, Any]]:
+def collect_reference_records(
+    parsed: Any,
+    secret: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
         reference_type = MDD_REFERENCE_TYPE_NAMES.get(normalized_key(key))
@@ -1944,9 +2286,9 @@ def collect_reference_records(parsed: Any) -> List[Dict[str, Any]]:
                 "value_type": json_value_type(item),
                 "source_origin": reference_origin_for_path(item_path),
                 "sanitized_value_examples": [
-                    short_text(scalar)
+                    short_text(scalar, secret)
                     for scalar in list(flatten_scalar_values(item))[:MAX_MDD_FIELD_EXAMPLES]
-                    if short_text(scalar) is not None
+                    if short_text(scalar, secret) is not None
                 ],
             }
             record.update(reference_parent_context(parent_path, parent, key))
@@ -1972,15 +2314,18 @@ def collect_reference_entries(parsed: Any) -> List[Tuple[str, str, Any]]:
     return entries
 
 
-def error_field_inventory(parsed: Any) -> List[Dict[str, Any]]:
+def error_field_inventory(
+    parsed: Any,
+    secret: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     records: Dict[str, Dict[str, Any]] = {}
     for path, key, child, _parent_path, _parent in iter_dict_entries_with_context(parsed):
         if normalized_key(key) not in MDD_ERROR_FIELD_NAMES:
             continue
         scalar_values = [
-            short_text(value)
+            short_text(value, secret)
             for value in flatten_scalar_values(child)
-            if short_text(value) is not None
+            if short_text(value, secret) is not None
         ]
         record = records.setdefault(
             path,
@@ -2023,44 +2368,79 @@ def error_field_inventory(parsed: Any) -> List[Dict[str, Any]]:
     return output
 
 
-def collect_incident_info_occurrences(parsed: Any) -> List[Dict[str, Any]]:
+def collect_incident_info_occurrences(
+    parsed: Any,
+    secret: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     token_pattern = re.compile(r"(?:IncidentCall|InfoCall)", re.IGNORECASE)
     grouped: Dict[str, Dict[str, Any]] = {}
     for path, key, child, parent_path, parent in iter_dict_entries_with_context(parsed):
         matched_in: Set[str] = set()
+        matched_identifier_types: Set[str] = set()
+        identifier_counts: Counter[str] = Counter()
+        matched_scalar_values: List[Any] = []
         if token_pattern.search(str(key)):
             matched_in.add("FIELD_NAME")
-        if isinstance(child, (str, int, float, bool)) and token_pattern.search(
-            str(child)
-        ):
+            for identifier_type in ("IncidentCall", "InfoCall"):
+                if re.search(identifier_type, str(key), re.IGNORECASE):
+                    matched_identifier_types.add(identifier_type)
+        direct_scalar_values: Iterable[Any]
+        if isinstance(child, (str, int, float, bool)):
+            direct_scalar_values = (child,)
+        elif isinstance(child, list):
+            direct_scalar_values = (
+                item
+                for item in child
+                if isinstance(item, (str, int, float, bool))
+            )
+        else:
+            direct_scalar_values = ()
+        for item in direct_scalar_values:
+            if not isinstance(item, (str, int, float, bool)):
+                continue
+            matched_types = [
+                identifier_type
+                for identifier_type in ("IncidentCall", "InfoCall")
+                if re.search(identifier_type, str(item), re.IGNORECASE)
+            ]
+            if not matched_types:
+                continue
             matched_in.add("VALUE")
-        if isinstance(child, list) and any(
-            isinstance(item, (str, int, float, bool))
-            and token_pattern.search(str(item))
-            for item in child
-        ):
-            matched_in.add("VALUE")
+            matched_scalar_values.append(item)
+            for identifier_type in matched_types:
+                matched_identifier_types.add(identifier_type)
+                identifier_counts[identifier_type] += 1
         if not matched_in:
             continue
         candidate_values = [
-            short_text(item)
-            for item in flatten_scalar_values(child)
-            if token_pattern.search(str(item))
+            short_text(item, secret)
+            for item in matched_scalar_values
+            if short_text(item, secret) is not None
         ]
         if token_pattern.search(str(key)) and not candidate_values:
-            candidate_values = [short_text(item) for item in flatten_scalar_values(child)]
+            candidate_values = [
+                short_text(item, secret) for item in flatten_scalar_values(child)
+            ]
+        if not identifier_counts:
+            for identifier_type in ("IncidentCall", "InfoCall"):
+                if identifier_type in matched_identifier_types:
+                    identifier_counts[identifier_type] += 1
         record = grouped.setdefault(
             path,
             {
                 "path": path,
                 "occurrence_count": 0,
                 "matched_in": set(),
+                "matched_identifier_types": set(),
+                "identifier_counts": Counter(),
                 "sample_identifiers": [],
                 "source_origin": reference_origin_for_path(path),
             },
         )
         record["occurrence_count"] += 1
         record["matched_in"].update(matched_in)
+        record["matched_identifier_types"].update(matched_identifier_types)
+        record["identifier_counts"].update(identifier_counts)
         for candidate in candidate_values:
             if candidate and candidate not in record["sample_identifiers"]:
                 record["sample_identifiers"].append(candidate)
@@ -2075,6 +2455,8 @@ def collect_incident_info_occurrences(parsed: Any) -> List[Dict[str, Any]]:
                 "path": path,
                 "occurrence_count": record["occurrence_count"],
                 "matched_in": sorted(record["matched_in"]),
+                "matched_identifier_types": sorted(record["matched_identifier_types"]),
+                "identifier_counts": dict(sorted(record["identifier_counts"].items())),
                 "sample_identifiers": record["sample_identifiers"][:MAX_MDD_FIELD_EXAMPLES],
                 "parent_object_path": record["nearest_enclosing_object_path"],
                 "parent_object_type": record["nearest_enclosing_object_type"],
@@ -2087,8 +2469,6 @@ def collect_incident_info_occurrences(parsed: Any) -> List[Dict[str, Any]]:
 
 def relation_scope_for_reference(path: str) -> str:
     components = path_component_names(path)
-    if "service" in components:
-        return "SERVICE"
     if any(
         component in {"previouscall", "thiscall", "onwardcall", "callatstop"}
         for component in components
@@ -2096,6 +2476,8 @@ def relation_scope_for_reference(path: str) -> str:
         return "CALL"
     if any("journey" in component for component in components):
         return "JOURNEY"
+    if "service" in components:
+        return "SERVICE"
     if any(component in {"stopevent", "stopeventresult"} for component in components):
         return "STOP_EVENT"
     if any(
@@ -2503,17 +2885,23 @@ def analyze_mdd_response(
     reason_like_inventory: List[Dict[str, Any]] = []
     incident_info_occurrences: List[Dict[str, Any]] = []
     error_inventory: List[Dict[str, Any]] = []
+    general_attribute_records: List[Dict[str, Any]] = []
+    extension_records: List[Dict[str, Any]] = []
+    operational_status_records: List[Dict[str, Any]] = []
     if parsed is not None:
         results = named_results(parsed)
         situation_entries = named_object_entries(
             parsed,
             {"ptsituation", "ptsituationelement", "roadsituation", "situation"},
         )
-        reference_records = collect_reference_records(parsed)
+        reference_records = collect_reference_records(parsed, secret)
         json_inventory = json_path_inventory(parsed)
-        reason_like_inventory = reason_like_field_inventory(parsed)
-        incident_info_occurrences = collect_incident_info_occurrences(parsed)
-        error_inventory = error_field_inventory(parsed)
+        reason_like_inventory = reason_like_field_inventory(parsed, secret)
+        incident_info_occurrences = collect_incident_info_occurrences(parsed, secret)
+        error_inventory = error_field_inventory(parsed, secret)
+        general_attribute_records = collect_general_attribute_records(parsed, secret)
+        extension_records = collect_extension_records(parsed, secret)
+        operational_status_records = collect_operational_status_records(parsed)
     situation_records = [
         situation_record(path, item, secret) for path, item in situation_entries
     ]
@@ -2565,6 +2953,30 @@ def analyze_mdd_response(
         })
         for reference in full_ref_records
     ]
+    general_attribute_field_counts: Counter[str] = Counter(
+        field_name
+        for record in general_attribute_records
+        for field_name in record.get("present_fields", [])
+    )
+    operational_status_counts: Counter[str] = Counter(
+        record["status_field"] for record in operational_status_records
+    )
+    operational_status_path_counts: Counter[str] = Counter(
+        record["path"] for record in operational_status_records
+    )
+    incident_call_identifier_count = sum(
+        record.get("identifier_counts", {}).get("IncidentCall", 0)
+        for record in incident_info_occurrences
+    )
+    info_call_identifier_count = sum(
+        record.get("identifier_counts", {}).get("InfoCall", 0)
+        for record in incident_info_occurrences
+    )
+    error_message_count = sum(
+        item.get("non_empty_value_count", 0)
+        for item in error_inventory
+        if normalized_key(item["field_name"]) == "errormessage"
+    )
     relation_scope_keys = (
         "CALL",
         "SERVICE",
@@ -2587,11 +2999,14 @@ def analyze_mdd_response(
         "response_audit_status": status,
         "result_count": len(results),
         "situation_count": len(situation_entries),
+        "inline_situation_count": len(situation_entries),
         "reference_entry_count": len(reference_records),
         "situation_reference_count": len(situation_references),
         "reference_type_counts": dict(sorted(reference_type_counts.items())),
         "incident_call_reference_count": reference_type_counts.get("IncidentCall", 0),
         "info_call_reference_count": reference_type_counts.get("InfoCall", 0),
+        "incident_call_identifier_count": incident_call_identifier_count,
+        "info_call_identifier_count": info_call_identifier_count,
         "unique_situation_count": content["unique_situation_count"],
         "relation_scope_counts": {
             key: relation_counts.get(key, 0) for key in relation_scope_keys
@@ -2602,6 +3017,11 @@ def analyze_mdd_response(
             "OTHER_OR_UNCLASSIFIED", 0
         ),
         "situation_full_ref_count": len(full_ref_records),
+        "journey_level_situation_full_ref_count": relation_counts.get("JOURNEY", 0),
+        "call_level_situation_full_ref_count": relation_counts.get("CALL", 0),
+        "other_situation_full_ref_count": len(full_ref_records)
+        - relation_counts.get("JOURNEY", 0)
+        - relation_counts.get("CALL", 0),
         "unique_situation_full_ref_count": len(unique_full_ref_keys),
         "resolved_inline_situation_ref_count": len(resolved_full_ref_records),
         "unresolved_situation_ref_count": len(full_ref_records)
@@ -2618,6 +3038,7 @@ def analyze_mdd_response(
         "reason_like_field_inventory": reason_like_inventory,
         "incident_info_occurrences": incident_info_occurrences,
         "error_message_field_inventory": error_inventory,
+        "error_message_count": error_message_count,
         "error_message_non_empty_value_count": len(
             {
                 example
@@ -2628,6 +3049,25 @@ def analyze_mdd_response(
         ),
         "situation_object_field_inventory": situation_object_inventory,
         "situation_object_entry_paths": [path for path, _item in situation_entries],
+        "general_attribute_count": len(general_attribute_records),
+        "general_attribute_text_present_count": general_attribute_field_counts.get(
+            "Text", 0
+        ),
+        "general_attribute_code_present_count": general_attribute_field_counts.get(
+            "Code", 0
+        ),
+        "general_attribute_info_url_present_count": general_attribute_field_counts.get(
+            "InfoURL", 0
+        ),
+        "general_attribute_field_counts": dict(sorted(general_attribute_field_counts.items())),
+        "general_attribute_records": general_attribute_records,
+        "extension_populated_count": len(extension_records),
+        "extension_records": extension_records,
+        "operational_status_counts": dict(sorted(operational_status_counts.items())),
+        "operational_status_true_path_counts": dict(
+            sorted(operational_status_path_counts.items())
+        ),
+        "operational_status_records": operational_status_records,
         "summary_present_count": content["summary_present_count"],
         "description_present_count": content["description_present_count"],
         "detail_present_count": content["detail_present_count"],
@@ -2648,6 +3088,95 @@ def analyze_mdd_response(
         "_reference_records": reference_records,
     }
     return output
+
+
+def empty_mdd_station_summary(
+    station: MddStation,
+    status: str,
+) -> Dict[str, Any]:
+    """Return a schema-stable no-request MDD station record."""
+
+    return {
+        "station": station.display_name,
+        "station_key": station.key,
+        "stop_point_ref": station.stop_point_ref,
+        "response_audit_status": status,
+        "http_status": None,
+        "response_content_type": None,
+        "response_bytes": 0,
+        "elapsed_ms": None,
+        "request_timestamp_utc": None,
+        "raw_artifact_path": None,
+        "result_count": 0,
+        "situation_count": 0,
+        "inline_situation_count": 0,
+        "reference_entry_count": 0,
+        "situation_reference_count": 0,
+        "reference_type_counts": {},
+        "incident_call_reference_count": 0,
+        "info_call_reference_count": 0,
+        "incident_call_identifier_count": 0,
+        "info_call_identifier_count": 0,
+        "unique_situation_count": 0,
+        "call_level_situation_link_count": 0,
+        "service_level_situation_link_count": 0,
+        "other_unclassified_relation_count": 0,
+        "relation_scope_counts": {
+            "CALL": 0,
+            "SERVICE": 0,
+            "JOURNEY": 0,
+            "STOP_EVENT": 0,
+            "RESPONSE_CONTEXT": 0,
+            "OTHER_OR_UNCLASSIFIED": 0,
+        },
+        "situation_full_ref_count": 0,
+        "journey_level_situation_full_ref_count": 0,
+        "call_level_situation_full_ref_count": 0,
+        "other_situation_full_ref_count": 0,
+        "unique_situation_full_ref_count": 0,
+        "resolved_inline_situation_ref_count": 0,
+        "unresolved_situation_ref_count": 0,
+        "situation_full_ref_records": [],
+        "situation_reference_records": [],
+        "json_path_inventory": [],
+        "reason_like_field_inventory": [],
+        "incident_info_occurrences": [],
+        "error_message_field_inventory": [],
+        "error_message_count": 0,
+        "error_message_non_empty_value_count": 0,
+        "situation_object_field_inventory": [],
+        "situation_object_entry_paths": [],
+        "general_attribute_count": 0,
+        "general_attribute_text_present_count": 0,
+        "general_attribute_code_present_count": 0,
+        "general_attribute_info_url_present_count": 0,
+        "general_attribute_field_counts": {},
+        "general_attribute_records": [],
+        "extension_populated_count": 0,
+        "extension_records": [],
+        "operational_status_counts": {},
+        "operational_status_true_path_counts": {},
+        "operational_status_records": [],
+        "summary_present_count": 0,
+        "description_present_count": 0,
+        "detail_present_count": 0,
+        "valid_from_present_count": 0,
+        "valid_to_present_count": 0,
+        "content_coverage_percentages": {
+            "participant_ref": None,
+            "situation_number": None,
+            "version": None,
+            "identifier": None,
+            "summary": None,
+            "description": None,
+            "detail": None,
+            "valid_from": None,
+            "valid_to": None,
+        },
+        "situation_content": aggregate_situation_content([]),
+        "_situation_records": [],
+        "_reference_records": [],
+    }
 
 
 def aggregate_mdd_summaries(
@@ -2695,6 +3224,10 @@ def aggregate_mdd_summaries(
         for reference in all_reference_records
         if reference["reference_type"] == "SituationFullRef"
     ]
+    full_ref_relation_counts: Counter[str] = Counter(
+        relation_scope_for_reference(reference["path"])
+        for reference in all_full_ref_records
+    )
     unique_full_ref_keys = {
         reference["identity_key"] for reference in all_full_ref_records
     }
@@ -2710,6 +3243,41 @@ def aggregate_mdd_summaries(
             for summary in station_summaries
         ]
     )
+    general_attribute_records = [
+        dict(record, station_key=summary.get("station_key"))
+        for summary in station_summaries
+        for record in summary.get("general_attribute_records", [])
+    ]
+    general_attribute_field_counts: Counter[str] = Counter()
+    for summary in station_summaries:
+        general_attribute_field_counts.update(
+            summary.get("general_attribute_field_counts", {})
+        )
+    extension_records = [
+        dict(record, station_key=summary.get("station_key"))
+        for summary in station_summaries
+        for record in summary.get("extension_records", [])
+    ]
+    operational_status_records = [
+        dict(record, station_key=summary.get("station_key"))
+        for summary in station_summaries
+        for record in summary.get("operational_status_records", [])
+    ]
+    operational_status_counts: Counter[str] = Counter()
+    operational_status_path_counts: Counter[str] = Counter()
+    for summary in station_summaries:
+        operational_status_counts.update(summary.get("operational_status_counts", {}))
+        operational_status_path_counts.update(
+            summary.get("operational_status_true_path_counts", {})
+        )
+    incident_call_identifier_count = sum(
+        summary.get("incident_call_identifier_count", 0)
+        for summary in station_summaries
+    )
+    info_call_identifier_count = sum(
+        summary.get("info_call_identifier_count", 0)
+        for summary in station_summaries
+    )
     station_views = []
     for summary in station_summaries:
         view = dict(summary)
@@ -2720,13 +3288,25 @@ def aggregate_mdd_summaries(
         "sample_station_count": len(station_summaries),
         "sample_result_count": result_count,
         "situation_count": content["situation_count"],
+        "inline_situation_count": content["situation_count"],
         "reference_entry_count": reference_entry_count,
         "situation_reference_count": situation_reference_count,
         "reference_type_counts": dict(sorted(reference_type_counts.items())),
         "incident_call_reference_count": reference_type_counts.get("IncidentCall", 0),
         "info_call_reference_count": reference_type_counts.get("InfoCall", 0),
+        "incident_call_identifier_count": incident_call_identifier_count,
+        "info_call_identifier_count": info_call_identifier_count,
         "unique_situation_count": content["unique_situation_count"],
         "situation_full_ref_count": len(all_full_ref_records),
+        "journey_level_situation_full_ref_count": full_ref_relation_counts.get(
+            "JOURNEY", 0
+        ),
+        "call_level_situation_full_ref_count": full_ref_relation_counts.get(
+            "CALL", 0
+        ),
+        "other_situation_full_ref_count": len(all_full_ref_records)
+        - full_ref_relation_counts.get("JOURNEY", 0)
+        - full_ref_relation_counts.get("CALL", 0),
         "unique_situation_full_ref_count": len(unique_full_ref_keys),
         "resolved_inline_situation_ref_count": sum(
             summary.get("resolved_inline_situation_ref_count", 0)
@@ -2776,6 +3356,31 @@ def aggregate_mdd_summaries(
             summary.get("error_message_non_empty_value_count", 0)
             for summary in station_summaries
         ),
+        "error_message_count": sum(
+            summary.get("error_message_count", 0)
+            for summary in station_summaries
+        ),
+        "general_attribute_count": len(general_attribute_records),
+        "general_attribute_text_present_count": general_attribute_field_counts.get(
+            "Text", 0
+        ),
+        "general_attribute_code_present_count": general_attribute_field_counts.get(
+            "Code", 0
+        ),
+        "general_attribute_info_url_present_count": general_attribute_field_counts.get(
+            "InfoURL", 0
+        ),
+        "general_attribute_field_counts": dict(
+            sorted(general_attribute_field_counts.items())
+        ),
+        "general_attribute_records": general_attribute_records,
+        "extension_populated_count": len(extension_records),
+        "extension_records": extension_records,
+        "operational_status_counts": dict(sorted(operational_status_counts.items())),
+        "operational_status_true_path_counts": dict(
+            sorted(operational_status_path_counts.items())
+        ),
+        "operational_status_records": operational_status_records,
         "summary_present_count": content["summary_present_count"],
         "description_present_count": content["description_present_count"],
         "detail_present_count": content["detail_present_count"],
@@ -2882,9 +3487,10 @@ def final_summary(
 
     return {
         "http_attempts": tracker.total_http_attempts,
-        "http_attempt_budget": MAX_HTTP_ATTEMPTS,
+        "http_attempt_budget": tracker.max_http_attempts,
         "http_attempts_by_source": dict(sorted(tracker.attempts_by_source.items())),
-        "http_budget_compliance": tracker.total_http_attempts <= MAX_HTTP_ATTEMPTS,
+        "http_budget_compliance": tracker.total_http_attempts
+        <= tracker.max_http_attempts,
         "gtfs_rt_cause_population_percentage": cause_percentage,
         "gtfs_rt_cause_explicit_presence_count": feed_summary.get(
             "cause_explicitly_present_count", 0
@@ -2928,6 +3534,10 @@ def final_summary(
                 "top_20_effect_details",
                 "gtfsde_provenance_description_count",
                 "gtfsde_provenance_description_percentage",
+                "non_provenance_description_alert_count",
+                "non_provenance_description_value_count",
+                "distinct_non_provenance_description_text_count",
+                "top_20_non_provenance_description_texts",
             )
         },
         "gtfs_rt_alert_scope_type_counts": scope_counts,
@@ -2942,6 +3552,12 @@ def final_summary(
                 "alerts_route_context_count_if_testable", 0
             ),
         },
+        "neumarkt_linked_alert_known_vs_unknown_cause_counts": local_summary.get(
+            "linked_alert_known_vs_unknown_cause_counts", {}
+        ),
+        "neumarkt_trip_linked_alerts_with_non_provenance_description_text": local_summary.get(
+            "trip_linked_alerts_with_non_provenance_description_text", 0
+        ),
         "mdd_human_readable_situation_evidence_statement": mdd_text_statement,
         "mdd_situation_text_population_counts": mdd_text_counts,
         "mdd_reference_type_counts": mdd_summary.get("reference_type_counts", {}),
@@ -2953,6 +3569,15 @@ def final_summary(
         ),
         "mdd_situation_full_ref_count": mdd_summary.get(
             "situation_full_ref_count", 0
+        ),
+        "mdd_journey_level_situation_full_ref_count": mdd_summary.get(
+            "journey_level_situation_full_ref_count", 0
+        ),
+        "mdd_call_level_situation_full_ref_count": mdd_summary.get(
+            "call_level_situation_full_ref_count", 0
+        ),
+        "mdd_other_situation_full_ref_count": mdd_summary.get(
+            "other_situation_full_ref_count", 0
         ),
         "mdd_unique_situation_full_ref_count": mdd_summary.get(
             "unique_situation_full_ref_count", 0
@@ -2969,6 +3594,31 @@ def final_summary(
         ),
         "mdd_error_message_non_empty_value_count": mdd_summary.get(
             "error_message_non_empty_value_count", 0
+        ),
+        "mdd_error_message_count": mdd_summary.get("error_message_count", 0),
+        "mdd_incident_call_identifier_count": mdd_summary.get(
+            "incident_call_identifier_count", 0
+        ),
+        "mdd_info_call_identifier_count": mdd_summary.get(
+            "info_call_identifier_count", 0
+        ),
+        "mdd_general_attribute_count": mdd_summary.get(
+            "general_attribute_count", 0
+        ),
+        "mdd_general_attribute_text_present_count": mdd_summary.get(
+            "general_attribute_text_present_count", 0
+        ),
+        "mdd_general_attribute_code_present_count": mdd_summary.get(
+            "general_attribute_code_present_count", 0
+        ),
+        "mdd_general_attribute_info_url_present_count": mdd_summary.get(
+            "general_attribute_info_url_present_count", 0
+        ),
+        "mdd_extension_populated_count": mdd_summary.get(
+            "extension_populated_count", 0
+        ),
+        "mdd_operational_status_counts": mdd_summary.get(
+            "operational_status_counts", {}
         ),
         "mdd_association_scope_counts": mdd_summary.get("relation_scope_counts", {}),
         "mdd_association_scope_statement": (
@@ -3008,6 +3658,253 @@ def final_summary(
     }
 
 
+def bounded_observation_label(count: int) -> str:
+    return "OBSERVED_IN_THIS_SAMPLE" if count else "NOT_OBSERVED_IN_THIS_SAMPLE"
+
+
+def populated_reason_evidence_paths(
+    station_summaries: Sequence[Dict[str, Any]],
+) -> List[str]:
+    paths = {
+        item["path"]
+        for summary in station_summaries
+        for item in summary.get("reason_like_field_inventory", [])
+        if item.get("semantic_category") == "REASON_TEXT"
+        and item.get("sanitized_value_examples")
+    }
+    return sorted(paths)
+
+
+def mdd_discovery_summary(
+    station_summaries: Sequence[Dict[str, Any]],
+    tracker: AttemptTracker,
+    api_key_present: bool,
+    stop_reason: Optional[str],
+    secret: Optional[str] = None,
+) -> Dict[str, Any]:
+    aggregate = aggregate_mdd_summaries(station_summaries, secret)
+    reason_paths = populated_reason_evidence_paths(station_summaries)
+    operational_status_total = sum(
+        aggregate.get("operational_status_counts", {}).values()
+    )
+    successful_http_response_count = sum(
+        summary.get("http_status") == 200 for summary in station_summaries
+    )
+    discovery_status = (
+        "MDD_API_KEY_MISSING"
+        if not api_key_present
+        else "STOPPED_ON_MDD_AUTH_FAILURE"
+        if stop_reason and stop_reason.startswith("MDD_AUTH_FAILURE_")
+        else "COMPLETED_10_STATION_ATTEMPTS"
+    )
+    output: Dict[str, Any] = {
+        "discovery_status": discovery_status,
+        "diagnostic_sample_station_count": len(MDD_DISCOVERY_STATIONS),
+        "attempted_station_count": len(station_summaries),
+        "skipped_station_count": len(MDD_DISCOVERY_STATIONS) - len(station_summaries),
+        "successful_http_response_count": successful_http_response_count,
+        "max_http_attempts": MDD_DISCOVERY_MAX_HTTP_ATTEMPTS,
+        "http_attempts": tracker.total_http_attempts,
+        "http_attempts_by_source": dict(sorted(tracker.attempts_by_source.items())),
+        "http_budget_compliance": tracker.total_http_attempts
+        <= MDD_DISCOVERY_MAX_HTTP_ATTEMPTS,
+        "gtfs_rt_http_attempts": 0,
+        "mdd_http_attempts": tracker.total_http_attempts,
+        "stop_reason": stop_reason,
+        "auth_failure_stop": bool(
+            stop_reason and stop_reason.startswith("MDD_AUTH_FAILURE_")
+        ),
+        "inline_situation_observation": bounded_observation_label(
+            aggregate.get("inline_situation_count", 0)
+        ),
+        "situation_full_ref_observation": bounded_observation_label(
+            aggregate.get("situation_full_ref_count", 0)
+        ),
+        "situation_full_ref_association_scope_counts": {
+            key: aggregate.get("relation_scope_counts", {}).get(key, 0)
+            for key in (
+                "CALL",
+                "SERVICE",
+                "JOURNEY",
+                "STOP_EVENT",
+                "RESPONSE_CONTEXT",
+                "OTHER_OR_UNCLASSIFIED",
+            )
+        },
+        "explicit_reason_field_observation": bounded_observation_label(
+            len(reason_paths)
+        ),
+        "explicit_reason_field_paths": reason_paths,
+        "general_attribute_observation": bounded_observation_label(
+            aggregate.get("general_attribute_count", 0)
+        ),
+        "general_attribute_classification": (
+            "PASSENGER_INFORMATION_ATTRIBUTE"
+            if aggregate.get("general_attribute_count", 0)
+            else None
+        ),
+        "operational_status_observation": bounded_observation_label(
+            operational_status_total
+        ),
+        "incident_call_identifier_observation": bounded_observation_label(
+            aggregate.get("incident_call_identifier_count", 0)
+        ),
+        "info_call_identifier_observation": bounded_observation_label(
+            aggregate.get("info_call_identifier_count", 0)
+        ),
+        "extension_observation": bounded_observation_label(
+            aggregate.get("extension_populated_count", 0)
+        ),
+        "error_message_observation": bounded_observation_label(
+            aggregate.get("error_message_count", 0)
+        ),
+        "reason_causality_guardrail": (
+            "A populated Reason-like field is source-reported evidence only; it "
+            "does not establish Root Cause, Proven Cause, or Confirmed Cause of Delay."
+        ),
+        "aggregate_mdd_summary": aggregate,
+    }
+    for field_name in (
+        "sample_result_count",
+        "inline_situation_count",
+        "situation_full_ref_count",
+        "journey_level_situation_full_ref_count",
+        "call_level_situation_full_ref_count",
+        "other_situation_full_ref_count",
+        "resolved_inline_situation_ref_count",
+        "unresolved_situation_ref_count",
+        "general_attribute_count",
+        "general_attribute_text_present_count",
+        "general_attribute_code_present_count",
+        "general_attribute_info_url_present_count",
+        "extension_populated_count",
+        "error_message_count",
+        "incident_call_identifier_count",
+        "info_call_identifier_count",
+        "operational_status_counts",
+        "reason_like_field_inventory",
+        "json_path_inventory",
+        "situation_full_ref_records",
+        "incident_info_occurrences",
+        "error_message_field_inventory",
+    ):
+        output[field_name] = aggregate.get(field_name, 0)
+    return output
+
+
+def run_mdd_discovery_mode() -> int:
+    """Run the broader bounded MDD-only discovery audit.
+
+    This path intentionally does not load GTFS bindings or call the GTFS-RT
+    fetch function.  It is the host command for the follow-up discovery run.
+    """
+
+    api_key = os.environ.get(MDD_API_KEY_ENV)
+    api_key_present = bool(api_key)
+    raw_directory = create_raw_temp_directory() if api_key_present else None
+    tracker = AttemptTracker(max_http_attempts=MDD_DISCOVERY_MAX_HTTP_ATTEMPTS)
+    emit(
+        "run_configuration",
+        {
+            "probe_name": PROBE_NAME,
+            "execution_mode": "MDD_DISCOVERY_HOST_RUN_ONLY",
+            "codex_must_not_execute": True,
+            "gtfs_rt_included": False,
+            "gtfs_rt_http_attempts": 0,
+            "mdd_endpoint": MDD_ENDPOINT,
+            "mdd_method": "POST",
+            "mdd_stations": [
+                {
+                    "station": station.display_name,
+                    "stop_point_ref": station.stop_point_ref,
+                }
+                for station in MDD_DISCOVERY_STATIONS
+            ],
+            "mdd_station_count": len(MDD_DISCOVERY_STATIONS),
+            "mdd_max_http_attempts": MDD_DISCOVERY_MAX_HTTP_ATTEMPTS,
+            "max_http_attempts": MDD_DISCOVERY_MAX_HTTP_ATTEMPTS,
+            "requests_per_station": 1,
+            "number_of_results": 5,
+            "include_previous_calls": True,
+            "include_onward_calls": True,
+            "include_realtime_data": True,
+            "retries": RETRIES,
+            "concurrency": CONCURRENCY,
+            "fallback_endpoints": list(FALLBACK_ENDPOINTS),
+            "mdd_api_key_environment_variable": MDD_API_KEY_ENV,
+            "mdd_api_key_present": api_key_present,
+            "raw_artifact_policy": "temporary_mode_700_directory_outside_repository",
+            "raw_temp_directory": raw_directory,
+        },
+    )
+
+    station_summaries: List[Dict[str, Any]] = []
+    stop_reason: Optional[str] = None
+    if not api_key_present:
+        stop_reason = "MDD_API_KEY_MISSING"
+    else:
+        assert api_key is not None
+        for station in MDD_DISCOVERY_STATIONS:
+            result = perform_mdd_post(tracker, station, api_key, raw_directory)
+            summary = analyze_mdd_response(station, result, api_key)
+            station_summaries.append(summary)
+            emitted_summary = dict(summary)
+            emitted_summary.pop("_situation_records", None)
+            emitted_summary.pop("_reference_records", None)
+            emit("mdd_discovery_station_summary", emitted_summary)
+            if result.http_status in (401, 403):
+                stop_reason = "MDD_AUTH_FAILURE_%s" % result.http_status
+                break
+
+    discovery = mdd_discovery_summary(
+        station_summaries,
+        tracker,
+        api_key_present,
+        stop_reason,
+        secret=api_key,
+    )
+    emit("mdd_discovery_summary", discovery)
+    emit(
+        "final_summary",
+        {
+            "execution_mode": "MDD_DISCOVERY_HOST_RUN_ONLY",
+            "stage_3a_status": (
+                "PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING"
+            ),
+            "discovery_status": discovery["discovery_status"],
+            "http_attempts": tracker.total_http_attempts,
+            "http_attempt_budget": MDD_DISCOVERY_MAX_HTTP_ATTEMPTS,
+            "http_budget_compliance": discovery["http_budget_compliance"],
+            "gtfs_rt_http_attempts": 0,
+            "mdd_http_attempts": tracker.total_http_attempts,
+            "answers": {
+                "inline_situations": discovery["inline_situation_observation"],
+                "situation_full_refs": discovery["situation_full_ref_observation"],
+                "explicit_reason_evidence": discovery[
+                    "explicit_reason_field_observation"
+                ],
+                "general_attributes": discovery["general_attribute_observation"],
+                "operational_status_fields": discovery[
+                    "operational_status_observation"
+                ],
+                "incident_call_identifiers": discovery[
+                    "incident_call_identifier_observation"
+                ],
+                "info_call_identifiers": discovery["info_call_identifier_observation"],
+                "provider_extensions": discovery["extension_observation"],
+                "real_error_messages": discovery["error_message_observation"],
+            },
+            "stop_reason": stop_reason,
+            "cross_source_matching_performed": False,
+            "root_cause_inference_performed": False,
+            "production_approval": "NONE",
+            "actual_time_status": "UNAVAILABLE",
+            "actual_delay_kpi": "NOT_APPROVED",
+        },
+    )
+    return 0
+
+
 def emit(record_type: str, payload: Dict[str, Any]) -> None:
     record = {"record_type": record_type}
     record.update(payload)
@@ -3018,14 +3915,21 @@ def parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser(
         description=(
             "HOST-RUN ONLY: perform the bounded Stage 3A disruption evidence "
-            "audit (one GTFS-RT GET and two MDD POST requests)."
+            "audit. The default mode uses one GTFS-RT GET and two MDD POST "
+            "requests; --mode mdd-discovery uses only ten bounded MDD POST "
+            "requests."
         )
+    )
+    argument_parser.add_argument(
+        "--mode",
+        choices=("full", "mdd-discovery"),
+        default="full",
+        help="Select the default combined audit or the host-only MDD discovery run.",
     )
     return argument_parser
 
 
-def main() -> int:
-    parser().parse_args()
+def run_full_audit() -> int:
     raw_directory = create_raw_temp_directory()
     api_key = os.environ.get(MDD_API_KEY_ENV)
     mdd_api_key_present = bool(api_key)
@@ -3203,6 +4107,18 @@ def main() -> int:
             "gtfsde_provenance_description_percentage": feed_summary.get(
                 "gtfsde_provenance_description_percentage"
             ),
+            "non_provenance_description_alert_count": feed_summary.get(
+                "non_provenance_description_alert_count", 0
+            ),
+            "non_provenance_description_value_count": feed_summary.get(
+                "non_provenance_description_value_count", 0
+            ),
+            "distinct_non_provenance_description_text_count": feed_summary.get(
+                "distinct_non_provenance_description_text_count", 0
+            ),
+            "top_20_non_provenance_description_texts": feed_summary.get(
+                "top_20_non_provenance_description_texts", []
+            ),
         },
     )
     emit(
@@ -3256,50 +4172,7 @@ def main() -> int:
     else:
         for station in MDD_STATIONS:
             mdd_station_summaries.append(
-                {
-                    "station": station.display_name,
-                    "station_key": station.key,
-                    "stop_point_ref": station.stop_point_ref,
-                    "response_audit_status": "MDD_API_KEY_MISSING",
-                    "http_status": None,
-                    "response_content_type": None,
-                    "response_bytes": 0,
-                    "elapsed_ms": None,
-                    "request_timestamp_utc": None,
-                    "raw_artifact_path": None,
-                    "result_count": 0,
-                    "situation_count": 0,
-                    "reference_entry_count": 0,
-                    "situation_reference_count": 0,
-                    "reference_type_counts": {},
-                    "incident_call_reference_count": 0,
-                    "unique_situation_count": 0,
-                    "call_level_situation_link_count": 0,
-                    "service_level_situation_link_count": 0,
-                    "other_unclassified_relation_count": 0,
-                    "relation_scope_counts": {
-                        "CALL": 0,
-                        "SERVICE": 0,
-                        "OTHER_OR_UNCLASSIFIED": 0,
-                    },
-                    "summary_present_count": 0,
-                    "description_present_count": 0,
-                    "detail_present_count": 0,
-                    "valid_from_present_count": 0,
-                    "valid_to_present_count": 0,
-                    "content_coverage_percentages": {
-                        "participant_ref": None,
-                        "situation_number": None,
-                        "identifier": None,
-                        "summary": None,
-                        "description": None,
-                        "detail": None,
-                        "valid_from": None,
-                        "valid_to": None,
-                    },
-                    "situation_content": aggregate_situation_content([]),
-                    "_situation_records": [],
-                }
+                empty_mdd_station_summary(station, "MDD_API_KEY_MISSING")
             )
     for station_summary in mdd_station_summaries:
         emitted_station_summary = dict(station_summary)
@@ -3320,6 +4193,13 @@ def main() -> int:
         ),
     )
     return 0
+
+
+def main() -> int:
+    arguments = parser().parse_args()
+    if arguments.mode == "mdd-discovery":
+        return run_mdd_discovery_mode()
+    return run_full_audit()
 
 
 if __name__ == "__main__":
