@@ -154,3 +154,28 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 59. Stage 5 approved a clean PostgreSQL redesign only. Legacy SQL Server is not
     copied 1:1; any later import must preserve source IDs/timestamps/NULLs and
     distinguish legacy rows from PostgreSQL-native observations.
+60. The current Stage 4 static-source counts are validated source baselines and
+    future reconciliation targets, not results from a physical warehouse.
+61. `FactScheduledTrip` is a scheduled trip-pattern fact, not one row per
+    active service date.
+62. `FactScheduledStopEvent` is a scheduled stop-event pattern fact, not one
+    row per active service date and not a realtime/actual-outcome fact.
+63. `BridgeServiceDate` owns active `Service + Date` expansion; it must not be
+    confused with trip-pattern or stop-event-pattern grain.
+64. `DateKey` does not enter the `FactScheduledStopEvent` grain. Date-expanded
+    analytics must use `BridgeServiceDate` in a separate derived/query output.
+65. GTFS schedule times greater than `24:00:00` retain their service-day
+    offset and must not be wrapped to a civil-day time without preserving that
+    offset.
+66. A route/trip serving label does not expand Cologne geography to external
+    route/trip stops.
+67. The actual source `stop_id` referenced by `stop_times.txt` controls
+    scheduled-event geography; `parent_station` does not override it.
+68. Stage 4 is the authoritative source mode classifier. Mode classification
+    never expands geography and unresolved classifications remain explicit.
+69. Static GTFS schedule/calendar evidence does not prove actual operation,
+    actual delay, actual cancellation, operational reliability, or physical
+    service delivery.
+70. PostgreSQL migration, runtime, database/schema/table creation, SQL,
+    migration, and data loading remain deferred until explicit user
+    authorization.

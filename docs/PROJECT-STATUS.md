@@ -14,8 +14,8 @@
 | 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
 | 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
 | 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
-| 6 | Static Warehouse & Analytics | NOT STARTED / NEXT |
-| 7 | Realtime Pilot Design | Not started |
+| 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
+| 7 | Realtime Pilot Design | NOT STARTED / NEXT |
 | 8 | Small Realtime Pilot | Not started |
 | 9 | Matching & Data Quality | Not started |
 | 10 | Operational Fact | Not started |
@@ -70,7 +70,8 @@ for the authoritative closeout record.
   [the separately named historical JSON](stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json).
 - Stage 4 completion did not authorize physical PostgreSQL, warehouse,
   collector, scheduler, matching, or Power BI implementation. Stage 5 has now
-  completed its architecture approval; Stage 6 is next and not started.
+  completed its architecture approval; Stage 6's design/contract closeout is
+  recorded below and physical implementation remains deferred.
 
 ### Stage 5 closeout
 
@@ -92,8 +93,33 @@ for the authoritative closeout record.
   backup/recovery requirement.
 - Stage 5 created no database, schema, table, migration, SQL execution,
   collector, scheduler, matching, warehouse, or Power BI implementation.
-  Stage 6 owns the first static warehouse implementation and remains **NOT
-  STARTED / NEXT**.
+  Its static warehouse/analytics handoff is now completed as a design
+  contract; physical implementation remains deferred until explicit user
+  authorization.
+
+### Stage 6 closeout
+
+- **Stage 6 — COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED.**
+  The [static warehouse and analytics design](stages/06-static-warehouse-analytics-design.md)
+  finalizes the source-to-Cologne boundary, exact static dimension/bridge/fact
+  grains, GTFS extended-hour time normalization, `calendar.txt` and
+  `calendar_dates.txt` activation semantics, Stage 4 scope/mode application,
+  cross-boundary behavior, static analytics outputs, snapshot lineage,
+  idempotency, and the future implementation acceptance matrix.
+- The current Stage 4 values are source baselines only: 3,137 Cologne stops,
+  1,144,295 Cologne scheduled stop events, 1,082,490 internal segments,
+  61,805 Cologne-serving trips, 39,566 Cologne-internal trips, 22,239
+  cross-boundary trips, 1,606 touch-only diagnostics, and 137
+  Cologne-serving routes. They are not claims about a warehouse that exists
+  today.
+- `FactScheduledTrip` and `FactScheduledStopEvent` remain pattern-level;
+  `BridgeServiceDate` owns active Service + Date expansion, and `DateKey` does
+  not enter the scheduled stop-event fact grain. Stage 6 does not depend on
+  Stage 9 `core` objects.
+- PostgreSQL migration/runtime, database/schema/table/migration creation, SQL,
+  data loading, network retrieval, realtime work, matching, operational facts,
+  and Power BI work did not occur. The [Stage 6 completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
+  records the closeout. Stage 7 is **NOT STARTED / NEXT**.
 
 ## Post-Stage-02 validation
 

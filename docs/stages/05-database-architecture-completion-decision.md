@@ -3,7 +3,8 @@
 **Date:** 2026-09-28
 **Decision:** [D-029](../DECISION-LOG.md#d-029--stage-5-database-architecture)
 **Final status:** COMPLETE — APPROVED ARCHITECTURE
-**Next stage:** Stage 6 — NOT STARTED / NEXT
+**Stage 6 handoff:** Static warehouse/analytics design and contract
+**Current next stage:** Stage 7 — NOT STARTED / NEXT
 
 This closeout classifies the Stage 5 conclusions and records the boundary
 between approved architecture and deferred implementation. The companion
@@ -85,9 +86,11 @@ The following are intentionally not implemented or finalized in Stage 5:
 - analytics materializations and Power BI; and
 - credentials, roles, grants, backup tooling, and network configuration.
 
-Stage 6 is the next stage and may begin only with the static warehouse handoff
-in the architecture document. It must not be treated as started by this
-documentation approval.
+The [Stage 6 design contract](06-static-warehouse-analytics-design.md) and
+[completion decision](06-static-warehouse-analytics-completion-decision.md)
+are the approved static warehouse/analytics handoff. Its physical PostgreSQL
+implementation remains deferred until explicit user authorization. Stage 7
+must not be treated as started by this documentation approval.
 
 ## OPEN IMPLEMENTATION RISK
 
@@ -136,9 +139,10 @@ constraints:
 ## Acceptance result and closeout
 
 All 25 Stage 5 acceptance criteria are **PASS**, including documentation
-consistency checks and `git diff --check`. No database changes, SQL execution,
-network requests, collector changes, scheduler changes, Power BI changes, or
-Stage 6 work occurred.
+consistency checks and `git diff --check`. At Stage 5 closeout, no database
+changes, SQL execution, network requests, collector changes, scheduler
+changes, Power BI changes, or Stage 6 work had occurred.
 
-**Final decision:** Stage 5 is **COMPLETE — APPROVED ARCHITECTURE**. Stage 6 is
-**NOT STARTED / NEXT**.
+**Final decision:** Stage 5 is **COMPLETE — APPROVED ARCHITECTURE**. Stage 6's
+design/contract closeout is complete; its physical implementation remains
+deferred until explicit user authorization. Stage 7 is **NOT STARTED / NEXT**.

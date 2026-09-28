@@ -33,6 +33,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-027 | 2026-09-28 | Stage 3 is complete: Stage 3A approved from bounded evidence; Stage 3B collection/cadence policy approved without activation; Stage 3C stop-event-first reconciliation design approved without implementation | Approved stage completion |
 | D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
 | D-029 | 2026-09-28 | Stage 5 database architecture: PostgreSQL 18 clean redesign, durable source-faithful layers, logical grains, lineage, and deferred physical implementation | Approved architecture |
+| D-030 | 2026-09-28 | Stage 6 static warehouse and analytics design contract: Cologne-scoped grains, schedule/calendar semantics, lineage, and future reconciliation baseline; physical implementation deferred by explicit user decision | Approved design; physical implementation deferred |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -274,5 +275,44 @@ source-lineaged legacy-import policy.
 
 This is an architecture approval only. It created no PostgreSQL database,
 schema, table, migration, SQL execution, collector, scheduler, matching,
-warehouse, or Power BI implementation. Stage 6 is **NOT STARTED / NEXT** and
-owns the first static warehouse implementation.
+warehouse, or Power BI implementation. Stage 6 receives the static
+warehouse/analytics design and contract handoff; physical implementation
+remains deferred until explicit user authorization.
+
+## D-030 — Stage 6 Static Warehouse & Analytics Design
+
+Stage 6 is **COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED**.
+The detailed [Stage 6 design contract](stages/06-static-warehouse-analytics-design.md)
+and [completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
+are authoritative together with the Stage 4 evidence and Stage 5 grain catalog.
+
+The approved design decisions are:
+
+- retain the complete approved VRS GTFS snapshot in `src`, then apply the
+  Stage 4 Cologne boundary in validated/rebuildable transformations before
+  producing the Cologne-focused `dw` contract;
+- keep the Stage 5 logical layers and exact static entities without requiring
+  Stage 9 `core` canonical objects;
+- keep `FactScheduledTrip` at one Cologne-serving trip-pattern grain and
+  `FactScheduledStopEvent` at one validated Cologne stop-event-pattern grain;
+- keep active `Service + Date` expansion exclusively in
+  `BridgeServiceDate`, with no `DateKey` in the scheduled stop-event fact;
+- preserve exact GTFS time text and normalize extended-hour times to integer
+  service-day seconds without wrapping values over `24:00:00`;
+- apply `calendar.txt` weekday/range rules and `calendar_dates.txt` add/remove
+  exceptions deterministically, including service IDs represented only by
+  exceptions;
+- preserve Stage 4 actual-stop-ID geography, cross-boundary treatment,
+  internal-segment rule, and source-faithful mode classifier;
+- define snapshot-aware static schedule/network analytics, lineage,
+  content-hash idempotency, and a future source-to-warehouse acceptance
+  matrix; and
+- treat all current Stage 4 counts as validated source baselines, not as
+  warehouse results.
+
+The user's explicit decision defers PostgreSQL migration/runtime/database
+implementation until later authorization. Stage 6 therefore created no
+database, schema, table, migration, SQL, data load, network request,
+collector, scheduler, matching layer, operational fact, or Power BI change.
+Stage 5 remains **COMPLETE — APPROVED ARCHITECTURE**. Stage 7 is
+**NOT STARTED / NEXT** and was not started by this decision.

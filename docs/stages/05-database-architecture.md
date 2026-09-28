@@ -59,7 +59,8 @@ Stage 5 does not:
 
 Stage 5 moved from **IN PROGRESS** during authoring to **COMPLETE — APPROVED
 ARCHITECTURE** only after the acceptance checks in Section 23 passed. Stage 6
-is **NOT STARTED / NEXT**.
+receives the static warehouse/analytics design and contract handoff; physical
+implementation remains deferred until explicit user authorization.
 
 ## 3. Inputs and architectural constraints
 
@@ -403,11 +404,12 @@ documented by Stage 9. `MDD JourneyRef` must never be treated as GTFS-RT
 
 ### `dw`
 
-Stage 6 owns the first static warehouse implementation. Approved conceptual
-grains are `DimDate`, `DimAgency`, `DimMode`, `DimStop`, `DimRoute`,
+Stage 6 owns the static warehouse/analytics design and contract. Approved
+conceptual grains are `DimDate`, `DimAgency`, `DimMode`, `DimStop`, `DimRoute`,
 `DimService`, `BridgeServiceDate`, `FactScheduledTrip`, and
 `FactScheduledStopEvent`. No realtime operational outcome fact is implemented
-in Stage 5; the placeholder belongs to Stage 10.
+in Stage 5; the placeholder belongs to Stage 10. Physical implementation of
+these static contracts remains deferred until explicit user authorization.
 
 Every static warehouse row that depends on GTFS retains `FeedSnapshotKey` and
 relevant source IDs so it can be traced back to the feed snapshot.
@@ -564,10 +566,11 @@ The following remain deferred:
 These are deferred implementation decisions, not reasons to alter the Stage 5
 architecture or to begin the next stage inside this task.
 
-## 22. Stage 6 handoff
+## 22. Stage 6 design/contract handoff
 
-Stage 6 begins the incremental static warehouse implementation. Its first
-work must:
+Stage 6 finalizes the static warehouse and analytics design/contract. Physical
+PostgreSQL implementation is explicitly deferred until a later user
+authorization. Any future implementation must:
 
 1. use the approved PostgreSQL 18 direction without hardcoding a future minor
    image tag;
@@ -589,6 +592,12 @@ work must:
 7. keep `wrk` rebuildable and analytics non-authoritative; and
 8. defer realtime outcome facts, collectors, matching, and Power BI changes to
    their owning stages.
+
+The [Stage 6 design contract](06-static-warehouse-analytics-design.md) and
+[completion decision](06-static-warehouse-analytics-completion-decision.md)
+are the authoritative follow-on handoff. This Stage 5 document does not
+authorize physical PostgreSQL implementation, and Stage 7 must not be treated
+as started by the Stage 5 approval.
 
 ## 23. Acceptance criteria
 
@@ -630,4 +639,7 @@ records the classifications, carried-forward risks, and final closeout.
 
 **STAGE BOUNDARY:** No PostgreSQL database, schema, table, migration, SQL
 execution, collector, scheduler, matching implementation, warehouse
-implementation, or Power BI change occurred. Stage 6 is **NOT STARTED / NEXT**.
+implementation, or Power BI change occurred at Stage 5 closeout. Stage 6 is
+the approved static warehouse/analytics design handoff; physical implementation
+remains deferred until explicit user authorization. Stage 7 is **NOT STARTED /
+NEXT**.

@@ -177,13 +177,19 @@ boundaries, static content-hash snapshots, MDD observation history, the bounded
 GTFS-RT persistence boundary, keys/types/history/idempotency, indexing,
 partition direction, lineage, security, backup/recovery, and legacy import
 policy. No PostgreSQL database, schema, table, migration, SQL execution, or
-runtime implementation was created. Stage 6 owns the first static warehouse
-implementation and is **NOT STARTED / NEXT**.
+runtime implementation was created. Stage 6 receives the static
+warehouse/analytics design and contract handoff; physical implementation
+remains deferred until explicit user authorization.
 
-## Stage 6 — Static Warehouse & Analytics — NOT STARTED / NEXT
-Build static dimensions/facts/views incrementally and reconcile source-to-warehouse counts.
+## Stage 6 — Static Warehouse & Analytics Design — COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED
+The [Stage 6 design contract](stages/06-static-warehouse-analytics-design.md)
+defines the Cologne-focused static dimensions, service-date bridge,
+pattern-level scheduled facts, GTFS extended-hour normalization, Stage 4
+scope/mode application, static analytics outputs, snapshot lineage, and future
+source-to-warehouse acceptance matrix. No PostgreSQL object, SQL execution,
+network request, or source load is part of this stage.
 
-## Stage 7 — Realtime Pilot Design
+## Stage 7 — Realtime Pilot Design — NOT STARTED / NEXT
 Approve target rationale, request contract, `NumberOfResults`, `TimeWindow` if
 supported, retry/timeout, quota budget, any justified bounded raw capture, and
 audit. Collector implementation begins by reviewing
