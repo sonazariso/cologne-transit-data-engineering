@@ -15,8 +15,8 @@
 | 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
 | 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
-| 7 | Realtime Pilot Design | NOT STARTED / NEXT |
-| 8 | Small Realtime Pilot | Not started |
+| 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
+| 8 | Small Realtime Pilot | NOT STARTED / NEXT |
 | 9 | Matching & Data Quality | Not started |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
@@ -119,7 +119,29 @@ for the authoritative closeout record.
 - PostgreSQL migration/runtime, database/schema/table/migration creation, SQL,
   data loading, network retrieval, realtime work, matching, operational facts,
   and Power BI work did not occur. The [Stage 6 completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
-  records the closeout. Stage 7 is **NOT STARTED / NEXT**.
+  records the closeout. Stage 7 is now separately closed as **COMPLETE —
+  APPROVED PILOT DESIGN**; Stage 8 remains **NOT STARTED / NEXT**.
+
+### Stage 7 closeout
+
+- **Stage 7 — COMPLETE — APPROVED PILOT DESIGN.** The [realtime pilot design](stages/07-realtime-pilot-design.md)
+  fixes a bounded, reproducible MDD/TRIAS-only Stage 8 pilot for Köln Hbf,
+  `de:05315:11201`, with one 60-second slot per minute for at most 60 minutes,
+  at most 60 scheduled requests, `NumberOfResults=20`, `TimeWindow` omitted,
+  a 30-second timeout, and zero retries.
+- The pilot preserves the approved source-field retention, timing, estimate
+  history, call scope, bay, operational-flag, Situation, service-information,
+  error, parser-lineage, gap, idempotency, and reconciliation requirements.
+  It uses protected temporary raw responses only under the bounded 24-hour
+  Stage 8 exception and a diagnostic append-only JSONL harness because
+  PostgreSQL remains deferred.
+- GTFS-RT is not part of the one-source pilot; Stage 9 owns cross-source
+  matching. Actual Delay remains **NOT APPROVED**. One-station evidence is not
+  Cologne-wide coverage.
+- The [Stage 7 completion decision](stages/07-realtime-pilot-design-completion-decision.md)
+  is authoritative. Stage 8 execution has not occurred: no MDD or GTFS-RT
+  request, network access, SQL/database access, runtime pilot, or PostgreSQL
+  implementation was performed by this closeout.
 
 ## Post-Stage-02 validation
 
@@ -213,10 +235,10 @@ executed zero probes, executed no SQL, and changed no database, Legacy
 repository, Task Scheduler, or Power BI state.
 
 The durable [realtime collector requirements](collector-design/realtime-collector-requirements.md)
-are approved Stage 02 design inputs with implementation deferred. The separate
-[near-event RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
-is a **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION** with host execution pending;
-it is not a Stage 02 blocker.
+are approved Stage 02/Stage 7 design inputs with implementation deferred. The
+separate [near-event RecordedAtTime lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
+is a **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION**; its bounded host evidence
+is documented and does not replace the future Stage 8 pilot.
 
 ## Current authoritative decisions
 
@@ -328,8 +350,8 @@ source-contract conclusions.
    retention matrix; implementation/schema design belongs to later approved
    stages.
 6. Full raw-payload retention — **RESOLVED_FOR_STAGE_02** by the approved
-   raw-retention decision; any automated exception requires a later Stage 7
-   gate.
+   raw-retention decision; Stage 7 now approves only the bounded Stage 8
+   temporary exception with protected storage and maximum 24-hour retention.
 
 **FINAL STAGE 02 APPROVAL: APPROVED.**
 

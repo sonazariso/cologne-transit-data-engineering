@@ -1,7 +1,7 @@
 # MDD/TRIAS Raw-Payload Retention Decision
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Decision state:** Approved Stage 02 decision; synchronized with post-Stage-02 consolidation<br>
+**Decision state:** Approved Stage 02 default; Stage 7 adds a bounded Stage 8 pilot exception<br>
 **Scope:** Full raw MDD XML/JSON response payloads
 
 ## Approved decision
@@ -50,8 +50,8 @@ nullability, media type, or parser loss. Such an artifact must:
 - be access-controlled by the diagnostic environment; and
 - be handled under the cleanup controls of the approved diagnostic task.
 
-The Stage 02 decision does not prescribe a number of days because no such
-period was authorized by the evidence supplied for this audit.
+The Stage 02 decision does not prescribe a permanent-retention period because
+no such period was authorized by the evidence supplied for that audit.
 
 The future architecture may evaluate a **short-term** raw-payload retention
 option for forensic reprocessing and parser improvements, particularly where a
@@ -60,22 +60,35 @@ an approved duration or an instruction to retain raw payloads permanently. Any
 later duration must be chosen using storage volume, privacy/data
 considerations, reprocessing need, and operational cost.
 
-## Future exception gate
+## Stage 7 bounded Stage 8 exception
 
-If Stage 7 later establishes a justified need for **automated short-term raw
-capture**, it requires a new explicit approval before implementation. That
-approval must state:
+Stage 7 explicitly approves a narrow automated raw-response exception for MDD
+Stage 8 pilot responses only. It does not change the default permanent-
+retention decision and does not approve a general raw archive.
 
-1. purpose;
-2. bounded retention period;
-3. storage location;
-4. access controls; and
-5. cleanup mechanism.
+| Control | Stage 8 pilot requirement |
+|---|---|
+| Purpose | Verify raw-response-to-parser fidelity, detect parser field loss, and support offline forensic comparison when unexpected fields appear. |
+| Scope | MDD Stage 8 pilot responses only. No GTFS-RT payload capture is included. |
+| Storage | Temporary directory outside the repository, such as `/private/tmp/cologne-transit-stage-08-XXXXXXXX/`. |
+| Directory permissions | Mode `700`. |
+| Raw-file permissions | Mode `600`. |
+| Credential check | Before writing, verify that the API-key value is not present in the response content. |
+| Prohibited content | No `x-api-key` header, API-key value, credential fingerprint, authorization material, or command-line secret. |
+| Retention | During Stage 8 execution/review only; maximum 24 hours after the pilot run ends. Delete earlier after successful verification and evidence extraction where possible. |
+| Cleanup | Cleanup on normal completion is required; the Stage 8 final report must state whether it succeeded. |
+| Source control/publication | Never commit, publish, or redistribute raw payloads. |
 
-Stage 02 does not approve automated capture, a raw archive, or a policy such
-as “keep raw XML forever,” “keep raw JSON forever,” or “keep raw protobuf
-forever.” Any bounded automatic raw capture requires a later explicit approval
-of purpose, retention, storage, access, and cleanup.
+The append-only JSONL pilot persistence artifacts are diagnostic artifacts in
+the same protected temporary area (or another explicitly protected temporary
+directory), not a permanent raw archive and not the future PostgreSQL source
+layer. Stage 8 must treat them as temporary diagnostic artifacts, clean them
+up under its execution/review report, and never commit the complete history.
+
+This exception is intentionally bounded to the Stage 8 handoff in
+[the Stage 7 design](../stages/07-realtime-pilot-design.md). It does not
+authorize Stage 8 execution, production collection, or a permanent raw-
+payload policy.
 
 ## Relationship to source-faithful retention
 

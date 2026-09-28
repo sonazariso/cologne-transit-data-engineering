@@ -189,20 +189,33 @@ scope/mode application, static analytics outputs, snapshot lineage, and future
 source-to-warehouse acceptance matrix. No PostgreSQL object, SQL execution,
 network request, or source load is part of this stage.
 
-## Stage 7 — Realtime Pilot Design — NOT STARTED / NEXT
-Approve target rationale, request contract, `NumberOfResults`, `TimeWindow` if
-supported, retry/timeout, quota budget, any justified bounded raw capture, and
-audit. Collector implementation begins by reviewing
-[docs/collector-design/realtime-collector-requirements.md](collector-design/realtime-collector-requirements.md).
-Validate `RecordedAtTime` population in the pilot; the separate
-[post-Stage-02 lifecycle validation](source-contracts/mdd-trias-event-lifecycle-validation.md)
-is additional design evidence, not a Stage 02 blocker. Stage 02 does not
-approve a production retry policy or new polling schedule.
+## Stage 7 — Realtime Pilot Design — COMPLETE — APPROVED PILOT DESIGN
 
-## Stage 8 — Small Realtime Pilot
-Start with one station. Validate every selected field end-to-end: raw response
-→ parser → persistence, including `RecordedAtTime` population and call/bay/
-situation scope. Expand only after correctness is proven.
+The [Stage 7 realtime pilot design](stages/07-realtime-pilot-design.md) and
+[completion decision](stages/07-realtime-pilot-design-completion-decision.md)
+fix a bounded, reproducible Stage 8 handoff without executing it. MDD/TRIAS is
+the only primary pilot source; GTFS-RT remains complementary and is excluded
+from the one-source loop because Stage 9 owns cross-source matching.
+
+The approved target is Köln Hbf, `de:05315:11201`. The exact pilot request uses
+TRIAS 1.2 `POST`, `NumberOfResults=20`, `arrival`, previous/onward/realtime
+flags true, `TimeWindow` omitted, and `IncludeOperatingDays` omitted. The
+sampling policy is one slot every 60 seconds for at most 60 minutes and at
+most 60 scheduled requests, with a 30-second timeout, zero retries, no
+concurrency, no catch-up, explicit overlap gaps, quota accounting, and
+early-stop rules. A bounded 24-hour temporary raw-response exception and a
+protected append-only JSONL diagnostic persistence harness are approved;
+PostgreSQL remains deferred. Actual Delay remains unapproved.
+
+## Stage 8 — Small Realtime Pilot — NOT STARTED / NEXT
+
+Stage 8 owns host execution of the approved MDD-only pilot. It must validate
+every selected field end-to-end — raw response → parser → diagnostic
+persistence — including `RecordedAtTime` population, repeated estimate
+history, call/bay/Situation scope, errors, gaps, cleanup, and parser-to-
+persistence reconciliation. It must remain bounded to one station and must
+not be interpreted as Cologne-wide coverage. No Stage 8 execution occurred in
+the Stage 7 closeout.
 
 ## Stage 9 — Matching & Data Quality
 Validate stop, route, service-date, trip/event identity, candidate richer

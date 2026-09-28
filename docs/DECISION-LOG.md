@@ -34,6 +34,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
 | D-029 | 2026-09-28 | Stage 5 database architecture: PostgreSQL 18 clean redesign, durable source-faithful layers, logical grains, lineage, and deferred physical implementation | Approved architecture |
 | D-030 | 2026-09-28 | Stage 6 static warehouse and analytics design contract: Cologne-scoped grains, schedule/calendar semantics, lineage, and future reconciliation baseline; physical implementation deferred by explicit user decision | Approved design; physical implementation deferred |
+| D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Approved pilot design |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -314,5 +315,80 @@ The user's explicit decision defers PostgreSQL migration/runtime/database
 implementation until later authorization. Stage 6 therefore created no
 database, schema, table, migration, SQL, data load, network request,
 collector, scheduler, matching layer, operational fact, or Power BI change.
-Stage 5 remains **COMPLETE — APPROVED ARCHITECTURE**. Stage 7 is
-**NOT STARTED / NEXT** and was not started by this decision.
+Stage 5 remains **COMPLETE — APPROVED ARCHITECTURE**. Stage 7 was not started
+by this decision; it is closed by D-031 below.
+
+## D-031 — Stage 7 Realtime Pilot Design
+
+Stage 7 is **COMPLETE — APPROVED PILOT DESIGN**. It defines a bounded,
+reproducible Stage 8 diagnostic handoff without executing the pilot.
+
+The approved decisions are:
+
+- Use **MDD/TRIAS as the only primary Stage 8 pilot source**. GTFS-RT remains
+  complementary/secondary in the long-term architecture but is excluded from
+  the one-source pilot; Stage 9 owns cross-source matching.
+- Target **Köln Hbf**, parent MDD `StopPointRef` **`de:05315:11201`**, for
+  source/parser/persistence validation only. The station is not a
+  representative Cologne-wide sample.
+- Use the fixed request contract: endpoint
+  `https://mdd.gorheinland.com/delfi`; `POST`; TRIAS 1.2;
+  `application/xml; charset=utf-8`; `x-api-key` from `MDD_API_KEY` only;
+  `RequestorRef=CologneTransitIntelligence`; current approved UTC
+  `DepArrTime`; `StopEventType=arrival`; `NumberOfResults=20`;
+  `IncludePreviousCalls=true`; `IncludeOnwardCalls=true`; and
+  `IncludeRealtimeData=true`.
+- Omit `TimeWindow` for the pilot and record it as semantically available but
+  not selected. Omit `IncludeOperatingDays` because it was not part of the
+  validated request path. `NumberOfResults=20` is bounded-pilot-only and is
+  not a production default or HTTP request count.
+- Use one request slot every **60 seconds** for at most **60 minutes**, with a
+  maximum of **60 scheduled logical requests**. Do not run concurrent or
+  catch-up requests. If a slot overlaps the prior request, skip it and record
+  `SCHEDULED_SLOT_SKIPPED_OVERLAP`.
+- Apply a **30-second timeout** and **zero retries**. Record every actual HTTP
+  attempt. The conservative project ceiling remains **250,000 MDD HTTP
+  requests/month**; total external caller usage remains unknown.
+- Before any request, check only credential presence and print
+  `MDD_API_KEY: PRESENT` or `MDD_API_KEY: MISSING`. Missing credentials mean
+  zero attempts. Stop immediately on 401/403 or 429. Do not retry network,
+  timeout, 408, or retryable 5xx failures; stop after three consecutive failed
+  request slots, with a successful request resetting the counter.
+- Version observation lineage under the non-production policy
+  `MDD_STAGE_8_KOELN_HBF_60S_60MIN_V1`.
+- Preserve the approved source fields and exact timing semantics, including
+  repeated estimate history, all call scopes, planned/estimated bays,
+  independent operational flags, Situation and `SituationFullRef` evidence,
+  `Attribute`/`GeneralAttribute`/`IncidentCall` evidence, populated errors,
+  parser gaps, and response/run lineage.
+- Keep source `RecordedAtTime` nullable, exact, and never synthesized. If it
+  appears, retain its first observation lineage; treat it only as candidate
+  evidence. Actual Delay remains **NOT APPROVED**. If zero occurrences are
+  observed, report `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`.
+- Approve a bounded MDD raw-response exception only for Stage 8: protected
+  temporary storage outside Git, mode-700 directory, mode-600 files, no
+  credentials or authorization material, API-key-content check before write,
+  maximum 24-hour retention after the run, and cleanup/reporting required.
+- Use append-only, source-faithful local JSONL diagnostic persistence outside
+  Git because PostgreSQL is deferred. Mirror the Stage 5 response snapshot,
+  stop-event, call, Situation, association, and service-attribute logical
+  grains. Exact response/run replay is idempotent; later scheduled
+  observations remain distinct.
+- Reconcile parser output to pilot persistence and distinguish `SUCCESS`,
+  overlap skips, authentication/authorization failures, rate-limit responses,
+  HTTP errors, network/DNS failures, timeouts, parser failures, pilot-
+  persistence failures, and MDD application errors. Never turn missingness
+  into on-time, served, cancelled, no-service, or no-delay facts.
+- Report the required request, status, parse, persistence, call, timing,
+  estimate-history, bay, flag, Situation, `IncidentCall`, attribute, error,
+  unmapped-field, `RecordedAtTime`, and raw-cleanup metrics without implying
+  provider-wide coverage.
+
+The full contract is in the [Stage 7 design](stages/07-realtime-pilot-design.md)
+and the [completion decision](stages/07-realtime-pilot-design-completion-decision.md).
+
+Stage 8 remains **NOT STARTED / NEXT**. D-031 authorizes no MDD request,
+GTFS-RT request, network access, SQL/database access, runtime pilot, or
+PostgreSQL implementation. Stage 6 remains **COMPLETE — APPROVED DESIGN;
+PHYSICAL IMPLEMENTATION DEFERRED** and Stage 5 remains **COMPLETE — APPROVED
+ARCHITECTURE**.

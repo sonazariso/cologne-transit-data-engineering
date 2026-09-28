@@ -179,3 +179,31 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 70. PostgreSQL migration, runtime, database/schema/table creation, SQL,
     migration, and data loading remain deferred until explicit user
     authorization.
+71. The Stage 8 pilot cadence — one MDD slot every 60 seconds for at most 60
+    minutes — is a diagnostic pilot cadence, not a production cadence.
+72. One Stage 8 station, Köln Hbf, is source/parser/persistence validation
+    evidence only and must not be presented as Cologne-wide coverage.
+73. `NumberOfResults` is a per-response result limit, not an HTTP request
+    count.
+74. Stage 8 uses zero retries. A failed slot is recorded as a gap/failure and
+    is not silently retried.
+75. Stage 8 must not issue concurrent or overlapping MDD requests.
+76. Stage 8 must not queue catch-up requests after a missed or skipped slot.
+77. Stage 8 omits `TimeWindow`; this records a pilot selection, not a claim
+    that the TRIAS semantic option is unsupported.
+78. `RecordedAtTime` remains exact, nullable, source-only evidence. It must
+    never be synthesized from the last estimate, any estimate, timetable,
+    request time, `ObservedAt`, or event disappearance.
+79. The last or most stable `EstimatedTime` is not actual time and must not be
+    promoted to Actual Delay evidence.
+80. Stage 8 raw payloads are temporary diagnostic artifacts only, must remain
+    outside Git with the approved protected permissions, and must be deleted
+    after review within the approved maximum retention.
+81. Stage 8 append-only JSONL artifacts are diagnostic pilot persistence, not
+    the production database, PostgreSQL implementation, or a mutable latest-
+    event store.
+82. GTFS-RT is excluded from the Stage 8 one-source pilot; its complementary
+    role and later cross-source matching remain separate.
+83. Actual Delay remains **NOT APPROVED**. A Stage 8 `RecordedAtTime` result is
+    candidate evidence only and cannot become a production KPI without later
+    semantic, coverage, matching, and operational approval.

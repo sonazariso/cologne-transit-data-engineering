@@ -1,9 +1,9 @@
 # MDD/TRIAS Request Contract
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Document state:** Approved Stage 02 source contract; synchronized with post-Stage-02 consolidation<br>
+**Document state:** Approved Stage 02 source contract; Stage 7 pilot selection appended<br>
 **Version:** TRIAS 1.2<br>
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-28
 
 This document defines the Stage 02 request contract for the audited MDD NRW
 `/delfi` endpoint. It records the VDV 431-2 TRIAS 1.2 semantics supplied for
@@ -82,6 +82,41 @@ The current Legacy builder does not emit `TimeWindow` or
 TRIAS-facing interpretation and a future validation point; it is not a claim
 that the current builder already sends them.
 
+## Stage 8 pilot settings
+
+Stage 7 selects the following bounded, non-production settings for the future
+Stage 8 MDD pilot. These settings do not replace the Stage 02 audited request
+evidence above and must not be promoted to production defaults.
+
+| Pilot element | Stage 8 setting |
+|---|---|
+| Endpoint | `https://mdd.gorheinland.com/delfi` |
+| Method / protocol | `POST` / TRIAS `1.2` |
+| Content-Type | `application/xml; charset=utf-8` |
+| Authentication | `x-api-key` header from `MDD_API_KEY` environment variable only |
+| RequestorRef | `CologneTransitIntelligence` |
+| StopPointRef | `de:05315:11201` (Köln Hbf) |
+| `DepArrTime` | Current request/reference timestamp in the already-approved UTC TRIAS format |
+| `StopEventType` | `arrival` |
+| `NumberOfResults` | `20` for the bounded pilot only |
+| `IncludePreviousCalls` | `true` |
+| `IncludeOnwardCalls` | `true` |
+| `IncludeRealtimeData` | `true` |
+| `TimeWindow` | Omitted; semantically available but not selected for this pilot |
+| `IncludeOperatingDays` | Omitted; it was not part of the validated request path |
+| Timeout | `30` seconds |
+| Retries | `0` |
+
+The API-key value must never be hardcoded, printed, logged, passed in command-
+line arguments, or written into raw artifacts. The pilot uses a presence-only
+preflight and prints only `MDD_API_KEY: PRESENT` or `MDD_API_KEY: MISSING`.
+
+`NumberOfResults = 20` is justified by the bounded pilot's need for broader
+per-request event/field coverage, the previously validated 1–100 builder
+range, and existing lifecycle tooling that used 20. It remains distinct from
+HTTP request count and is not a production setting. A failed request is not
+retried in the same slot.
+
 ## Result count, HTTP requests, retries, and quota
 
 These terms are separate:
@@ -108,10 +143,11 @@ public MDD dataset description is not treated as independent proof of the
 Stage 02 uses `250,000` as the project's conservative known request ceiling.
 
 Stage 02 defines the accounting implication, not a production retry policy.
-Stage 7 must approve retry/timeout behavior and quota budgeting; Stage 13
-must budget base requests, retries, concurrency/overlap, and all measurable
-active collectors using the credential. No new polling schedule is approved
-by this document.
+Stage 7 approves the bounded pilot timeout, zero-retry behavior, and pilot
+quota budget in [the Stage 7 design](../stages/07-realtime-pilot-design.md).
+Stage 13 must still budget base requests, retries, concurrency/overlap, and
+all measurable active collectors using the credential for production. No
+production polling schedule is approved by this document.
 
 ## Permission boundary
 
@@ -127,14 +163,17 @@ payloads. See the [raw-retention decision](mdd-trias-raw-retention.md).
 
 ## Stage 02 boundary
 
-This is the technical request contract candidate for the approval gate. It
-does not:
+This is the technical Stage 02 request contract plus the clearly labelled
+Stage 8 pilot selection. It does not:
 
 - define a production retry or timeout policy;
-- approve a polling cadence, station panel, or new MDD requests;
+- approve a production polling cadence or station panel;
 - define SQL tables, columns, or database objects;
 - establish provider-wide field coverage; or
 - convert the Legacy request builder into the future implementation.
+
+Stage 8 execution itself remains not started. The pilot settings authorize a
+future design handoff, not a request run in Stage 7.
 
 The detailed response evidence and the four-layer comparison are in the
 [response contract](mdd-trias-response-contract.md) and the

@@ -1,7 +1,8 @@
 # Realtime Collector Requirements
 
 > **Stage 02 approved source requirements; Stage 3B collection/cadence policy
-> approved; implementation and activation are deferred.**
+> approved; Stage 7 pilot design approved; implementation and activation are
+> deferred.**
 
 This document is the durable handoff from the approved Stage 02 MDD/TRIAS
 source-contract audit to the later realtime collector-design stages. It records
@@ -18,7 +19,9 @@ future timing, history, and persistence boundary is defined in the [future
 source-observation and persistence contract](../source-contracts/future-observation-persistence-contract.md).
 The approved Stage 3 collection/cadence boundary is defined in the [Stage 3B
 contract](../stage-03/03b-collection-strategy-cadence-contract.md). It approves
-a policy and guardrails, not a fixed production schedule.
+a policy and guardrails, not a fixed production schedule. Stage 7 now adds a
+bounded MDD-only Stage 8 pilot handoff; its settings must not be promoted to
+production defaults.
 
 ## 0. Approved source roles and separation
 
@@ -318,10 +321,40 @@ choice does not change source availability. A future short-term raw-payload
 retention option may support forensic reprocessing, but no retention duration is
 approved and permanent raw retention is not the default.
 
+## 19. Stage 7-approved Stage 8 pilot handoff
+
+Stage 7 approves a diagnostic handoff for one future Stage 8 execution:
+
+- primary source: MDD/TRIAS only;
+- target: Köln Hbf, `de:05315:11201`;
+- endpoint: `https://mdd.gorheinland.com/delfi` with `POST`, TRIAS 1.2, and
+  `application/xml; charset=utf-8`;
+- credential: `MDD_API_KEY` environment variable only, with presence-only
+  preflight and no secret output;
+- request: `arrival`, `NumberOfResults=20`, previous/onward/realtime flags
+  true, `TimeWindow` omitted, and `IncludeOperatingDays` omitted;
+- sampling policy: `MDD_STAGE_8_KOELN_HBF_60S_60MIN_V1`, one slot every 60
+  seconds for at most 60 minutes and at most 60 scheduled requests;
+- timeout/retries: 30 seconds and zero retries;
+- overlap: no concurrency or catch-up; an overlapping slot is recorded as
+  `SCHEDULED_SLOT_SKIPPED_OVERLAP`;
+- early stop: missing credential means zero attempts; 401/403 and 429 stop
+  immediately; three consecutive failed request slots stop the pilot; and
+- persistence: protected append-only diagnostic JSONL outside Git, with the
+  bounded raw-response exception governed by
+  [the Stage 7 design](../stages/07-realtime-pilot-design.md).
+
+This handoff preserves the full Stage 2 field-retention requirements and the
+Stage 5 logical source grains. It does not authorize Stage 8 host execution,
+runtime code, PostgreSQL, GTFS-RT collection, production cadence, or Actual
+Delay. The [Stage 7 completion decision](../stages/07-realtime-pilot-design-completion-decision.md)
+is the authoritative approval record.
+
 ## Handoff gate
 
-Stage 7 collector implementation begins by reviewing this document. The review
-must explicitly address source timestamps, event identity, observation time,
-estimate history, source-reported Situation/Cause history, operational flags,
-gaps, quota, failure causality, raw-response policy, and `RecordedAtTime`
-coverage before any production design is approved.
+Stage 8 host execution and any later collector implementation begin by
+reviewing this document and the [Stage 7 pilot design](../stages/07-realtime-pilot-design.md).
+The review must explicitly address source timestamps, event identity,
+observation time, estimate history, source-reported Situation/Cause history,
+operational flags, gaps, quota, failure causality, raw-response policy, and
+`RecordedAtTime` coverage before any production design is approved.
