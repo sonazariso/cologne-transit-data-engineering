@@ -28,6 +28,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-022 | 2026-09-25 | The conservative documented project request ceiling remains 250,000 requests/month until stronger provider/account evidence supersedes it; see the [Stage 02 request contract](source-contracts/mdd-trias-request-contract.md) | Approved |
 | D-023 | 2026-09-26 | Realtime source roles: **MDD/TRIAS primary; GTFS-RT complementary**; source-faithful staging remains separate before future reconciliation | Approved direction |
 | D-024 | 2026-09-26 | Cross-Source Reconciliation and Cologne Scope Contract | Approved design guardrail |
+| D-025 | 2026-09-28 | Stage 3 formally started with a bounded Stage 3A disruption/cause evidence audit; no schema, cadence, cause-model, matching, or production decision is made before host evidence | Procedural status |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -112,7 +113,20 @@ semantics; claim limits; and unresolved Stage 3 validation items.
 - Actual Delay, Actual On-Time Performance, and Prediction Accuracy vs Actual
   remain unapproved until confirmed actual time is validated.
 
-This is an approved design guardrail, not Stage 3 approval. It does not create
-SQL tables, schemas, migrations, collector code, matching algorithms, ETL,
-Power BI changes, scheduler jobs, or production mappings. Stage 3 remains
-**NEXT / NOT STARTED**.
+This is an approved design guardrail, not production implementation approval.
+It does not create SQL tables, schemas, migrations, collector code, matching
+algorithms, ETL, Power BI changes, scheduler jobs, or production mappings.
+Stage 3 is now **IN PROGRESS** through Stage 3A, whose host execution remains
+pending.
+
+## D-025 — Stage 3A Procedural Start
+
+Stage 3 formally started with the bounded [Stage 3A Disruption Cause & Alert
+Evidence Audit](stage-03/03a-disruption-cause-alert-evidence-audit.md). The
+substage measures current GTFS-RT ServiceAlert population and two sampled MDD
+Situation responses using exactly one GTFS-RT GET and two MDD POST requests.
+
+This is a procedural status entry, not a final analytical decision. Host
+evidence is still pending. No database schema, collector cadence, cause
+taxonomy, GTFS-RT production-ingestion approval, cross-source matching,
+causal attribution, scheduler, or Power BI decision is made here.

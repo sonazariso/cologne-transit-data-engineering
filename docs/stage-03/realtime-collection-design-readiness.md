@@ -1,15 +1,22 @@
 # Realtime Collection Design Readiness
 
-**Status:** `READY FOR USER REVIEW — STAGE 3 NOT STARTED`
+**Status:** `STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
-**APPROVED**; Stage 3 **NEXT / NOT STARTED**
-**Purpose:** entry conditions and guardrails for a future Stage 3 design review
+**APPROVED**; Stage 3 **IN PROGRESS**
+**Purpose:** approved entry guardrails while Stage 3A validates disruption and
+alert evidence before any production design
 
 This document consolidates the approved post-Stage-02 source decision. It is a
 readiness handoff, not an implementation design. It does not approve
 collector code, database objects, schemas, migrations, scheduler jobs, final
 table names, reconciliation algorithms, Power BI changes, or production
 runtime changes.
+
+Stage 3A is the current bounded substage. The [Disruption Cause & Alert
+Evidence Audit](03a-disruption-cause-alert-evidence-audit.md) is **HOST
+EXECUTION PENDING** and measures current GTFS-RT alert population and two
+sampled MDD Situation responses. Its result is an evidence gate, not a
+production approval.
 
 ## Approved source direction
 
@@ -142,15 +149,17 @@ validated.
 5. Final database/staging schema is not yet designed.
 6. The full Cologne GTFS.de stop-identity bridge and canonical line mapping
    are not yet implemented.
-7. Cross-source service-event matching and GTFS-RT cause/effect population
-   quality are not yet validated across a representative sample.
+7. Cross-source service-event matching is not yet validated. GTFS-RT
+   cause/effect population quality is pending the bounded Stage 3A host run
+   and remains unvalidated across a representative sample.
 8. Final GTFS-RT alert persistence and Cologne-filtering strategy is not yet
    designed.
 
 ## Stage boundary
 
-Stage 3 remains **NEXT / NOT STARTED**. The next user decision is whether to
-begin Stage 3. Until that decision, do not write collector production code,
-create SQL tables or migrations, add scheduler jobs, create services, change
-Power BI, modify environment variables, query external endpoints, or design
-the final reconciliation layer.
+Stage 3 is **IN PROGRESS** through Stage 3A. Stage 3A remains **HOST
+EXECUTION PENDING** until the user runs the bounded probe and reviews its
+JSONL evidence. Do not write collector production code, create SQL tables or
+migrations, add scheduler jobs, create services, change Power BI, modify
+environment variables, query external endpoints from Codex, or design the
+final reconciliation layer as part of this substage.

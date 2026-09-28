@@ -51,14 +51,16 @@ is a separate post-Stage-02 validation. Its current-feed inventory is complete
 from supplied host evidence, and its two-sample Köln Neumarkt lifecycle check
 is **BOUNDED LIFECYCLE VALIDATION COMPLETE**. The [GTFS.de static identity bridge](source-contracts/gtfsde-static-identity-bridge-audit.md)
 remains partial because railway Köln Hbf is unresolved. The bounded result does
-not reopen Stage 02, approve GTFS-RT as a production source, or start Stage 3.
+not reopen Stage 02, approve GTFS-RT as a production source, or authorize
+production implementation.
 
 The [GTFS-RT Historical Availability Audit](source-contracts/gtfs-rt-historical-availability-audit.md)
 is the separate S19 post-Stage-02 validation and is **BOUNDED VALIDATION
 COMPLETE**. The initial ±7-day exact-URL test and the separate ±45-day
 metadata-only test each returned zero captures at the 3-month and 6-month
 targets. These results do not establish provider-supported or continuous
-history, change the collector design, or start Stage 3.
+history or change the collector design; current disruption evidence is now
+tracked separately under Stage 3A.
 
 The bounded MDD/TRIAS near-event review covered six live journeys (three at
 Köln Hbf and three at Köln Neumarkt). No `RecordedAtTime` was observed in the
@@ -82,17 +84,30 @@ evidence to core KPIs, long-distance rail remains outside core KPI scope, and
 cross-source cause/effect attribution requires HIGH-confidence reconciliation,
 while alert scope and source provenance remain distinct.
 
-## Stage 3 — Static GTFS Profile — NEXT / NOT STARTED
-Resolve the authoritative GTFS feed and its coverage/update policy; this is
-deferred from Stage 02.
-Re-profile raw files, counts, duplicates, missing values, date coverage, stop hierarchy, routes, agencies, and modes from the current authoritative feed.
+## Stage 3 — Static GTFS Profile / Realtime Evidence Validation — IN PROGRESS
+
+Stage 3 has formally started with a bounded evidence-validation substage. The
+approved source direction remains MDD/TRIAS **PRIMARY REALTIME** and GTFS-RT
+**COMPLEMENTARY REALTIME**. No production implementation is authorized.
+
+### Stage 3A — Disruption Cause & Alert Evidence Audit — HOST EXECUTION PENDING
+
+The [Stage 3A audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
+will measure populated GTFS-RT ServiceAlert cause/effect/text/scope evidence in
+one current snapshot and MDD Situation content/association evidence in two
+fixed diagnostic station responses. Its host budget is exactly one GTFS-RT GET
+and two MDD POST requests, with no retries, concurrency, or fallback endpoint.
 
 The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-is **READY FOR USER REVIEW — STAGE 3 NOT STARTED**. It records entry
-conditions and guardrails only; it does not constitute the Stage 3 design or
-approval.
-The cross-source contract is an entry guardrail for that future review; it does
-not start Stage 3 or approve implementation.
+now records **STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING**. It
+continues to record entry guardrails only; it does not constitute a production
+collector, schema, cadence, reconciliation, or Power BI approval.
+
+Resolve the authoritative GTFS feed and its coverage/update policy as a later
+bounded design question; re-profile raw files, counts, duplicates, missing
+values, date coverage, stop hierarchy, routes, agencies, and modes from the
+current authoritative feed. The cross-source contract remains an entry
+guardrail and does not authorize implementation.
 
 ## Stage 4 — Cologne Scope & Mode Classification
 Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.

@@ -1,8 +1,8 @@
 # Project Status
 
-**Project:** Cologne Transport Intelligence  
+**Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-09-26
+**Status date:** 2026-09-28
 
 ## Authoritative status
 
@@ -11,7 +11,7 @@
 | 0 | Project Definition | APPROVED |
 | 1 | Source Inventory & Permission | APPROVED |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
-| 3 | Static GTFS Profile | NEXT / NOT STARTED |
+| 3 | Static GTFS Profile | IN PROGRESS |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
 | 6 | Static Warehouse & Analytics | Not started |
@@ -26,6 +26,17 @@
 | 15 | Post-Cutover Validation | Not started |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
+
+### Current Stage 3 substage
+
+- **Stage 3 — IN PROGRESS.**
+- **Stage 3A — Disruption Cause & Alert Evidence Audit — HOST EXECUTION
+  PENDING.**
+- Stage 3A is a bounded host-run evidence audit only. It does not start
+  production implementation, database/schema work, collector changes,
+  scheduler changes, Power BI work, or cross-source matching.
+
+See the [Stage 3A audit document](stage-03/03a-disruption-cause-alert-evidence-audit.md).
 
 ## Post-Stage-02 validation
 
@@ -54,9 +65,9 @@ Existing GTFS-RT validation:
   ±45-day metadata-only run each returned zero captures for both horizons.
   This does not establish provider history or continuous coverage and does not
   approve GTFS-RT as a production source.
-- This validation does not reopen or invalidate Stage 2, start Stage 3,
-  approve GTFS-RT as a production source, or change the MDD collector,
-  database, Power BI, scheduler, or Legacy repository.
+- This validation did not reopen or invalidate Stage 2 or approve GTFS-RT as a
+  production source. Stage 3 is now in progress only through the bounded Stage
+  3A evidence audit; no production implementation is authorized.
 
 ### Post-Stage-02 source validation package
 
@@ -173,13 +184,17 @@ it is not a Stage 02 blocker.
 - ICE, IC, NightJet, FlixTrain, and Thalys are outside the core KPI scope for now; source evidence may still be retained.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.
-- Stage 02 is **APPROVED**; Stage 03 is **NEXT / NOT STARTED**.
+- Stage 02 is **APPROVED**; Stage 03 is **IN PROGRESS** through Stage 3A.
 - The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-  is **READY FOR USER REVIEW — STAGE 3 NOT STARTED** and records guardrails
-  only; it does not start or approve Stage 3.
+  now records **STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING** and
+  continues to record guardrails only; it does not approve production
+  implementation.
+- The [Stage 3A disruption/cause evidence audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
+  is **HOST EXECUTION PENDING**. No analytical decision is final before its
+  bounded host evidence is reviewed.
 - The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
-  is an approved design guardrail for that future review; it does not start
-  Stage 3 or approve implementation.
+  is an approved design guardrail for subsequent Stage 3 design work; it does
+  not approve production implementation or cross-source matching.
 
 ## Former open critical questions and S15/S16 refinement
 
