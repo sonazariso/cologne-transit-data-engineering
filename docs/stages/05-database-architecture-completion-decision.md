@@ -60,9 +60,14 @@ with this decision.
     architectural requirements. Backup/recovery becomes a production-readiness
     gate before realtime collection starts.
 16. The [42-entry table/grain catalog](05-table-grain-catalog.md) is the
-    approved logical contract. Stage 6 owns the static warehouse entries;
-    Stage 9 owns canonical/matching entries; Stage 10 owns the operational-fact
-    placeholder.
+    approved logical contract. Stage 6 owns the static warehouse entries:
+    `DimStop` and `DimRoute` are source-first VRS/static GTFS dimensions and do
+    not require Stage 9 `core.canonical_stop` or `core.canonical_line` objects;
+    `FactScheduledStopEvent` remains pattern-level, while `BridgeServiceDate`
+    carries the active `Service + Date` grain. Stage 9 owns canonical/matching
+    entries, including the clarified conceptual grains for
+    `CanonicalServiceEvent` and `SourceEventMatch`; Stage 10 owns the
+    operational-fact placeholder.
 
 ## DEFERRED IMPLEMENTATION DECISION
 

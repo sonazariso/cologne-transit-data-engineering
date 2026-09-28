@@ -146,6 +146,12 @@ SOURCE
 The source-faithful layer remains independently interpretable if matching,
 canonicalization, or analytics logic is later rebuilt.
 
+Stage 6 static warehouse construction may use validated `src`/`wrk` static GTFS
+outputs directly. `core.canonical_stop` and `core.canonical_line` are Stage 9
+objects, not prerequisites for constructing `dw.dim_stop` or `dw.dim_route`;
+later canonical mappings may enrich or reference those dimensions. Source
+route identity remains distinct from geographical KPI scope.
+
 ## 6. Source-faithful policy
 
 `src` is durable source evidence, not disposable staging.
@@ -216,6 +222,11 @@ silently overwritten.
 Stage 4's core geography remains the direct source rule `stop_id` beginning
 with `de:05315:`. The complete source feed is retained first; the rule is
 applied when constructing validated/analytical scope.
+
+The Stage 6 static dimensions are built from validated VRS/static GTFS source
+identity for the approved feed snapshot, together with the approved Stage 4
+scope, hierarchy, and mode rules. Canonical identity is a later enrichment or
+reference path, not a prerequisite for static warehouse construction.
 
 ## 8. MDD/TRIAS realtime source architecture
 
@@ -376,7 +387,19 @@ history.
 Reserve `core` for validated canonical identity and cross-source
 reconciliation: canonical stop, canonical line, canonical service event, and
 source-event match. Stage 9 owns implementation and empirical validation.
-`MDD JourneyRef` must never be treated as GTFS-RT `trip_id`.
+Conceptually, `core.canonical_service_event` is one validated canonical stop
+event for one service/operating date, canonical line, canonical stop, event
+type (`ARRIVAL` or `DEPARTURE`), and scheduled event time, with
+direction/stop-sequence/operator or other already-approved evidence available
+as disambiguation where required. Conceptually, `core.source_event_match` is
+one versioned reconciliation decision associating one source event observation
+with one canonical service event while preserving source system, source event
+identity, canonical service event identity, `MatchMethod`, `MatchConfidence`,
+and decision/version lineage. These are conceptual grains only: Stage 5 does
+not define a physical unique constraint, matching algorithm, or fixed physical
+association shape; any later physical association shape must be validated and
+documented by Stage 9. `MDD JourneyRef` must never be treated as GTFS-RT
+`trip_id`.
 
 ### `dw`
 
@@ -388,6 +411,19 @@ in Stage 5; the placeholder belongs to Stage 10.
 
 Every static warehouse row that depends on GTFS retains `FeedSnapshotKey` and
 relevant source IDs so it can be traced back to the feed snapshot.
+
+`DimStop` is constructed from validated VRS/static GTFS stop identity and
+Stage 4 Cologne scope/hierarchy rules. `DimRoute` is constructed from
+validated VRS/static GTFS route identity, agency/mode classification, and
+feed-snapshot lineage. Later Stage 9 canonical mappings may enrich or reference
+either dimension, but `core.canonical_stop` and `core.canonical_line` are not
+Stage 6 prerequisites. `FactScheduledStopEvent` remains a pattern-level fact:
+one scheduled stop event in one trip pattern for one approved source snapshot,
+with no active service `DateKey` in its identity or grain. `BridgeServiceDate`
+retains the one active `Service + Date` grain; Stage 6 must not multiply
+scheduled trip/stop-event patterns by active dates. Any date-expanded
+analytics must use a separately derived/query/explicitly approved object rather
+than changing this fact's grain.
 
 ## 15. JSONB boundary
 
@@ -538,12 +574,20 @@ work must:
 2. preserve complete VRS source snapshots in `src` and apply Cologne scope
    only in validated/analytical layers;
 3. implement the approved dimensions, `BridgeServiceDate`, and scheduled
-   facts at the catalogued grains;
-4. carry `FeedSnapshotKey` and relevant source IDs into every GTFS-dependent
+   facts at the catalogued grains; build `DimStop` and `DimRoute` from
+   validated VRS/static GTFS identities and their approved Stage 4
+   scope/classification rules without requiring Stage 9 `core` objects;
+4. keep source route identity distinct from geographical KPI scope, and keep
+   `FactScheduledStopEvent` at pattern grain without an active service
+   `DateKey`; use `BridgeServiceDate` for the one active `Service + Date`
+   grain rather than multiplying scheduled patterns by active dates; any
+   date-expanded analytics require a separately derived/query/explicitly
+   approved object;
+5. carry `FeedSnapshotKey` and relevant source IDs into every GTFS-dependent
    warehouse object;
-5. reconcile source-to-warehouse counts and validation outcomes through `ctl`;
-6. keep `wrk` rebuildable and analytics non-authoritative; and
-7. defer realtime outcome facts, collectors, matching, and Power BI changes to
+6. reconcile source-to-warehouse counts and validation outcomes through `ctl`;
+7. keep `wrk` rebuildable and analytics non-authoritative; and
+8. defer realtime outcome facts, collectors, matching, and Power BI changes to
    their owning stages.
 
 ## 23. Acceptance criteria
