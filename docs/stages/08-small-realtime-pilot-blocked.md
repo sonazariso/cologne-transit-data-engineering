@@ -2,7 +2,8 @@
 
 **Status:** `BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT`  
 **Date:** `2026-09-28`  
-**Preflight timestamp:** `2026-09-28T18:10:37Z`  
+**Preflight timestamp:** `2026-09-28T18:50:36Z`
+
 **Stage 9 status:** `NOT STARTED / NEXT`
 
 ## Scope and implementation
@@ -12,6 +13,18 @@ The Stage 8-specific runtime is implemented at
 It is constrained to the approved MDD/TRIAS Köln Hbf contract and contains no
 GTFS-RT, SQL, PostgreSQL, matching, operational-fact, Power BI, or later-stage
 implementation.
+
+## Runtime correction status
+
+The Stage 8 runtime now retains audited service-level origin and destination
+identity/text fields with their exact source paths; tracks later timing-context
+observations when `RecordedAtTime` is absent; skips fixed slots missed during
+request/response processing, including persistence work; reconciles parser
+bundles against records read back from the append-only JSONL artifacts; applies
+consistent pilot/response/observation/parser lineage to diagnostic records; and
+preserves structured `SituationFullRef` values with identity, scope, source
+path, and inline-resolution status. These are Stage 8 runtime corrections only;
+the approved pilot policy and the Stage 8 blocker remain unchanged.
 
 ## Safe preflight result
 

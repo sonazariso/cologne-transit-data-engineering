@@ -134,10 +134,12 @@ RECOGNIZED_SOURCE_FIELDS = {
     "originref",
     "originstoppointref",
     "originstoppointname",
+    "origintext",
     "destination",
     "destinationref",
     "destinationstoppointref",
     "destinationstoppointname",
+    "destinationtext",
     "previouscall",
     "thiscall",
     "onwardcall",
@@ -254,6 +256,10 @@ class ResponseTooLarge(ValueError):
     """The bounded response-size guard was reached."""
 
 
+class PersistenceReadbackError(ValueError):
+    """The append-only JSONL persistence could not be read back safely."""
+
+
 @dataclass
 class HTTPResult:
     request_timestamp: datetime
@@ -351,6 +357,29 @@ class PilotStore:
         safe_record = sanitize_for_artifact(record, self.api_key)
         self.writers[logical_name].append(safe_record)
 
+    def records_for_response(self, logical_name: str, response_id: str) -> List[Dict[str, Any]]:
+        """Read the append-only JSONL artifact, not the in-memory bundle."""
+
+        path = self.writers[logical_name].path
+        records: List[Dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as stream:
+            for line_number, line in enumerate(stream, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except (TypeError, ValueError) as error:
+                    raise PersistenceReadbackError(
+                        f"invalid JSONL in {logical_name} at line {line_number}"
+                    ) from error
+                if not isinstance(record, dict):
+                    raise PersistenceReadbackError(
+                        f"non-object JSONL in {logical_name} at line {line_number}"
+                    )
+                if record.get("response_id") == response_id:
+                    records.append(record)
+        return records
+
     def close(self) -> None:
         for writer in self.writers.values():
             writer.close()
@@ -366,6 +395,22 @@ def iso_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z"
     )
+
+
+def parser_lineage(
+    *,
+    pilot_run_id: Optional[str],
+    response_id: Optional[str],
+    observed_at: Optional[str],
+) -> Dict[str, Any]:
+    """Common direct lineage fields for parser-generated diagnostic records."""
+
+    return {
+        "pilot_run_id": pilot_run_id,
+        "response_id": response_id,
+        "observed_at": observed_at,
+        "parser_version": PARSER_VERSION,
+    }
 
 
 def trias_utc(value: datetime) -> str:
@@ -430,6 +475,32 @@ def source_value(value: Any) -> Any:
             return None
         return extracted_values[0] if len(extracted_values) == 1 else extracted_values
     return None
+
+
+def source_value_at_path(value: Any, path: str) -> Tuple[Optional[str], Any]:
+    """Return the first source scalar and its exact leaf path."""
+
+    if value is None:
+        return path, None
+    if isinstance(value, (str, int, float, bool)):
+        return path, source_value(value)
+    if isinstance(value, dict):
+        for preferred_name in ("value", "text", "name", "id", "ref"):
+            for key, child in value.items():
+                if normalized_key(key) != preferred_name:
+                    continue
+                child_path = path_for_key(path, key)
+                leaf_path, extracted = source_value_at_path(child, child_path)
+                if extracted is not None:
+                    return leaf_path, extracted
+        return path, source_value(value)
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            leaf_path, extracted = source_value_at_path(item, f"{path}[{index}]")
+            if extracted is not None:
+                return leaf_path, extracted
+        return path, source_value(value)
+    return path, source_value(value)
 
 
 def scalar_values(value: Any) -> Iterator[Any]:
@@ -959,30 +1030,67 @@ def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
     return identity
 
 
-def origin_destination(service: Any) -> Dict[str, Any]:
+def origin_destination(service: Any, root_path: str = "$") -> Dict[str, Any]:
+    """Retain service-level origin/destination identity and text independently."""
+
     output: Dict[str, Any] = {}
-    for prefix, names in (
-        ("origin", {"origin"}),
-        ("destination", {"destination"}),
+    for prefix, specific_ref_names, specific_text_names, container_names in (
+        (
+            "origin",
+            {"originstoppointref", "originref"},
+            {"origintext", "originstoppointname"},
+            {"origin"},
+        ),
+        (
+            "destination",
+            {"destinationstoppointref", "destinationref"},
+            {"destinationtext", "destinationstoppointname"},
+            {"destination"},
+        ),
     ):
-        path, raw_value = direct_named_raw(service, names)
-        if path is None:
-            path, raw_value = first_named_raw(service, names)
-        if isinstance(raw_value, dict):
-            ref_path, ref = first_named_source(raw_value, {"stoppointref", "originref", "destinationref", "ref", "id"})
-            text_path, text = first_named_source(raw_value, {"stoppointname", "name", "text", "value"})
-            output[f"{prefix}_ref"] = ref
-            output[f"{prefix}_text"] = text
-            output[f"{prefix}_source_path"] = path
-            output[f"{prefix}_ref_source_path"] = ref_path
-            output[f"{prefix}_text_source_path"] = text_path
-        else:
-            value = source_value(raw_value)
-            output[f"{prefix}_ref"] = value
-            output[f"{prefix}_text"] = None
-            output[f"{prefix}_source_path"] = path
-            output[f"{prefix}_ref_source_path"] = path
-            output[f"{prefix}_text_source_path"] = None
+        ref_path, raw_ref = direct_named_raw(service, specific_ref_names, root_path)
+        text_path, raw_text = direct_named_raw(service, specific_text_names, root_path)
+        if ref_path is None:
+            ref_path, raw_ref = first_named_raw(service, specific_ref_names, root_path)
+        if text_path is None:
+            text_path, raw_text = first_named_raw(service, specific_text_names, root_path)
+        container_path: Optional[str] = None
+        container: Any = None
+        if ref_path is None or text_path is None:
+            container_path, container = direct_named_raw(service, container_names, root_path)
+            if container_path is None:
+                container_path, container = first_named_raw(service, container_names, root_path)
+            if isinstance(container, dict):
+                if ref_path is None:
+                    ref_path, raw_ref = first_named_raw(
+                        container,
+                        {"stoppointref", "originref", "destinationref", "ref", "id"},
+                        container_path or root_path,
+                    )
+                if text_path is None:
+                    text_path, raw_text = first_named_raw(
+                        container,
+                        {"origintext", "destinationtext", "stoppointname", "name", "text", "value"},
+                        container_path or root_path,
+                    )
+
+        ref_value_path, ref = source_value_at_path(raw_ref, ref_path or root_path)
+        text_value_path, text = source_value_at_path(raw_text, text_path or root_path)
+        if ref is not None:
+            ref_path = ref_value_path
+        if text is not None:
+            text_path = text_value_path
+        output[f"{prefix}_stop_point_ref"] = ref
+        output[f"{prefix}_stop_point_ref_source_path"] = ref_path
+        output[f"{prefix}_text"] = text
+        output[f"{prefix}_text_source_path"] = text_path
+        output[f"{prefix}_source_path"] = container_path
+
+        # Preserve the earlier diagnostic aliases while making the source
+        # identity meaning explicit in the canonical fields above.
+        output[f"{prefix}_ref"] = ref
+        output[f"{prefix}_ref_source_path"] = ref_path
+
     return output
 
 
@@ -1031,8 +1139,12 @@ def first_named_value(value: Any, names: Set[str]) -> Any:
     return result
 
 
-def first_named_raw(value: Any, names: Set[str]) -> Tuple[Optional[str], Any]:
-    for path, key, child, _parent_path, _parent in iter_dict_entries(value):
+def first_named_raw(
+    value: Any,
+    names: Set[str],
+    root_path: str = "$",
+) -> Tuple[Optional[str], Any]:
+    for path, key, child, _parent_path, _parent in iter_dict_entries(value, root_path):
         if normalized_key(key) in names:
             return path, child
     return None, None
@@ -1051,6 +1163,8 @@ def call_record(
     service: Any,
     observed_at: str,
     event_identity: str,
+    pilot_run_id: Optional[str] = None,
+    source_result_id: Any = None,
 ) -> Dict[str, Any]:
     call_stop = call_at_stop(call)
     call_stop = call_stop or {}
@@ -1072,10 +1186,15 @@ def call_record(
     return {
         "record_type": "call_observation",
         "call_observation_id": f"{stop_event_id}|call|{call_scope}|{call_ordinal}",
+        **parser_lineage(
+            pilot_run_id=pilot_run_id,
+            response_id=response_id,
+            observed_at=observed_at,
+        ),
         "response_id": response_id,
         "stop_event_observation_id": stop_event_id,
-        "observed_at": observed_at,
         "event_source_identity": event_identity,
+        "source_result_id": source_result_id,
         "call_scope": call_scope,
         "call_ordinal": call_ordinal,
         "source_path": call_path,
@@ -1154,7 +1273,12 @@ def stop_event_record(
     result_id_value, result_id_path = result_id(result, result_path, result_ordinal)
     stop_event_path, stop_event_raw = direct_named_raw(result, {"stopevent"}, result_path)
     stop_event = stop_event_raw if isinstance(stop_event_raw, dict) else {}
-    service = service_for_stop_event(stop_event)
+    service_path, service_raw = direct_named_raw(
+        stop_event,
+        {"service"},
+        stop_event_path or f"{result_path}.stopEvent",
+    )
+    service = service_raw if isinstance(service_raw, dict) else service_for_stop_event(stop_event)
     identity = context_identity(service, stop_event)
     this_calls = scope_calls(stop_event, "thiscall", stop_event_path or f"{result_path}.stopEvent")
     this_call_stop = call_at_stop(this_calls[0][1]) if this_calls else None
@@ -1208,17 +1332,27 @@ def stop_event_record(
                     service=service,
                     observed_at=observed_at,
                     event_identity=event_identity,
+                    pilot_run_id=run_id,
+                    source_result_id=result_id_value,
                 )
             )
+    origin_destination_values = origin_destination(
+        service,
+        service_path or stop_event_path or f"{result_path}.stopEvent.service",
+    )
     return {
         "record_type": "stop_event_observation",
         "stop_event_observation_id": stop_event_id,
-        "pilot_run_id": run_id,
+        **parser_lineage(
+            pilot_run_id=run_id,
+            response_id=response_id,
+            observed_at=observed_at,
+        ),
         "response_id": response_id,
-        "observed_at": observed_at,
         "source_result_id": result_id_value,
         "source_result_id_path": result_id_path,
         "result_ordinal": result_ordinal,
+        "source_path": result_path,
         "result_source_path": result_path,
         "event_source_identity": event_identity,
         "stable_event_identity": stable_event_identity(identity, result_id_value),
@@ -1230,7 +1364,21 @@ def stop_event_record(
         "pt_mode": identity.get("pt_mode"),
         "rail_submode": identity.get("rail_submode"),
         "published_line_name": identity.get("published_line_name"),
-        "origin_destination": origin_destination(service),
+        "origin_destination": origin_destination_values,
+        "origin_stop_point_ref": origin_destination_values.get("origin_stop_point_ref"),
+        "origin_stop_point_ref_source_path": origin_destination_values.get(
+            "origin_stop_point_ref_source_path"
+        ),
+        "origin_text": origin_destination_values.get("origin_text"),
+        "origin_text_source_path": origin_destination_values.get("origin_text_source_path"),
+        "destination_stop_point_ref": origin_destination_values.get("destination_stop_point_ref"),
+        "destination_stop_point_ref_source_path": origin_destination_values.get(
+            "destination_stop_point_ref_source_path"
+        ),
+        "destination_text": origin_destination_values.get("destination_text"),
+        "destination_text_source_path": origin_destination_values.get(
+            "destination_text_source_path"
+        ),
         "stop_point_ref": stop_ref,
         "stop_point_ref_source_path": stop_ref_path,
         "stop_seq_number": stop_seq,
@@ -1270,6 +1418,7 @@ def situation_record(
     path: str,
     situation: Dict[str, Any],
     ordinal: int,
+    run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     identity = situation_identity(situation, path)
     valid_from = first_named_value(situation, {"validfrom", "starttime"})
@@ -1277,8 +1426,11 @@ def situation_record(
     return {
         "record_type": "situation_observation",
         "situation_observation_id": f"{response_id}|situation|{ordinal}",
-        "response_id": response_id,
-        "observed_at": observed_at,
+        **parser_lineage(
+            pilot_run_id=run_id,
+            response_id=response_id,
+            observed_at=observed_at,
+        ),
         "source_path": path,
         "occurrence_ordinal": ordinal,
         **identity,
@@ -1307,6 +1459,9 @@ def situation_associations(
     situations: Sequence[Dict[str, Any]],
     references: Sequence[Tuple[str, Any]],
     result_paths: Sequence[Tuple[str, str]],
+    run_id: Optional[str] = None,
+    observed_at: Optional[str] = None,
+    result_source_ids: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     output: List[Dict[str, Any]] = []
     for ordinal, (path, value) in enumerate(references):
@@ -1323,24 +1478,37 @@ def situation_associations(
                 break
         result_ordinal: Optional[int] = None
         stop_event_id: Optional[str] = None
+        result_source_id: Any = None
         for candidate_result_ordinal, (result_path, candidate_stop_event_id) in enumerate(result_paths):
             if path == result_path or path.startswith(result_path + ".") or path.startswith(result_path + "["):
                 result_ordinal = candidate_result_ordinal
                 stop_event_id = candidate_stop_event_id
+                if result_source_ids is not None:
+                    result_source_id = result_source_ids.get(result_path)
                 break
         output.append(
             {
                 "record_type": "stop_event_situation_association",
                 "association_id": f"{response_id}|situation_ref|{ordinal}",
-                "response_id": response_id,
+                **parser_lineage(
+                    pilot_run_id=run_id,
+                    response_id=response_id,
+                    observed_at=observed_at,
+                ),
                 "stop_event_observation_id": stop_event_id,
+                "source_result_id": result_source_id,
                 "result_ordinal": result_ordinal,
-                "observed_at": None,
                 "source_path": path,
+                "situation_full_ref_source_path": path,
                 "association_scope": relation_scope(path),
-                "situation_full_ref": source_value(value),
+                "relation_scope": relation_scope(path),
+                "situation_full_ref": sanitize_for_artifact(value, ""),
+                "situation_full_ref_source_representation": sanitize_for_artifact(value, ""),
                 "situation_ref_identity": ref,
                 "situation_observation_id": (
+                    linked_situation.get("situation_observation_id") if linked_situation else None
+                ),
+                "resolved_situation_observation_id": (
                     linked_situation.get("situation_observation_id") if linked_situation else None
                 ),
                 "resolution_status": "RESOLVED_INLINE_SITUATION" if linked_situation else "UNRESOLVED_INLINE_SITUATION",
@@ -1359,6 +1527,8 @@ def service_attribute_record(
     result_paths: Sequence[Tuple[str, str]],
     call_scopes: Sequence[Tuple[str, str]],
     ordinal: int,
+    run_id: Optional[str] = None,
+    result_source_ids: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     codes = named_source_values(value, {"code"})
     texts = named_source_values(value, {"text"})
@@ -1372,18 +1542,25 @@ def service_attribute_record(
     incident = bool(incident_values)
     parent_result_id: Optional[str] = None
     stop_event_id: Optional[str] = None
+    source_result_id: Any = None
     for result_path, candidate_stop_event_id in result_paths:
         if path == result_path or path.startswith(result_path + ".") or path.startswith(result_path + "["):
             stop_event_id = candidate_stop_event_id
             parent_result_id = result_path
+            if result_source_ids is not None:
+                source_result_id = result_source_ids.get(result_path)
             break
     scope = relation_scope(path)
     return {
         "record_type": "service_attribute_observation",
         "service_attribute_observation_id": f"{response_id}|attribute|{ordinal}",
-        "response_id": response_id,
+        **parser_lineage(
+            pilot_run_id=run_id,
+            response_id=response_id,
+            observed_at=observed_at,
+        ),
         "stop_event_observation_id": stop_event_id,
-        "observed_at": observed_at,
+        "source_result_id": source_result_id,
         "source_path": path,
         "attribute_field_name": field_name,
         "relation_scope": scope,
@@ -1411,6 +1588,7 @@ def build_bundle(
 ) -> Dict[str, Any]:
     stop_events: List[Dict[str, Any]] = []
     result_paths: List[Tuple[str, str]] = []
+    result_source_ids: Dict[str, Any] = {}
     for ordinal, (result_path, result) in enumerate(parsed.results):
         record = stop_event_record(
             response_id=response_id,
@@ -1422,9 +1600,10 @@ def build_bundle(
         )
         stop_events.append(record)
         result_paths.append((result_path, record["stop_event_observation_id"]))
+        result_source_ids[result_path] = record.get("source_result_id")
 
     situations = [
-        situation_record(response_id, observed_at, path, item, ordinal)
+        situation_record(response_id, observed_at, path, item, ordinal, run_id)
         for ordinal, (path, item) in enumerate(parsed.situation_entries)
     ]
     situation_by_identity: Dict[str, Dict[str, Any]] = {}
@@ -1439,9 +1618,10 @@ def build_bundle(
         situations=list(situations),
         references=parsed.reference_entries,
         result_paths=result_paths,
+        run_id=run_id,
+        observed_at=observed_at,
+        result_source_ids=result_source_ids,
     )
-    for association in references:
-        association["observed_at"] = observed_at
     attributes = [
         service_attribute_record(
             response_id=response_id,
@@ -1452,18 +1632,40 @@ def build_bundle(
             result_paths=result_paths,
             call_scopes=[],
             ordinal=ordinal,
+            run_id=run_id,
+            result_source_ids=result_source_ids,
         )
         for ordinal, (path, field_name, value) in enumerate(parsed.attribute_entries)
     ]
-    gaps = [
-        {
-            "record_type": "parser_gap_evidence",
-            "response_id": response_id,
-            "observed_at": observed_at,
-            **gap,
-        }
-        for gap in parsed.parser_gaps
-    ]
+    gaps: List[Dict[str, Any]] = []
+    for ordinal, gap in enumerate(parsed.parser_gaps):
+        result_source_path: Optional[str] = None
+        source_result_id: Any = None
+        for candidate_result_path, candidate_result_id in result_source_ids.items():
+            gap_path = str(gap.get("source_path", ""))
+            if (
+                gap_path == candidate_result_path
+                or gap_path.startswith(candidate_result_path + ".")
+                or gap_path.startswith(candidate_result_path + "[")
+            ):
+                result_source_path = candidate_result_path
+                source_result_id = candidate_result_id
+                break
+        gaps.append(
+            {
+                "record_type": "parser_gap_evidence",
+                **parser_lineage(
+                    pilot_run_id=run_id,
+                    response_id=response_id,
+                    observed_at=observed_at,
+                ),
+                "parser_gap_id": f"{response_id}|parser_gap|{ordinal}",
+                "field_path": gap.get("source_path"),
+                "source_result_id": source_result_id,
+                "result_source_path": result_source_path,
+                **gap,
+            }
+        )
     return {
         "stop_events": stop_events,
         "calls": [call for event in stop_events for call in event["call_observations"]],
@@ -1479,38 +1681,136 @@ def build_bundle(
     }
 
 
-def reconcile_bundle(bundle: Dict[str, Any], parsed: ParsedResponse) -> Dict[str, Any]:
+def reconcile_bundle(
+    bundle: Dict[str, Any],
+    parsed: ParsedResponse,
+    store: Optional[PilotStore] = None,
+    response_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Reconcile parser output against records read back from JSONL."""
+
+    if response_id is None:
+        for item in bundle["stop_events"]:
+            if item.get("response_id") is not None:
+                response_id = item["response_id"]
+                break
+        if response_id is None:
+            for logical_name in ("situations", "associations", "attributes", "parser_gaps"):
+                for item in bundle.get(logical_name, []):
+                    if item.get("response_id") is not None:
+                        response_id = item["response_id"]
+                        break
+                if response_id is not None:
+                    break
+
     expected_stop_events = len(parsed.results)
-    persisted_stop_events = len(bundle["stop_events"])
     expected_calls = 0
     for _path, result in parsed.results:
         stop_event = direct_object(result, {"stopevent"}) or {}
         for scope_name in ("thiscall", "previouscall", "onwardcall"):
             expected_calls += len(scope_calls(stop_event, scope_name))
-    persisted_calls = len(bundle["calls"])
     expected_situations = len(parsed.situation_entries)
-    persisted_situations = len(bundle["situations"])
     expected_associations = sum(1 for _path, value in parsed.reference_entries if is_populated(value))
-    persisted_associations = len(bundle["associations"])
     expected_attributes = len(parsed.attribute_entries)
-    persisted_attributes = len(bundle["attributes"])
     expected_gaps = len(parsed.parser_gaps)
-    persisted_gaps = len(bundle["parser_gaps"])
+
+    actual_records: Dict[str, List[Dict[str, Any]]] = {}
+    persistence_readback_ok = store is not None and response_id is not None
+    if persistence_readback_ok:
+        for logical_name in (
+            "stop_event_observations",
+            "call_observations",
+            "situation_observations",
+            "situation_associations",
+            "service_attributes",
+            "parser_gaps",
+        ):
+            actual_records[logical_name] = store.records_for_response(logical_name, response_id)
+    else:
+        for logical_name in (
+            "stop_event_observations",
+            "call_observations",
+            "situation_observations",
+            "situation_associations",
+            "service_attributes",
+            "parser_gaps",
+        ):
+            actual_records[logical_name] = []
+
+    persisted_stop_events = len(actual_records["stop_event_observations"])
+    persisted_calls = len(actual_records["call_observations"])
+    persisted_situations = len(actual_records["situation_observations"])
+    persisted_associations = len(actual_records["situation_associations"])
+    persisted_attributes = len(actual_records["service_attributes"])
+    persisted_gaps = len(actual_records["parser_gaps"])
+
+    def ids_match(
+        expected_items: Sequence[Dict[str, Any]],
+        actual_items: Sequence[Dict[str, Any]],
+        field_name: str,
+    ) -> bool:
+        expected_ids = [item.get(field_name) for item in expected_items]
+        actual_ids = [item.get(field_name) for item in actual_items]
+        return (
+            None not in expected_ids
+            and None not in actual_ids
+            and len(set(expected_ids)) == len(expected_ids)
+            and len(set(actual_ids)) == len(actual_ids)
+            and Counter(expected_ids) == Counter(actual_ids)
+        )
+
+    def gap_keys(items: Sequence[Dict[str, Any]]) -> Counter[Tuple[Any, Any, Any]]:
+        return Counter(
+            (
+                item.get("source_path"),
+                item.get("field_name"),
+                item.get("mapping_status"),
+            )
+            for item in items
+        )
 
     checks = {
+        "actual_jsonl_persistence_readback_available": persistence_readback_ok,
         "stop_event_result_count_equals_persisted_stop_event_count": expected_stop_events == persisted_stop_events,
+        "stop_event_observation_ids_match_persisted_records": ids_match(
+            bundle["stop_events"],
+            actual_records["stop_event_observations"],
+            "stop_event_observation_id",
+        ),
         "call_occurrence_count_equals_persisted_call_count": expected_calls == persisted_calls,
-        "call_occurrence_ids_unique": len({item["call_observation_id"] for item in bundle["calls"]}) == persisted_calls,
+        "call_occurrence_ids_match_persisted_records": ids_match(
+            bundle["calls"],
+            actual_records["call_observations"],
+            "call_observation_id",
+        ),
         "situation_occurrence_count_equals_persisted_situation_count": expected_situations == persisted_situations,
-        "situation_observation_ids_unique": len({item["situation_observation_id"] for item in bundle["situations"]}) == persisted_situations,
+        "situation_observation_ids_match_persisted_records": ids_match(
+            bundle["situations"],
+            actual_records["situation_observations"],
+            "situation_observation_id",
+        ),
         "situation_association_occurrence_count_equals_persisted_link_count": expected_associations == persisted_associations,
-        "situation_association_scopes_present": all(bool(item.get("association_scope")) for item in bundle["associations"]),
+        "situation_association_ids_match_persisted_records": ids_match(
+            bundle["associations"],
+            actual_records["situation_associations"],
+            "association_id",
+        ),
+        "situation_association_scopes_present": all(
+            bool(item.get("association_scope"))
+            for item in actual_records["situation_associations"]
+        ),
         "attribute_occurrence_count_equals_persisted_attribute_count": expected_attributes == persisted_attributes,
-        "attribute_observation_ids_unique": len({item["service_attribute_observation_id"] for item in bundle["attributes"]}) == persisted_attributes,
+        "attribute_observation_ids_match_persisted_records": ids_match(
+            bundle["attributes"],
+            actual_records["service_attributes"],
+            "service_attribute_observation_id",
+        ),
         "parser_gap_count_equals_persisted_gap_count": expected_gaps == persisted_gaps,
+        "parser_gap_occurrences_match_persisted_records": gap_keys(bundle["parser_gaps"])
+        == gap_keys(actual_records["parser_gaps"]),
         "parser_gaps_explicit_when_present": all(
             item.get("mapping_status") == "UNMAPPED_RELEVANT_SOURCE_FIELD"
-            for item in bundle["parser_gaps"]
+            for item in actual_records["parser_gaps"]
         ),
     }
     return {
@@ -1551,10 +1851,18 @@ def persist_bundle(
     response_id: str,
 ) -> Dict[str, Any]:
     if response_id in store.seen_response_ids:
+        reconciliation = reconcile_bundle(
+            bundle,
+            parsed,
+            store=store,
+            response_id=response_id,
+        )
+        if reconciliation["status"] == "PASS":
+            reconciliation["status"] = "PASS_EXACT_REPLAY_IDEMPOTENT"
         return {
             "idempotent_replay": True,
-            "persistence_status": "PASS",
-            "reconciliation": {"status": "PASS_EXACT_REPLAY_IDEMPOTENT"},
+            "persistence_status": "PASS" if reconciliation["status"] == "PASS_EXACT_REPLAY_IDEMPOTENT" else "FAIL",
+            "reconciliation": reconciliation,
         }
 
     store.append("response_snapshots", response_snapshot)
@@ -1581,11 +1889,16 @@ def persist_bundle(
                         "recorded_at_time",
                         {
                             "record_type": "recorded_at_time_observation",
-                            "response_id": item["response_id"],
-                            "observed_at": item["observed_at"],
+                            **parser_lineage(
+                                pilot_run_id=item.get("pilot_run_id"),
+                                response_id=item["response_id"],
+                                observed_at=item["observed_at"],
+                            ),
                             "recorded_at_time_observed_at": first_seen,
                             "recorded_at_time": field["value"],
                             "event_source_identity": item.get("event_source_identity"),
+                            "source_result_id": item.get("source_result_id"),
+                            "result_source_path": item.get("result_source_path"),
                             "stop_event_observation_id": item.get("stop_event_observation_id"),
                             "call_observation_id": item.get("call_observation_id"),
                             "call_scope": item.get("call_scope"),
@@ -1608,12 +1921,21 @@ def persist_bundle(
     for item in bundle["parser_gaps"]:
         store.append("parser_gaps", item)
 
-    reconciliation = reconcile_bundle(bundle, parsed)
+    reconciliation = reconcile_bundle(
+        bundle,
+        parsed,
+        store=store,
+        response_id=response_id,
+    )
     store.append(
         "validation_results",
         {
             "record_type": "response_reconciliation",
-            "response_id": response_id,
+            **parser_lineage(
+                pilot_run_id=response_snapshot.get("pilot_run_id"),
+                response_id=response_id,
+                observed_at=response_snapshot.get("observed_at"),
+            ),
             "reconciliation": reconciliation,
         },
     )
@@ -1668,6 +1990,7 @@ class PilotMetrics:
         self.event_history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.recorded_occurrences: List[Dict[str, Any]] = []
         self.recorded_context_history: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+        self.known_recorded_contexts: Set[Tuple[str, str, str]] = set()
         self.successful_response_sequence = 0
 
     def record_http_result(self, result: HTTPResult) -> None:
@@ -1735,16 +2058,48 @@ class PilotMetrics:
             stable_identity = event.get("stable_event_identity")
             for call in event.get("call_observations", []):
                 self.call_occurrences[call.get("call_scope", "UNKNOWN")] += 1
-            if stable_identity:
-                arrival_estimates: List[Any] = []
-                for call in event.get("call_observations", []):
-                    for timing in call.get("arrival_timing", []):
-                        self._record_timing(timing, call, response_sequence, event)
-                        arrival_estimates.extend(
-                            timing.get("field_values", {}).get("EstimatedTime", [])
+            arrival_estimates: List[Any] = []
+            event_key = str(event.get("event_source_identity"))
+            recorded_context_keys: Set[Tuple[str, str, str]] = set()
+            current_scope_contexts: Set[Tuple[str, str]] = set()
+            for call in event.get("call_observations", []):
+                call_scope = str(call.get("call_scope"))
+                for context_name in ("arrival", "departure"):
+                    timings = call.get(f"{context_name}_timing", [])
+                    context_key = (event_key, call_scope, context_name.upper())
+                    if timings:
+                        current_scope_contexts.add((call_scope, context_name.upper()))
+                        for timing in timings:
+                            self._record_timing(timing, call, response_sequence, event)
+                            recorded_context_keys.add(context_key)
+                            if context_name == "arrival":
+                                arrival_estimates.extend(
+                                    timing.get("field_values", {}).get("EstimatedTime", [])
+                                )
+                    elif context_key in self.known_recorded_contexts:
+                        self._record_timing_absence(
+                            event,
+                            call_scope,
+                            context_name.upper(),
+                            response_sequence,
                         )
-                    for timing in call.get("departure_timing", []):
-                        self._record_timing(timing, call, response_sequence, event)
+                        recorded_context_keys.add(context_key)
+
+            # A call or timing container can disappear entirely in a later
+            # response.  Preserve that lifecycle observation without inventing
+            # a NULL source value.
+            for context_key in list(self.known_recorded_contexts):
+                if context_key[0] != event_key or context_key in recorded_context_keys:
+                    continue
+                if (context_key[1], context_key[2]) not in current_scope_contexts:
+                    self._record_timing_absence(
+                        event,
+                        context_key[1],
+                        context_key[2],
+                        response_sequence,
+                    )
+
+            if stable_identity:
                 self.event_history[stable_identity].append(
                     {
                         "response_sequence": response_sequence,
@@ -1752,12 +2107,6 @@ class PilotMetrics:
                         "estimated_time": arrival_estimates[0] if arrival_estimates else None,
                     }
                 )
-            else:
-                for call in event.get("call_observations", []):
-                    for timing in call.get("arrival_timing", []):
-                        self._record_timing(timing, call, response_sequence, event)
-                    for timing in call.get("departure_timing", []):
-                        self._record_timing(timing, call, response_sequence, event)
             for flag_name, value in event.get("operational_flags", {}).items():
                 if value is not None:
                     self.operational_flags[flag_name][value_distribution_key(value)] += 1
@@ -1778,6 +2127,21 @@ class PilotMetrics:
         event: Dict[str, Any],
     ) -> None:
         context = timing.get("context")
+        history_key = (
+            str(event.get("event_source_identity")),
+            str(call.get("call_scope")),
+            str(context),
+        )
+        recorded_values = list(timing.get("field_values", {}).get("RecordedAtTime", []))
+        self.known_recorded_contexts.add(history_key)
+        self.recorded_context_history[history_key].append(
+            {
+                "response_sequence": response_sequence,
+                "response_id": event.get("response_id"),
+                "recorded_at_time_present": bool(recorded_values),
+                **({"recorded_at_times": recorded_values} if recorded_values else {}),
+            }
+        )
         for field_name, values in timing.get("field_values", {}).items():
             self.timing_presence[field_name] += len(values)
             if field_name != "RecordedAtTime":
@@ -1785,9 +2149,11 @@ class PilotMetrics:
             for value in values:
                 occurrence = {
                     "event_source_identity": event.get("event_source_identity"),
+                    "pilot_run_id": event.get("pilot_run_id"),
                     "call_scope": call.get("call_scope"),
                     "arrival_departure_context": context,
                     "response_id": event.get("response_id"),
+                    "response_sequence": response_sequence,
                     "observed_at": event.get("observed_at"),
                     "recorded_at_time_observed_at": RECORDED_FIRST_SEEN.get(
                         (
@@ -1810,18 +2176,26 @@ class PilotMetrics:
                     ),
                 }
                 self.recorded_occurrences.append(occurrence)
-                history_key = (
-                    str(event.get("event_source_identity")),
-                    str(call.get("call_scope")),
-                    str(context),
-                )
-                self.recorded_context_history[history_key].append(
-                    {
-                        "response_sequence": response_sequence,
-                        "value": value,
-                        "response_id": event.get("response_id"),
-                    }
-                )
+
+    def _record_timing_absence(
+        self,
+        event: Dict[str, Any],
+        call_scope: str,
+        context: str,
+        response_sequence: int,
+    ) -> None:
+        history_key = (
+            str(event.get("event_source_identity")),
+            str(call_scope),
+            str(context),
+        )
+        self.recorded_context_history[history_key].append(
+            {
+                "response_sequence": response_sequence,
+                "response_id": event.get("response_id"),
+                "recorded_at_time_present": False,
+            }
+        )
 
     def finalize_recorded_occurrences(self) -> None:
         for occurrence in self.recorded_occurrences:
@@ -1830,25 +2204,44 @@ class PilotMetrics:
                 str(occurrence.get("call_scope")),
                 str(occurrence.get("arrival_departure_context")),
             )
-            current_sequence = next(
-                (
-                    item["response_sequence"]
-                    for item in self.recorded_context_history[key]
-                    if item["response_id"] == occurrence.get("response_id")
-                    and item["value"] == occurrence.get("recorded_at_time")
-                ),
-                None,
-            )
+            current_sequence = occurrence.get("response_sequence")
+            if current_sequence is None:
+                current_sequence = next(
+                    (
+                        item["response_sequence"]
+                        for item in self.recorded_context_history[key]
+                        if item["response_id"] == occurrence.get("response_id")
+                        and occurrence.get("recorded_at_time")
+                        in item.get("recorded_at_times", [])
+                    ),
+                    None,
+                )
             later = [
                 item for item in self.recorded_context_history[key]
                 if current_sequence is not None and item["response_sequence"] > current_sequence
             ]
             if not later:
                 occurrence["later_response_result"] = "NO_LATER_RESPONSE_FOR_SAME_EVENT_SCOPE"
-            elif any(item["value"] == occurrence.get("recorded_at_time") for item in later):
-                occurrence["later_response_result"] = "RETAINED_IN_LATER_RESPONSE"
             else:
-                occurrence["later_response_result"] = "OMITTED_OR_DISAPPEARED_IN_LATER_RESPONSE"
+                later_results: List[Dict[str, Any]] = []
+                for item in later:
+                    if not item.get("recorded_at_time_present"):
+                        result = "OMITTED_OR_DISAPPEARED_IN_LATER_RESPONSE"
+                    elif occurrence.get("recorded_at_time") in item.get("recorded_at_times", []):
+                        result = "RETAINED_IN_LATER_RESPONSE"
+                    else:
+                        result = "DIFFERENT_SOURCE_RECORDED_AT_TIME_IN_LATER_RESPONSE"
+                    later_result = {
+                        "response_sequence": item["response_sequence"],
+                        "response_id": item.get("response_id"),
+                        "result": result,
+                        "recorded_at_time_present": bool(item.get("recorded_at_time_present")),
+                    }
+                    if item.get("recorded_at_time_present"):
+                        later_result["recorded_at_times"] = item.get("recorded_at_times", [])
+                    later_results.append(later_result)
+                occurrence["later_response_results"] = later_results
+                occurrence["later_response_result"] = later_results[0]["result"]
 
     def summary(self) -> Dict[str, Any]:
         repeated_events = {
@@ -1968,10 +2361,12 @@ def write_collection_slot(
         "collection_slots",
         {
             "record_type": "collection_slot",
+            "parser_version": PARSER_VERSION,
             "pilot_run_id": run_id,
             "sampling_policy": SAMPLING_POLICY,
             "scheduled_slot": slot_index,
             "scheduled_slot_utc": iso_utc(scheduled_at),
+            "observed_at": iso_utc(request_timestamp) if request_timestamp else None,
             "state": state,
             "outcome": outcome,
             "request_timestamp": iso_utc(request_timestamp) if request_timestamp else None,
@@ -2131,12 +2526,63 @@ def run_pilot() -> Dict[str, Any]:
     try:
         directory = create_temp_directory()
         store = PilotStore(directory, api_key)
+
+        def record_skipped_slot(slot_number: int, detail: str) -> None:
+            nonlocal stop_reason
+            skipped_at = run_started + timedelta(seconds=slot_number * SAMPLE_INTERVAL_SECONDS)
+            metrics.record_skipped_overlap()
+            try:
+                write_collection_slot(
+                    store,
+                    run_id=run_id,
+                    slot_index=slot_number,
+                    scheduled_at=skipped_at,
+                    state="SKIPPED",
+                    outcome="SCHEDULED_SLOT_SKIPPED_OVERLAP",
+                    detail=detail,
+                )
+            except Exception:
+                metrics.persistence_failure_count += 1
+                stop_reason = "PILOT_PERSISTENCE_FAILURE"
+
+        def record_termination() -> None:
+            try:
+                store.append(
+                    "collection_slots",
+                    {
+                        "record_type": "pilot_termination",
+                        "parser_version": PARSER_VERSION,
+                        "pilot_run_id": run_id,
+                        "sampling_policy": SAMPLING_POLICY,
+                        "observed_at": iso_utc(utc_now()),
+                        "terminated_after_slot": slot_index - 1,
+                        "stop_reason": stop_reason,
+                    },
+                )
+            except Exception:
+                metrics.persistence_failure_count += 1
+
         slot_index = 0
         while slot_index < MAX_LOGICAL_SLOTS:
             scheduled_mono = t0_mono + slot_index * SAMPLE_INTERVAL_SECONDS
-            remaining = scheduled_mono - time.perf_counter()
-            if remaining > 0:
-                time.sleep(remaining)
+            if slot_index > 0:
+                remaining = scheduled_mono - time.perf_counter()
+                if remaining > 0:
+                    time.sleep(remaining)
+                else:
+                    # The scheduler already returned after this fixed slot's
+                    # start time.  Record the miss; never issue a late catch-up
+                    # request for it.
+                    record_skipped_slot(
+                        slot_index,
+                        "previous HTTP request/response processing cycle was still active at fixed slot time",
+                    )
+                    completed_slots += 1
+                    slot_index += 1
+                    if stop_reason is not None:
+                        record_termination()
+                        break
+                    continue
             scheduled_at = run_started + timedelta(seconds=slot_index * SAMPLE_INTERVAL_SECONDS)
             result = perform_http_request(api_key, pilot_anchor)
             metrics.record_http_result(result)
@@ -2217,11 +2663,18 @@ def run_pilot() -> Dict[str, Any]:
                     response_persisted = True
                     if persist_result["persistence_status"] != "PASS":
                         outcome = "PILOT_PERSISTENCE_FAILURE"
-                    elif persist_result["reconciliation"].get("status") == "PASS":
+                    elif persist_result["reconciliation"].get("status") in {
+                        "PASS",
+                        "PASS_EXACT_REPLAY_IDEMPOTENT",
+                    }:
                         metrics.record_bundle(bundle, response_sequence)
                         response_sequence += 1
                     else:
                         outcome = "PILOT_PERSISTENCE_FAILURE"
+                except PersistenceReadbackError as error:
+                    outcome = "PILOT_PERSISTENCE_FAILURE"
+                    stop_reason = stop_reason or "PILOT_PERSISTENCE_FAILURE"
+                    parse_error = clean_error(error, api_key)
                 except PilotParserError as error:
                     outcome = "PARSER_FAILURE"
                     parse_error = clean_error(error, api_key)
@@ -2329,46 +2782,25 @@ def run_pilot() -> Dict[str, Any]:
 
             completed_slots += 1
             slot_index += 1
-            # Fixed start-to-start overlap handling is based on the HTTP
-            # request end, not response-processing completion.  Every slot
-            # whose due time fell while that HTTP request was active is
-            # explicitly skipped; no catch-up request is queued.
+            # Fixed start-to-start overlap handling is based on the moment the
+            # complete HTTP request/response processing cycle returns control
+            # to the scheduler.  This includes parsing and JSONL persistence,
+            # so a slot missed during post-response work is skipped too.
             while (
                 slot_index < MAX_LOGICAL_SLOTS
-                and t0_mono + slot_index * SAMPLE_INTERVAL_SECONDS < result.request_ended_mono
+                and t0_mono + slot_index * SAMPLE_INTERVAL_SECONDS < time.perf_counter()
             ):
-                skipped_at = run_started + timedelta(seconds=slot_index * SAMPLE_INTERVAL_SECONDS)
-                metrics.record_skipped_overlap()
-                try:
-                    write_collection_slot(
-                        store,
-                        run_id=run_id,
-                        slot_index=slot_index,
-                        scheduled_at=skipped_at,
-                        state="SKIPPED",
-                        outcome="SCHEDULED_SLOT_SKIPPED_OVERLAP",
-                        detail="previous HTTP request was still active at fixed slot time",
-                    )
-                except Exception:
-                    metrics.persistence_failure_count += 1
-                    stop_reason = "PILOT_PERSISTENCE_FAILURE"
+                record_skipped_slot(
+                    slot_index,
+                    "previous HTTP request/response processing cycle was still active at fixed slot time",
+                )
                 completed_slots += 1
                 slot_index += 1
+                if stop_reason is not None:
+                    break
 
             if stop_reason is not None:
-                try:
-                    store.append(
-                        "collection_slots",
-                        {
-                            "record_type": "pilot_termination",
-                            "pilot_run_id": run_id,
-                            "sampling_policy": SAMPLING_POLICY,
-                            "terminated_after_slot": slot_index - 1,
-                            "stop_reason": stop_reason,
-                        },
-                    )
-                except Exception:
-                    metrics.persistence_failure_count += 1
+                record_termination()
                 break
     except Exception as error:  # pragma: no cover - host failure boundary
         stop_reason = stop_reason or "UNRECOVERABLE_RUNTIME_FAILURE"
@@ -2378,8 +2810,10 @@ def run_pilot() -> Dict[str, Any]:
                     "collection_slots",
                     {
                         "record_type": "pilot_runtime_failure",
+                        "parser_version": PARSER_VERSION,
                         "pilot_run_id": run_id,
                         "sampling_policy": SAMPLING_POLICY,
+                        "observed_at": iso_utc(utc_now()),
                         "stop_reason": stop_reason,
                         "detail": clean_error(error, api_key),
                     },
