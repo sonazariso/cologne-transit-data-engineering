@@ -1,6 +1,7 @@
 # Realtime Collector Requirements
 
-> **Stage 02 approved design inputs; implementation is deferred.**
+> **Stage 02 approved source requirements; Stage 3B collection/cadence policy
+> approved; implementation and activation are deferred.**
 
 This document is the durable handoff from the approved Stage 02 MDD/TRIAS
 source-contract audit to the later realtime collector-design stages. It records
@@ -15,6 +16,9 @@ near-event validation is described in the [RecordedAtTime lifecycle
 validation](../source-contracts/mdd-trias-event-lifecycle-validation.md). The
 future timing, history, and persistence boundary is defined in the [future
 source-observation and persistence contract](../source-contracts/future-observation-persistence-contract.md).
+The approved Stage 3 collection/cadence boundary is defined in the [Stage 3B
+contract](../stage-03/03b-collection-strategy-cadence-contract.md). It approves
+a policy and guardrails, not a fixed production schedule.
 
 ## 0. Approved source roles and separation
 
@@ -179,16 +183,19 @@ difference an actual physical platform change without stronger evidence.
 
 ## 9. Situation data
 
-Where available, preserve:
+Where available, preserve the complete observed Situation evidence rather than
+only the three common text fields:
 
-- situation identity;
-- `SituationFullRef` and related references;
-- validity;
-- summary;
-- description/detail where approved;
-- source;
-- priority; and
-- affected-entity association or scope.
+- `ParticipantRef`, `SituationNumber`, and `Version` when present;
+- `SituationFullRef` and related references, with original source path and
+  association scope;
+- `CreationTime`, `ValidFrom`, and `ValidTo` when source-reported;
+- `Summary`, `Description`, and `Detail`;
+- observed `Affects`, `Source`, `Priority`, and other version-related fields;
+- service/event identity needed to retain the association; and
+- `GeneralAttribute`/`Attribute` `Code` + sibling `Text`, including the
+  distinction between ordinary passenger information and
+  `IncidentCall`-coded incident service information.
 
 Preserve the observed sequence of Situation/Cause versions rather than only a
 single mutable `Cause` value. If a Situation, Cause, `SituationFullRef`, text,
@@ -199,6 +206,9 @@ association scope where available. Do not synthesize validity from
 disappearance, infer root cause, or create a normalized cause taxonomy here.
 
 Situation association is not causal explanation for a delay or cancellation.
+Provider-reported reason text is evidence distinct from a meaningful dedicated
+structured reason field; `unknownReason = unknown` is not meaningful reason
+evidence. Neither evidence class is a proven or confirmed root cause.
 
 ## 10. Collection gaps
 
@@ -231,8 +241,9 @@ together:
 - overlap/concurrency.
 
 The current conservative project ceiling is **250,000 requests/month** until
-stronger provider or account evidence supersedes it. Final production cadence
-is not defined in this document.
+stronger provider or account evidence supersedes it. Stage 3B approves a
+tiered, quota-aware cadence policy, but final production cadence, tier
+membership, and activation budget are not defined in this Stage 02 handoff.
 
 ## 12. Idempotency and duplicates
 

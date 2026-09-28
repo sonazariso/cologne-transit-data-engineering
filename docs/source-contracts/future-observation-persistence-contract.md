@@ -1,7 +1,8 @@
 # Future Source-Observation and Persistence Contract
 
 **Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — IMPLEMENTATION NOT STARTED`<br>
-**Current stage:** Stage 3 in progress; Stage 3A remains `PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
+**Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED` and
+Stage 3B/3C design contracts are approved with implementation deferred
 
 This document records the approved semantic contract for a later source-faithful
 observation and persistence architecture. It is not a database schema, table
@@ -115,15 +116,31 @@ observation and it disappears later, the earlier observation remains retained.
 
 Because Situation/Cause information may evolve, future persistence must preserve
 the sequence of observed source-reported versions rather than only one mutable
-`Cause` value. Where explicitly source-reported, retain evidence such as:
+`Cause` value. The completed MDD discovery demonstrates that the persistence
+contract must cover more than a dedicated structured reason field. Where
+explicitly source-reported, retain evidence such as:
 
 - `ObservedAt` / `CapturedAt`;
-- Situation identity and references, including `SituationFullRef`;
-- source field/path;
-- summary, description, and detail;
-- reason and effect fields;
-- `ValidFrom` and `ValidTo`; and
-- association scope and affected-entity context.
+- Situation identity, including `ParticipantRef`, `SituationNumber`, and
+  `Version` when present;
+- references, including `SituationFullRef`, its association scope, and the
+  service/event identity needed to retain the link;
+- source field/path and source-specific field names;
+- `Summary`, `Description`, and `Detail`;
+- lifecycle/validity evidence such as `CreationTime`, `ValidFrom`, and
+  `ValidTo`;
+- observed situation context such as `Affects`, `Source`, `Priority`, and
+  other version-related fields;
+- meaningful dedicated structured reason/effect fields when actually present;
+- provider-reported reason or operational-explanation text in Situation text
+  and `IncidentCall` service-information `GeneralAttribute`/`Attribute`
+  `Code` + sibling `Text`, including the original source path; and
+- operational status fields separately from reason text.
+
+The bounded discovery sample had provider-reported reason-text evidence but no
+meaningful dedicated structured reason field. `unknownReason = unknown` is a
+placeholder, not a reason. Provider-reported text remains source evidence and
+must not be promoted to a proven or confirmed cause.
 
 `ValidFrom`/`ValidTo` are source-reported validity values where present; a
 later disappearance must not be converted into a synthetic `ValidTo` or
@@ -165,13 +182,15 @@ separate approval says otherwise.
 
 ## 8. Current-stage guardrail
 
-Stage 3A remains:
+Stage 3 is complete as a source-evidence and design stage:
 
-> **PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING**
+> **COMPLETE — APPROVED; IMPLEMENTATION NOT STARTED**
 
-This contract does not advance that status and does not authorize PostgreSQL
-migration, database schema, production collector persistence, scheduler changes,
-Power BI changes, Actual Delay KPIs, or prediction-accuracy KPIs.
+The Stage 3A conclusion is approved for the bounded evidence already
+documented. The Stage 3B collection/cadence policy and Stage 3C matching design
+are approved separately. This contract still does not authorize PostgreSQL
+migration, database schema, production collector persistence, scheduler
+changes, Power BI changes, Actual Delay KPIs, or prediction-accuracy KPIs.
 
 Related documentation:
 
@@ -180,3 +199,4 @@ Related documentation:
 - [Realtime collector requirements](../collector-design/realtime-collector-requirements.md)
 - [Realtime collection design readiness](../stage-03/realtime-collection-design-readiness.md)
 - [MDD/TRIAS raw-payload retention decision](mdd-trias-raw-retention.md)
+- [Stage 3 completion decision](../stage-03/stage-03-completion-decision.md)

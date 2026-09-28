@@ -1,13 +1,15 @@
 # Stage 3A — Disruption Cause & Alert Evidence Audit
 
-**Status:** `PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
+**Status:** `COMPLETE — APPROVED`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
-**APPROVED**; Stage 3 **IN PROGRESS**
-**Purpose:** bounded evidence validation before any Stage 3 production design
+**APPROVED**; Stage 3 **COMPLETE**
+**Purpose:** bounded evidence validation whose documented conclusions were
+approved without reinterpretation before Stage 3 design closeout
 
 Stage 3A measures how much disruption, cause, effect, alert, and MDD Situation
-evidence is actually populated in one current GTFS-Realtime snapshot and two
-current MDD StopEvent responses. It does not design tables, collectors,
+evidence is actually populated in one current GTFS-Realtime snapshot and
+bounded current MDD StopEvent responses. The completed ten-station MDD-only
+discovery is reviewed below. This audit does not design tables, collectors,
 matching algorithms, dashboards, or a normalized cause model.
 
 ## Source roles and guardrails
@@ -59,12 +61,12 @@ Each MDD request uses the established TRIAS 1.2 StopEvent request contract:
 
 ### Broader MDD-only discovery mode
 
-The existing two-station audit remains the completed baseline. The probe also
-now has an explicit host-only discovery mode for the broader bounded question
-of whether current MDD responses expose Situation/reason evidence elsewhere.
-This mode makes **no GTFS-RT request** and uses exactly one MDD POST per listed
-diagnostic station, up to ten total attempts. These locations are diagnostic
-only and do not define production scope or cadence:
+The existing two-station audit remains the baseline. The explicit host-only
+discovery mode answered the broader bounded question of whether current MDD
+responses expose Situation/reason evidence elsewhere. The completed run made
+**no GTFS-RT request** and used exactly one MDD POST per listed diagnostic
+station, ten attempts total. These locations are diagnostic only and do not
+define production scope or cadence:
 
 | Station | `StopPointRef` |
 |---|---|
@@ -79,11 +81,11 @@ only and do not define production scope or cadence:
 | Köln Hansaring | `de:05315:11801` |
 | Köln Bf Lövenich | `de:05315:13701` |
 
-The mode preserves the established request contract (`NumberOfResults=5`,
+The mode preserved the established request contract (`NumberOfResults=5`,
 `IncludePreviousCalls=true`, `IncludeOnwardCalls=true`, and
-`IncludeRealtimeData=true`), performs no retries or concurrency, and stops on
-the first `401`/`403`. A missing `MDD_API_KEY` causes zero HTTP requests and a
-clear `MDD_API_KEY_MISSING` JSONL status.
+`IncludeRealtimeData=true`), with no retries or concurrency. A missing
+`MDD_API_KEY` causes zero HTTP requests and a clear `MDD_API_KEY_MISSING` JSONL
+status.
 
 ## GTFS-RT audit scope
 
@@ -158,8 +160,11 @@ operational status flags (`Cancelled`, `Deviation`, `Unplanned`,
 and `DemandStop`), populated `Extension` paths/keys, and populated
 `ErrorMessage` values. Operational flags remain effect/status evidence and
 are not interpreted as reasons. Attributes are labelled
-`PASSENGER_INFORMATION_ATTRIBUTE` unless source semantics explicitly prove
-otherwise.
+`GENERAL_PASSENGER_INFORMATION_ATTRIBUTE` by default. An attribute whose
+`Code` contains an observed `IncidentCall` identifier and whose sibling
+`Text` contains incident/service information is separately labelled
+`INCIDENT_SERVICE_INFORMATION_ATTRIBUTE`. This is an evidence distinction for
+the bounded audit, not a production taxonomy.
 
 ## Output and temporary raw artifacts
 
@@ -171,19 +176,127 @@ directory such as `/private/tmp/cologne-transit-stage-03a-XXXXXXXX/`, with
 individual files mode 600. No raw payload is written into the repository and
 no permanent raw-retention policy is introduced.
 
-The final summary reports exact population percentages and neutral evidence
-statements. It does not apply undocumented HIGH/MEDIUM/LOW thresholds and it
-does not approve a schema, cause taxonomy, collector cadence, GTFS-RT
-production ingestion, cross-source matching, causal attribution, database,
-scheduler, or Power BI work.
+The final summary reports exact population percentages and bounded evidence
+statements. It distinguishes `structured_reason_field_evidence` from
+`provider_reported_reason_text_evidence`; the latter may come from Situation
+Summary/Description/Detail or IncidentCall service-information Text. It does
+not apply undocumented HIGH/MEDIUM/LOW thresholds and it does not approve a
+schema, cause taxonomy, collector cadence, GTFS-RT production ingestion,
+cross-source matching, causal attribution, database, scheduler, Power BI, or
+Stage 3B work.
 
-## Deep source-field forensic validation
+## Completed ten-station MDD discovery — offline interpretation
 
-This section is an offline audit of the successful host artifacts from
+The completed artifact is `stage03a-mdd-discovery.jsonl`. Its run configuration
+records ten MDD HTTP attempts, ten successful station responses, and zero
+GTFS-RT HTTP attempts. The bounded sample contained 50 `StopEventResult`
+records, 15 inline `PtSituation` objects (14 unique situation identities), 5
+`SituationFullRef` observations, 5 resolved inline references, and 0
+unresolved references. Resolution is **OBSERVED_IN_THIS_SAMPLE** only; it is
+not a claim that every future reference will resolve.
+
+The artifact's final summary and appended `mdd_discovery_semantic_correction`
+record carry the corrected interpretation; the original source evidence and
+counts are not recomputed from assumptions. A terminal
+`stage_3a_approval_record` records the later explicit approval without
+rewriting the discovery records emitted before that approval.
+
+The situations were returned in:
+
+```text
+StopEventResponse
+  -> StopEventResponseContext
+     -> Situations
+        -> PtSituation
+```
+
+The observed situation evidence includes `Summary`, `Description`, `Detail`,
+`ParticipantRef`, `SituationNumber`, `CreationTime`, `ValidityPeriod`,
+`Affects`, `Source`, `Priority`, and `Version` fields. The service-level
+association was observed at:
+
+```text
+stopEvent -> service -> situationFullRef
+```
+
+The future observation contract must therefore preserve identity, source text,
+lifecycle/validity, affected-entity context, version-related values, and
+association scope when present. It must not reduce a situation to only
+Summary/Description/Detail.
+
+### Reason-text interpretation
+
+The final summary now reports two separate bounded conclusions:
+
+| Evidence class | Completed sample |
+|---|---|
+| `structured_reason_field_evidence` | `NOT_OBSERVED_IN_THIS_SAMPLE` |
+| `provider_reported_reason_text_evidence` | `OBSERVED_IN_THIS_SAMPLE` |
+
+The first conclusion concerns a meaningful dedicated structured reason field.
+The observed `unknownReason = unknown` placeholder is not meaningful reason
+evidence. The second conclusion covers provider-reported human-readable text
+in Situation Summary/Description/Detail and in service-information `Text`
+beside an `IncidentCall` code. Examples include:
+
+- `Verspätung eines vorausfahrenden Zuges`
+- `Reparatur an der Oberleitung`
+- `Technische Störung am Zug`
+- `Warten auf einen entgegenkommenden Zug`
+- `Unbefugte Personen auf der Strecke`
+- detail text containing `Grund: Reparatur an der Strecke.`
+
+These remain `PROVIDER_REPORTED_REASON_TEXT` / provider-reported operational
+explanation evidence. They are not `ROOT_CAUSE`, `PROVEN_CAUSE`, or
+`CONFIRMED_CAUSE_OF_DELAY`.
+
+### IncidentCall and GeneralAttribute interpretation
+
+The 93 populated GeneralAttribute/Attribute observations divide into 82
+`GENERAL_PASSENGER_INFORMATION_ATTRIBUTE` records and 11
+`INCIDENT_SERVICE_INFORMATION_ATTRIBUTE` records. The latter have the
+observed structure:
+
+```text
+stopEvent
+  -> service
+     -> attribute[*]
+        -> code   (*_IncidentCall*)
+        -> text   (incident/service information)
+```
+
+The 11 IncidentCall identifiers are therefore service-information evidence,
+not demonstrated protocol errors. Actual TRIAS `ErrorMessage` fields remain a
+separate error structure; this sample contained 0 populated ErrorMessage
+values and 0 populated provider Extension structures. Ordinary passenger
+facilities such as bicycle carriage, accessibility, wheelchair space, WLAN,
+and climate control remain separate from IncidentCall service information.
+
+Operational-status evidence was observed independently and remains status or
+service-effect evidence, not a reason or causal conclusion.
+
+The bounded conclusions for the completed discovery are:
+
+| Evidence | Result |
+|---|---|
+| Inline Situations | `OBSERVED_IN_THIS_SAMPLE` |
+| SituationFullRefs | `OBSERVED_IN_THIS_SAMPLE` |
+| Incident service information | `OBSERVED_IN_THIS_SAMPLE` |
+| Operational status fields | `OBSERVED_IN_THIS_SAMPLE` |
+| Provider Extensions | `NOT_OBSERVED_IN_THIS_SAMPLE` |
+| Real ErrorMessages | `NOT_OBSERVED_IN_THIS_SAMPLE` |
+
+This was evidence collection and semantic review only. No analytical cause KPI
+is approved, and no production collector, schema, scheduler, matching, or
+Power BI change is authorized by this audit.
+
+## Earlier two-station baseline — deep source-field forensic validation
+
+This section is an offline audit of the earlier two-station host artifacts from
 `/private/tmp/cologne-transit-stage-03a-wzv9x1qc/`. The exact directory was
 available and contained `gtfs-rt-snapshot.pb`, `koeln_neumarkt.json`, and
 `koeln_bf_muelheim.json`. No new HTTP, MDD, GTFS-RT, DNS, or SQL request was
-made. The raw files remain outside the repository.
+made for this offline review. The raw files remain outside the repository.
 
 ### GTFS-Realtime protobuf presence
 
@@ -368,7 +481,7 @@ narrow reporting additions required for the new sample:
 | Response-context `Situation` objects | **ALREADY_COVERED** | Recursive inline Situation detection and full populated-field inventory were already present. |
 | `DatedJourney` → `SituationFullRef` | **MISSING_COVERAGE_FIXED** | Recursive reference detection already existed; journey-level counts and structural association output are now explicit. |
 | `CallAtStop` → `SituationFullRef` | **MISSING_COVERAGE_FIXED** | Recursive reference detection already existed; call-level counts and structural association output are now explicit. |
-| Journey/service `Attribute` / `GeneralAttribute` | **MISSING_COVERAGE_FIXED** | Populated objects now emit exact paths, `Text`, `Code`, `AllFacilities`, `Mandatory`, `Importance`, `InfoURL`, and `Status` values as `PASSENGER_INFORMATION_ATTRIBUTE`. |
+| Journey/service `Attribute` / `GeneralAttribute` | **MISSING_COVERAGE_FIXED** | Populated objects now emit exact paths, `Text`, `Code`, `AllFacilities`, `Mandatory`, `Importance`, `InfoURL`, and `Status` values; ordinary attributes and IncidentCall service-information attributes are classified separately. |
 | Operational status fields | **MISSING_COVERAGE_FIXED** | True values now emit exact paths and separate per-field counts; they remain effect/status evidence. |
 | `ErrorMessage` | **ALREADY_COVERED** | Error fields and populated values were already inventoried separately from references. A direct `error_message_count` is now also emitted. |
 | `Extension` / provider-specific extension structures | **MISSING_COVERAGE_FIXED** | Populated extension paths, direct keys, nested paths, and bounded sanitized scalar examples are now inventoried. |
@@ -419,19 +532,19 @@ the existing protobuf presence/detail logic was reused and no duplicate GTFS
 implementation was added.
 
 Remaining unknowns are temporal stability across repeated snapshots, whether
-other provider responses contain populated Situation content, the raw
-location and semantics of the historical `IncidentCall` identifiers,
-`InfoCall` structures, and any cross-source attribution. This bounded offline
-finding set does not close Stage 3A or authorize production implementation.
+other provider responses contain the same Situation and IncidentCall content,
+`InfoCall` structures, and any cross-source attribution. The completed
+discovery evidence is sufficient to replace the stale pending-execution
+status, but it does not authorize production implementation.
 
 ## Decision gate after host evidence
 
-Stage 3A remains `PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
-until the broader MDD-only discovery mode is executed and its resulting JSONL
-is reviewed. After host evidence, the next decision may
-classify source-evidence usability and identify remaining validation gaps. It
-must not be treated as approval of production implementation or as proof of
-root cause.
+Stage 3A is now **COMPLETE — APPROVED** based on the explicit user approval
+recorded for this closeout. The approval covers the bounded evidence and
+semantic conclusions already documented; it does not reinterpret the sample,
+expand it to provider-wide claims, approve production implementation, or turn
+provider-reported text into proof of root cause. Stage 3B and Stage 3C are
+documented as design contracts in the linked Stage 3 completion record.
 
 Codex preparation validation is limited to compilation, AST parsing, `--help`,
 synthetic in-memory GTFS-RT/MDD parsing, JSON serialization, attempt-budget

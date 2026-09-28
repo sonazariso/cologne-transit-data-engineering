@@ -6,7 +6,8 @@ current Stage 02 status is **APPROVED** after the explicit S17 user approval
 gate. Stage 02A.1, Stage 02A.2, and Stage 02A.3 are completed.
 
 Current stage position: Stage 0 — **APPROVED**; Stage 1 — **APPROVED**;
-Stage 2 — **APPROVED**; Stage 3 — **NEXT / NOT STARTED**.
+Stage 2 — **APPROVED**; Stage 3 — **COMPLETE** as a source-evidence,
+collection-design, and matching-design stage.
 
 ## Approved Stage 02 contract
 
@@ -57,7 +58,8 @@ diagnostic task, without secrets. No arbitrary retention period or automated
 capture is approved in Stage 02.
 
 The [realtime collector requirements](../collector-design/realtime-collector-requirements.md)
-are the durable Stage 02-approved design handoff; implementation is deferred.
+are the durable Stage 02-approved source handoff; implementation remains
+deferred under the approved [Stage 3B collection/cadence contract](../stage-03/03b-collection-strategy-cadence-contract.md).
 The [future source-observation and persistence contract](future-observation-persistence-contract.md)
 records the later architecture's non-negotiable separation of timetable,
 estimate, source-provided recorded time, and collector observation time. It
@@ -75,8 +77,8 @@ also separate post-Stage-02 validation. Its current-feed inventory is complete
 from supplied host evidence, and its two-sample Köln Neumarkt lifecycle check
 is **BOUNDED LIFECYCLE VALIDATION COMPLETE**. The [GTFS.de static identity bridge](gtfsde-static-identity-bridge-audit.md)
 remains `PARTIAL` because railway Köln Hbf is unresolved. It is read-only
-host-run tooling, does not approve a production GTFS-RT source, and does not
-start Stage 3.
+host-run tooling, does not approve a production GTFS-RT source or production
+implementation, and does not alter the completed Stage 3 design closeout.
 
 The [GTFS-RT Historical Availability Audit](gtfs-rt-historical-availability-audit.md)
 is a separate S19/S19.1 post-Stage-02 validation with status **BOUNDED
@@ -84,8 +86,8 @@ VALIDATION COMPLETE**. The initial ±7-day exact-URL Wayback test and the
 separate ±45-day metadata-only test each returned zero captures at the
 requested 3-month and 6-month horizons. It does not merge with the current-
 feed feasibility audit or the GTFS.de static identity bridge, establish
-provider-supported or continuous history, approve a collector, or start Stage
-3.
+provider-supported or continuous history, approve a collector, or alter the
+completed Stage 3 design closeout.
 
 ## Post-Stage-02 realtime source direction
 
@@ -101,12 +103,19 @@ collection must preserve `ObservedAt`/`CapturedAt`, source identity, and
 estimate evolution before any normalization or reconciliation. Confirmed
 Actual Time is unavailable; Actual Delay remains not approved. The [Stage 3
 realtime collection design readiness document](../stage-03/realtime-collection-design-readiness.md)
-records the guardrails without starting Stage 3.
+records the completed design handoff; it does not approve production
+implementation.
+
+The [Stage 3 completion decision](../stage-03/stage-03-completion-decision.md)
+is the authoritative closeout record. The [Stage 3B collection/cadence
+contract](../stage-03/03b-collection-strategy-cadence-contract.md) and [Stage
+3C matching design](../stage-03/03c-cross-source-matching-design.md) close the
+two design substages without activating a collector or matching engine.
 
 ## Cross-source reconciliation and Cologne scope guardrail
 
 The [Cross-Source Reconciliation Contract](cross-source-reconciliation-contract.md)
-is **APPROVED DESIGN GUARDRAIL — IMPLEMENTATION NOT STARTED**. It makes the
+is **APPROVED DESIGN CONTRACT — IMPLEMENTATION NOT STARTED**. It makes the
 GTFS-RT analytical scope Cologne-only even when the source feed is Germany-wide,
 requires validated canonical stop/line/service-event identity evidence, and
 prohibits direct equality between MDD `JourneyRef` and GTFS-RT `trip_id`.
@@ -116,8 +125,8 @@ stop-event-first matching, auditable HIGH/MEDIUM/LOW confidence, distinct
 trip/route/stop/agency alert scopes, Cologne-only KPI evidence, and explicit
 through-service and long-distance exclusions. Provider-reported cause/effect
 remains distinct from proven root cause, and MDD Situation association remains
-distinct from causality. The contract is a Stage 3 entry guardrail; it does not
-start Stage 3 or define final schemas, persistence algorithms, or production
+distinct from causality. The contract is the Stage 3C reconciliation handoff;
+it does not define final schemas, persistence algorithms, or production
 implementation.
 
 ## Historical / Legacy implementation evidence

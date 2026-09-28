@@ -1,12 +1,12 @@
 # Cross-Source Reconciliation Contract
 
-**Status:** `APPROVED DESIGN GUARDRAIL — IMPLEMENTATION NOT STARTED`  
+**Status:** `APPROVED DESIGN CONTRACT — IMPLEMENTATION NOT STARTED`<br>
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
-**APPROVED**; Stage 3 **NEXT / NOT STARTED**
+**APPROVED**; Stage 3 **COMPLETE**
 
 This document defines the approved design contract for reconciling MDD/TRIAS
 and GTFS-RT evidence within the Cologne Transport Intelligence project. It is
-a documentation and design guardrail only. It does not approve Stage 3
+a documentation and design contract only. It does not approve production
 implementation, final schemas, SQL tables, migrations, collectors, ETL,
 matching algorithms, DAX, Power BI pages, production mappings, or scheduler
 changes.
@@ -27,7 +27,7 @@ or association layer is introduced. This contract defines:
 - how GTFS-RT ServiceAlert scope is preserved;
 - which reported-cause claims are permitted;
 - how MDD Situation evidence is interpreted; and
-- which unresolved questions remain for Stage 3 design and validation.
+- which implementation and validation risks remain after Stage 3 design.
 
 The contract is intended to prevent a Germany-wide GTFS-RT feed, a weak
 identity overlap, or a provider-reported cause/effect value from silently
@@ -618,27 +618,31 @@ The following claim is invalid under this contract:
 
 > The technical problem caused exactly 8 minutes of delay.
 
-## 31. Unresolved issues
+## 31. Carried-forward implementation risks
 
-The following remain Stage 3 design or validation items:
+The following remain carried-forward implementation or validation items after
+Stage 3 design completion:
 
 1. Confirmed Actual Time remains unavailable.
 2. Actual Delay remains unapproved.
-3. Railway Köln Hbf GTFS.de identity remains unresolved.
-4. The full Cologne GTFS.de stop-identity bridge is not yet built.
-5. Canonical line mapping between MDD and GTFS.de is not yet implemented.
-6. Cross-source service-event matching has not yet been empirically validated
+3. Prediction Accuracy vs Actual remains unapproved.
+4. Railway Köln Hbf GTFS.de identity remains unresolved.
+5. The full Cologne GTFS.de stop-identity bridge is not yet built.
+6. Canonical line mapping between MDD and GTFS.de is not yet implemented.
+7. Cross-source service-event matching has not yet been empirically validated
    across a representative sample.
-7. GTFS-RT cause/effect population quality has not yet been measured.
-8. The final alert persistence and filtering strategy is not yet designed.
+8. GTFS-RT cause/effect population quality has not yet been validated beyond
+   the bounded inspected snapshot.
+9. Final alert persistence and filtering implementation is not yet designed.
 
 The bounded Köln Neumarkt identity evidence must not be generalized into
 historical identity stability or used to substitute for the unresolved railway
 Köln Hbf mapping.
 
-## 32. Stage 3 implementation implications
+## 32. Post-Stage-3 implementation handoff
 
-When Stage 3 is explicitly started, its design review must address at least:
+The completed Stage 3 design requires any later implementation review to
+address at least:
 
 - source-faithful MDD and GTFS-RT staging before reconciliation;
 - a validated canonical stop bridge and a separately governed canonical line
@@ -653,7 +657,9 @@ When Stage 3 is explicitly started, its design review must address at least:
 - source-specific missingness and provenance; and
 - validation of representative matching and cause/effect coverage.
 
-This list is a Stage 3 entry contract, not a Stage 3 implementation plan. Stage
-3 remains **NEXT / NOT STARTED**. No SQL tables, C# models, collector code,
+This list is a later implementation handoff, not an implementation plan or
+approval. Stage 3 is **COMPLETE**; no SQL tables, C# models, collector code,
 ETL, matching algorithms, DAX measures, Power BI pages, or production mappings
-are created by this document.
+are created by this document. See the [Stage 3C matching design](../stage-03/03c-cross-source-matching-design.md)
+and the [Stage 3 completion decision](../stage-03/stage-03-completion-decision.md)
+for the authoritative design closeout.

@@ -11,7 +11,7 @@
 | 0 | Project Definition | APPROVED |
 | 1 | Source Inventory & Permission | APPROVED |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
-| 3 | Static GTFS Profile / Realtime Evidence Validation | IN PROGRESS |
+| 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
 | 6 | Static Warehouse & Analytics | Not started |
@@ -29,14 +29,20 @@
 
 ### Current Stage 3 substage
 
-- **Stage 3 — IN PROGRESS.**
-- **Stage 3A — Disruption Cause & Alert Evidence Audit — PARTIAL HOST EVIDENCE
-  — MDD SITUATION DISCOVERY PENDING.**
-- Stage 3A is a bounded host-run evidence audit only. It does not start
-  production implementation, database/schema work, collector changes,
-  scheduler changes, Power BI work, or cross-source matching.
+- **Stage 3 — COMPLETE** as a source-evidence, collection/cadence-design, and
+  cross-source-matching-design stage.
+- **Stage 3A — Disruption Cause & Alert Evidence Audit — COMPLETE — APPROVED.**
+- **Stage 3B — Collection Strategy & Cadence — COMPLETE — APPROVED DESIGN;
+  ACTIVATION DEFERRED.**
+- **Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN;
+  IMPLEMENTATION NOT STARTED.**
+- Stage 3 completion does not authorize production implementation,
+  database/schema work, collector changes, scheduler changes, Power BI work,
+  or the next project stage.
 
 See the [Stage 3A audit document](stage-03/03a-disruption-cause-alert-evidence-audit.md).
+See the [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
+for the authoritative closeout record.
 
 ## Post-Stage-02 validation
 
@@ -66,8 +72,8 @@ Existing GTFS-RT validation:
   This does not establish provider history or continuous coverage and does not
   approve GTFS-RT as a production source.
 - This validation did not reopen or invalidate Stage 2 or approve GTFS-RT as a
-  production source. Stage 3 is now in progress only through the bounded Stage
-  3A evidence audit; no production implementation is authorized.
+  production source. Stage 3 is complete as a design stage; no production
+  implementation is authorized.
 
 ### Post-Stage-02 source validation package
 
@@ -79,7 +85,9 @@ Existing GTFS-RT validation:
 | GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
 | GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
 | Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
-| Cross-source reconciliation and Cologne scope contract | **APPROVED DESIGN GUARDRAIL** — implementation not started |
+| Cross-source reconciliation and Cologne scope contract | **APPROVED DESIGN CONTRACT** — implementation not started |
+| Stage 3 collection/cadence contract | **COMPLETE — APPROVED DESIGN** — activation deferred |
+| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — implementation not started |
 | Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
 | Actual Delay KPI | **NOT APPROVED** |
 
@@ -196,18 +204,21 @@ it is not a Stage 02 blocker.
 - ICE, IC, NightJet, FlixTrain, and Thalys are outside the core KPI scope for now; source evidence may still be retained.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.
-- Stage 02 is **APPROVED**; Stage 03 is **IN PROGRESS** through Stage 3A.
+- Stage 02 is **APPROVED**; Stage 03 is **COMPLETE** as a design/contract
+  stage.
 - The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-  now records **STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD
-  SITUATION DISCOVERY PENDING** and
-  continues to record guardrails only; it does not approve production
-  implementation.
+  now records **STAGE 3 COMPLETE — 3A APPROVED — 3B/3C DESIGN COMPLETE** and
+  carries the implementation boundary forward; it does not approve production
+  activation.
 - The [Stage 3A disruption/cause evidence audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
-  is **PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING**. No analytical decision is final before its
-  bounded host evidence is reviewed.
+  is **COMPLETE — APPROVED** for the bounded evidence already collected. Its
+  conclusions remain evidence-only and non-causal.
 - The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
-  is an approved design guardrail for subsequent Stage 3 design work; it does
-  not approve production implementation or cross-source matching.
+  is the approved Stage 3C design contract; it does not approve production
+  implementation or matching code.
+- The [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
+  records the approved collection/cadence policy, matching design, acceptance
+  checks, and carried-forward implementation risks.
 
 ## Former open critical questions and S15/S16 refinement
 

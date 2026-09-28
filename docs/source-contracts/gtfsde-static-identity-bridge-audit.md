@@ -2,7 +2,7 @@
 
 **Status:** `PARTIAL — Neumarkt current identity validated; railway Köln Hbf unresolved`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
-**APPROVED**; Stage 3 — **NOT STARTED**
+**APPROVED**; Stage 3 — **COMPLETE (design closeout; implementation not started)**
 **Overall bridge status:** `PARTIAL` until Köln Hbf is resolved.
 **Production decision:** none; this audit does not approve GTFS-Realtime as a
 production source or replace the project's existing static GTFS.

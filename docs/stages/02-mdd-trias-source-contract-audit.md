@@ -2003,6 +2003,7 @@ explicit source semantic. Permanent or automatic full raw XML/JSON/protobuf
 retention remains disallowed by default.
 
 The [Stage 3 realtime collection design readiness document](../stage-03/realtime-collection-design-readiness.md)
-records these entry conditions and guardrails. Stage 3 remains **NEXT / NOT
-STARTED**; this consolidation does not implement collectors, schemas,
-migrations, schedules, database objects, Power BI, or reconciliation logic.
+records these entry conditions and guardrails. Stage 3 is now **COMPLETE** as a
+design/contract stage; this consolidation does not implement collectors,
+schemas, migrations, schedules, database objects, Power BI, or reconciliation
+logic.

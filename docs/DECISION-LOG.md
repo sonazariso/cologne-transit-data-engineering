@@ -30,6 +30,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-024 | 2026-09-26 | Cross-Source Reconciliation and Cologne Scope Contract | Approved design guardrail |
 | D-025 | 2026-09-28 | Stage 3 formally started with a bounded Stage 3A disruption/cause evidence audit; no schema, cadence, cause-model, matching, or production decision is made before host evidence | Procedural status |
 | D-026 | 2026-09-28 | Future persistence preserves source timing and disruption evidence as append-only observations: `TimetabledTime`, `EstimatedTime`, nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` remain separate; PostgreSQL is the intended future direction only | Approved design guardrail |
+| D-027 | 2026-09-28 | Stage 3 is complete: Stage 3A approved from bounded evidence; Stage 3B collection/cadence policy approved without activation; Stage 3C stop-event-first reconciliation design approved without implementation | Approved stage completion |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -71,10 +72,10 @@ railway Köln Hbf is unresolved in GTFS.de.
 - Future normalization/reconciliation is a separate design problem deferred
   until source-specific staging is designed.
 
-This decision is a future design direction. It does not start Stage 3, approve
-collector production code, finalize schemas or table names, or authorize
-database, scheduler, Power BI, or runtime changes. See the [Stage 3 realtime
-collection design readiness document](stage-03/realtime-collection-design-readiness.md).
+At the time of this decision, it was a future design direction. It did not
+approve collector production code, finalize schemas or table names, or
+authorize database, scheduler, Power BI, or runtime changes. See the [Stage 3
+realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md).
 
 ## D-024 — Cross-Source Reconciliation and Cologne Scope Contract
 
@@ -117,8 +118,10 @@ semantics; claim limits; and unresolved Stage 3 validation items.
 This is an approved design guardrail, not production implementation approval.
 It does not create SQL tables, schemas, migrations, collector code, matching
 algorithms, ETL, Power BI changes, scheduler jobs, or production mappings.
-Stage 3 is now **IN PROGRESS** through Stage 3A, whose status is **PARTIAL HOST
-EVIDENCE — MDD SITUATION DISCOVERY PENDING**.
+At the time of this decision entry, Stage 3 was **IN PROGRESS** through Stage
+3A. The status was **PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY
+PENDING**; the later completed discovery and current approved closeout are
+recorded in the Stage 3A audit and D-027 below.
 
 ## D-025 — Stage 3A Procedural Start
 
@@ -128,10 +131,11 @@ substage measures current GTFS-RT ServiceAlert population and two sampled MDD
 Situation responses using exactly one GTFS-RT GET and two MDD POST requests.
 
 This is a procedural status entry, not a final analytical decision. The
-original two-station MDD execution is complete; the broader ten-station
-Situation discovery remains pending. No database schema, collector cadence,
-cause taxonomy, GTFS-RT production-ingestion approval, cross-source matching,
-causal attribution, scheduler, or Power BI decision is made here.
+original two-station MDD execution was complete at entry; the broader
+ten-station Situation discovery was subsequently completed and is now under
+review. No database schema, collector cadence, cause taxonomy, GTFS-RT
+production-ingestion approval, cross-source matching, causal attribution,
+scheduler, or Power BI decision is made here.
 
 ## D-026 — Future Source-Observation and Persistence Contract
 
@@ -162,3 +166,34 @@ Delay and prediction-accuracy KPIs remain **NOT APPROVED** until source
 `RecordedAtTime` is observed and validated. A future short-term raw-payload
 retention option may be evaluated for forensic reprocessing, but no duration is
 approved and permanent raw retention is not the default.
+
+## D-027 — Stage 3 Completion
+
+The explicit user approval recorded for this closeout changes Stage 3A to
+**COMPLETE — APPROVED** for the bounded evidence already documented. The
+approved conclusions preserve provider-reported reason text, Situation and
+SituationFullRef association, IncidentCall service-information semantics,
+GTFS-RT cause/effect limitations, separate timing fields, and non-causal
+interpretation. It does not reinterpret the sample or prove root cause.
+
+Stage 3B is **COMPLETE — APPROVED DESIGN CONTRACT — ACTIVATION DEFERRED**. The
+approved architecture has separate MDD and GTFS-RT collection loops, a
+tiered/quota-aware Sampling Policy/Era, bounded retries, explicit timeout and
+lineage requirements, append-only evidence, and no replay of missed snapshots.
+The historical 10/20/20 candidate is not approved as production truth.
+
+Stage 3C is **COMPLETE — APPROVED DESIGN CONTRACT — IMPLEMENTATION NOT
+STARTED**. The canonical unit is a stop event, source identifiers remain
+distinct, confidence and method are explicit, Cologne scope is preserved, and
+alert/Situation association is non-causal by default. Railway Köln Hbf identity
+and the full Cologne bridge remain open implementation risks.
+
+This completion does not create PostgreSQL schema, modify the database,
+implement collectors or matching, modify Power BI, or start the next stage.
+
+## Current Stage 3 status
+
+Stage 3 is **COMPLETE** as a source-evidence and design/contract stage. The
+[Stage 3 completion decision](stage-03/stage-03-completion-decision.md) is the
+authoritative closeout record. Production implementation and the next project
+stage remain separately gated.

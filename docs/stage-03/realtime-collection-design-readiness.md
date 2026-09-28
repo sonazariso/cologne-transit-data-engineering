@@ -1,22 +1,24 @@
 # Realtime Collection Design Readiness
 
-**Status:** `STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING`
+**Status:** `STAGE 3 COMPLETE — 3A APPROVED — 3B/3C DESIGN COMPLETE`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
-**APPROVED**; Stage 3 **IN PROGRESS**
-**Purpose:** approved entry guardrails while Stage 3A validates disruption and
-alert evidence before any production design
+**APPROVED**; Stage 3 **COMPLETE**
+**Purpose:** Stage 3 design handoff and guardrails for later implementation
 
-This document consolidates the approved post-Stage-02 source decision. It is a
-readiness handoff, not an implementation design. It does not approve
-collector code, database objects, schemas, migrations, scheduler jobs, final
-table names, reconciliation algorithms, Power BI changes, or production
-runtime changes.
+This document consolidates the approved post-Stage-02 source decision and the
+Stage 3 design boundary. It is a design handoff, not an implementation. It
+does not approve collector code, database objects, schemas, migrations,
+scheduler jobs, final table names, matching algorithms, Power BI changes, or
+production runtime activation.
 
-Stage 3A is the current bounded substage. The [Disruption Cause & Alert
-Evidence Audit](03a-disruption-cause-alert-evidence-audit.md) is **PARTIAL
-HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING** and measures current GTFS-RT alert
-population and two sampled MDD Situation responses. Its result is an evidence
-gate, not a production approval.
+Stage 3A is complete and approved. The [Disruption Cause & Alert Evidence
+Audit](03a-disruption-cause-alert-evidence-audit.md) records the bounded
+Situation/reason-text evidence and the explicit approval boundary. The [Stage
+3B collection and cadence contract](03b-collection-strategy-cadence-contract.md)
+and [Stage 3C cross-source matching design](03c-cross-source-matching-design.md)
+complete the design work; neither activates production implementation. The
+[Stage 3 completion decision](stage-03-completion-decision.md) is the
+authoritative closeout record.
 
 ## Approved source direction
 
@@ -132,15 +134,16 @@ latest-state record.
 - Do not retain permanent or automatic full raw XML, JSON, or protobuf
   payloads by default. A bounded automatic raw-capture exception requires a
   later explicit approval of purpose, retention, storage, access, and cleanup.
-- Future reconciliation is deferred until source-specific staging is designed
-  and reviewed. This document does not choose final schemas, table names,
-  cadence, request budgets, or reconciliation algorithms.
+- Production reconciliation remains deferred until source-specific staging is
+  implemented and reviewed. Stage 3 defines the source-faithful collection and
+  matching contracts, but does not choose final schemas, table names, matching
+  algorithms, or runtime implementations.
 
 ## Cross-source reconciliation and Cologne scope guardrails
 
 The detailed contract is documented in the [cross-source reconciliation and
 Cologne scope contract](../source-contracts/cross-source-reconciliation-contract.md).
-Its mandatory Stage 3 entry guardrails are:
+Its approved Stage 3 design guardrails are:
 
 - GTFS-RT analytical scope is **Cologne/Köln only**.
 - The Germany-wide GTFS-RT feed does not expand the project's analytical
@@ -178,22 +181,23 @@ validated.
 2. Railway Köln Hbf identity is unresolved in GTFS.de.
 3. GTFS-RT historical archive was not available from the tested Wayback
    scope: zero exact-URL captures at both horizons in both bounded runs.
-4. Final collector cadence and request budget are not yet designed.
+4. A tiered, quota-aware cadence policy is approved, but final collector
+   intervals, station tiers, and activation budget are not yet measured or
+   activated.
 5. Final database/staging schema is not yet designed.
 6. The full Cologne GTFS.de stop-identity bridge and canonical line mapping
    are not yet implemented.
 7. Cross-source service-event matching is not yet validated. The retained
-   GTFS-RT snapshot has bounded cause/effect evidence, while broader MDD
-   Situation discovery remains pending and neither source has representative
-   repeated-sample coverage.
-8. Final GTFS-RT alert persistence and Cologne-filtering strategy is not yet
-   designed.
+   GTFS-RT snapshot has bounded cause/effect evidence, while the completed MDD
+   discovery has only one bounded ten-station sample and neither source has
+   representative repeated-sample coverage.
+8. The conceptual GTFS-RT alert scope/filtering contract is approved, but final
+   persistence and production filtering implementation is not yet designed.
 
 ## Stage boundary
 
-Stage 3 is **IN PROGRESS** through Stage 3A. Stage 3A remains **PARTIAL HOST
-EVIDENCE — MDD SITUATION DISCOVERY PENDING** until the broader MDD-only
-discovery mode is executed and its JSONL evidence is reviewed. Do not write collector production code, create SQL tables or
-migrations, add scheduler jobs, create services, change Power BI, modify
-environment variables, query external endpoints from Codex, or design the
-final reconciliation layer as part of this substage.
+Stage 3 is **COMPLETE**. Stage 3A is **COMPLETE — APPROVED**; Stage 3B and
+Stage 3C are **COMPLETE — APPROVED DESIGN CONTRACTS**. Do not write collector
+production code, create SQL tables or migrations, add scheduler jobs, create
+services, change Power BI, modify environment variables, query external
+endpoints from Codex, or start the next project stage as part of this handoff.

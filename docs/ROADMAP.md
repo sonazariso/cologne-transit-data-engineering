@@ -84,35 +84,56 @@ evidence to core KPIs, long-distance rail remains outside core KPI scope, and
 cross-source cause/effect attribution requires HIGH-confidence reconciliation,
 while alert scope and source provenance remain distinct.
 
-## Stage 3 — Static GTFS Profile / Realtime Evidence Validation — IN PROGRESS
+## Stage 3 — Static GTFS Profile / Realtime Evidence Validation — COMPLETE
 
-Stage 3 has formally started with a bounded evidence-validation substage. The
+Stage 3 was completed as a bounded evidence, collection-design, and
+reconciliation-design stage. The
 approved source direction remains MDD/TRIAS **PRIMARY REALTIME** and GTFS-RT
-**COMPLEMENTARY REALTIME**. No production implementation is authorized.
+**COMPLEMENTARY REALTIME**. No production implementation or activation is
+authorized by this stage.
 
-### Stage 3A — Disruption Cause & Alert Evidence Audit — PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING
+### Stage 3A — Disruption Cause & Alert Evidence Audit — COMPLETE — APPROVED
 
 The [Stage 3A audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
-will measure populated GTFS-RT ServiceAlert cause/effect/text/scope evidence in
-one current snapshot and MDD Situation content/association evidence in two
-fixed diagnostic station responses. Its host budget is exactly one GTFS-RT GET
-and two MDD POST requests, with no retries, concurrency, or fallback endpoint.
+measures populated GTFS-RT ServiceAlert cause/effect/text/scope evidence in
+one current snapshot and MDD Situation content/association evidence in fixed
+diagnostic station responses. The completed MDD-only discovery used ten MDD
+POST requests with no retries, concurrency, or fallback endpoint and no
+GTFS-RT request.
 
 The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-now records **STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD
-SITUATION DISCOVERY PENDING**. It
-continues to record entry guardrails only; it does not constitute a production
-collector, schema, cadence, reconciliation, or Power BI approval.
+records **STAGE 3 COMPLETE — 3A APPROVED — 3B/3C DESIGN COMPLETE**. It
+remains a design handoff and does not constitute a production collector,
+schema, scheduler, or Power BI approval.
 
-The initial two-station MDD execution is complete. A separate host-only
-ten-station MDD Situation discovery mode is prepared and remains pending host
-execution and JSONL review; it makes no GTFS-RT request.
+The initial two-station MDD execution and the separate host-only ten-station
+MDD Situation discovery are complete. The discovery JSONL was reviewed
+offline; it made no GTFS-RT request. The explicit user approval closes the
+bounded Stage 3A evidence gate.
 
-Resolve the authoritative GTFS feed and its coverage/update policy as a later
-bounded design question; re-profile raw files, counts, duplicates, missing
-values, date coverage, stop hierarchy, routes, agencies, and modes from the
-current authoritative feed. The cross-source contract remains an entry
-guardrail and does not authorize implementation.
+### Stage 3B — Collection Strategy & Cadence — COMPLETE — APPROVED DESIGN; ACTIVATION DEFERRED
+
+The [Stage 3B collection and cadence contract](stage-03/03b-collection-strategy-cadence-contract.md)
+approves separate MDD and GTFS-RT collection loops, a tiered quota-aware
+Sampling Policy/Era, bounded retries, overlap protection, and independent
+source/collector timestamps. It does not approve the historical 10/20/20
+schedule, final station tiers, final intervals, or production activation.
+
+### Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN; IMPLEMENTATION NOT STARTED
+
+The [Stage 3C cross-source matching design](stage-03/03c-cross-source-matching-design.md)
+defines stop-event-first reconciliation, canonical service-event dimensions,
+HIGH/MEDIUM/LOW-or-UNMATCHED confidence, auditable match methods, Cologne
+scope, and non-causal alert/Situation association. It preserves the unresolved
+railway Köln Hbf identity and does not implement matching.
+
+The [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
+is the authoritative closeout record. Stage 4 remains not started.
+
+Authoritative-feed coverage, canonical bridge construction, final collector
+readiness, and implementation validation remain later work. The cross-source
+contract is now the Stage 3C design handoff and does not authorize
+implementation.
 
 ## Stage 4 — Cologne Scope & Mode Classification
 Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.

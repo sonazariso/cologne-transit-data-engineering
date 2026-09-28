@@ -91,6 +91,32 @@ MDD_REFERENCE_TYPE_NAMES = {
 MDD_ERROR_FIELD_NAMES = {"errormessage", "errorcode"}
 MDD_GENERAL_ATTRIBUTE_FIELD_NAMES = frozenset({"attribute", "generalattribute"})
 MDD_EXTENSION_FIELD_MARKER = "extension"
+GENERAL_PASSENGER_INFORMATION_ATTRIBUTE = "GENERAL_PASSENGER_INFORMATION_ATTRIBUTE"
+INCIDENT_SERVICE_INFORMATION_ATTRIBUTE = "INCIDENT_SERVICE_INFORMATION_ATTRIBUTE"
+MEANINGLESS_REASON_VALUES = frozenset(
+    {"", "unknown", "unknownreason", "n/a", "na", "none", "null"}
+)
+# This is a bounded audit evidence detector, not a production cause taxonomy.
+# It only identifies text that is useful for the manual semantic review of this
+# sample; it must not be used to infer a causal category.
+PROVIDER_REASON_TEXT_HINTS = (
+    "verspät",
+    "reparatur",
+    "störung",
+    "warten auf",
+    "unbefug",
+    "beeinträchtig",
+    "grund:",
+    "ausfall",
+    "delay",
+    "repair",
+    "technical",
+    "waiting for",
+    "unauthorized",
+    "reason:",
+    "disruption",
+    "cancel",
+)
 MDD_OPERATIONAL_STATUS_FIELDS = {
     "cancelled": "Cancelled",
     "deviation": "Deviation",
@@ -1734,8 +1760,10 @@ def field_semantic_category(key: str, path: str) -> str:
         return "GENERAL_INFORMATION_TEXT"
     if "error" in normalized:
         return "UNCLASSIFIED_SOURCE_TEXT"
+    if normalized == "unknownreason":
+        return "UNMEANINGFUL_REASON_PLACEHOLDER"
     if normalized in {"reason", "reasongroup", "reasoncontent", "reasonname"}:
-        return "REASON_TEXT"
+        return "STRUCTURED_REASON_FIELD"
     if normalized in {"effect", "effecttext", "impact", "consequence"}:
         return "EFFECT_TEXT"
     if normalized in {"advice", "advicetext"}:
@@ -1743,6 +1771,23 @@ def field_semantic_category(key: str, path: str) -> str:
     if normalized in {"textualcontent", "customerinformation"}:
         return "GENERAL_INFORMATION_TEXT"
     return "UNCLASSIFIED_SOURCE_TEXT"
+
+
+def is_meaningful_reason_value(value: Any) -> bool:
+    scalar = source_scalar(value)
+    if scalar is None or isinstance(scalar, bool):
+        return False
+    return str(scalar).strip().casefold() not in MEANINGLESS_REASON_VALUES
+
+
+def looks_like_provider_reason_text(value: Any) -> bool:
+    scalar = source_scalar(value)
+    if scalar is None or isinstance(scalar, bool):
+        return False
+    normalized = str(scalar).strip().casefold()
+    if not normalized or normalized in MEANINGLESS_REASON_VALUES:
+        return False
+    return any(hint in normalized for hint in PROVIDER_REASON_TEXT_HINTS)
 
 
 def reason_like_field_inventory(
@@ -1781,6 +1826,11 @@ def reason_like_field_inventory(
         existing_examples = record["sanitized_value_examples"]
         if len(existing_examples) < MAX_MDD_FIELD_EXAMPLES:
             for scalar in flatten_scalar_values(child):
+                if (
+                    record["semantic_category"] == "STRUCTURED_REASON_FIELD"
+                    and not is_meaningful_reason_value(scalar)
+                ):
+                    continue
                 example = short_text(scalar, secret)
                 if example is None:
                     continue
@@ -1950,6 +2000,22 @@ def sanitized_attribute_value(
     return examples[:MAX_MDD_FIELD_EXAMPLES] or None
 
 
+def attribute_code_contains_identifier(
+    attribute: Dict[str, Any],
+    identifier_type: str,
+) -> bool:
+    code_value = direct_named_value(attribute, {"code"})
+    return any(
+        re.search(identifier_type, str(scalar), re.IGNORECASE)
+        for scalar in flatten_scalar_values(code_value)
+    )
+
+
+def attribute_has_source_text(attribute: Dict[str, Any]) -> bool:
+    text_value = direct_named_value(attribute, {"text"})
+    return bool(source_text_values(text_value))
+
+
 def collect_general_attribute_records(
     parsed: Any,
     secret: Optional[str],
@@ -1991,11 +2057,23 @@ def collect_general_attribute_records(
                     continue
                 fields[field_name] = sanitized
                 field_paths[field_name] = field_path
+            incident_call_code_present = attribute_code_contains_identifier(
+                attribute, "IncidentCall"
+            )
+            incident_service_text_present = (
+                incident_call_code_present and attribute_has_source_text(attribute)
+            )
             output.append(
                 {
                     "path": object_path,
                     "field_name": key,
-                    "classification": "PASSENGER_INFORMATION_ATTRIBUTE",
+                    "classification": (
+                        INCIDENT_SERVICE_INFORMATION_ATTRIBUTE
+                        if incident_service_text_present
+                        else GENERAL_PASSENGER_INFORMATION_ATTRIBUTE
+                    ),
+                    "incident_call_code_present": incident_call_code_present,
+                    "incident_service_text_present": incident_service_text_present,
                     "present_fields": sorted(fields),
                     "fields": fields,
                     "field_paths": field_paths,
@@ -2590,6 +2668,15 @@ def situation_record(
         "summary_values": summary_values,
         "description_values": description_values,
         "detail_values": detail_values,
+        "summary_source_field_paths": source_field_paths(
+            situation, entry_path, {"summary"}
+        ),
+        "description_source_field_paths": source_field_paths(
+            situation, entry_path, {"description"}
+        ),
+        "detail_source_field_paths": source_field_paths(
+            situation, entry_path, {"detail"}
+        ),
         "valid_from": short_text(valid_from, secret),
         "valid_to": short_text(valid_to, secret),
         "observed_source_field_paths": source_field_paths(
@@ -2758,6 +2845,104 @@ def aggregate_situation_content(
         ),
         "observed_source_field_paths": observed_paths,
         "max_sanitized_short_examples": examples,
+    }
+
+
+def provider_reported_reason_text_evidence(
+    situation_records: Sequence[Dict[str, Any]],
+    general_attribute_records: Sequence[Dict[str, Any]],
+    secret: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Summarize bounded provider-reported reason/explanation text evidence.
+
+    A Situation's Summary/Description/Detail and an IncidentCall attribute's
+    sibling Text remain source text.  The bounded detector identifies examples
+    for review; it does not turn them into a normalized cause or prove that
+    they caused a delay.
+    """
+
+    source_counts: Counter[str] = Counter()
+    paths: Set[str] = set()
+    examples: List[Dict[str, Any]] = []
+    situation_fields = (
+        ("summary", "SITUATION_SUMMARY", "summary_source_field_paths"),
+        ("description", "SITUATION_DESCRIPTION", "description_source_field_paths"),
+        ("detail", "SITUATION_DETAIL", "detail_source_field_paths"),
+    )
+
+    def add_example(
+        source_category: str,
+        source_path: Optional[str],
+        text: Any,
+        station_key: Optional[str] = None,
+        code: Optional[Any] = None,
+    ) -> None:
+        sanitized = short_text(text, secret)
+        if sanitized is None:
+            return
+        source_counts[source_category] += 1
+        if source_path:
+            paths.add(source_path)
+        example = {
+            "classification": "PROVIDER_REPORTED_REASON_TEXT",
+            "source_category": source_category,
+            "source_path": source_path,
+            "text": sanitized,
+        }
+        if station_key is not None:
+            example["station_key"] = station_key
+        if code is not None:
+            example["incident_call_code"] = short_text(code, secret)
+        if example not in examples:
+            examples.append(example)
+
+    for record in situation_records:
+        for field_name, source_category, path_field in situation_fields:
+            values = record.get("%s_values" % field_name, [])
+            source_paths = record.get(path_field, [])
+            source_path = source_paths[0] if source_paths else record.get("entry_path")
+            for text, _language in values:
+                if looks_like_provider_reason_text(text):
+                    add_example(source_category, source_path, text)
+
+    for record in general_attribute_records:
+        if record.get("classification") != INCIDENT_SERVICE_INFORMATION_ATTRIBUTE:
+            continue
+        text_value = record.get("fields", {}).get("Text")
+        code_value = record.get("fields", {}).get("Code")
+        text_values = (
+            text_value if isinstance(text_value, list) else [text_value]
+        )
+        for text in text_values:
+            if looks_like_provider_reason_text(text):
+                add_example(
+                    "INCIDENT_SERVICE_INFORMATION_ATTRIBUTE_TEXT",
+                    record.get("field_paths", {}).get("Text"),
+                    text,
+                    station_key=record.get("station_key"),
+                    code=code_value,
+                )
+
+    selected_examples: List[Dict[str, Any]] = []
+    for source_category in sorted(source_counts):
+        for example in examples:
+            if example["source_category"] != source_category:
+                continue
+            selected_examples.append(example)
+            break
+    for example in examples:
+        if example in selected_examples:
+            continue
+        selected_examples.append(example)
+        if len(selected_examples) >= MAX_TEXT_EXAMPLES:
+            break
+
+    return {
+        "observation": bounded_observation_label(len(examples)),
+        "evidence_observation_count": sum(source_counts.values()),
+        "source_counts": dict(sorted(source_counts.items())),
+        "source_paths": sorted(paths),
+        "examples": selected_examples[:MAX_TEXT_EXAMPLES],
     }
 
 
@@ -2958,6 +3143,10 @@ def analyze_mdd_response(
         for record in general_attribute_records
         for field_name in record.get("present_fields", [])
     )
+    general_attribute_classification_counts: Counter[str] = Counter(
+        record.get("classification", GENERAL_PASSENGER_INFORMATION_ATTRIBUTE)
+        for record in general_attribute_records
+    )
     operational_status_counts: Counter[str] = Counter(
         record["status_field"] for record in operational_status_records
     )
@@ -2976,6 +3165,9 @@ def analyze_mdd_response(
         item.get("non_empty_value_count", 0)
         for item in error_inventory
         if normalized_key(item["field_name"]) == "errormessage"
+    )
+    provider_reason_evidence = provider_reported_reason_text_evidence(
+        situation_records, general_attribute_records, secret
     )
     relation_scope_keys = (
         "CALL",
@@ -3060,7 +3252,21 @@ def analyze_mdd_response(
             "InfoURL", 0
         ),
         "general_attribute_field_counts": dict(sorted(general_attribute_field_counts.items())),
+        "general_attribute_classification_counts": dict(
+            sorted(general_attribute_classification_counts.items())
+        ),
+        "general_passenger_information_attribute_count": (
+            general_attribute_classification_counts.get(
+                GENERAL_PASSENGER_INFORMATION_ATTRIBUTE, 0
+            )
+        ),
+        "incident_service_information_attribute_count": (
+            general_attribute_classification_counts.get(
+                INCIDENT_SERVICE_INFORMATION_ATTRIBUTE, 0
+            )
+        ),
         "general_attribute_records": general_attribute_records,
+        "provider_reported_reason_text_evidence": provider_reason_evidence,
         "extension_populated_count": len(extension_records),
         "extension_records": extension_records,
         "operational_status_counts": dict(sorted(operational_status_counts.items())),
@@ -3151,7 +3357,17 @@ def empty_mdd_station_summary(
         "general_attribute_code_present_count": 0,
         "general_attribute_info_url_present_count": 0,
         "general_attribute_field_counts": {},
+        "general_attribute_classification_counts": {},
+        "general_passenger_information_attribute_count": 0,
+        "incident_service_information_attribute_count": 0,
         "general_attribute_records": [],
+        "provider_reported_reason_text_evidence": {
+            "observation": "NOT_OBSERVED_IN_THIS_SAMPLE",
+            "evidence_observation_count": 0,
+            "source_counts": {},
+            "source_paths": [],
+            "examples": [],
+        },
         "extension_populated_count": 0,
         "extension_records": [],
         "operational_status_counts": {},
@@ -3249,9 +3465,13 @@ def aggregate_mdd_summaries(
         for record in summary.get("general_attribute_records", [])
     ]
     general_attribute_field_counts: Counter[str] = Counter()
+    general_attribute_classification_counts: Counter[str] = Counter()
     for summary in station_summaries:
         general_attribute_field_counts.update(
             summary.get("general_attribute_field_counts", {})
+        )
+        general_attribute_classification_counts.update(
+            summary.get("general_attribute_classification_counts", {})
         )
     extension_records = [
         dict(record, station_key=summary.get("station_key"))
@@ -3270,6 +3490,9 @@ def aggregate_mdd_summaries(
         operational_status_path_counts.update(
             summary.get("operational_status_true_path_counts", {})
         )
+    provider_reason_evidence = provider_reported_reason_text_evidence(
+        records, general_attribute_records, secret
+    )
     incident_call_identifier_count = sum(
         summary.get("incident_call_identifier_count", 0)
         for summary in station_summaries
@@ -3373,7 +3596,21 @@ def aggregate_mdd_summaries(
         "general_attribute_field_counts": dict(
             sorted(general_attribute_field_counts.items())
         ),
+        "general_attribute_classification_counts": dict(
+            sorted(general_attribute_classification_counts.items())
+        ),
+        "general_passenger_information_attribute_count": (
+            general_attribute_classification_counts.get(
+                GENERAL_PASSENGER_INFORMATION_ATTRIBUTE, 0
+            )
+        ),
+        "incident_service_information_attribute_count": (
+            general_attribute_classification_counts.get(
+                INCIDENT_SERVICE_INFORMATION_ATTRIBUTE, 0
+            )
+        ),
         "general_attribute_records": general_attribute_records,
+        "provider_reported_reason_text_evidence": provider_reason_evidence,
         "extension_populated_count": len(extension_records),
         "extension_records": extension_records,
         "operational_status_counts": dict(sorted(operational_status_counts.items())),
@@ -3559,6 +3796,16 @@ def final_summary(
             "trip_linked_alerts_with_non_provenance_description_text", 0
         ),
         "mdd_human_readable_situation_evidence_statement": mdd_text_statement,
+        "mdd_structured_reason_field_evidence": bounded_observation_label(
+            len(
+                populated_reason_evidence_paths(
+                    mdd_summary.get("station_summaries", [])
+                )
+            )
+        ),
+        "mdd_provider_reported_reason_text_evidence": mdd_summary.get(
+            "provider_reported_reason_text_evidence", {}
+        ).get("observation", "NOT_OBSERVED_IN_THIS_SAMPLE"),
         "mdd_situation_text_population_counts": mdd_text_counts,
         "mdd_reference_type_counts": mdd_summary.get("reference_type_counts", {}),
         "mdd_incident_call_reference_count": mdd_summary.get(
@@ -3613,6 +3860,12 @@ def final_summary(
         ),
         "mdd_general_attribute_info_url_present_count": mdd_summary.get(
             "general_attribute_info_url_present_count", 0
+        ),
+        "mdd_general_attribute_classification_counts": mdd_summary.get(
+            "general_attribute_classification_counts", {}
+        ),
+        "mdd_incident_service_information_attribute_count": mdd_summary.get(
+            "incident_service_information_attribute_count", 0
         ),
         "mdd_extension_populated_count": mdd_summary.get(
             "extension_populated_count", 0
@@ -3669,7 +3922,7 @@ def populated_reason_evidence_paths(
         item["path"]
         for summary in station_summaries
         for item in summary.get("reason_like_field_inventory", [])
-        if item.get("semantic_category") == "REASON_TEXT"
+        if item.get("semantic_category") == "STRUCTURED_REASON_FIELD"
         and item.get("sanitized_value_examples")
     }
     return sorted(paths)
@@ -3684,6 +3937,9 @@ def mdd_discovery_summary(
 ) -> Dict[str, Any]:
     aggregate = aggregate_mdd_summaries(station_summaries, secret)
     reason_paths = populated_reason_evidence_paths(station_summaries)
+    provider_reason_evidence = aggregate.get(
+        "provider_reported_reason_text_evidence", {}
+    )
     operational_status_total = sum(
         aggregate.get("operational_status_counts", {}).values()
     )
@@ -3731,17 +3987,19 @@ def mdd_discovery_summary(
                 "OTHER_OR_UNCLASSIFIED",
             )
         },
-        "explicit_reason_field_observation": bounded_observation_label(
+        "structured_reason_field_evidence": bounded_observation_label(
             len(reason_paths)
         ),
-        "explicit_reason_field_paths": reason_paths,
+        "structured_reason_field_paths": reason_paths,
+        "provider_reported_reason_text_evidence": provider_reason_evidence.get(
+            "observation", "NOT_OBSERVED_IN_THIS_SAMPLE"
+        ),
+        "provider_reported_reason_text_evidence_detail": provider_reason_evidence,
         "general_attribute_observation": bounded_observation_label(
             aggregate.get("general_attribute_count", 0)
         ),
-        "general_attribute_classification": (
-            "PASSENGER_INFORMATION_ATTRIBUTE"
-            if aggregate.get("general_attribute_count", 0)
-            else None
+        "general_attribute_classification": aggregate.get(
+            "general_attribute_classification_counts", {}
         ),
         "operational_status_observation": bounded_observation_label(
             operational_status_total
@@ -3777,6 +4035,9 @@ def mdd_discovery_summary(
         "general_attribute_text_present_count",
         "general_attribute_code_present_count",
         "general_attribute_info_url_present_count",
+        "general_attribute_classification_counts",
+        "general_passenger_information_attribute_count",
+        "incident_service_information_attribute_count",
         "extension_populated_count",
         "error_message_count",
         "incident_call_identifier_count",
@@ -3869,7 +4130,7 @@ def run_mdd_discovery_mode() -> int:
         {
             "execution_mode": "MDD_DISCOVERY_HOST_RUN_ONLY",
             "stage_3a_status": (
-                "PARTIAL HOST EVIDENCE — MDD SITUATION DISCOVERY PENDING"
+                "EVIDENCE COLLECTED — REVIEW/DECISION PENDING"
             ),
             "discovery_status": discovery["discovery_status"],
             "http_attempts": tracker.total_http_attempts,
@@ -3880,9 +4141,15 @@ def run_mdd_discovery_mode() -> int:
             "answers": {
                 "inline_situations": discovery["inline_situation_observation"],
                 "situation_full_refs": discovery["situation_full_ref_observation"],
-                "explicit_reason_evidence": discovery[
-                    "explicit_reason_field_observation"
+                "structured_reason_field_evidence": discovery[
+                    "structured_reason_field_evidence"
                 ],
+                "provider_reported_reason_text_evidence": discovery[
+                    "provider_reported_reason_text_evidence"
+                ],
+                "incident_service_information": bounded_observation_label(
+                    discovery.get("incident_service_information_attribute_count", 0)
+                ),
                 "general_attributes": discovery["general_attribute_observation"],
                 "operational_status_fields": discovery[
                     "operational_status_observation"

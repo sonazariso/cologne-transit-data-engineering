@@ -2,7 +2,7 @@
 
 **Status:** `BOUNDED LIFECYCLE VALIDATION COMPLETE — NEUMARKT SAMPLES #1 AND #2 RECORDED`
 **Stage position:** Stage 0 — **APPROVED**; Stage 1 — **APPROVED**; Stage 2 —
-**APPROVED**; Stage 3 — **NEXT / NOT STARTED**  
+**APPROVED**; Stage 3 — **COMPLETE (design closeout; implementation not started)**<br>
 **Validation type:** bounded, read-only source-feasibility audit  
 **Production decision:** none; GTFS-Realtime is not approved as a production
 source by this document.
@@ -18,8 +18,9 @@ freshness, lifecycle visibility, and identifier compatibility.
 
 The audit tooling is diagnostic only. It does not integrate GTFS-Realtime into
 the database, production collector, Power BI, SQL Server, or the Legacy
-repository. It does not modify the existing MDD collector and it does not
-start Stage 3.
+repository. It does not modify the existing MDD collector or authorize
+production implementation; the later Stage 3 design closeout is recorded
+separately.
 
 ## 2. Why this audit is being performed now
 
@@ -419,9 +420,9 @@ No additional S18 lifecycle run is required for this bounded validation. Any
 future historical-availability work is a separate post-Stage-02 audit and
 must not be read as evidence that the live feed retains a continuous archive.
 
-No GTFS-RT production approval, architecture change, Stage 3 start, MDD
-collector change, database change, Power BI change, scheduler change, Legacy
-change, or final architectural decision is made by this audit.
+No GTFS-RT production approval, MDD collector change, database change, Power
+BI change, scheduler change, Legacy change, or production implementation is
+made by this audit. The Stage 3 design closeout is recorded separately.
 
 The later S20 consolidation records the project-level source-role direction
 and keeps source-faithful MDD and GTFS-RT staging separate. `ObservedAt` /
