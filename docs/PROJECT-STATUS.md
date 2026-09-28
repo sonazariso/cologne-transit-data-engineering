@@ -16,7 +16,7 @@
 | 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
-| 8 | Small Realtime Pilot | NOT STARTED / NEXT |
+| 8 | Small Realtime Pilot | BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT |
 | 9 | Matching & Data Quality | Not started |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
@@ -120,7 +120,7 @@ for the authoritative closeout record.
   data loading, network retrieval, realtime work, matching, operational facts,
   and Power BI work did not occur. The [Stage 6 completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
   records the closeout. Stage 7 is now separately closed as **COMPLETE —
-  APPROVED PILOT DESIGN**; Stage 8 remains **NOT STARTED / NEXT**.
+  APPROVED PILOT DESIGN**; Stage 8 is currently blocked at its safe preflight.
 
 ### Stage 7 closeout
 
@@ -154,6 +154,15 @@ for the authoritative closeout record.
   is authoritative. Stage 8 execution has not occurred: no MDD or GTFS-RT
   request, network access, SQL/database access, runtime pilot, or PostgreSQL
   implementation was performed by this closeout.
+
+### Stage 8 preflight blocker
+
+- **Stage 8 — BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT.** The Stage 8 runtime
+  exists at [scripts/stage_08_mdd_realtime_pilot.py](../scripts/stage_08_mdd_realtime_pilot.py),
+  but its safe credential preflight measured zero HTTP attempts. No raw or
+  JSONL temporary directory was created, and no MDD response was available for
+  parsing or reconciliation. See the [sanitized blocker record](stages/08-small-realtime-pilot-blocked.md).
+- Stage 9 and all later stages remain not started and untouched.
 
 ## Post-Stage-02 validation
 

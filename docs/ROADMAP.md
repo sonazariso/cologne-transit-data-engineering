@@ -220,15 +220,15 @@ not guarantee every response completes within 3 seconds. Three-second sampling
 reduces but cannot mathematically guarantee capture of a transient
 `RecordedAtTime`. Actual Delay remains unapproved.
 
-## Stage 8 — Small Realtime Pilot — NOT STARTED / NEXT
+## Stage 8 — Small Realtime Pilot — BLOCKED AT PREFLIGHT
 
-Stage 8 owns host execution of the approved MDD-only pilot. It must validate
-every selected field end-to-end — raw response → parser → diagnostic
-persistence — including `RecordedAtTime` population, repeated estimate
-history, call/bay/Situation scope, errors, gaps, cleanup, and parser-to-
-persistence reconciliation. It must remain bounded to one station and must
-not be interpreted as Cologne-wide coverage. No Stage 8 execution occurred in
-the Stage 7 closeout.
+Stage 8 owns host execution of the approved MDD-only pilot. Its runtime is
+implemented, but the safe preflight found `MDD_API_KEY` missing and made zero
+HTTP attempts. The pilot therefore remains incomplete: no response was
+available for raw → parser → diagnostic-persistence validation, reconciliation,
+field coverage, or `RecordedAtTime` measurement. See the [sanitized blocker
+record](stages/08-small-realtime-pilot-blocked.md). Stage 9 remains not started
+and is not authorized by this blocker.
 
 ## Stage 9 — Matching & Data Quality
 Validate stop, route, service-date, trip/event identity, candidate richer
