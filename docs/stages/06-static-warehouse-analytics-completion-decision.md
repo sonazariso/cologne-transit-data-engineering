@@ -16,9 +16,17 @@ architecture and table/grain handoff.
   version `VERSION__20260928_0042`, validity `2026-09-02` through
   `2026-12-12`, retrieval timestamp `2026-09-28T13:44:03Z`, and ZIP SHA-256
   `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6`.
-- The complete source baseline contains 33 agencies, 957 routes, 30,364
-  stops, 126,160 trips, 2,943,746 `stop_times` rows, 4,616 `calendar` rows,
-  and 124,061 `calendar_dates` rows.
+- The complete source baseline contains 33 `agency.txt` rows, 957 `routes.txt`
+  rows, 30,364 `stops.txt` rows, 126,160 `trips.txt` rows, 2,943,746
+  `stop_times.txt` rows, 4,616 `calendar.txt` rows, 124,061
+  `calendar_dates.txt` rows, 0 `frequencies.txt` rows, 1,167,322
+  `shapes.txt` rows, and 1,691 `transfers.txt` rows. The source also records
+  9,903 parent-station rows and 20,461 physical stop-position rows within
+  `stops.txt`.
+- `feed_info.txt` metadata identifies publisher `VRS`, feed version
+  `VERSION__20260928_0042`, and validity `2026-09-02` through `2026-12-12`.
+  Stage 4 does not expose a comparable row count for that file, so no such
+  assertion is made.
 - The Stage 4 Cologne rule is the actual source `stop_id` prefix
   `de:05315:`. Parent stations do not override the actual stop ID referenced
   by `stop_times.txt`.
@@ -68,9 +76,10 @@ architecture and table/grain handoff.
   source rows. The same content hash reuses one snapshot identity and a
   different hash creates a new snapshot/version.
 - The future physical implementation acceptance matrix covers snapshot
-  identity, source rows, Cologne stops/routes/trips/events, internal segments,
-  trip-scope populations, mode totals, duplicate safety, service dates,
-  pattern grain, date-expansion safety, and extended-hour time safety.
+  identity, all explicitly counted source-file populations and `feed_info.txt`
+  metadata, Cologne stops/routes/trips/events, internal segments, trip-scope
+  populations, mode totals, duplicate safety, service dates, pattern grain,
+  date-expansion safety, and extended-hour time safety.
 
 ## DEFERRED IMPLEMENTATION DECISION
 

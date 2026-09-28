@@ -106,11 +106,20 @@ claims about rows currently present in a warehouse.
 | `stop_times` rows | 2,943,746 |
 | `calendar.txt` rows | 4,616 |
 | `calendar_dates.txt` rows | 124,061 |
+| `frequencies.txt` rows | 0 |
+| `shapes.txt` rows | 1,167,322 |
+| `transfers.txt` rows | 1,691 |
 
 The current source evidence reports zero missing agency, route, stop, or trip
 identifiers, zero unknown `stop_times` stop references, and zero duplicate
 route, stop, or trip identifiers. A future load must still validate these
 conditions and must not rely on them as universal source guarantees.
+
+`feed_info.txt` is validated through the source metadata in Section 3:
+publisher `VRS`, feed version `VERSION__20260928_0042`, and validity
+`2026-09-02` through `2026-12-12`. Stage 4 does not expose a comparable
+`feed_info.txt` row count, so this contract makes no row-count assertion for
+that file.
 
 ### 3.2 Validated Cologne source baseline
 
@@ -494,7 +503,7 @@ implementation. They are not executed by this Stage 6 design approval.
 | ID | Future check | Current approved baseline / required result |
 |---|---|---|
 | A | Source snapshot identity | Loaded ZIP SHA-256 equals the explicitly selected Stage 4 hash `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; the feed version and validity also match. |
-| B | Source rows | Parsed source counts reconcile to the selected evidence: 33 agencies, 957 routes, 30,364 stops, 126,160 trips, 2,943,746 `stop_times`, 4,616 `calendar`, and 124,061 `calendar_dates` rows, subject to preserved source-row lineage. |
+| B | Source rows | All parsed source-file populations with explicit Stage 4 baseline counts reconcile to the selected evidence: 33 `agency.txt` rows / distinct agency IDs, 957 `routes.txt` rows / distinct route IDs, 30,364 `stops.txt` rows / distinct stop IDs including 9,903 parent-station rows and 20,461 physical stop-position rows, 126,160 `trips.txt` rows / distinct trip IDs, 2,943,746 `stop_times.txt` rows, 4,616 `calendar.txt` rows, 124,061 `calendar_dates.txt` rows, 0 `frequencies.txt` rows, 1,167,322 `shapes.txt` rows, and 1,691 `transfers.txt` rows, subject to preserved source-row lineage. `feed_info.txt` metadata must preserve and validate publisher `VRS`, feed version `VERSION__20260928_0042`, and validity `2026-09-02` through `2026-12-12`; no `feed_info.txt` row-count assertion is made because Stage 4 evidence does not expose one in the same manner. |
 | C | Cologne stop scope | Validated `stop_id` prefix rule produces 3,137 Cologne stop IDs / rows, including 2,273 positions and 864 parent stations; actual stop IDs referenced by events control scope. |
 | D | Cologne-serving route population | Exactly 137 Cologne-serving route identities under the Stage 4 rule. |
 | E | Cologne-serving trip patterns | Exactly 61,805 Cologne-serving trip patterns, with no unknown trip-row or unresolved stop-scope trip in the approved baseline. |

@@ -61,7 +61,8 @@ with this decision.
     architectural requirements. Backup/recovery becomes a production-readiness
     gate before realtime collection starts.
 16. The [42-entry table/grain catalog](05-table-grain-catalog.md) is the
-    approved logical contract. Stage 6 owns the static warehouse entries:
+    approved logical contract. Stage 6 owns the approved static
+    warehouse/analytics design-contract entries, not physical objects:
     `DimStop` and `DimRoute` are source-first VRS/static GTFS dimensions and do
     not require Stage 9 `core.canonical_stop` or `core.canonical_line` objects;
     `FactScheduledStopEvent` remains pattern-level, while `BridgeServiceDate`
@@ -78,7 +79,9 @@ The following are intentionally not implemented or finalized in Stage 5:
   creation, SQL execution, and migrations;
 - final primary-key, foreign-key, unique-constraint, and partitioned-table
   syntax;
-- physical static warehouse objects and source-to-warehouse load logic;
+- future physical static warehouse objects and source-to-warehouse load logic,
+  governed by the Stage 6 design contract and deferred until explicit user
+  authorization;
 - MDD/GTFS-RT collectors, scheduler, sampling activation, and raw-payload
   retention operations;
 - canonical identity resolution and source-event matching;
@@ -88,9 +91,10 @@ The following are intentionally not implemented or finalized in Stage 5:
 
 The [Stage 6 design contract](06-static-warehouse-analytics-design.md) and
 [completion decision](06-static-warehouse-analytics-completion-decision.md)
-are the approved static warehouse/analytics handoff. Its physical PostgreSQL
-implementation remains deferred until explicit user authorization. Stage 7
-must not be treated as started by this documentation approval.
+are the approved static warehouse/analytics handoff and govern any future
+physical implementation. That physical PostgreSQL implementation remains
+deferred until explicit user authorization. Stage 7 must not be treated as
+started by this documentation approval.
 
 ## OPEN IMPLEMENTATION RISK
 

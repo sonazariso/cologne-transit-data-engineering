@@ -147,11 +147,13 @@ SOURCE
 The source-faithful layer remains independently interpretable if matching,
 canonicalization, or analytics logic is later rebuilt.
 
-Stage 6 static warehouse construction may use validated `src`/`wrk` static GTFS
-outputs directly. `core.canonical_stop` and `core.canonical_line` are Stage 9
-objects, not prerequisites for constructing `dw.dim_stop` or `dw.dim_route`;
-later canonical mappings may enrich or reference those dimensions. Source
-route identity remains distinct from geographical KPI scope.
+The approved Stage 6 static warehouse/analytics design contract governs any
+future physical static warehouse implementation. If explicitly authorized
+later, that implementation may use validated `src`/`wrk` static GTFS outputs
+directly. `core.canonical_stop` and `core.canonical_line` are Stage 9 objects,
+not prerequisites for constructing `dw.dim_stop` or `dw.dim_route`; later
+canonical mappings may enrich or reference those dimensions. Source route
+identity remains distinct from geographical KPI scope.
 
 ## 6. Source-faithful policy
 
@@ -552,7 +554,10 @@ made authoritative by rewriting them into the new model.
 
 The following remain deferred:
 
-- Stage 6 physical static warehouse objects and reconciliation counts;
+- future physical static warehouse implementation governed by the approved
+  Stage 6 static warehouse/analytics design contract, including reconciliation
+  counts; Stage 6 itself creates no physical PostgreSQL objects or executes
+  reconciliation;
 - Stage 7/8 realtime collector implementation, raw-capture exception, and
   operational persistence selection;
 - Stage 9 canonical identity and cross-source matching implementation;
@@ -568,8 +573,9 @@ architecture or to begin the next stage inside this task.
 
 ## 22. Stage 6 design/contract handoff
 
-Stage 6 finalizes the static warehouse and analytics design/contract. Physical
-PostgreSQL implementation is explicitly deferred until a later user
+Stage 6 finalizes the static warehouse and analytics design/contract and
+governs the design of any future physical static warehouse implementation.
+Physical PostgreSQL implementation is explicitly deferred until a later user
 authorization. Any future implementation must:
 
 1. use the approved PostgreSQL 18 direction without hardcoding a future minor
