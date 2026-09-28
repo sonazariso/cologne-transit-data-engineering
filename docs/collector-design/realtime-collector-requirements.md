@@ -277,10 +277,10 @@ Do not infer provider outage from a local resolver failure.
 The default is **no permanent or automatic full raw-response retention** for
 MDD XML/JSON or GTFS-RT protobuf payloads.
 Temporary raw evidence outside Git is allowed for an approved diagnostic
-experiment. The Stage 7 V2 handoff explicitly approves only the bounded
+experiment. The Stage 7 V3 handoff explicitly approves only the bounded
 purpose, retention, storage, access control, and cleanup described below.
 
-For the approved Stage 8 V2 diagnostic handoff, the increased response count
+For the approved Stage 8 V3 diagnostic handoff, the increased response count
 does not change that boundary: raw files remain temporary and outside Git,
 with mode-600 files inside a mode-700 directory, a maximum 24-hour retention,
 and deletion after successful evidence extraction and reconciliation. This is
@@ -348,13 +348,15 @@ Stage 7 approves a diagnostic handoff for one future Stage 8 execution:
   preflight and no secret output;
 - request: `arrival`, `NumberOfResults=20`, previous/onward/realtime flags
   true, `TimeWindow` omitted, and `IncludeOperatingDays` omitted;
-- sampling policy: `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`, one slot every 10
-  seconds for at most 60 minutes and at most 360 scheduled logical requests
-  and 360 normal HTTP attempts;
+- sampling policy: `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`, fixed start-to-start
+  slots at `T0`, `T0 + 3s`, `T0 + 6s`, and so on for at most 60 minutes, with
+  at most 1200 scheduled logical slots and 1200 normal HTTP attempts;
 - `DepArrTime`: fixed `PilotAnchorDepArrTime` selected at pilot start and reused
   for every request; do not advance it with wall-clock time;
 - timeout/retries: 30 seconds and zero retries;
-- overlap: no concurrency or catch-up; an overlapping slot is recorded as
+- overlap: requests remain sequential and non-concurrent; do not wait three
+  seconds after response completion, queue catch-up work, or shift the fixed
+  schedule. An overlapping slot is recorded as
   `SCHEDULED_SLOT_SKIPPED_OVERLAP`;
 - early stop: missing credential means zero attempts; 401/403 and 429 stop
   immediately; three consecutive failed request slots stop the pilot; and
@@ -363,17 +365,30 @@ Stage 7 approves a diagnostic handoff for one future Stage 8 execution:
   [the Stage 7 design](../stages/07-realtime-pilot-design.md).
 
 This handoff preserves the full Stage 2 field-retention requirements and the
-Stage 5 logical source grains. The 360-attempt ceiling is approximately
-0.144% of the conservative 250,000-request monthly ceiling and is a bounded
-diagnostic pilot budget, not a production cadence approval; Stage 13 owns
-production cadence/readiness analysis. Every successful 10-second response is
-a distinct observation, even when values are unchanged. Ten-second polling
+Stage 5 logical source grains. Retained MDD lifecycle/probe evidence shows
+observed request elapsed times predominantly below the proposed 3-second
+interval, from sub-second observations to approximately 2 seconds. This
+supports the bounded diagnostic interval but does not guarantee completion
+within 3 seconds or prevent skipped slots.
+
+The conservative monthly ceiling remains `250,000` MDD HTTP requests. Normal
+operational planning must use the approved `83–84%` envelope of
+`207,500–210,000` requests/month and preserve `40,000–42,500` requests/month
+(`16–17%`) as unallocated headroom; it must not silently plan against the full
+ceiling. The theoretical 1200-attempt pilot maximum is `0.48%` of the full
+ceiling and approximately `0.57–0.58%` of the operational planning envelope.
+`NumberOfResults=20` is a per-response result limit, not an HTTP request count.
+The pilot is a bounded diagnostic budget, not a production cadence approval;
+Stage 13 owns production cadence/readiness analysis and must size production
+inside the operational envelope. Every successful 3-second response is a
+distinct observation, even when values are unchanged. Three-second polling
 reduces but cannot mathematically guarantee capture of a transient
-`RecordedAtTime`; `RECORDED_AT_TIME_NOT_OBSERVED` means absence in the observed
-sampling window, not provider-wide absence. It does not authorize Stage 8 host
-execution, runtime code, PostgreSQL, GTFS-RT collection, production cadence,
-or Actual Delay. The [Stage 7 completion decision](../stages/07-realtime-pilot-design-completion-decision.md)
-is the authoritative approval record.
+`RecordedAtTime`; `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT` means
+absence in the observed sampling window, not provider-wide absence. It does
+not authorize Stage 8 host execution, runtime code, PostgreSQL, GTFS-RT
+collection, production cadence, or Actual Delay. The [Stage 7 completion
+decision](../stages/07-realtime-pilot-design-completion-decision.md) is the
+authoritative approval record.
 
 ## Handoff gate
 

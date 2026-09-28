@@ -1,7 +1,7 @@
 # Stage 7 — Realtime Pilot Design
 
 **Status:** `COMPLETE — APPROVED PILOT DESIGN`  
-**Decision:** [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction), correcting the cadence detail in [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)<br>
+**Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Date:** `2026-09-28`  
 **Next stage:** Stage 8 — `NOT STARTED / NEXT`
 
@@ -180,7 +180,11 @@ readiness stage may test it separately.
 Every observation and gap must identify the following explicitly named,
 versioned, non-production policy:
 
-`MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`
+`MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`
+
+Policy lineage is preserved: V1 was the original 60-second design and V2 was
+the superseding 10-second fixed-anchor design. Both remain historical records;
+V3 is the active revised Stage 8 policy.
 
 The policy conceptually records:
 
@@ -188,10 +192,10 @@ The policy conceptually records:
 |---|---|
 | Source | MDD/TRIAS |
 | Scope | Köln Hbf / `de:05315:11201` |
-| Interval | One request slot every 10 seconds |
+| Interval | Fixed start-to-start slot every 3 seconds |
 | Maximum duration | 60 minutes |
-| Maximum scheduled logical requests | 360 |
-| Maximum normal HTTP attempts | 360 |
+| Maximum scheduled logical requests | 1200 |
+| Maximum normal HTTP attempts | 1200 |
 | `NumberOfResults` | 20 |
 | `StopEventType` | `arrival` |
 | Retry count | 0 |
@@ -199,23 +203,38 @@ The policy conceptually records:
 | Environment | Stage 8 diagnostic pilot; non-production |
 
 This sampling policy must not be reused as a production `SamplingEra` or
-represented as a production cadence approval.
+represented as a production cadence approval. The 3-second pilot cadence is
+not production approval.
 
 ### 5.2 Scheduling rules
 
-- Schedule one logical request slot every 10 seconds for at most 60 minutes.
+- Schedule fixed start-to-start logical request slots at `T0`, `T0 + 3s`,
+  `T0 + 6s`, and so on for at most 60 minutes; the maximum is 1200 scheduled
+  slots.
 - Do not queue catch-up requests.
 - Do not issue requests concurrently.
 - Do not overlap an active request with another request.
 - If a slot is missed because the previous request is still active, skip it
   and write the gap state `SCHEDULED_SLOT_SKIPPED_OVERLAP`.
+- Do not wait three seconds after receiving the previous response; response
+  completion must not shift the fixed slot schedule.
 - Record the planned slot, actual attempt state, and outcome separately.
 - A failed slot is not silently converted into a successful observation.
 
-The 30-second request timeout exceeds one 10-second slot interval but does not
-permit overlap. The scheduler remains slot-based and sequential: if a request
-is still running when a later slot arrives, that slot is skipped and recorded
-explicitly rather than queued or compressed.
+The 30-second request timeout exceeds one 3-second slot interval but does not
+permit overlap. The scheduler remains fixed-start, sequential, and
+non-concurrent: if a request is still running when a later slot arrives, that
+slot is skipped and recorded explicitly rather than queued, shifted, or
+compressed.
+
+The evidence basis for this bounded diagnostic interval is the retained MDD
+lifecycle/probe evidence: observed request elapsed times are predominantly
+below the proposed 3-second interval, ranging from sub-second observations to
+approximately 2 seconds in the retained artifacts. This supports a 3-second
+bounded diagnostic slot interval with sequential execution and overlap
+skipping. It does not establish a provider guarantee that every response will
+finish within 3 seconds, that no slot will be skipped, or that this is an
+approved production cadence.
 
 This is a bounded diagnostic pilot cadence intended to increase temporal
 observation density for estimate evolution and potentially short-lived fields.
@@ -225,13 +244,24 @@ shared-quota, and readiness analysis.
 ### 5.3 Quota accounting
 
 The conservative project ceiling remains **250,000 MDD HTTP requests per
-month**. The revised one-hour Stage 8 maximum is **360 scheduled logical
-requests** and **360 normal HTTP attempts** because retries are zero. This is
-approximately **0.144%** of the conservative monthly ceiling. Every actual
-HTTP attempt must be recorded, including failed attempts.
+month**. The approved operational planning envelope is **83–84%** of that
+ceiling: **207,500–210,000 MDD HTTP requests per month**. Preserve the
+remaining **40,000–42,500 requests per month**, approximately **16–17%**, as
+unallocated headroom. Normal scheduled production traffic must not be planned
+against the full 250,000-request ceiling.
+
+For the 3-second / 60-minute Stage 8 pilot, the maximum is **1200 scheduled
+logical slots** and **1200 normal HTTP attempts** because retries are zero.
+This is **0.48%** of the full conservative ceiling and approximately
+**0.57–0.58%** of the operational planning envelope (`1200 / 210000` and
+`1200 / 207500`, respectively). Every actual HTTP attempt must be recorded,
+including failed attempts. Actual consumption can be lower because a slot
+skipped for overlap does not create an HTTP attempt.
 `NumberOfResults` never counts as HTTP attempts. This is a bounded diagnostic
-pilot budget, not a production cadence approval; Stage 13 owns production
-cadence/readiness analysis and shared-caller headroom.
+pilot budget, not a production cadence approval; Stage 13 owns final
+production station tiers, cadence, staggering, retry policy, overlap analysis,
+and the full monthly request projection, sized inside the operational planning
+envelope unless the user later changes this decision.
 
 The pilot does not claim knowledge of total account usage by other external
 callers sharing the credential. Stage 13 remains responsible for production
@@ -424,7 +454,7 @@ ObservedAt 10:10 -> EstimatedTime 10:17
 ```
 
 The harness must preserve all three observations, even when a later estimate
-equals an earlier estimate. Every successful 10-second response remains a
+equals an earlier estimate. Every successful 3-second response remains a
 distinct observation and must not be deduplicated merely because
 `EstimatedTime` or `RecordedAtTime` did not change. Exact replay of the exact
 same response/run identity is the only replay-idempotency case already defined
@@ -444,17 +474,17 @@ If zero `RecordedAtTime` values are observed, that is a valid bounded result.
 The report must say:
 
 ```text
-RECORDED_AT_TIME_NOT_OBSERVED
+RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT
 ```
 
 This means absence in the observed sampling window, not provider-wide
-absence. Ten-second polling materially reduces the risk of missing a
+absence. Three-second polling materially reduces the risk of missing a
 transient `RecordedAtTime` occurrence but cannot mathematically guarantee
 capture. No positive `RecordedAtTime` lifecycle sample currently establishes
 the field's minimum visibility period. If Stage 8 shows that a relevant source
-field can appear and disappear within the 10-second sampling interval, a
+field can appear and disappear within the 3-second sampling interval, a
 separately approved shorter bounded validation may be required. This does not
-pre-approve a 5-second production cadence. The report must not say
+pre-approve a shorter production cadence. The report must not say
 `MDD_DOES_NOT_SUPPORT_RECORDED_AT_TIME`.
 
 ## 10. Situation and cause semantics
@@ -473,7 +503,7 @@ Situation caused a measured delay or cancellation.
 Stage 7 approves one narrow raw-response exception for MDD Stage 8 pilot
 responses only. Its purpose is to compare raw response structure with parser
 output, detect parser field loss, and support offline forensic review if an
-unexpected field appears. The revised V2 cadence increases the response
+unexpected field appears. The active V3 cadence increases the response
 count, but it does not change the default project policy of no permanent raw
 MDD archive.
 
@@ -667,7 +697,7 @@ The Stage 8 report must explicitly list, for every observed non-null source
 If the count is zero, the report must include the exact bounded result:
 
 ```text
-RECORDED_AT_TIME_NOT_OBSERVED
+RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT
 ```
 
 This means absence in the observed sampling window, not a provider-wide
@@ -707,7 +737,8 @@ implementation handoff is:
 1. perform the safe credential-presence preflight;
 2. at pilot start, select `PilotAnchorDepArrTime` and use that fixed anchor in
    the exact request contract in Section 4 for every request;
-3. apply the named V2 sampling policy, 10-second slot boundary, no-retry rule,
+3. apply the named V3 sampling policy, fixed 3-second start-to-start slot
+   boundary, no-retry rule,
    timeout, overlap, quota, and early-stop controls;
 4. capture only the approved bounded raw exception and protected JSONL
    artifacts;
@@ -731,9 +762,9 @@ PostgreSQL implementation are not part of this Stage 7 closeout.
 | 3 | The exact request contract is fixed. | PASS — Section 4. |
 | 4 | `NumberOfResults` is fixed and justified. | PASS — 20 for the bounded pilot only. |
 | 5 | The `TimeWindow` decision is explicit. | PASS — omitted; semantically available but not selected. |
-| 6 | Cadence, duration, and request ceiling are explicit. | PASS — V2 10-second slots, 60-minute maximum, 360 scheduled requests and normal HTTP attempts. |
+| 6 | Cadence, duration, and request ceiling are explicit. | PASS — V3 3-second fixed start-to-start slots, 60-minute maximum, 1200 scheduled slots and normal HTTP attempts. |
 | 7 | Timeout and retry behavior are explicit. | PASS — 30 seconds, zero retries. |
-| 8 | Quota accounting is explicit. | PASS — actual attempts counted; 250,000/month remains conservative ceiling. |
+| 8 | Quota accounting is explicit. | PASS — actual attempts counted; 250,000/month remains the conservative ceiling; 207,500–210,000/month (83–84%) is the operational planning envelope; the 1200-attempt maximum is 0.48% of the full ceiling and approximately 0.57–0.58% of the envelope. |
 | 9 | Overlap and catch-up behavior are explicit. | PASS — no concurrency or catch-up; overlap slot skipped. |
 | 10 | Authentication, rate-limit, and failure stop rules are explicit. | PASS — Section 6. |
 | 11 | Field retention is tied to approved prior contracts. | PASS — Sections 2 and 7. |

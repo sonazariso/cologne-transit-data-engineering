@@ -126,22 +126,27 @@ for the authoritative closeout record.
 
 - **Stage 7 — COMPLETE — APPROVED PILOT DESIGN.** The [realtime pilot design](stages/07-realtime-pilot-design.md)
   fixes a bounded, reproducible MDD/TRIAS-only Stage 8 pilot for Köln Hbf,
-  `de:05315:11201`, with the V2 policy `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`:
-  one 10-second slot for at most 60 minutes, at most 360 scheduled logical
-  requests and 360 normal HTTP attempts, a fixed pilot-start `DepArrTime`
-  anchor, `NumberOfResults=20`, `TimeWindow` omitted, a 30-second timeout,
-  and zero retries. The bounded cadence reduces but cannot mathematically
-  guarantee capture of a transient source `RecordedAtTime`.
+  `de:05315:11201`, with the active V3 policy
+  `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`: fixed start-to-start 3-second slots for
+  at most 60 minutes, at most 1200 scheduled logical slots and 1200 normal
+  HTTP attempts, a fixed pilot-start `DepArrTime` anchor, `NumberOfResults=20`,
+  `TimeWindow` omitted, a 30-second timeout, zero retries, sequential
+  non-concurrent execution, and overlap-slot skipping. The bounded cadence
+  reduces but cannot mathematically guarantee capture of a transient source
+  `RecordedAtTime`.
 - The pilot preserves the approved source-field retention, timing, estimate
   history, call scope, bay, operational-flag, Situation, service-information,
   error, parser-lineage, gap, idempotency, and reconciliation requirements,
   including immediate append-only persistence of any observed source
-  `RecordedAtTime` and protection from later NULL erasure. The 360-attempt
-  ceiling is approximately 0.144% of the conservative 250,000-request
-  monthly ceiling; Stage 13 owns production cadence/readiness analysis. It
-  uses protected temporary raw responses only under the bounded 24-hour Stage
-  8 exception and a diagnostic append-only JSONL harness because PostgreSQL
-  remains deferred.
+  `RecordedAtTime` and protection from later NULL erasure. The conservative
+  monthly ceiling remains 250,000 requests; the operational planning envelope
+  is 207,500–210,000 requests/month (83–84%), with 40,000–42,500 requests
+  (16–17%) preserved as unallocated headroom. The 1200-attempt pilot maximum
+  is 0.48% of the full ceiling and approximately 0.57–0.58% of the planning
+  envelope. Stage 13 owns production cadence/readiness analysis and must size
+  normal production traffic inside that envelope. It uses protected temporary
+  raw responses only under the bounded 24-hour Stage 8 exception and a
+  diagnostic append-only JSONL harness because PostgreSQL remains deferred.
 - GTFS-RT is not part of the one-source pilot; Stage 9 owns cross-source
   matching. Actual Delay remains **NOT APPROVED**. One-station evidence is not
   Cologne-wide coverage.

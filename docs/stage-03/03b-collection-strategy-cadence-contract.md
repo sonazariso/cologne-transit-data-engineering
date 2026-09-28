@@ -104,19 +104,23 @@ Stage 3B approves a **CADENCE POLICY**, not a fixed production timetable.
 1. MDD cadence is tiered and quota-aware.
 2. Exact production tier membership and final intervals require later
    operational readiness measurements.
-3. The production budget must reserve explicit headroom for retries,
-   diagnostics, manual investigations, unexpected longer calendar months, and
-   operational changes.
-4. Every active cadence is versioned as a `SamplingPolicy` / `SamplingEra`.
-5. Changing cadence must never rewrite historical observations.
-6. Each observation must retain enough collector metadata to identify the
+3. Normal scheduled MDD traffic must be planned inside the approved
+   operational envelope of **83–84%** of the conservative `250,000`-request
+   monthly ceiling: **207,500–210,000 MDD HTTP requests/month**. The full
+   ceiling must not be treated as available normal production capacity.
+4. Preserve **40,000–42,500 requests/month**, approximately **16–17%**, as
+   unallocated headroom for retries, diagnostics, manual investigations,
+   unexpected longer calendar months, and operational changes.
+5. Every active cadence is versioned as a `SamplingPolicy` / `SamplingEra`.
+6. Changing cadence must never rewrite historical observations.
+7. Each observation must retain enough collector metadata to identify the
    Sampling Policy under which it was collected.
-7. Analytics must not compare periods with materially different sampling
+8. Analytics must not compare periods with materially different sampling
    policies without acknowledging the sampling change.
-8. MDD requests must not overlap uncontrollably; target ownership, run
+9. MDD requests must not overlap uncontrollably; target ownership, run
    coordination, or an equivalent overlap guard is required before activation.
-9. Retry policy is finite, quota-accounted, and included in the active budget.
-10. GTFS-RT cadence is independent of MDD station cadence because one
+10. Retry policy is finite, quota-accounted, and included in the active budget.
+11. GTFS-RT cadence is independent of MDD station cadence because one
     GTFS-RT request supplies the broad snapshot.
 
 The historical candidate of 10 stations every 5 minutes, 20 every 10 minutes,
@@ -130,7 +134,11 @@ The final production budget must account for all measurable callers sharing the
 credential. A budget that counts only successful base requests is insufficient;
 initial attempts, bounded retries, diagnostics, manual investigations,
 calendar-month variation, overlap protection, and reserved headroom must be
-visible in the approval record.
+visible in the approval record. Stage 13 owns the final production station
+tiers, cadence, staggering, retry policy, overlap analysis, and full monthly
+projection; it must size normal production traffic inside the
+`207,500–210,000` operational envelope unless the user later changes this
+decision.
 
 ## Sampling-era and retention semantics
 

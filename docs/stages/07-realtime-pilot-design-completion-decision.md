@@ -1,7 +1,7 @@
 # Stage 7 — Realtime Pilot Design Completion Decision
 
 **Date:** `2026-09-28`  
-**Decision:** [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction), correcting the cadence detail in [D-031](../DECISION-LOG.md#d-031--stage-7-realtime-pilot-design)<br>
+**Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Final status:** `COMPLETE — APPROVED PILOT DESIGN`  
 **Stage 8 status:** `NOT STARTED / NEXT`
 
@@ -31,6 +31,10 @@ and remaining pilot risks.
   occurrence. These are logical architecture contracts, not physical tables.
 - The project-level conservative MDD ceiling remains `250,000` HTTP requests
   per month, with shared-caller usage uncertainty explicitly retained.
+- Retained MDD lifecycle/probe evidence shows observed request elapsed times
+  predominantly below the proposed 3-second interval, from sub-second
+  observations to approximately 2 seconds in the retained artifacts. This is
+  bounded design evidence, not a provider response-time guarantee.
 
 These facts come from the existing approved Stage 2, Stage 3, Stage 5, and
 Stage 6 documents. Stage 7 did not make a network request or add new source
@@ -55,24 +59,33 @@ The following Stage 8 design is approved and fixed:
   an HTTP request count or a production default.
 - **Time window:** omitted; semantically available but not selected for the
   pilot. `IncludeOperatingDays` is also omitted.
-- **Cadence:** one request slot every 10 seconds, at most 60 minutes, and at
-  most 360 scheduled logical MDD requests and 360 normal HTTP attempts.
+- **Cadence:** fixed start-to-start request slots at `T0`, `T0 + 3s`,
+  `T0 + 6s`, and so on for at most 60 minutes, with at most 1200 scheduled
+  logical MDD slots and 1200 normal HTTP attempts.
 - **Concurrency:** no concurrent requests, overlap protection, no catch-up
   burst, and `SCHEDULED_SLOT_SKIPPED_OVERLAP` for an overlapping skipped slot.
-  The 30-second timeout does not permit overlap; the scheduler remains
-  slot-based and sequential.
+  The 30-second timeout does not permit overlap; the scheduler remains fixed-
+  start and sequential. Response completion must not add three seconds or
+  shift the next fixed slot.
 - **Timeout/retry:** 30-second timeout and zero retries. Every actual attempt
   is recorded.
 - **Early stop:** missing credential means zero attempts; 401/403 stops for
   authentication/authorization evidence; 429 stops for rate-limit evidence;
   three consecutive failed request slots stop the pilot. A successful request
   resets the consecutive-failure count.
-- **Quota:** the 360-attempt one-hour ceiling is approximately `0.144%` of
-  the conservative `250,000` HTTP-request monthly ceiling. This is a bounded
-  diagnostic pilot cadence, not an approved production cadence; Stage 13 owns
-  production cadence/readiness analysis and shared-caller headroom.
+- **Quota:** the conservative ceiling remains `250,000` MDD HTTP requests per
+  month. The operational planning envelope is `207,500–210,000` requests per
+  month (`83–84%`), with `40,000–42,500` requests (`16–17%`) unallocated as
+  headroom. The 1200-attempt one-hour pilot maximum is `0.48%` of the full
+  ceiling and approximately `0.57–0.58%` of the operational planning
+  envelope; actual consumption can be lower because skipped-overlap slots do
+  not create HTTP attempts. This is a bounded diagnostic pilot cadence, not an approved
+  production cadence; Stage 13 owns production station tiers, cadence,
+  staggering, retry policy, overlap analysis, and the full monthly request
+  projection inside that envelope.
 - **Sampling lineage:** every observation identifies the versioned,
-  non-production policy `MDD_STAGE_8_KOELN_HBF_10S_60MIN_V2`.
+  non-production policy `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. V1 (60 seconds)
+  and V2 (10-second fixed-anchor) remain historical policy records.
 - **Retention:** the complete approved Stage 2 source-field selection is
   preserved, including independent timing fields, call scope, bays,
   operational flags, Situation/attribute/service-information evidence, errors,
@@ -85,7 +98,7 @@ The following Stage 8 design is approved and fixed:
   identity, `ObservedAt`, and first-seen observation timestamp. It is
   nullable, source-only, never synthesized, and later `NULL` or disappearance
   cannot erase it.
-- **History:** every successful 10-second response remains a distinct
+- **History:** every successful 3-second response remains a distinct
   observation, including when `EstimatedTime` or `RecordedAtTime` is unchanged;
   an exact replay of the same response/run identity is idempotent without
   collapsing legitimate later observations. The first successful response is
@@ -94,7 +107,7 @@ The following Stage 8 design is approved and fixed:
 - **Situation semantics:** Situation and `IncidentCall` evidence is append-only
   context, not a normalized or proven root cause. `IncidentCall` is not
   `ErrorMessage`.
-- **Raw exception:** the increased V2 response count does not change the
+- **Raw exception:** the increased V3 response count does not change the
   approved bounded exception: MDD pilot responses remain temporary, outside Git,
   in a mode-700 directory with mode-600 files, after an API-key-content check,
   without credentials, for at most 24 hours after the run, and are deleted
@@ -131,14 +144,14 @@ do not change the deferred implementation boundary.
 ## OPEN PILOT RISK
 
 - `RecordedAtTime` may be absent in the one-hour sample. The result
-  `RECORDED_AT_TIME_NOT_OBSERVED` means absence in the observed sampling window,
+  `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT` means absence in the observed sampling window,
   not provider-wide absence.
-- Ten-second polling materially reduces the risk of missing a transient
+- Three-second polling materially reduces the risk of missing a transient
   `RecordedAtTime` occurrence but cannot mathematically guarantee capture. No
   positive lifecycle sample establishes the field's minimum visibility period.
   If Stage 8 shows a relevant source field appearing and disappearing within
-  the 10-second interval, a separately approved shorter bounded validation may
-  be required; this does not pre-approve a 5-second production cadence.
+  the 3-second interval, a separately approved shorter bounded validation may
+  be required; this does not pre-approve a shorter production cadence.
 - One station and one bounded hour cannot establish Cologne-wide, mode-wide,
   operator-wide, or provider-wide coverage percentages.
 - Response/application error behavior, parser gaps, persistence failures,

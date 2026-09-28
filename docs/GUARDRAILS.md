@@ -179,18 +179,23 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 70. PostgreSQL migration, runtime, database/schema/table creation, SQL,
     migration, and data loading remain deferred until explicit user
     authorization.
-71. The active Stage 8 V2 pilot cadence — one MDD slot every 10 seconds for at
-    most 60 minutes, with at most 360 scheduled logical requests and 360 normal
-    HTTP attempts — is a bounded diagnostic cadence, not a production cadence;
-    Stage 13 owns production cadence/readiness analysis.
+71. The active Stage 8 V3 pilot cadence is a fixed start-to-start MDD slot at
+    `T0`, `T0 + 3s`, `T0 + 6s`, and so on for at most 60 minutes, with at most
+    1200 scheduled logical slots and 1200 normal HTTP attempts. It is a bounded
+    diagnostic cadence, not a production cadence; Stage 13 owns production
+    cadence/readiness analysis.
 72. One Stage 8 station, Köln Hbf, is source/parser/persistence validation
     evidence only and must not be presented as Cologne-wide coverage.
 73. `NumberOfResults` is a per-response result limit, not an HTTP request
     count.
 74. Stage 8 uses zero retries. A failed slot is recorded as a gap/failure and
     is not silently retried.
-75. Stage 8 must not issue concurrent or overlapping MDD requests.
-76. Stage 8 must not queue catch-up requests after a missed or skipped slot.
+75. Stage 8 must not issue concurrent or overlapping MDD requests. If a fixed
+    slot arrives while the prior request is active, record
+    `SCHEDULED_SLOT_SKIPPED_OVERLAP`; do not queue it.
+76. Stage 8 must not queue catch-up requests after a missed or skipped slot,
+    and must not shift the fixed start-to-start schedule or wait three seconds
+    after response completion.
 77. Stage 8 omits `TimeWindow`; this records a pilot selection, not a claim
     that the TRIAS semantic option is unsupported.
 78. `RecordedAtTime` remains exact, nullable, source-only evidence. It must
@@ -209,7 +214,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 83. Actual Delay remains **NOT APPROVED**. A Stage 8 `RecordedAtTime` result is
     candidate evidence only and cannot become a production KPI without later
     semantic, coverage, matching, and operational approval.
-84. The active Stage 8 V2 pilot selects `PilotAnchorDepArrTime` at pilot start
+84. The active Stage 8 V3 pilot selects `PilotAnchorDepArrTime` at pilot start
     and reuses that fixed `DepArrTime` for every request; it must not advance
     with wall-clock time.
 85. If source `RecordedAtTime` is observed once in any retained `THIS`,
@@ -218,8 +223,18 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     `ObservedAt`, and first-seen timestamp must be written immediately to
     append-only pilot persistence. Later `NULL` or disappearance must not erase
     it, and equal-valued successful responses remain distinct observations.
-86. Ten-second sampling materially reduces but cannot mathematically guarantee
-    capture of a transient `RecordedAtTime`. `RECORDED_AT_TIME_NOT_OBSERVED`
-    means absence in the observed sampling window, not provider-wide absence;
-    a shorter validation requires separate approval and no 5-second production
-    cadence is pre-approved.
+86. Three-second sampling materially reduces but cannot mathematically
+    guarantee capture of a transient `RecordedAtTime`.
+    `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT` means absence in the
+    observed sampling window, not provider-wide absence; a shorter validation
+    requires separate approval and no shorter production cadence is
+    pre-approved.
+87. The conservative monthly MDD ceiling remains exactly `250,000` requests.
+    Normal MDD planning must not consume the full ceiling; the planned monthly
+    operating envelope is `207,500–210,000` requests, or `83–84%`.
+88. Preserve `40,000–42,500` requests/month, approximately `16–17%`, as
+    unallocated headroom. Stage 13 must size normal production collection
+    inside the `207,500–210,000` envelope unless the user changes this
+    decision.
+89. An HTTP `429` stops the Stage 8 pilot immediately, is classified as
+    rate-limit/provider evidence, and is never retried.

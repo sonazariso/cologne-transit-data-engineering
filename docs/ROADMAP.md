@@ -200,18 +200,25 @@ from the one-source loop because Stage 9 owns cross-source matching.
 The approved target is Köln Hbf, `de:05315:11201`. The exact pilot request uses
 TRIAS 1.2 `POST`, a fixed pilot-start `DepArrTime` anchor reused for every
 request, `NumberOfResults=20`, `arrival`, previous/onward/realtime flags true,
-`TimeWindow` omitted, and `IncludeOperatingDays` omitted. The V2 sampling
-policy is one slot every 10 seconds for at most 60 minutes and at most 360
-scheduled logical requests and 360 normal HTTP attempts, with a 30-second
-timeout, zero retries, no concurrency, no catch-up, explicit overlap gaps,
-quota accounting, and early-stop rules. The 360-attempt ceiling is
-approximately 0.144% of the conservative 250,000-request monthly ceiling;
-this remains a bounded diagnostic cadence, not production approval, and Stage
-13 owns production cadence/readiness analysis. A bounded 24-hour temporary
-raw-response exception and a protected append-only JSONL diagnostic persistence
-harness are approved; PostgreSQL remains deferred. Ten-second sampling reduces
-but cannot mathematically guarantee capture of a transient `RecordedAtTime`.
-Actual Delay remains unapproved.
+`TimeWindow` omitted, and `IncludeOperatingDays` omitted. The active V3
+sampling policy is fixed start-to-start slots every 3 seconds for at most 60
+minutes and at most 1200 scheduled logical slots and 1200 normal HTTP attempts,
+with a 30-second timeout, zero retries, sequential/non-concurrent execution,
+no catch-up bursts, explicit overlap skips, quota accounting, and early-stop
+rules. The 1200-attempt ceiling is 0.48% of the conservative 250,000-request
+monthly ceiling and approximately 0.57–0.58% of the 207,500–210,000-request
+operational planning envelope (83–84%). Preserve 40,000–42,500 requests/month
+(16–17%) as unallocated headroom; normal production planning must not use the
+full ceiling. This remains a bounded diagnostic cadence, not production
+approval, and Stage 13 owns production station tiers, cadence, staggering,
+retry policy, overlap analysis, and full monthly projection. A bounded 24-hour
+temporary raw-response exception and a protected append-only JSONL diagnostic
+persistence harness are approved; PostgreSQL remains deferred. Retained MDD
+lifecycle/probe evidence shows response elapsed times predominantly below 3
+seconds, from sub-second observations to approximately 2 seconds, but does
+not guarantee every response completes within 3 seconds. Three-second sampling
+reduces but cannot mathematically guarantee capture of a transient
+`RecordedAtTime`. Actual Delay remains unapproved.
 
 ## Stage 8 — Small Realtime Pilot — NOT STARTED / NEXT
 

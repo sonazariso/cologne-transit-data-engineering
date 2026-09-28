@@ -34,8 +34,9 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-028 | 2026-09-28 | Stage 4 current official VRS Global-ID snapshot approval: Cologne scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier | Approved stage completion |
 | D-029 | 2026-09-28 | Stage 5 database architecture: PostgreSQL 18 clean redesign, durable source-faithful layers, logical grains, lineage, and deferred physical implementation | Approved architecture |
 | D-030 | 2026-09-28 | Stage 6 static warehouse and analytics design contract: Cologne-scoped grains, schedule/calendar semantics, lineage, and future reconciliation baseline; physical implementation deferred by explicit user decision | Approved design; physical implementation deferred |
-| D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Approved pilot design; cadence detail superseded by D-032 |
-| D-032 | 2026-09-28 | Stage 7 pilot-design correction: bounded 10-second fixed-anchor MDD handoff for `RecordedAtTime` visibility; D-031's 60-second cadence detail is superseded while its historical record is retained | Approved pilot-design correction |
+| D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Historical pilot design; cadence detail superseded by D-032 and later D-033 |
+| D-032 | 2026-09-28 | Stage 7 pilot-design correction: bounded 10-second fixed-anchor MDD handoff for `RecordedAtTime` visibility; D-031's 60-second cadence detail is superseded while its historical record is retained | Historical pilot-design correction; superseded by D-033 |
+| D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -322,10 +323,10 @@ by this decision; it is closed by D-031 below.
 ## D-031 — Stage 7 Realtime Pilot Design
 
 **Historical record:** D-031's original 60-second cadence, moving
-`DepArrTime` detail, and V1 sampling-policy identifier are superseded for the
-active Stage 8 handoff by [D-032](#d-032--stage-7-pilot-cadence-and-recordedattime-correction).
-The original decision is retained so the repository does not rewrite its
-decision history.
+`DepArrTime` detail, and V1 sampling-policy identifier were superseded at that
+historical point for the Stage 8 handoff by [D-032](#d-032--stage-7-pilot-cadence-and-recordedattime-correction).
+D-032 was later superseded by D-033 for the active handoff. The original
+decision is retained so the repository does not rewrite its decision history.
 
 Stage 7 is **COMPLETE — APPROVED PILOT DESIGN**. It defines a bounded,
 reproducible Stage 8 diagnostic handoff without executing the pilot.
@@ -402,8 +403,14 @@ ARCHITECTURE**.
 
 ## D-032 — Stage 7 Pilot Cadence and RecordedAtTime Correction
 
-D-032 is the active correction to the bounded Stage 8 handoff. It supersedes
-the 60-second cadence, moving `DepArrTime` detail, and V1 policy identifier in
+**Historical record:** D-032 was the active correction to the bounded Stage 8
+handoff at the time. It is now superseded for the active Stage 8 handoff by
+[D-033](#d-033--stage-7-3-second-pilot-and-operational-planning-envelope).
+Its V2 10-second fixed-anchor decision remains preserved as historical
+decision context.
+
+D-032 superseded the 60-second cadence, moving `DepArrTime` detail, and V1
+policy identifier in
 D-031 while retaining D-031 as historical decision context. Stage 7 remains
 **COMPLETE — APPROVED PILOT DESIGN** and Stage 8 remains **NOT STARTED / NEXT**.
 
@@ -462,3 +469,69 @@ The corrected handoff is:
 D-032 authorizes no MDD request, GTFS-RT request, other network request, SQL or
 database work, or runtime pilot code. The documentation-only correction does
 not start Stage 8.
+
+## D-033 — Stage 7 3-Second Pilot and Operational Planning Envelope
+
+D-033 is the active documentation-only correction to the bounded Stage 8
+handoff. It supersedes the V2 10-second fixed-anchor policy in D-032 while
+preserving D-031 and D-032 as historical records. Stage 7 remains
+**COMPLETE — APPROVED PILOT DESIGN** and Stage 8 remains **NOT STARTED / NEXT**.
+
+The active decision is:
+
+- Keep MDD/TRIAS as the only primary Stage 8 pilot source at Köln Hbf,
+  `de:05315:11201`; GTFS-RT remains excluded from the pilot and Stage 9 owns
+  later cross-source matching.
+- Keep the already-approved fixed pilot-start `PilotAnchorDepArrTime` for the
+  entire one-hour run. Reuse that exact `DepArrTime` in every request and do
+  not advance it with wall-clock time.
+- Keep the other request settings unchanged: TRIAS 1.2 `POST`,
+  `StopEventType=arrival`, `NumberOfResults=20`,
+  `IncludePreviousCalls=true`, `IncludeOnwardCalls=true`,
+  `IncludeRealtimeData=true`, `TimeWindow` omitted, and
+  `IncludeOperatingDays` omitted.
+- Activate the new non-production sampling policy
+  `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. It schedules fixed start-to-start
+  slots at `T0`, `T0 + 3s`, `T0 + 6s`, and so on for a maximum duration of 60
+  minutes. The maximum is `1200` scheduled logical slots, calculated from the
+  3-second interval across one hour, and `1200` normal HTTP attempts because
+  retries remain zero.
+- Requests remain strictly sequential and non-concurrent. The scheduler does
+  not wait three seconds after response completion, shift the schedule, queue
+  missed slots, or issue catch-up bursts. If a fixed slot arrives while the
+  previous request is active, skip it and record
+  `SCHEDULED_SLOT_SKIPPED_OVERLAP`.
+- Keep the 30-second timeout and zero retries. HTTP `429` stops the pilot
+  immediately and is classified as rate-limit/provider evidence.
+- The cadence evidence basis is retained MDD lifecycle/probe evidence with
+  observed request elapsed times predominantly below 3 seconds, ranging from
+  sub-second observations to approximately 2 seconds. This supports a bounded
+  3-second diagnostic interval with sequential execution and overlap skipping;
+  it does not guarantee a response within 3 seconds, prevent skipped slots, or
+  approve a production cadence.
+- Preserve all existing `RecordedAtTime` rules. The field remains nullable,
+  exact, source-only, and append-only when observed. If it appears in any
+  retained `THIS`, `PREVIOUS`, or `ONWARD` arrival/departure context, persist
+  the exact source value immediately with event/source identity, call scope,
+  arrival/departure context, response identity, `ObservedAt`, and first-seen
+  observation timestamp. Later `NULL` or disappearance must not erase it. If
+  no value is observed, report
+  `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`, not
+  `MDD_DOES_NOT_SUPPORT_RECORDED_AT_TIME`.
+- Keep the conservative monthly ceiling exactly `250,000` MDD HTTP
+  requests/month. Set the operational planning envelope at `83–84%`:
+  `207,500` requests/month at 83% through `210,000` at 84%. Preserve
+  `40,000–42,500` requests/month, approximately `16–17%`, as unallocated
+  headroom. Stage 13 owns final production station tiers, cadence, staggering,
+  retry policy, overlap analysis, and full monthly request projection, and must
+  size production inside the `207,500–210,000` envelope unless the user later
+  changes this decision.
+- Account for the theoretical pilot maximum as `1200 / 250000 = 0.48%` of the
+  full conservative ceiling and approximately `0.57–0.58%` of the operational
+  planning envelope (`1200 / 210000 ≈ 0.571%`; `1200 / 207500 ≈ 0.578%`).
+  `NumberOfResults=20` is not an HTTP request count. Actual consumption may be
+  lower because overlapping slots are skipped.
+
+D-033 authorizes no MDD request, GTFS-RT request, other network request, SQL or
+database work, or runtime pilot code. It does not start Stage 8. Historical V1
+and V2 policy decisions remain unchanged in the decision log.
