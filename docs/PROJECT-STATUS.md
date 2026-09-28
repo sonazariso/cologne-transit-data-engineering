@@ -30,8 +30,8 @@
 ### Current Stage 3 substage
 
 - **Stage 3 — IN PROGRESS.**
-- **Stage 3A — Disruption Cause & Alert Evidence Audit — HOST EXECUTION
-  PENDING.**
+- **Stage 3A — Disruption Cause & Alert Evidence Audit — PARTIAL HOST EVIDENCE
+  — MDD EXECUTION PENDING.**
 - Stage 3A is a bounded host-run evidence audit only. It does not start
   production implementation, database/schema work, collector changes,
   scheduler changes, Power BI work, or cross-source matching.
@@ -186,11 +186,12 @@ it is not a Stage 02 blocker.
 - The legacy project remains intact as evidence/reference.
 - Stage 02 is **APPROVED**; Stage 03 is **IN PROGRESS** through Stage 3A.
 - The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-  now records **STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING** and
+  now records **STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD
+  EXECUTION PENDING** and
   continues to record guardrails only; it does not approve production
   implementation.
 - The [Stage 3A disruption/cause evidence audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
-  is **HOST EXECUTION PENDING**. No analytical decision is final before its
+  is **PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING**. No analytical decision is final before its
   bounded host evidence is reviewed.
 - The [cross-source reconciliation and Cologne scope contract](source-contracts/cross-source-reconciliation-contract.md)
   is an approved design guardrail for subsequent Stage 3 design work; it does

@@ -90,7 +90,7 @@ Stage 3 has formally started with a bounded evidence-validation substage. The
 approved source direction remains MDD/TRIAS **PRIMARY REALTIME** and GTFS-RT
 **COMPLEMENTARY REALTIME**. No production implementation is authorized.
 
-### Stage 3A — Disruption Cause & Alert Evidence Audit — HOST EXECUTION PENDING
+### Stage 3A — Disruption Cause & Alert Evidence Audit — PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING
 
 The [Stage 3A audit](stage-03/03a-disruption-cause-alert-evidence-audit.md)
 will measure populated GTFS-RT ServiceAlert cause/effect/text/scope evidence in
@@ -99,7 +99,8 @@ fixed diagnostic station responses. Its host budget is exactly one GTFS-RT GET
 and two MDD POST requests, with no retries, concurrency, or fallback endpoint.
 
 The [Stage 3 realtime collection design readiness document](stage-03/realtime-collection-design-readiness.md)
-now records **STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING**. It
+now records **STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD
+EXECUTION PENDING**. It
 continues to record entry guardrails only; it does not constitute a production
 collector, schema, cadence, reconciliation, or Power BI approval.
 

@@ -1,6 +1,6 @@
 # Realtime Collection Design Readiness
 
-**Status:** `STAGE 3 IN PROGRESS — STAGE 3A HOST EXECUTION PENDING`
+**Status:** `STAGE 3 IN PROGRESS — STAGE 3A PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **IN PROGRESS**
 **Purpose:** approved entry guardrails while Stage 3A validates disruption and
@@ -13,10 +13,10 @@ table names, reconciliation algorithms, Power BI changes, or production
 runtime changes.
 
 Stage 3A is the current bounded substage. The [Disruption Cause & Alert
-Evidence Audit](03a-disruption-cause-alert-evidence-audit.md) is **HOST
-EXECUTION PENDING** and measures current GTFS-RT alert population and two
-sampled MDD Situation responses. Its result is an evidence gate, not a
-production approval.
+Evidence Audit](03a-disruption-cause-alert-evidence-audit.md) is **PARTIAL
+HOST EVIDENCE — MDD EXECUTION PENDING** and measures current GTFS-RT alert
+population and two sampled MDD Situation responses. Its result is an evidence
+gate, not a production approval.
 
 ## Approved source direction
 
@@ -157,9 +157,9 @@ validated.
 
 ## Stage boundary
 
-Stage 3 is **IN PROGRESS** through Stage 3A. Stage 3A remains **HOST
-EXECUTION PENDING** until the user runs the bounded probe and reviews its
-JSONL evidence. Do not write collector production code, create SQL tables or
+Stage 3 is **IN PROGRESS** through Stage 3A. Stage 3A remains **PARTIAL HOST
+EVIDENCE — MDD EXECUTION PENDING** until the MDD portion of the bounded probe
+is executed and its JSONL evidence is reviewed. Do not write collector production code, create SQL tables or
 migrations, add scheduler jobs, create services, change Power BI, modify
 environment variables, query external endpoints from Codex, or design the
 final reconciliation layer as part of this substage.

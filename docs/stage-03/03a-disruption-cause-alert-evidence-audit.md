@@ -1,6 +1,6 @@
 # Stage 3A — Disruption Cause & Alert Evidence Audit
 
-**Status:** `HOST EXECUTION PENDING`
+**Status:** `PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING`
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **IN PROGRESS**
 **Purpose:** bounded evidence validation before any Stage 3 production design
@@ -138,8 +138,9 @@ scheduler, or Power BI work.
 
 ## Decision gate after host evidence
 
-Stage 3A remains `HOST EXECUTION PENDING` until the user runs the probe and
-the resulting JSONL is reviewed. After host evidence, the next decision may
+Stage 3A remains `PARTIAL HOST EVIDENCE — MDD EXECUTION PENDING` until the
+MDD portion of the probe is executed and the resulting JSONL is reviewed.
+After host evidence, the next decision may
 classify source-evidence usability and identify remaining validation gaps. It
 must not be treated as approval of production implementation or as proof of
 root cause.
