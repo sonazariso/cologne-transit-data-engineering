@@ -128,17 +128,38 @@ scope, and non-causal alert/Situation association. It preserves the unresolved
 railway Köln Hbf identity and does not implement matching.
 
 The [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
-is the authoritative closeout record. Stage 4 remains not started.
+is the authoritative closeout record. Stage 4 was subsequently completed and
+approved under its own static-source validation gate below.
 
 Authoritative-feed coverage, canonical bridge construction, final collector
 readiness, and implementation validation remain later work. The cross-source
 contract is now the Stage 3C design handoff and does not authorize
 implementation.
 
-## Stage 4 — Cologne Scope & Mode Classification
-Define and validate the technical rule for “inside Cologne,” distinguish route identity from in-city service/event scope, and approve the mode classification.
+## Stage 4 — Cologne Scope & Mode Classification — COMPLETE — APPROVED
 
-## Stage 5 — Database Architecture
+The official VRS Global-ID GTFS snapshot was validated with the direct
+`stop_id` prefix rule `de:05315:`. The approved analytical scope is
+stop-event-first; an internal segment requires both consecutive endpoints to
+be validated Cologne stops. Source route/trip identity remains separate from
+geographical KPI scope, so cross-boundary services contribute only their
+Cologne events and Cologne-internal segments.
+
+The current snapshot contains 862 distinct Cologne stop IDs, 448,755 Cologne
+scheduled stop events, 421,999 internal segments, 26,692 Cologne-serving
+trips, 13,268 Cologne-internal trips, 13,424 cross-boundary trips, 1,187
+touch-only trips, and 136 Cologne-serving route IDs. The approved source-
+faithful classifier includes Stadtbahn/Tram, Urban/KVB Bus, S-Bahn, RE, RB,
+and Regional/Other Bus as core modes for in-Cologne evidence; SEV remains a
+separate category; long-distance and unresolved/unsupported values remain
+outside core scope.
+
+The [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
+and [deterministic evidence JSON](stages/04-cologne-scope-mode-evidence.json)
+are authoritative. Stage 4 does not implement a database, collector,
+matching layer, warehouse, or Power BI model.
+
+## Stage 5 — Database Architecture — NOT STARTED / NEXT
 The intended future database direction is PostgreSQL for an append-only,
 source-faithful observation layer followed by derived analytical state. Approve
 grain, schemas/layers, source-faithful vs derived data, keys, history strategy,

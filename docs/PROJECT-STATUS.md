@@ -12,8 +12,8 @@
 | 1 | Source Inventory & Permission | APPROVED |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
 | 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
-| 4 | Cologne Scope & Mode Classification | Not started |
-| 5 | Database Architecture | Not started |
+| 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
+| 5 | Database Architecture | NOT STARTED / NEXT |
 | 6 | Static Warehouse & Analytics | Not started |
 | 7 | Realtime Pilot Design | Not started |
 | 8 | Small Realtime Pilot | Not started |
@@ -43,6 +43,28 @@
 See the [Stage 3A audit document](stage-03/03a-disruption-cause-alert-evidence-audit.md).
 See the [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
 for the authoritative closeout record.
+
+### Stage 4 closeout
+
+- **Stage 4 — COMPLETE — APPROVED.** The authoritative VRS Global-ID static
+  snapshot was inspected from the official Global-ID ZIP.
+- The validated Cologne identity is the direct source rule
+  `stop_id LIKE 'de:05315:%'`; parent-station relationships do not override
+  the actual stop ID referenced by `stop_times.txt`.
+- Cologne scope is measured at stop-event and both-endpoints internal-segment
+  grain. Route/trip serving labels are discovery identities, not full
+  geographical KPI scope.
+- The approved mode inventory is Stadtbahn/Tram, Urban/KVB Bus, S-Bahn, RE,
+  RB, Regional/Other Bus, and separate SEV, with long-distance/unsupported
+  values outside core scope. Cross-boundary services contribute only their
+  validated Cologne events and segments.
+- The [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
+  and [Stage 4 evidence](stages/04-cologne-scope-mode-evidence.json) contain
+  the snapshot metadata, counts, classifier examples, anomalies, and
+  reconciliation checks.
+- Stage 4 completion does not authorize PostgreSQL, warehouse, collector,
+  scheduler, matching, or Power BI implementation. Stage 5 is next and not
+  started.
 
 ## Post-Stage-02 validation
 
@@ -198,9 +220,13 @@ it is not a Stage 02 blocker.
   default; temporary diagnostic artifacts remain outside source control.
 - Permanent or automatic full raw GTFS-RT protobuf retention is likewise not
   the default; any bounded automatic capture requires a later explicit gate.
-- Core starting modes: Stadtbahn/Tram, urban/KVB bus, and S-Bahn.
-- RE, RB, and regional/other bus require Stage 4 service-level scope validation.
-- SEV is retained as a separate analytical category.
+- Core approved Stage 4 modes: Stadtbahn/Tram, urban/KVB bus, S-Bahn, RE, RB,
+  and Regional/Other Bus, always limited to validated in-Cologne events and
+  segments.
+- Stage 4 validated the RE, RB, and Regional/Other Bus service-level scope;
+  their external trip portions remain outside Cologne KPI scope.
+- SEV is retained as a separate analytical category, and long-distance rail
+  remains outside core KPI scope.
 - ICE, IC, NightJet, FlixTrain, and Thalys are outside the core KPI scope for now; source evidence may still be retained.
 - Operational claims must be source-supported or deterministically derived and documented.
 - The legacy project remains intact as evidence/reference.

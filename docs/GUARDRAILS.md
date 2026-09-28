@@ -104,3 +104,21 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     storage volume, privacy/data considerations, reprocessing need, and
     operational cost must be considered, and permanent raw retention is not the
     default.
+42. Source `route_id`/route identity is not geographical Cologne scope. A
+    Cologne-serving route or trip must not make all of its external stops part
+    of a Cologne KPI.
+43. One validated Cologne stop event does not make an entire trip or route an
+    internal Cologne movement or full-trip KPI subject.
+44. A Cologne-internal segment requires two consecutive scheduled stop events
+    with both actual endpoint `stop_id` values validated inside Cologne.
+45. Mode classification never expands geographical scope. RE, RB,
+    Regional/Other Bus, KVB Bus, Tram, S-Bahn, and SEV remain subject to the
+    validated stop-event/segment boundary.
+46. A `parent_station` relationship must not silently override the actual
+    source `stop_id` referenced by `stop_times.txt`.
+47. Unknown, unsupported, duplicate-ambiguous, or unresolved route/mode values
+    remain explicit and out of core scope; they must not be forced into a
+    named core mode to eliminate an unresolved bucket.
+48. Static GTFS mode and scope evidence describes scheduled source coverage
+    only. It is not realtime operation, actual delay, cancellation, or current
+    performance evidence.

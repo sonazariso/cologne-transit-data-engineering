@@ -31,6 +31,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-025 | 2026-09-28 | Stage 3 formally started with a bounded Stage 3A disruption/cause evidence audit; no schema, cadence, cause-model, matching, or production decision is made before host evidence | Procedural status |
 | D-026 | 2026-09-28 | Future persistence preserves source timing and disruption evidence as append-only observations: `TimetabledTime`, `EstimatedTime`, nullable source-only `RecordedAtTime`, and `ObservedAt`/`CapturedAt` remain separate; PostgreSQL is the intended future direction only | Approved design guardrail |
 | D-027 | 2026-09-28 | Stage 3 is complete: Stage 3A approved from bounded evidence; Stage 3B collection/cadence policy approved without activation; Stage 3C stop-event-first reconciliation design approved without implementation | Approved stage completion |
+| D-028 | 2026-09-28 | Stage 4 is complete: official VRS Global-ID Cologne stop scope, internal-segment boundary, cross-boundary treatment, and source-faithful mode classifier approved | Approved stage completion |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -197,3 +198,38 @@ Stage 3 is **COMPLETE** as a source-evidence and design/contract stage. The
 [Stage 3 completion decision](stage-03/stage-03-completion-decision.md) is the
 authoritative closeout record. Production implementation and the next project
 stage remain separately gated.
+
+## D-028 — Stage 4 Completion — Cologne Scope and Mode Classification
+
+Stage 4 is **COMPLETE — APPROVED** for the bounded static-source validation
+recorded in the [Stage 4 completion document](stages/04-cologne-scope-mode-classification.md)
+and [summary evidence](stages/04-cologne-scope-mode-evidence.json).
+
+The approved decisions are:
+
+1. Use the direct VRS Global-ID source stop identity prefix `de:05315:` for
+   Cologne scope.
+2. Define geographical analytical scope at the validated stop-event first;
+   do not substitute route names, agencies, modes, free text, or approximate
+   geofencing for source stop identity.
+3. Define a Cologne-internal segment only when both consecutive scheduled
+   endpoints are validated Cologne stops.
+4. Treat technical Cologne-serving trip and route labels as discovery
+   identities, not as full geographical KPI scope.
+5. For cross-boundary services, include only validated Cologne events and
+   Cologne-internal segments in core Cologne KPI evidence.
+6. Approve the deterministic source-faithful mode classifier evidenced from
+   current route rows.
+7. Include RE, RB, and Regional/Other Bus only through their validated
+   in-Cologne events and segments.
+8. Retain Rail Replacement Bus (SEV) as a separate analytical category.
+9. Keep long-distance rail outside core KPI scope; retain source evidence only
+   when legitimately present and labelled.
+10. Keep unsupported, unknown, and ambiguous route/mode values explicit rather
+    than forcing them into a core category.
+
+The current feed had no duplicate route, stop, or trip IDs, no unknown
+stop-time stop references, and no unclassified Cologne events. This approval is
+static-feed scope evidence only. It does not claim realtime operation or
+actual performance and does not authorize PostgreSQL, collectors, matching,
+Power BI, or Stage 5 implementation.
