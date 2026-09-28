@@ -11,7 +11,7 @@
 | 0 | Project Definition | APPROVED |
 | 1 | Source Inventory & Permission | APPROVED |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
-| 3 | Static GTFS Profile | IN PROGRESS |
+| 3 | Static GTFS Profile / Realtime Evidence Validation | IN PROGRESS |
 | 4 | Cologne Scope & Mode Classification | Not started |
 | 5 | Database Architecture | Not started |
 | 6 | Static Warehouse & Analytics | Not started |

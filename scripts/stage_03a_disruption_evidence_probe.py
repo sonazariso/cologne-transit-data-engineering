@@ -1131,9 +1131,10 @@ def named_object_entries(
             continue
         objects = as_object_list(child)
         for index, item in enumerate(objects):
-            item_path = path + "[*]" if isinstance(child, list) else path
-            if isinstance(child, list):
-                item_path += "[%d]" % index
+            # `iter_dict_entries` yields the collection key itself.  Add the
+            # concrete item index once; adding another wildcard would invent
+            # a nesting level in the reported source path.
+            item_path = path + "[%d]" % index if isinstance(child, list) else path
             entries.append((item_path, item))
     return entries
 
@@ -1784,10 +1785,14 @@ def main() -> int:
         "trip_ids": set(),
         "route_ids": set(),
     }
+    # The bounded source audit owns exactly one GTFS-RT request.  Parsing is a
+    # separate concern: even if the validated bindings are unavailable, retain
+    # the one host-run snapshot attempt and report that the payload could not
+    # be interpreted rather than silently changing the request budget.
+    gtfs_fetch = perform_get(tracker, raw_directory)
     if bindings is None:
         feed_summary = empty_feed_summary("BINDINGS_UNAVAILABLE")
     else:
-        gtfs_fetch = perform_get(tracker, raw_directory)
         if gtfs_fetch.http_status == 200 and gtfs_fetch.body:
             try:
                 feed = bindings.FeedMessage()
