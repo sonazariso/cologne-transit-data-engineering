@@ -2,7 +2,7 @@
 
 **Status:** `BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT`  
 **Date:** `2026-09-28`  
-**Preflight timestamp:** `2026-09-28T18:50:36Z`
+**Preflight timestamp:** `2026-09-28T19:42:51Z`
 
 **Stage 9 status:** `NOT STARTED / NEXT`
 
@@ -17,14 +17,27 @@ implementation.
 ## Runtime correction status
 
 The Stage 8 runtime now retains audited service-level origin and destination
-identity/text fields with their exact source paths; tracks later timing-context
-observations when `RecordedAtTime` is absent; skips fixed slots missed during
-request/response processing, including persistence work; reconciles parser
-bundles against records read back from the append-only JSONL artifacts; applies
-consistent pilot/response/observation/parser lineage to diagnostic records; and
-preserves structured `SituationFullRef` values with identity, scope, source
-path, and inline-resolution status. These are Stage 8 runtime corrections only;
-the approved pilot policy and the Stage 8 blocker remain unchanged.
+identity/text fields with their exact source paths; compares `RecordedAtTime`
+only within source-derived call-specific contexts; declines lifecycle claims
+when call evidence is insufficient or ambiguous; skips fixed slots missed
+during request/response processing, including persistence work; reconciles
+parser bundles against records read back from the append-only JSONL artifacts;
+persists populated response-level and result-level `ErrorMessage` evidence
+with scope, source paths, result identity, source representation, and error
+code where supplied; applies consistent pilot/response/observation/parser
+lineage to diagnostic records; preserves structured Situation `Source` and
+`SourceType` evidence; retains structured `SituationFullRef` values with
+identity, scope, source path, and inline-resolution status; and carries
+sanitized aggregated parser-gap findings into the final runtime summary.
+These are Stage 8 runtime corrections only; the approved pilot policy and the
+Stage 8 blocker remain unchanged.
+
+Cleanup now deletes the protected temporary directory after successful evidence
+extraction and parser-to-persistence reconciliation. If an actual HTTP pilot
+is blocked before that gate completes, the directory remains mode `700` with
+mode `600` files for bounded diagnostic review, is reported as pending, and
+must be removed no later than the approved 24-hour boundary. No permanent raw
+archive is created.
 
 ## Safe preflight result
 
@@ -40,6 +53,7 @@ Measured result:
 - attempted HTTP requests: `0`;
 - temporary raw/JSONL directory: not created;
 - cleanup result: `NOT_CREATED`;
+- parser-gap count: `0`;
 - stop reason: `MDD_API_KEY_MISSING`.
 
 No MDD response was available for parsing, persistence, reconciliation, field

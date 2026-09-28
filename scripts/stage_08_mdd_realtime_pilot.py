@@ -35,7 +35,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from xml.sax.saxutils import escape as xml_escape
 
 
-SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.0"
+SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.1"
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
 MDD_API_KEY_ENV = "MDD_API_KEY"
 STATION = "Köln Hbf"
@@ -53,7 +53,7 @@ SAMPLE_INTERVAL_SECONDS = 3
 MAX_DURATION_SECONDS = 60 * 60
 MAX_LOGICAL_SLOTS = 1200
 SAMPLING_POLICY = "MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3"
-PARSER_VERSION = "stage-08-mdd-parser-1.0"
+PARSER_VERSION = "stage-08-mdd-parser-1.1"
 RAW_TEMP_PREFIX = "cologne-transit-stage-08-"
 MAX_RESPONSE_BYTES = 25 * 1024 * 1024
 MAX_EXCERPT_CHARS = 1000
@@ -183,6 +183,7 @@ RECOGNIZED_SOURCE_FIELDS = {
     "starttime",
     "endtime",
     "source",
+    "sourcetype",
     "priority",
     "affects",
     "affectedentity",
@@ -338,6 +339,7 @@ class PilotStore:
         "situation_observations": "situation_observations.jsonl",
         "situation_associations": "stop_event_situation_associations.jsonl",
         "service_attributes": "service_attribute_observations.jsonl",
+        "error_messages": "error_message_observations.jsonl",
         "recorded_at_time": "recorded_at_time_observations.jsonl",
         "parser_gaps": "parser_gap_evidence.jsonl",
         "collection_slots": "collection_slots.jsonl",
@@ -461,7 +463,7 @@ def source_value(value: Any) -> Any:
             return None
         return value
     if isinstance(value, dict):
-        for key_name in ("value", "text", "name", "id", "ref"):
+        for key_name in ("value", "text", "name", "id", "ref", "sourcetype"):
             for key, child in value.items():
                 if normalized_key(key) == key_name:
                     extracted = source_value(child)
@@ -485,7 +487,7 @@ def source_value_at_path(value: Any, path: str) -> Tuple[Optional[str], Any]:
     if isinstance(value, (str, int, float, bool)):
         return path, source_value(value)
     if isinstance(value, dict):
-        for preferred_name in ("value", "text", "name", "id", "ref"):
+        for preferred_name in ("value", "text", "name", "id", "ref", "sourcetype"):
             for key, child in value.items():
                 if normalized_key(key) != preferred_name:
                     continue
@@ -906,23 +908,104 @@ def result_entries(parsed: Any) -> List[Tuple[str, Dict[str, Any]]]:
     return entries
 
 
-def error_entries(parsed: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def error_entries(
+    parsed: Any,
+    results: Optional[Sequence[Tuple[str, Dict[str, Any]]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Extract response/result errors with source and result lineage.
+
+    ``ErrorMessage`` and ``ErrorCode`` are detected independently.  The
+    result context is resolved from the source path so a result-level
+    ``ErrorMessage`` can be persisted without being confused with a
+    response-level message or with an ``IncidentCall``.
+    """
+
+    result_contexts: List[Dict[str, Any]] = []
+    for ordinal, (result_path, result) in enumerate(results or result_entries(parsed)):
+        result_identity, result_identity_path = result_id(result, result_path, ordinal)
+        result_contexts.append(
+            {
+                "result_source_path": result_path,
+                "source_result_id": result_identity,
+                "source_result_id_path": result_identity_path,
+                "result_ordinal": ordinal,
+            }
+        )
+
+    def context_for_path(path: str) -> Optional[Dict[str, Any]]:
+        matches = [
+            context
+            for context in result_contexts
+            if path == context["result_source_path"]
+            or path.startswith(context["result_source_path"] + ".")
+            or path.startswith(context["result_source_path"] + "[")
+        ]
+        return max(matches, key=lambda item: len(item["result_source_path"])) if matches else None
+
     response_errors: List[Dict[str, Any]] = []
     result_errors: List[Dict[str, Any]] = []
-    for path, key, child, _parent_path, _parent in iter_dict_entries(parsed):
+    for path, key, child, parent_path, parent in iter_dict_entries(parsed):
         if normalized_key(key) not in ERROR_FIELDS:
             continue
-        components = path_components(path)
-        item = {
-            "source_path": path,
-            "field_name": key,
-            "populated": is_populated(child),
-            "value_excerpt": source_excerpt(child, ""),
-        }
-        if "stopeventresult" in components:
-            result_errors.append(item)
-        else:
-            response_errors.append(item)
+        child_occurrences = (
+            [
+                (f"{path}[{index}]", item)
+                for index, item in enumerate(child)
+            ]
+            if isinstance(child, list)
+            else [(path, child)]
+        )
+        for occurrence_path, occurrence in child_occurrences:
+            result_context = context_for_path(occurrence_path)
+            error_code_path: Optional[str] = None
+            error_code: Any = None
+            if isinstance(parent, dict):
+                for parent_key, parent_child in parent.items():
+                    if normalized_key(parent_key) != "errorcode":
+                        continue
+                    candidate_path = path_for_key(parent_path, parent_key)
+                    candidate_value_path, candidate_value = source_value_at_path(
+                        parent_child,
+                        candidate_path,
+                    )
+                    if candidate_value is not None:
+                        error_code_path = candidate_value_path
+                        error_code = candidate_value
+                        break
+            if error_code is None and isinstance(occurrence, dict):
+                nested_code_path, nested_code_raw = direct_named_raw(
+                    occurrence,
+                    {"errorcode"},
+                    occurrence_path,
+                )
+                if nested_code_path is not None:
+                    error_code_path, error_code = source_value_at_path(
+                        nested_code_raw,
+                        nested_code_path,
+                    )
+            item = {
+                "source_path": occurrence_path,
+                "field_name": key,
+                "populated": is_populated(occurrence),
+                "value_excerpt": source_excerpt(occurrence, ""),
+                "source_value": source_value(occurrence),
+                "source_representation": occurrence,
+                "error_scope": "RESULT_LEVEL" if result_context else "RESPONSE_LEVEL",
+                "source_result_id": result_context.get("source_result_id") if result_context else None,
+                "source_result_id_path": (
+                    result_context.get("source_result_id_path") if result_context else None
+                ),
+                "result_source_path": (
+                    result_context.get("result_source_path") if result_context else None
+                ),
+                "result_ordinal": result_context.get("result_ordinal") if result_context else None,
+                "error_code": error_code,
+                "error_code_source_path": error_code_path,
+            }
+            if result_context:
+                result_errors.append(item)
+            else:
+                response_errors.append(item)
     return response_errors, result_errors
 
 
@@ -952,6 +1035,12 @@ def parser_gap_entries(parsed: Any) -> List[Dict[str, Any]]:
     return gaps
 
 
+def normalized_parser_gap_path(path: Any) -> str:
+    """Normalize array indexes while retaining the source structure."""
+
+    return re.sub(r"\[\d+\]", "[]", str(path))
+
+
 def parse_response(body: bytes, content_type: Optional[str]) -> ParsedResponse:
     try:
         parsed = json.loads(decode_response(body, content_type))
@@ -961,7 +1050,7 @@ def parse_response(body: bytes, content_type: Optional[str]) -> ParsedResponse:
         raise PilotParserError("JSON_ROOT_NOT_OBJECT")
 
     results = result_entries(parsed)
-    response_errors, result_errors = error_entries(parsed)
+    response_errors, result_errors = error_entries(parsed, results)
     service_delivery = direct_object(parsed, {"servicedelivery"})
     response_timestamp = source_value(
         direct_named_value(service_delivery or parsed, {"responsetimestamp"})
@@ -1423,6 +1512,29 @@ def situation_record(
     identity = situation_identity(situation, path)
     valid_from = first_named_value(situation, {"validfrom", "starttime"})
     valid_to = first_named_value(situation, {"validto", "endtime"})
+    source_field_path, source_raw = first_named_raw(situation, {"source"}, path)
+    source_type_path: Optional[str] = None
+    source_type: Any = None
+    if source_field_path is not None:
+        source_type_raw_path, source_type_raw = first_named_raw(
+            source_raw,
+            {"sourcetype"},
+            source_field_path,
+        )
+        if source_type_raw_path is not None:
+            source_type_path, source_type = source_value_at_path(
+                source_type_raw,
+                source_type_raw_path,
+            )
+    source_scalar = source_value(source_raw)
+    source_representation = source_raw if is_populated(source_raw) else None
+    source_record_value = source_scalar
+    if source_record_value is None and source_type is not None:
+        source_record_value = source_type
+    if source_record_value is None and source_representation is not None:
+        # A populated structured Source must never be reduced to NULL merely
+        # because the generic scalar helper does not know its shape.
+        source_record_value = source_representation
     return {
         "record_type": "situation_observation",
         "situation_observation_id": f"{response_id}|situation|{ordinal}",
@@ -1440,7 +1552,16 @@ def situation_record(
         "summary": first_named_value(situation, {"summary"}),
         "description": first_named_value(situation, {"description"}),
         "detail": first_named_value(situation, {"detail"}),
-        "source": first_named_value(situation, {"source"}),
+        "source": source_record_value,
+        "source_value": source_scalar,
+        "source_representation": source_representation,
+        "source_field_path": source_field_path,
+        "source_type": source_type,
+        "source_type_source_path": source_type_path,
+        "source_field_paths": {
+            "source": source_field_path,
+            "source_type": source_type_path,
+        },
         "priority": first_named_value(situation, {"priority"}),
         "affected_entity_context": {
             "affects": sanitize_for_artifact(direct_named_value(situation, {"affects"}), ""),
@@ -1579,6 +1700,39 @@ def service_attribute_record(
     }
 
 
+def error_message_record(
+    *,
+    response_id: str,
+    observed_at: str,
+    entry: Dict[str, Any],
+    ordinal: int,
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create one persisted record for one populated source ErrorMessage."""
+
+    return {
+        "record_type": "error_message_observation",
+        "error_message_observation_id": f"{response_id}|error_message|{ordinal}",
+        **parser_lineage(
+            pilot_run_id=run_id,
+            response_id=response_id,
+            observed_at=observed_at,
+        ),
+        "error_scope": entry.get("error_scope"),
+        "source_path": entry.get("source_path"),
+        "field_name": entry.get("field_name"),
+        "source_result_id": entry.get("source_result_id"),
+        "source_result_id_path": entry.get("source_result_id_path"),
+        "result_source_path": entry.get("result_source_path"),
+        "result_ordinal": entry.get("result_ordinal"),
+        "source_value": entry.get("source_value"),
+        "source_representation": entry.get("source_representation"),
+        "value_excerpt": entry.get("value_excerpt"),
+        "error_code": entry.get("error_code"),
+        "error_code_source_path": entry.get("error_code_source_path"),
+    }
+
+
 def build_bundle(
     *,
     parsed: ParsedResponse,
@@ -1637,6 +1791,20 @@ def build_bundle(
         )
         for ordinal, (path, field_name, value) in enumerate(parsed.attribute_entries)
     ]
+    error_messages = [
+        error_message_record(
+            response_id=response_id,
+            observed_at=observed_at,
+            entry=entry,
+            ordinal=ordinal,
+            run_id=run_id,
+        )
+        for ordinal, entry in enumerate(
+            parsed.response_error_entries + parsed.result_error_entries
+        )
+        if normalized_key(entry.get("field_name")) == "errormessage"
+        and entry.get("populated")
+    ]
     gaps: List[Dict[str, Any]] = []
     for ordinal, gap in enumerate(parsed.parser_gaps):
         result_source_path: Optional[str] = None
@@ -1672,6 +1840,7 @@ def build_bundle(
         "situations": situations,
         "associations": references,
         "attributes": attributes,
+        "error_messages": error_messages,
         "parser_gaps": gaps,
         "response_error_entries": parsed.response_error_entries,
         "result_error_entries": parsed.result_error_entries,
@@ -1695,7 +1864,13 @@ def reconcile_bundle(
                 response_id = item["response_id"]
                 break
         if response_id is None:
-            for logical_name in ("situations", "associations", "attributes", "parser_gaps"):
+            for logical_name in (
+                "situations",
+                "associations",
+                "attributes",
+                "error_messages",
+                "parser_gaps",
+            ):
                 for item in bundle.get(logical_name, []):
                     if item.get("response_id") is not None:
                         response_id = item["response_id"]
@@ -1712,6 +1887,12 @@ def reconcile_bundle(
     expected_situations = len(parsed.situation_entries)
     expected_associations = sum(1 for _path, value in parsed.reference_entries if is_populated(value))
     expected_attributes = len(parsed.attribute_entries)
+    expected_error_messages = sum(
+        1
+        for item in parsed.response_error_entries + parsed.result_error_entries
+        if normalized_key(item.get("field_name")) == "errormessage"
+        and item.get("populated")
+    )
     expected_gaps = len(parsed.parser_gaps)
 
     actual_records: Dict[str, List[Dict[str, Any]]] = {}
@@ -1723,6 +1904,7 @@ def reconcile_bundle(
             "situation_observations",
             "situation_associations",
             "service_attributes",
+            "error_messages",
             "parser_gaps",
         ):
             actual_records[logical_name] = store.records_for_response(logical_name, response_id)
@@ -1733,6 +1915,7 @@ def reconcile_bundle(
             "situation_observations",
             "situation_associations",
             "service_attributes",
+            "error_messages",
             "parser_gaps",
         ):
             actual_records[logical_name] = []
@@ -1742,6 +1925,7 @@ def reconcile_bundle(
     persisted_situations = len(actual_records["situation_observations"])
     persisted_associations = len(actual_records["situation_associations"])
     persisted_attributes = len(actual_records["service_attributes"])
+    persisted_error_messages = len(actual_records["error_messages"])
     persisted_gaps = len(actual_records["parser_gaps"])
 
     def ids_match(
@@ -1765,6 +1949,31 @@ def reconcile_bundle(
                 item.get("source_path"),
                 item.get("field_name"),
                 item.get("mapping_status"),
+            )
+            for item in items
+        )
+
+    def error_keys(
+        items: Sequence[Dict[str, Any]],
+    ) -> Counter[Tuple[Any, Any, Any, Any, Any]]:
+        def key_atom(value: Any) -> Any:
+            if isinstance(value, (dict, list)):
+                return json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+            return value
+
+        return Counter(
+            (
+                key_atom(item.get("error_scope")),
+                key_atom(item.get("source_path")),
+                key_atom(item.get("source_result_id")),
+                key_atom(item.get("result_source_path")),
+                key_atom(item.get("error_code")),
             )
             for item in items
         )
@@ -1805,6 +2014,27 @@ def reconcile_bundle(
             actual_records["service_attributes"],
             "service_attribute_observation_id",
         ),
+        "error_message_count_equals_persisted_error_message_count": (
+            expected_error_messages == persisted_error_messages
+        ),
+        "error_message_observation_ids_match_persisted_records": ids_match(
+            bundle["error_messages"],
+            actual_records["error_messages"],
+            "error_message_observation_id",
+        ),
+        "error_message_scope_and_source_lineage_match": (
+            error_keys(bundle["error_messages"])
+            == error_keys(actual_records["error_messages"])
+        ),
+        "error_message_values_are_persisted": all(
+            item.get("source_value") is not None
+            or item.get("source_representation") is not None
+            for item in actual_records["error_messages"]
+        ),
+        "persisted_error_message_fields_are_not_incident_calls": all(
+            normalized_key(item.get("field_name")) == "errormessage"
+            for item in actual_records["error_messages"]
+        ),
         "parser_gap_count_equals_persisted_gap_count": expected_gaps == persisted_gaps,
         "parser_gap_occurrences_match_persisted_records": gap_keys(bundle["parser_gaps"])
         == gap_keys(actual_records["parser_gaps"]),
@@ -1822,6 +2052,7 @@ def reconcile_bundle(
             "situations": expected_situations,
             "associations": expected_associations,
             "attributes": expected_attributes,
+            "error_messages": expected_error_messages,
             "parser_gaps": expected_gaps,
         },
         "persisted": {
@@ -1830,6 +2061,7 @@ def reconcile_bundle(
             "situation_observations": persisted_situations,
             "situation_associations": persisted_associations,
             "service_attributes": persisted_attributes,
+            "error_message_observations": persisted_error_messages,
             "parser_gap_evidence": persisted_gaps,
         },
     }
@@ -1875,16 +2107,22 @@ def persist_bundle(
                 for field in timing.get("fields", []):
                     if field.get("field") != "RecordedAtTime" or field.get("value") is None:
                         continue
-                    recorded_key = (
-                        item.get("event_source_identity"),
-                        item.get("call_scope"),
-                        timing.get("context"),
-                        field.get("value"),
+                    comparison_key = timing_comparison_key(
+                        {"event_source_identity": item.get("event_source_identity")},
+                        item,
+                        timing,
                     )
-                    first_seen = RECORDED_FIRST_SEEN.setdefault(
-                        recorded_key,
-                        item["observed_at"],
-                    )
+                    if comparison_key is None:
+                        # The occurrence is still retained immediately, but
+                        # no cross-response first-seen identity is claimed
+                        # without a source call anchor.
+                        first_seen = item["observed_at"]
+                    else:
+                        recorded_key = (comparison_key, field.get("value"))
+                        first_seen = RECORDED_FIRST_SEEN.setdefault(
+                            recorded_key,
+                            item["observed_at"],
+                        )
                     store.append(
                         "recorded_at_time",
                         {
@@ -1918,6 +2156,8 @@ def persist_bundle(
         store.append("situation_associations", item)
     for item in bundle["attributes"]:
         store.append("service_attributes", item)
+    for item in bundle["error_messages"]:
+        store.append("error_messages", item)
     for item in bundle["parser_gaps"]:
         store.append("parser_gaps", item)
 
@@ -1952,7 +2192,74 @@ def first_timing_value(timing: Dict[str, Any], field_name: str) -> Any:
     return values[0] if values else None
 
 
-RECORDED_FIRST_SEEN: Dict[Tuple[Any, Any, Any, Any], str] = {}
+def source_identity_atom(value: Any) -> Optional[str]:
+    """Create a hashable representation from already-retained source evidence."""
+
+    if not is_populated(value):
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+    return str(value)
+
+
+def timing_comparison_key(
+    event: Dict[str, Any],
+    call: Dict[str, Any],
+    timing: Optional[Dict[str, Any]],
+    context: Optional[str] = None,
+) -> Optional[Tuple[str, ...]]:
+    """Return a conservative cross-response identity for one call context.
+
+    Stop sequence is the strongest retained call anchor.  When it is absent,
+    the source TimetabledTime can identify the call context.  A bare scope,
+    context, or StopPointRef is deliberately insufficient because multiple
+    calls can share those values.
+    """
+
+    event_identity = source_identity_atom(event.get("event_source_identity"))
+    call_scope = source_identity_atom(call.get("call_scope"))
+    context_name = source_identity_atom(
+        timing.get("context") if timing is not None else context
+    )
+    stop_point_ref = source_identity_atom(call.get("stop_point_ref"))
+    stop_seq_number = source_identity_atom(call.get("stop_seq_number"))
+    timetabled_time = (
+        source_identity_atom(first_timing_value(timing, "TimetabledTime"))
+        if timing is not None
+        else None
+    )
+    if event_identity is None or call_scope is None or context_name is None:
+        return None
+    if stop_seq_number is not None:
+        return (
+            "MDD_CALL_CONTEXT",
+            event_identity,
+            call_scope,
+            context_name,
+            "STOP_POINT_AND_SEQUENCE",
+            stop_point_ref or "",
+            stop_seq_number,
+        )
+    if timetabled_time is not None:
+        return (
+            "MDD_CALL_CONTEXT",
+            event_identity,
+            call_scope,
+            context_name,
+            "STOP_POINT_AND_TIMETABLED_TIME",
+            stop_point_ref or "",
+            timetabled_time,
+        )
+    return None
+
+
+RECORDED_FIRST_SEEN: Dict[Tuple[Tuple[str, ...], Any], str] = {}
 
 
 class PilotMetrics:
@@ -1987,10 +2294,10 @@ class PilotMetrics:
         self.response_error_populated_count = 0
         self.result_error_populated_count = 0
         self.unmapped_source_field_count = 0
+        self.parser_gap_findings: Counter[Tuple[str, str, str, str]] = Counter()
         self.event_history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.recorded_occurrences: List[Dict[str, Any]] = []
-        self.recorded_context_history: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
-        self.known_recorded_contexts: Set[Tuple[str, str, str]] = set()
+        self.recorded_context_history: Dict[Tuple[str, ...], List[Dict[str, Any]]] = defaultdict(list)
         self.successful_response_sequence = 0
 
     def record_http_result(self, result: HTTPResult) -> None:
@@ -2036,6 +2343,15 @@ class PilotMetrics:
         self.situation_occurrences += len(bundle["situations"])
         self.situation_associations += len(bundle["associations"])
         self.unmapped_source_field_count += len(bundle["parser_gaps"])
+        for gap in bundle["parser_gaps"]:
+            self.parser_gap_findings[
+                (
+                    str(gap.get("field_name")),
+                    normalized_parser_gap_path(gap.get("source_path")),
+                    str(gap.get("value_type")),
+                    str(gap.get("mapping_status")),
+                )
+            ] += 1
         self.response_error_populated_count += sum(
             1
             for item in bundle["response_error_entries"]
@@ -2059,45 +2375,98 @@ class PilotMetrics:
             for call in event.get("call_observations", []):
                 self.call_occurrences[call.get("call_scope", "UNKNOWN")] += 1
             arrival_estimates: List[Any] = []
-            event_key = str(event.get("event_source_identity"))
-            recorded_context_keys: Set[Tuple[str, str, str]] = set()
-            current_scope_contexts: Set[Tuple[str, str]] = set()
+            timing_observations: List[Dict[str, Any]] = []
             for call in event.get("call_observations", []):
-                call_scope = str(call.get("call_scope"))
                 for context_name in ("arrival", "departure"):
-                    timings = call.get(f"{context_name}_timing", [])
-                    context_key = (event_key, call_scope, context_name.upper())
+                    timings = list(call.get(f"{context_name}_timing", []))
                     if timings:
-                        current_scope_contexts.add((call_scope, context_name.upper()))
                         for timing in timings:
-                            self._record_timing(timing, call, response_sequence, event)
-                            recorded_context_keys.add(context_key)
+                            timing_observations.append(
+                                {
+                                    "call": call,
+                                    "timing": timing,
+                                    "comparison_key": timing_comparison_key(
+                                        event,
+                                        call,
+                                        timing,
+                                    ),
+                                }
+                            )
                             if context_name == "arrival":
                                 arrival_estimates.extend(
                                     timing.get("field_values", {}).get("EstimatedTime", [])
                                 )
-                    elif context_key in self.known_recorded_contexts:
-                        self._record_timing_absence(
-                            event,
-                            call_scope,
-                            context_name.upper(),
-                            response_sequence,
+                    else:
+                        timing_observations.append(
+                            {
+                                "call": call,
+                                "timing": None,
+                                "comparison_key": timing_comparison_key(
+                                    event,
+                                    call,
+                                    None,
+                                    context_name.upper(),
+                                ),
+                            }
                         )
-                        recorded_context_keys.add(context_key)
 
-            # A call or timing container can disappear entirely in a later
-            # response.  Preserve that lifecycle observation without inventing
-            # a NULL source value.
-            for context_key in list(self.known_recorded_contexts):
-                if context_key[0] != event_key or context_key in recorded_context_keys:
+            key_counts = Counter(
+                item["comparison_key"]
+                for item in timing_observations
+                if item["comparison_key"] is not None
+            )
+            ambiguous_keys = {
+                key for key, count in key_counts.items() if count > 1
+            }
+            for item in timing_observations:
+                comparison_key = item["comparison_key"]
+                timing = item["timing"]
+                call = item["call"]
+                if comparison_key is None:
+                    if timing is not None:
+                        self._record_timing(
+                            timing,
+                            call,
+                            response_sequence,
+                            event,
+                            comparison_key=None,
+                            comparison_status="UNCOMPARABLE_INSUFFICIENT_SOURCE_EVIDENCE",
+                        )
                     continue
-                if (context_key[1], context_key[2]) not in current_scope_contexts:
+                if comparison_key in ambiguous_keys:
+                    # A duplicate source anchor within one response cannot
+                    # establish which call is the same occurrence later.
+                    if timing is not None:
+                        self._record_timing(
+                            timing,
+                            call,
+                            response_sequence,
+                            event,
+                            comparison_key=None,
+                            comparison_status="UNCOMPARABLE_AMBIGUOUS_SOURCE_EVIDENCE",
+                        )
+                    continue
+                if timing is None:
                     self._record_timing_absence(
                         event,
-                        context_key[1],
-                        context_key[2],
+                        comparison_key,
                         response_sequence,
+                        "TIMING_CONTEXT_MISSING",
                     )
+                else:
+                    self._record_timing(
+                        timing,
+                        call,
+                        response_sequence,
+                        event,
+                        comparison_key=comparison_key,
+                        comparison_status="COMPARABLE_SOURCE_CALL_CONTEXT",
+                    )
+
+            # A missing call has no current source occurrence with which to
+            # establish comparability.  Leave it as no later comparable call
+            # rather than treating another call in the same scope as an
+            # omission for this occurrence.
 
             if stable_identity:
                 self.event_history[stable_identity].append(
@@ -2125,23 +2494,21 @@ class PilotMetrics:
         call: Dict[str, Any],
         response_sequence: int,
         event: Dict[str, Any],
+        *,
+        comparison_key: Optional[Tuple[str, ...]],
+        comparison_status: str,
     ) -> None:
         context = timing.get("context")
-        history_key = (
-            str(event.get("event_source_identity")),
-            str(call.get("call_scope")),
-            str(context),
-        )
         recorded_values = list(timing.get("field_values", {}).get("RecordedAtTime", []))
-        self.known_recorded_contexts.add(history_key)
-        self.recorded_context_history[history_key].append(
-            {
-                "response_sequence": response_sequence,
-                "response_id": event.get("response_id"),
-                "recorded_at_time_present": bool(recorded_values),
-                **({"recorded_at_times": recorded_values} if recorded_values else {}),
-            }
-        )
+        if comparison_key is not None:
+            self.recorded_context_history[comparison_key].append(
+                {
+                    "response_sequence": response_sequence,
+                    "response_id": event.get("response_id"),
+                    "recorded_at_time_present": bool(recorded_values),
+                    **({"recorded_at_times": recorded_values} if recorded_values else {}),
+                }
+            )
         for field_name, values in timing.get("field_values", {}).items():
             self.timing_presence[field_name] += len(values)
             if field_name != "RecordedAtTime":
@@ -2155,17 +2522,10 @@ class PilotMetrics:
                     "response_id": event.get("response_id"),
                     "response_sequence": response_sequence,
                     "observed_at": event.get("observed_at"),
-                    "recorded_at_time_observed_at": RECORDED_FIRST_SEEN.get(
-                        (
-                            event.get("event_source_identity"),
-                            call.get("call_scope"),
-                            context,
-                            value,
-                        ),
-                        event.get("observed_at"),
-                    ),
+                    "recorded_at_time_observed_at": event.get("observed_at"),
                     "recorded_at_time": value,
                     "source_call_observation_id": call.get("call_observation_id"),
+                    "lifecycle_comparison_status": comparison_status,
                     "source_path": next(
                         (
                             field.get("source_path")
@@ -2175,35 +2535,36 @@ class PilotMetrics:
                         None,
                     ),
                 }
+                if comparison_key is not None:
+                    occurrence["_lifecycle_comparison_key"] = comparison_key
+                    occurrence["recorded_at_time_observed_at"] = RECORDED_FIRST_SEEN.get(
+                        (comparison_key, value),
+                        event.get("observed_at"),
+                    )
                 self.recorded_occurrences.append(occurrence)
 
     def _record_timing_absence(
         self,
         event: Dict[str, Any],
-        call_scope: str,
-        context: str,
+        comparison_key: Tuple[str, ...],
         response_sequence: int,
+        reason: str,
     ) -> None:
-        history_key = (
-            str(event.get("event_source_identity")),
-            str(call_scope),
-            str(context),
-        )
-        self.recorded_context_history[history_key].append(
+        self.recorded_context_history[comparison_key].append(
             {
                 "response_sequence": response_sequence,
                 "response_id": event.get("response_id"),
                 "recorded_at_time_present": False,
+                "absence_reason": reason,
             }
         )
 
     def finalize_recorded_occurrences(self) -> None:
         for occurrence in self.recorded_occurrences:
-            key = (
-                str(occurrence.get("event_source_identity")),
-                str(occurrence.get("call_scope")),
-                str(occurrence.get("arrival_departure_context")),
-            )
+            key = occurrence.pop("_lifecycle_comparison_key", None)
+            if key is None:
+                occurrence["later_response_result"] = "NO_LATER_COMPARABLE_CALL_OBSERVATION"
+                continue
             current_sequence = occurrence.get("response_sequence")
             if current_sequence is None:
                 current_sequence = next(
@@ -2221,7 +2582,7 @@ class PilotMetrics:
                 if current_sequence is not None and item["response_sequence"] > current_sequence
             ]
             if not later:
-                occurrence["later_response_result"] = "NO_LATER_RESPONSE_FOR_SAME_EVENT_SCOPE"
+                occurrence["later_response_result"] = "NO_LATER_COMPARABLE_CALL_OBSERVATION"
             else:
                 later_results: List[Dict[str, Any]] = []
                 for item in later:
@@ -2260,6 +2621,21 @@ class PilotMetrics:
                     previous = estimate
                     previous_present = True
         durations = sorted(self.response_durations_ms)
+        parser_gap_findings = [
+            {
+                "field_name": field_name,
+                "source_path": source_path,
+                "value_type": value_type,
+                "mapping_status": mapping_status,
+                "occurrence_count": occurrence_count,
+            }
+            for (
+                field_name,
+                source_path,
+                value_type,
+                mapping_status,
+            ), occurrence_count in sorted(self.parser_gap_findings.items())
+        ]
         return {
             "planned_slots": MAX_LOGICAL_SLOTS,
             "attempted_http_requests": self.attempted_http_requests,
@@ -2298,6 +2674,7 @@ class PilotMetrics:
             "populated_response_level_error_message_count": self.response_error_populated_count,
             "populated_result_level_error_message_count": self.result_error_populated_count,
             "unmapped_source_field_count": self.unmapped_source_field_count,
+            "parser_gap_findings": parser_gap_findings,
             "estimated_time_revision_count": estimate_revisions,
             "events_observed_repeatedly": len(repeated_events),
             "response_duration_ms": {
@@ -2509,11 +2886,16 @@ def run_pilot() -> Dict[str, Any]:
             "attempted_http_requests": 0,
             "stop_reason": "MDD_API_KEY_MISSING",
             "cleanup_result": "NOT_CREATED",
+            "cleanup_pending": False,
+            "cleanup_max_retention_hours": 24,
+            "unmapped_source_field_count": 0,
+            "parser_gap_findings": [],
             "recorded_at_time_result": "RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT",
         }
 
     directory: Optional[Path] = None
     store: Optional[PilotStore] = None
+    RECORDED_FIRST_SEEN.clear()
     metrics = PilotMetrics()
     stop_reason: Optional[str] = None
     consecutive_failures = 0
@@ -2827,7 +3209,26 @@ def run_pilot() -> Dict[str, Any]:
     run_ended = utc_now()
     metrics.finalize_recorded_occurrences()
     metrics_summary = metrics.summary()
-    cleanup_result = cleanup_directory(directory)
+    evidence_extraction_and_reconciliation_complete = (
+        metrics.success_count > 0
+        and metrics.parser_failure_count == 0
+        and metrics.persistence_failure_count == 0
+        and stop_reason is None
+    )
+    actual_http_evidence_exists = metrics.attempted_http_requests > 0
+    if evidence_extraction_and_reconciliation_complete:
+        cleanup_result = cleanup_directory(directory)
+    elif actual_http_evidence_exists:
+        # A blocked run may retain protected diagnostic artifacts for bounded
+        # review.  The caller must delete them no later than this deadline;
+        # they are never a permanent raw archive.
+        cleanup_result = "PENDING_MAX_24_HOURS"
+    else:
+        cleanup_result = cleanup_directory(directory)
+    cleanup_pending = cleanup_result == "PENDING_MAX_24_HOURS"
+    cleanup_retention_deadline = (
+        iso_utc(run_ended + timedelta(hours=24)) if cleanup_pending else None
+    )
     status = terminal_status(
         preflight_missing=False,
         stop_reason=stop_reason,
@@ -2868,6 +3269,12 @@ def run_pilot() -> Dict[str, Any]:
             "stop_reason": stop_reason,
             "raw_and_jsonl_directory_cleanup_target": str(directory) if directory else None,
             "cleanup_result": cleanup_result,
+            "cleanup_pending": cleanup_pending,
+            "cleanup_max_retention_hours": 24,
+            "cleanup_retention_deadline_utc": cleanup_retention_deadline,
+            "evidence_extraction_and_reconciliation_complete": (
+                evidence_extraction_and_reconciliation_complete
+            ),
         },
         "metrics": metrics_summary,
         "recorded_at_time_result": (
