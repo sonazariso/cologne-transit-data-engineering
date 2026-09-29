@@ -75,8 +75,8 @@ retention decision and does not approve a general raw archive.
 | Raw-file permissions | Mode `600`. |
 | Credential check | Before writing, verify that the API-key value is not present in the response content. |
 | Prohibited content | No `x-api-key` header, API-key value, credential fingerprint, authorization material, or command-line secret. |
-| Retention | During Stage 8 execution/review only; maximum 24 hours after the pilot run ends. Delete earlier after successful verification and evidence extraction where possible. |
-| Cleanup | Cleanup on normal completion is required; the Stage 8 final report must state whether it succeeded. |
+| Retention | Ordinary successful response artifacts are deleted after evidence extraction. If a successful response contains a non-null source `RecordedAtTime`, only its corresponding raw response is retained for review, with a maximum of 24 hours after the run ends. Failed/blocked diagnostic evidence retains the existing bounded 24-hour review behavior. |
+| Cleanup | Ordinary successful cleanup remains required. Intentional positive `RecordedAtTime` retention is reported as `RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS`, not as a cleanup failure, and the final report gives the deletion deadline. |
 | Source control/publication | Never commit, publish, or redistribute raw payloads. |
 
 The append-only JSONL pilot persistence artifacts are diagnostic artifacts in
@@ -84,6 +84,33 @@ the same protected temporary area (or another explicitly protected temporary
 directory), not a permanent raw archive and not the future PostgreSQL source
 layer. Stage 8 must treat them as temporary diagnostic artifacts, clean them
 up under its execution/review report, and never commit the complete history.
+
+### Positive `RecordedAtTime` evidence exception
+
+When a successful MDD response contains at least one non-null source-provided
+`RecordedAtTime`, the parsed source-faithful observation remains the evidence
+of record with its event/source identity, response identity, call scope,
+arrival/departure context, `ObservedAt`, and first-seen
+`RecordedAtTimeObservedAt` lineage. The corresponding raw response is marked
+`RECORDED_AT_TIME_RAW_EVIDENCE` and is retained only in the protected
+temporary Stage 8 directory. Other successful raw responses and ordinary
+successful diagnostic files are cleaned normally; this feature does not
+retain every successful response.
+
+The retained raw evidence remains mode `600` inside a mode `700` directory,
+contains no API key or authorization material, is never committed, published,
+moved into Git, or used as the authoritative warehouse source, and is deleted
+no later than the current maximum of 24 hours after the run. The non-error
+cleanup status is `RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS`. A longer
+retention period requires a separate explicit decision based on storage,
+privacy/provider terms, and operational cost; this document does not approve
+7-day, 14-day, or permanent raw retention.
+
+If no non-null `RecordedAtTime` occurs, the collector may retain only
+sanitized aggregate counts for the observed sample: successful responses and
+call/timing contexts inspected, non-null occurrences, distinct events, call
+scope, and arrival/departure distributions. A zero count is a bounded sample
+absence result, not a provider-wide absence claim.
 
 This exception is intentionally bounded to the Stage 8 handoff in
 [the Stage 7 design](../stages/07-realtime-pilot-design.md). It does not

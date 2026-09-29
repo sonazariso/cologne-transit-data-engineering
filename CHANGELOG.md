@@ -4,6 +4,8 @@
 
 ### Added
 - New Cologne Transport Intelligence repository foundation.
+- Stage 8 hardening for secret-free API-key header preflight, bounded positive
+  `RecordedAtTime` raw-evidence retention, and offline synthetic validation.
 - Approved Stage 0 project definition.
 - Restart roadmap and approval-gate workflow.
 - Semantic/data guardrails.

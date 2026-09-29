@@ -238,3 +238,45 @@ responses, produced the required measurements, and cleaned up protected
 temporary artifacts. Stage 8 is therefore **COMPLETE**. The fixed 50-station
 objective, 250,000/month quota, and all other approved boundaries remain
 unchanged. Stage 9 and all later stages were not started or modified.
+
+## Prospective post-Stage-8 hardening
+
+The following hardening applies only to future offline/host executions. It does
+not reopen Stage 8, rerun the one-hour pilot, rewrite the historical result,
+or recover the raw payloads deleted during the successful 2026-09-29 cleanup.
+
+The shared Stage 8 credential boundary now validates the API-key value before
+request construction, the network transport, or temporary-directory creation.
+An empty value retains `MDD_API_KEY: MISSING`. A value containing unsafe
+header characters, including Unicode U+2028, newline, or carriage-return
+contamination, prints only `MDD_API_KEY: INVALID_FORMAT` and is classified as
+`CREDENTIAL_FORMAT_INVALID`. No credential value, length, position, hash, or
+derived secret is exposed. The authorization diagnostic and the pilot use this
+same boundary.
+
+For future successful responses, a non-null source-provided `RecordedAtTime`
+is parsed and persisted with its existing source/event/response/call-scope,
+arrival/departure, `ObservedAt`, and first-seen lineage. That response is
+marked `RECORDED_AT_TIME_RAW_EVIDENCE`; only its corresponding raw payload is
+kept in the protected mode-700/mode-600 temporary area. Ordinary successful
+response artifacts are cleaned normally. The non-error cleanup status
+`RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS` reports intentional bounded
+retention and supplies a maximum deletion deadline of 24 hours. Full raw
+payloads remain temporary and are never the durable warehouse source; the
+sanitized parsed `RecordedAtTime` evidence and lineage are the durable record.
+
+Future runs also retain sanitized aggregate evidence for the observed sample:
+successful responses and call/timing contexts inspected, non-null occurrences,
+distinct events, call-scope distribution, and arrival/departure distribution.
+Zero occurrences remain a bounded sample result and are not provider-wide
+absence evidence. Failed/blocked diagnostic evidence continues to use the
+existing bounded failure-retention behavior.
+
+Offline hardening validation uses synthetic/local responses only and confirms
+invalid-credential zero-request behavior, normal cleanup without
+`RecordedAtTime`, positive raw-evidence retention, exact parsed value and
+lineage preservation, later-NULL/disappearance safety, secret-free artifacts,
+and the 24-hour maximum. The historical Stage 8 status and metrics above
+remain authoritative. The future 50-station objective, 250,000/month quota,
+and Stage 13 ownership of production cadence, concurrency, `NumberOfResults`,
+and rollout decisions are unchanged; Stage 9+ implementation was not started.

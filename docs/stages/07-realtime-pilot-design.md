@@ -515,6 +515,9 @@ MDD archive.
 - Store raw responses outside the repository in a permission-restricted
   temporary directory, for example
   `/private/tmp/cologne-transit-stage-08-XXXXXXXX/`.
+- Validate the API-key header format before request construction, network
+  transport, or temporary-directory creation; report only `MDD_API_KEY:
+  INVALID_FORMAT` for unsafe values.
 - Create the directory with mode `700`.
 - Write raw response files with mode `600`.
 - Before writing a payload, verify that the API-key value is not present in
@@ -527,15 +530,19 @@ MDD archive.
 
 Raw payloads remain temporary and may exist only during Stage 8 execution and
 review, outside Git, with mode-600 files inside a mode-700 directory and a
-maximum retention of **24 hours after the pilot run ends**. Delete them after
-successful Stage 8 evidence extraction and parser-to-persistence
-reconciliation, or earlier after successful offline verification when
-possible. Cleanup must run on normal completion.
-
-The Stage 8 final report must state whether cleanup succeeded. A cleanup
-failure is an explicit pilot quality result and must not be hidden. The
-exception applies only to this bounded pilot and does not approve permanent
-raw retention.
+maximum retention of **24 hours after the pilot run ends**. Ordinary successful
+responses are deleted after successful evidence extraction and
+parser-to-persistence reconciliation. If a successful response contains a
+non-null source `RecordedAtTime`, mark it
+`RECORDED_AT_TIME_RAW_EVIDENCE` and retain only that corresponding raw
+response for bounded forensic review. Report the intentional non-error status
+`RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS` with its deletion deadline;
+do not call it a cleanup failure. Failed/blocked diagnostic evidence continues
+to use the existing bounded 24-hour review behavior. The parsed
+source-faithful `RecordedAtTime` record and lineage remain the durable
+evidence, and the full raw payload is never the authoritative warehouse
+source. This exception applies only to the bounded pilot and does not approve
+permanent raw retention.
 
 ## 12. Non-PostgreSQL pilot persistence harness
 
@@ -662,6 +669,9 @@ The final Stage 8 report must include at least:
 - `EstimatedTime` presence count;
 - `RecordedAtTime` presence count;
 - distinct events with `RecordedAtTime`;
+- successful responses and call/timing contexts inspected;
+- call-scope distribution; and
+- arrival/departure distribution;
 - estimate revision count;
 - events with repeated observations;
 - `PlannedBay` presence;
@@ -737,7 +747,7 @@ implementation.
 Stage 8 may begin only as a separately identified host-execution stage. Its
 implementation handoff is:
 
-1. perform the safe credential-presence preflight;
+1. perform the shared safe credential-format preflight;
 2. at pilot start, select `PilotAnchorDepArrTime` and use that fixed anchor in
    the exact request contract in Section 4 for every request;
 3. apply the named V3 sampling policy, fixed 3-second start-to-start slot

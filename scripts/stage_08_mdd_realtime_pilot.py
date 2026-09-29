@@ -36,7 +36,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from xml.sax.saxutils import escape as xml_escape
 
 
-SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.2"
+SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.3"
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
 MDD_API_KEY_ENV = "MDD_API_KEY"
 DEFAULT_STATION = "Köln Hbf"
@@ -61,6 +61,17 @@ RAW_TEMP_PREFIX = "cologne-transit-stage-08-"
 MAX_RESPONSE_BYTES = 25 * 1024 * 1024
 MAX_EXCERPT_CHARS = 1000
 MAX_ERROR_CHARS = 500
+MAX_RAW_EVIDENCE_RETENTION_HOURS = 24
+
+CREDENTIAL_PREFLIGHT_MISSING = "MISSING"
+CREDENTIAL_PREFLIGHT_VALID = "VALID"
+CREDENTIAL_PREFLIGHT_INVALID_FORMAT = "INVALID_FORMAT"
+RECORDED_AT_TIME_RAW_EVIDENCE = "RECORDED_AT_TIME_RAW_EVIDENCE"
+NO_RECORDED_AT_TIME_RAW_EVIDENCE = "NO_RECORDED_AT_TIME_RAW_EVIDENCE"
+RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS = (
+    "RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS"
+)
+TEMP_FAILURE_RETENTION_STATUS = "PENDING_MAX_24_HOURS"
 
 SUCCESS_APPLICATION_STATUSES = {"ok", "success", "successful", "completed", "true"}
 
@@ -328,6 +339,39 @@ class PilotParserError(ValueError):
 
 class CredentialContentError(ValueError):
     """The response body unexpectedly contained the API-key value."""
+
+
+def validate_api_key_format(api_key: Optional[str]) -> str:
+    """Return a secret-free preflight status for the HTTP header value.
+
+    The Stage 8 transport uses an API key as an HTTP header value.  The
+    preflight deliberately accepts only visible ASCII characters so that
+    Unicode encoding failures and control-character contamination are caught
+    before a request body, temporary evidence directory, or HTTP transport is
+    created.  The credential itself is never returned or included in an error.
+    """
+
+    if not api_key:
+        return CREDENTIAL_PREFLIGHT_MISSING
+    if not isinstance(api_key, str):
+        return CREDENTIAL_PREFLIGHT_INVALID_FORMAT
+    try:
+        encoded = api_key.encode("ascii")
+    except UnicodeEncodeError:
+        return CREDENTIAL_PREFLIGHT_INVALID_FORMAT
+    if not encoded or any(byte < 0x21 or byte > 0x7E for byte in encoded):
+        return CREDENTIAL_PREFLIGHT_INVALID_FORMAT
+    return CREDENTIAL_PREFLIGHT_VALID
+
+
+def credential_preflight_output(status: str) -> str:
+    """Return the only user-visible credential preflight value permitted."""
+
+    if status == CREDENTIAL_PREFLIGHT_MISSING:
+        return "MDD_API_KEY: MISSING"
+    if status == CREDENTIAL_PREFLIGHT_INVALID_FORMAT:
+        return "MDD_API_KEY: INVALID_FORMAT"
+    return "MDD_API_KEY: PRESENT"
 
 
 class ResponseTooLarge(ValueError):
@@ -835,9 +879,25 @@ def create_temp_directory() -> Path:
     return directory
 
 
-def write_raw_artifact(directory: Path, filename: str, body: bytes, api_key: str) -> Path:
-    if api_key.encode("utf-8") in body:
+def raw_payload_secret_check(body: bytes, api_key: str) -> None:
+    """Reject raw evidence containing credentials or authorization headers."""
+
+    if api_key and api_key.encode("utf-8") in body:
         raise CredentialContentError("API-key value found in response content")
+    lowered = body.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            b"authorization:",
+            b"proxy-authorization:",
+            b"x-api-key:",
+        )
+    ):
+        raise CredentialContentError("authorization material found in response content")
+
+
+def write_raw_artifact(directory: Path, filename: str, body: bytes, api_key: str) -> Path:
+    raw_payload_secret_check(body, api_key)
     path = directory / filename
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -857,6 +917,16 @@ def write_raw_artifact(directory: Path, filename: str, body: bytes, api_key: str
             pass
         raise
     return path
+
+
+def verify_raw_artifacts_secret_free(
+    paths: Iterable[Path],
+    api_key: str,
+) -> None:
+    """Recheck retained raw files immediately before bounded retention."""
+
+    for path in paths:
+        raw_payload_secret_check(path.read_bytes(), api_key)
 
 
 def read_bounded(stream: Any, maximum_bytes: int) -> bytes:
@@ -921,6 +991,25 @@ def perform_http_request(
     stop_point_ref: Optional[str] = None,
     number_of_results: Optional[int] = None,
 ) -> HTTPResult:
+    credential_status = validate_api_key_format(api_key)
+    if credential_status != CREDENTIAL_PREFLIGHT_VALID:
+        now = utc_now()
+        return HTTPResult(
+            request_timestamp=now,
+            request_timestamp_utc=trias_utc(now),
+            http_status=None,
+            content_type=None,
+            body=b"",
+            elapsed_ms=0.0,
+            request_started_mono=time.perf_counter(),
+            request_ended_mono=time.perf_counter(),
+            failure=(
+                "MDD_API_KEY_MISSING"
+                if credential_status == CREDENTIAL_PREFLIGHT_MISSING
+                else "CREDENTIAL_FORMAT_INVALID"
+            ),
+            failure_detail=None,
+        )
     effective_config = runtime_config or DEFAULT_RUNTIME_CONFIG
     effective_stop_point_ref = (
         effective_config.stop_point_ref
@@ -1961,6 +2050,32 @@ def build_bundle(
     }
 
 
+def bundle_has_recorded_at_time(bundle: Dict[str, Any]) -> bool:
+    """Return whether a parsed successful response has source actual-time data."""
+
+    for call in bundle.get("calls", []):
+        for context_name in ("arrival", "departure"):
+            for timing in call.get(f"{context_name}_timing", []):
+                if any(
+                    value is not None
+                    for value in timing.get("field_values", {}).get("RecordedAtTime", [])
+                ):
+                    return True
+    return False
+
+
+def parsed_response_has_recorded_at_time(parsed: ParsedResponse) -> bool:
+    """Check parsed source timing through the same bundle mapping as the pilot."""
+
+    probe_bundle = build_bundle(
+        parsed=parsed,
+        response_id="RECORDED_AT_TIME_PREFLIGHT_RESPONSE",
+        run_id="RECORDED_AT_TIME_PREFLIGHT_RUN",
+        observed_at="RECORDED_AT_TIME_PREFLIGHT_OBSERVED_AT",
+    )
+    return bundle_has_recorded_at_time(probe_bundle)
+
+
 def reconcile_bundle(
     bundle: Dict[str, Any],
     parsed: ParsedResponse,
@@ -2409,6 +2524,11 @@ class PilotMetrics:
         self.event_history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.recorded_occurrences: List[Dict[str, Any]] = []
         self.recorded_context_history: Dict[Tuple[str, ...], List[Dict[str, Any]]] = defaultdict(list)
+        self.timing_contexts_inspected = 0
+        self.inspected_scope_distribution: Counter[str] = Counter()
+        self.inspected_context_distribution: Counter[str] = Counter()
+        self.recorded_scope_distribution: Counter[str] = Counter()
+        self.recorded_context_distribution: Counter[str] = Counter()
         self.successful_response_sequence = 0
 
     def record_http_result(self, result: HTTPResult) -> None:
@@ -2496,6 +2616,7 @@ class PilotMetrics:
                                 {
                                     "call": call,
                                     "timing": timing,
+                                    "timing_context": context_name.upper(),
                                     "comparison_key": timing_comparison_key(
                                         event,
                                         call,
@@ -2512,6 +2633,7 @@ class PilotMetrics:
                             {
                                 "call": call,
                                 "timing": None,
+                                "timing_context": context_name.upper(),
                                 "comparison_key": timing_comparison_key(
                                     event,
                                     call,
@@ -2526,6 +2648,12 @@ class PilotMetrics:
                 for item in timing_observations
                 if item["comparison_key"] is not None
             )
+            self.timing_contexts_inspected += len(timing_observations)
+            for item in timing_observations:
+                self.inspected_scope_distribution[
+                    item["call"].get("call_scope", "UNKNOWN")
+                ] += 1
+                self.inspected_context_distribution[item["timing_context"]] += 1
             ambiguous_keys = {
                 key for key, count in key_counts.items() if count > 1
             }
@@ -2625,6 +2753,8 @@ class PilotMetrics:
             if field_name != "RecordedAtTime":
                 continue
             for value in values:
+                self.recorded_scope_distribution[call.get("call_scope", "UNKNOWN")] += 1
+                self.recorded_context_distribution[context or "UNKNOWN"] += 1
                 occurrence = {
                     "event_source_identity": event.get("event_source_identity"),
                     "pilot_run_id": event.get("pilot_run_id"),
@@ -2747,6 +2877,35 @@ class PilotMetrics:
                 mapping_status,
             ), occurrence_count in sorted(self.parser_gap_findings.items())
         ]
+        distinct_recorded_events = len(
+            {
+                item.get("event_source_identity")
+                for item in self.recorded_occurrences
+                if item.get("event_source_identity") is not None
+            }
+        )
+        recorded_at_time_aggregate = {
+            "successful_responses_inspected": self.success_count,
+            "successful_http_responses_inspected": self.successful_http_responses,
+            "call_timing_contexts_inspected": self.timing_contexts_inspected,
+            "non_null_recorded_at_time_occurrences": len(self.recorded_occurrences),
+            "distinct_events_with_recorded_at_time": distinct_recorded_events,
+            "scope_distribution": dict(sorted(self.inspected_scope_distribution.items())),
+            "arrival_departure_distribution": dict(
+                sorted(self.inspected_context_distribution.items())
+            ),
+            "recorded_at_time_scope_distribution": dict(
+                sorted(self.recorded_scope_distribution.items())
+            ),
+            "recorded_at_time_arrival_departure_distribution": dict(
+                sorted(self.recorded_context_distribution.items())
+            ),
+            "absence_interpretation": (
+                "BOUNDED_OBSERVED_SAMPLE_ONLY"
+                if not self.recorded_occurrences
+                else None
+            ),
+        }
         return {
             "planned_slots": MAX_LOGICAL_SLOTS,
             "attempted_http_requests": self.attempted_http_requests,
@@ -2796,7 +2955,8 @@ class PilotMetrics:
                 "max": durations[-1] if durations else None,
             },
             "recorded_at_time_occurrences": list(self.recorded_occurrences),
-            "recorded_at_time_distinct_events": len({item.get("event_source_identity") for item in self.recorded_occurrences}),
+            "recorded_at_time_distinct_events": distinct_recorded_events,
+            "recorded_at_time_aggregate": recorded_at_time_aggregate,
         }
 
 
@@ -2844,6 +3004,7 @@ def write_collection_slot(
     http_status: Optional[int] = None,
     elapsed_ms: Optional[float] = None,
     detail: Optional[str] = None,
+    raw_evidence_status: Optional[str] = None,
     runtime_config: Stage8RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ) -> None:
     store.append(
@@ -2871,6 +3032,7 @@ def write_collection_slot(
             "http_status": http_status,
             "elapsed_ms": elapsed_ms,
             "detail": detail,
+            "raw_evidence_status": raw_evidence_status,
         },
     )
 
@@ -2889,6 +3051,7 @@ def response_snapshot_record(
     parsed: Optional[ParsedResponse],
     parse_error: Optional[str],
     credential_content_check: str,
+    raw_evidence_status: str = NO_RECORDED_AT_TIME_RAW_EVIDENCE,
     runtime_config: Stage8RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ) -> Dict[str, Any]:
     return {
@@ -2926,6 +3089,8 @@ def response_snapshot_record(
         "content_sha256": content_hash,
         "elapsed_ms": round(result.elapsed_ms, 3),
         "raw_artifact_path": str(raw_path) if raw_path else None,
+        "raw_evidence_status": raw_evidence_status,
+        "recorded_at_time_raw_evidence_status": raw_evidence_status,
         "parser_version": PARSER_VERSION,
         "parse_status": "PARSED" if parsed else "FAILED",
         "parse_error": parse_error,
@@ -2958,13 +3123,38 @@ def response_snapshot_record(
     }
 
 
-def cleanup_directory(directory: Optional[Path]) -> str:
+def cleanup_directory(
+    directory: Optional[Path],
+    retained_raw_paths: Optional[Set[Path]] = None,
+    retained_additional_paths: Optional[Set[Path]] = None,
+) -> str:
     if directory is None:
         return "NOT_CREATED"
     try:
         resolved = directory.resolve()
         if resolved.parent != Path("/private/tmp").resolve() and resolved.parent != Path(tempfile.gettempdir()).resolve():
             return "FAILED_UNSAFE_CLEANUP_TARGET"
+        retained_paths = set(retained_raw_paths or set())
+        retained_paths.update(retained_additional_paths or set())
+        if retained_paths:
+            retained = {path.resolve() for path in retained_paths}
+            if not retained or any(path.parent != resolved for path in retained):
+                return "FAILED_UNSAFE_CLEANUP_TARGET"
+            for child in resolved.iterdir():
+                child_resolved = child.resolve()
+                if child_resolved in retained:
+                    if not child.is_file():
+                        return "FAILED_RETAINED_EVIDENCE_INVALID"
+                    os.chmod(child, 0o600)
+                    continue
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            if all(path.exists() and path.is_file() for path in retained):
+                os.chmod(resolved, 0o700)
+                return RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS
+            return "FAILED_RETAINED_EVIDENCE_MISSING"
         shutil.rmtree(resolved)
         return "SUCCEEDED" if not resolved.exists() else "FAILED_REMAINS"
     except Exception:
@@ -2980,7 +3170,10 @@ def terminal_status(
 ) -> str:
     if preflight_missing:
         return "BLOCKED"
-    if cleanup_result != "SUCCEEDED":
+    if cleanup_result not in {
+        "SUCCEEDED",
+        RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS,
+    }:
         return "BLOCKED"
     if stop_reason in {
         "AUTHENTICATION_OR_AUTHORIZATION_FAILURE",
@@ -3003,9 +3196,12 @@ def run_pilot(
 ) -> Dict[str, Any]:
     effective_runtime_config = runtime_config or DEFAULT_RUNTIME_CONFIG
     api_key = os.environ.get(MDD_API_KEY_ENV)
-    print("MDD_API_KEY: PRESENT" if api_key else "MDD_API_KEY: MISSING", flush=True)
+    credential_status = validate_api_key_format(api_key)
+    print(credential_preflight_output(credential_status), flush=True)
     run_id = f"stage08-{uuid.uuid4().hex}"
-    if not api_key:
+    if credential_status != CREDENTIAL_PREFLIGHT_VALID:
+        missing = credential_status == CREDENTIAL_PREFLIGHT_MISSING
+        stop_reason = "MDD_API_KEY_MISSING" if missing else "CREDENTIAL_FORMAT_INVALID"
         return {
             "record_type": "stage_08_summary",
             "script_version": SCRIPT_VERSION,
@@ -3020,13 +3216,15 @@ def run_pilot(
             "requested_stop_point_ref": effective_runtime_config.stop_point_ref,
             "number_of_results": effective_runtime_config.number_of_results,
             "sampling_policy": effective_runtime_config.sampling_policy,
-            "preflight": "MDD_API_KEY: MISSING",
+            "preflight": credential_preflight_output(credential_status),
+            "credential_preflight_status": credential_status,
             "planned_slots": MAX_LOGICAL_SLOTS,
             "attempted_http_requests": 0,
-            "stop_reason": "MDD_API_KEY_MISSING",
+            "stop_reason": stop_reason,
+            "classification": stop_reason,
             "cleanup_result": "NOT_CREATED",
             "cleanup_pending": False,
-            "cleanup_max_retention_hours": 24,
+            "cleanup_max_retention_hours": MAX_RAW_EVIDENCE_RETENTION_HOURS,
             "request_contract": {
                 "requestor_ref": REQUESTOR_REF,
                 "stop_event_type": STOP_EVENT_TYPE,
@@ -3042,7 +3240,11 @@ def run_pilot(
             },
             "unmapped_source_field_count": 0,
             "parser_gap_findings": [],
-            "recorded_at_time_result": "RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT",
+            "recorded_at_time_result": (
+                "RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT"
+                if missing
+                else "NOT_EVALUATED_PRE_FLIGHT_CREDENTIAL_FORMAT_INVALID"
+            ),
             "stage_8_pilot_started": False,
             "stage_9_or_later_work_performed": False,
         }
@@ -3058,6 +3260,8 @@ def run_pilot(
     pilot_anchor = trias_utc(run_started)
     response_sequence = 0
     completed_slots = 0
+    retained_raw_paths: Set[Path] = set()
+    retained_sanitized_paths: Set[Path] = set()
 
     try:
         directory = create_temp_directory()
@@ -3146,6 +3350,7 @@ def run_pilot(
             bundle: Optional[Dict[str, Any]] = None
             parse_error: Optional[str] = None
             response_persisted = False
+            raw_evidence_status = NO_RECORDED_AT_TIME_RAW_EVIDENCE
 
             if result.http_status is not None:
                 try:
@@ -3186,6 +3391,11 @@ def run_pilot(
                         run_id=run_id,
                         observed_at=observed_at,
                     )
+                    successful_source_response = not application_error(parsed)
+                    if successful_source_response and bundle_has_recorded_at_time(bundle):
+                        raw_evidence_status = RECORDED_AT_TIME_RAW_EVIDENCE
+                        if raw_path is not None:
+                            retained_raw_paths.add(raw_path)
                     snapshot = response_snapshot_record(
                         run_id=run_id,
                         response_id=response_id,
@@ -3199,9 +3409,10 @@ def run_pilot(
                         parsed=parsed,
                         parse_error=None,
                         credential_content_check="PASS",
+                        raw_evidence_status=raw_evidence_status,
                         runtime_config=effective_runtime_config,
                     )
-                    if application_error(parsed):
+                    if not successful_source_response:
                         outcome = "MDD_APPLICATION_ERROR"
                     else:
                         outcome = "SUCCESS"
@@ -3284,6 +3495,7 @@ def run_pilot(
                     parsed=error_body_parsed,
                     parse_error=error_body_parse_error,
                     credential_content_check="PASS",
+                    raw_evidence_status=NO_RECORDED_AT_TIME_RAW_EVIDENCE,
                     runtime_config=effective_runtime_config,
                 )
                 try:
@@ -3312,6 +3524,7 @@ def run_pilot(
                     http_status=result.http_status,
                     elapsed_ms=round(result.elapsed_ms, 3),
                     detail=detail,
+                    raw_evidence_status=raw_evidence_status,
                     runtime_config=effective_runtime_config,
                 )
             except Exception:
@@ -3392,6 +3605,15 @@ def run_pilot(
     run_ended = utc_now()
     metrics.finalize_recorded_occurrences()
     metrics_summary = metrics.summary()
+    if retained_raw_paths and store is not None:
+        parsed_evidence_path = store.writers["recorded_at_time"].path
+        if parsed_evidence_path.exists() and parsed_evidence_path.stat().st_size > 0:
+            retained_sanitized_paths.add(parsed_evidence_path)
+    if retained_raw_paths:
+        try:
+            verify_raw_artifacts_secret_free(retained_raw_paths, api_key)
+        except Exception:
+            stop_reason = stop_reason or "CREDENTIAL_SAFETY_FAILURE"
     evidence_extraction_and_reconciliation_complete = (
         metrics.success_count > 0
         and metrics.parser_failure_count == 0
@@ -3400,17 +3622,28 @@ def run_pilot(
     )
     actual_http_evidence_exists = metrics.attempted_http_requests > 0
     if evidence_extraction_and_reconciliation_complete:
-        cleanup_result = cleanup_directory(directory)
+        cleanup_result = cleanup_directory(
+            directory,
+            retained_raw_paths=retained_raw_paths or None,
+            retained_additional_paths=retained_sanitized_paths or None,
+        )
     elif actual_http_evidence_exists:
         # A blocked run may retain protected diagnostic artifacts for bounded
         # review.  The caller must delete them no later than this deadline;
         # they are never a permanent raw archive.
-        cleanup_result = "PENDING_MAX_24_HOURS"
+        cleanup_result = TEMP_FAILURE_RETENTION_STATUS
     else:
         cleanup_result = cleanup_directory(directory)
-    cleanup_pending = cleanup_result == "PENDING_MAX_24_HOURS"
+    cleanup_pending = cleanup_result in {
+        TEMP_FAILURE_RETENTION_STATUS,
+        RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS,
+    }
     cleanup_retention_deadline = (
-        iso_utc(run_ended + timedelta(hours=24)) if cleanup_pending else None
+        iso_utc(
+            run_ended + timedelta(hours=MAX_RAW_EVIDENCE_RETENTION_HOURS)
+        )
+        if cleanup_pending
+        else None
     )
     status = terminal_status(
         preflight_missing=False,
@@ -3439,6 +3672,18 @@ def run_pilot(
         "pilot_started_at_utc": iso_utc(run_started),
         "pilot_ended_at_utc": iso_utc(run_ended),
         "pilot_anchor_dep_arr_time": pilot_anchor,
+        "cleanup_result": cleanup_result,
+        "recorded_at_time_raw_evidence_status": (
+            RECORDED_AT_TIME_RAW_EVIDENCE if retained_raw_paths else None
+        ),
+        "recorded_at_time_raw_evidence_response_count": len(retained_raw_paths),
+        "recorded_at_time_raw_evidence_paths": sorted(
+            str(path) for path in retained_raw_paths
+        ),
+        "recorded_at_time_sanitized_evidence_paths": sorted(
+            str(path) for path in retained_sanitized_paths
+        ),
+        "durable_recorded_at_time_evidence": metrics.recorded_occurrences,
         "request_contract": {
             "requestor_ref": REQUESTOR_REF,
             "stop_event_type": STOP_EVENT_TYPE,
@@ -3460,8 +3705,17 @@ def run_pilot(
             "raw_and_jsonl_directory_cleanup_target": str(directory) if directory else None,
             "cleanup_result": cleanup_result,
             "cleanup_pending": cleanup_pending,
-            "cleanup_max_retention_hours": 24,
+            "cleanup_max_retention_hours": MAX_RAW_EVIDENCE_RETENTION_HOURS,
             "cleanup_retention_deadline_utc": cleanup_retention_deadline,
+            "ordinary_success_artifacts_cleaned": (
+                evidence_extraction_and_reconciliation_complete
+                and cleanup_result
+                in {
+                    "SUCCEEDED",
+                    RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS,
+                }
+            ),
+            "recorded_at_time_raw_evidence_retained": bool(retained_raw_paths),
             "evidence_extraction_and_reconciliation_complete": (
                 evidence_extraction_and_reconciliation_complete
             ),

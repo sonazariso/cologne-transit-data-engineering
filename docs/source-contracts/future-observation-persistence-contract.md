@@ -54,6 +54,12 @@ The following are non-negotiable invariants:
   source value and its first-seen observation timestamp. Later non-null source
   observations remain append-only evidence; a later `NULL` or disappearance
   must not overwrite or erase the previously captured value.
+- The parsed `RecordedAtTime` record and its lineage are the durable evidence
+  required for later use. A full raw response is not a permanent source of
+  record. During the bounded Stage 8 validation exception, a successful
+  response with positive `RecordedAtTime` evidence may retain its
+  corresponding raw payload temporarily for forensic review, for no more than
+  24 hours; ordinary successful raw responses are cleaned normally.
 - `TimetabledTime`, `EstimatedTime`, and `RecordedAtTime` must not be collapsed
   into one generic `EventTime` concept.
 
@@ -172,8 +178,17 @@ it is not approval for permanent raw-payload retention.
 
 A future design may evaluate short-term raw-payload retention for forensic
 reprocessing and parser improvements, especially where a source field was
-present but not yet understood. This is not an approved retention duration and
-must not default to permanent raw storage.
+present but not yet understood. For the current Stage 8 hardening exception,
+the boundary is explicit: positive source-provided `RecordedAtTime` responses
+receive bounded temporary raw-evidence retention, while ordinary successful
+responses do not. The maximum is 24 hours; it must not become permanent raw
+storage, and a longer period requires a separate explicit decision.
+
+The sanitized parsed `RecordedAtTime` observation and lineage remain the
+durable evidence. If zero occurrences are observed, retained aggregate counts
+may describe only the successful responses, call/timing contexts, event
+counts, call scopes, and arrival/departure contexts inspected in that bounded
+sample. They must not be presented as provider-wide absence.
 
 Any later retention decision must consider storage volume, privacy/data
 considerations, reprocessing need, and operational cost. Durable

@@ -238,3 +238,28 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     decision.
 89. An HTTP `429` stops the Stage 8 pilot immediately, is classified as
     rate-limit/provider evidence, and is never retried.
+90. Credential preflight must validate the API-key header format before any
+    temporary evidence directory, request construction, or network transport.
+    Missing keys retain `MDD_API_KEY: MISSING`; unsafe values are reported only
+    as `MDD_API_KEY: INVALID_FORMAT` and classified as
+    `CREDENTIAL_FORMAT_INVALID`. The value, length, position, hash, and any
+    derived secret information must never be printed, logged, or persisted.
+91. A successful response with a non-null source `RecordedAtTime` receives the
+    marker `RECORDED_AT_TIME_RAW_EVIDENCE`; only its corresponding raw payload
+    may remain temporarily for review. Ordinary successful artifacts are
+    cleaned normally. The intentional retention status is
+    `RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS`, not a cleanup failure.
+92. Positive raw evidence remains in mode `600` files under a mode `700`
+    temporary directory, is never committed or published, and must be deleted
+    within the current maximum of 24 hours. A longer raw-retention period
+    requires a separate explicit decision.
+93. The parsed source-faithful `RecordedAtTime` record and lineage are the
+    durable evidence; the full raw payload is temporary and is never the
+    authoritative warehouse source. Zero occurrences retain only sanitized
+    aggregate evidence for the bounded observed sample and do not prove
+    provider-wide absence.
+94. This hardening change is prospective only. Stage 8 remains **COMPLETE**;
+    the fixed future 50-station objective and the `250,000` monthly quota are
+    unchanged; Stage 13 retains production cadence, concurrency,
+    `NumberOfResults`, and rollout ownership; and Stage 9+ implementation is
+    not started.

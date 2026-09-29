@@ -94,6 +94,22 @@ conceptual `RecordedAtTimeObservedAt` first-seen observation timestamp. A later
 
 Never persist only a derived delay while discarding the source timestamps.
 
+When a successful response contains a non-null source `RecordedAtTime`, mark
+the response `RECORDED_AT_TIME_RAW_EVIDENCE` and retain only its corresponding
+raw payload in the protected temporary evidence area for review. The parsed,
+source-faithful `RecordedAtTime` observation and lineage remain the durable
+evidence; the full raw response is not a permanent source of record. Ordinary
+successful raw responses continue through normal cleanup. The current
+temporary raw-evidence maximum is 24 hours, with mode `700` directories and
+mode `600` files; a longer period requires an explicit later decision.
+
+If no non-null `RecordedAtTime` is observed, retain sanitized aggregate
+evidence for the bounded sample: successful responses inspected,
+call/timing contexts inspected, non-null occurrences, distinct events, call
+scope distribution, and arrival/departure distribution. A zero occurrence
+count is bounded sample absence only and must not be stated as provider-wide
+absence.
+
 ## 3. Never promote an estimate to actual
 
 The collector must never infer either of the following:

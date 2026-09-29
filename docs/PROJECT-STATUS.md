@@ -251,6 +251,28 @@ future Tiered50 production `NumberOfResults`, cadence, concurrency, and
 readiness decisions. Stage 9 and all later stages remain not started and
 untouched.
 
+### Post-Stage-8 hardening boundary
+
+Future Stage 8 executions now perform a shared secret-free API-key header
+preflight before temporary-directory creation or HTTP transport. Unsafe format
+is reported as `MDD_API_KEY: INVALID_FORMAT` and classified as
+`CREDENTIAL_FORMAT_INVALID`; the API-key value is never exposed. A successful
+response with a non-null source `RecordedAtTime` is marked
+`RECORDED_AT_TIME_RAW_EVIDENCE`; only its corresponding raw response is
+retained temporarily, for a maximum of 24 hours, while the parsed
+source-faithful value and lineage remain the durable evidence. Ordinary
+successful response artifacts continue normal cleanup, and intentional
+positive retention is reported as
+`RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS`, not a failure.
+
+Future zero-occurrence runs retain only sanitized aggregate counts for the
+bounded observed sample and do not claim provider-wide absence. This is
+prospective hardening only: the historical Stage 8 `COMPLETE` result and its
+successful original cleanup remain unchanged; no live MDD request was made by
+this hardening change; the future 50-station objective and `250,000` monthly
+quota are unchanged; Stage 13 retains production ownership; and Stage 9+
+implementation was not started.
+
 ## Post-Stage-02 validation
 
 Existing GTFS-RT validation:

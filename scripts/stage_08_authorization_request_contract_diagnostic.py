@@ -22,12 +22,12 @@ import unicodedata
 import uuid
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 import stage_08_mdd_realtime_pilot as pilot
 
 
-SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.3"
+SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.4"
 DIAGNOSTIC_POLICY = "MDD_STAGE_8_AUTH_REQUEST_CONTRACT_DIAGNOSTIC_V1"
 CONTROL_A_STATION = "Köln Hbf"
 CONTROL_A_STOP_POINT_REF = "de:05315:11201"
@@ -228,6 +228,7 @@ def run_control(
 
     raw_artifact_path: Optional[Path] = None
     raw_artifact_error: Optional[str] = None
+    raw_evidence_status = pilot.NO_RECORDED_AT_TIME_RAW_EVIDENCE
     if result.body:
         try:
             raw_artifact_path = pilot.write_raw_artifact(
@@ -240,6 +241,14 @@ def run_control(
             raw_artifact_error = pilot.clean_error(error, api_key)
 
     parseable, parsed, parse_error = parse_control_response(result)
+    if (
+        result.http_status is not None
+        and 200 <= result.http_status < 300
+        and parsed is not None
+        and not pilot.application_error(parsed)
+        and pilot.parsed_response_has_recorded_at_time(parsed)
+    ):
+        raw_evidence_status = pilot.RECORDED_AT_TIME_RAW_EVIDENCE
     sanitized_error = provider_error_text(result, api_key, parsed)
     record: Dict[str, Any] = {
         "record_type": "stage_08_authorization_control",
@@ -293,6 +302,8 @@ def run_control(
         ),
         "data_supplier_access_message": contains_supplier_access_message(sanitized_error),
         "raw_artifact_path": str(raw_artifact_path) if raw_artifact_path else None,
+        "raw_evidence_status": raw_evidence_status,
+        "recorded_at_time_raw_evidence_status": raw_evidence_status,
         "raw_artifact_error": raw_artifact_error,
         "recorded_at_utc": pilot.iso_utc(pilot.utc_now()),
     }
@@ -421,21 +432,32 @@ def run_diagnostic() -> Dict[str, Any]:
     global diagnostic_run_id
 
     api_key = os.environ.get(pilot.MDD_API_KEY_ENV)
-    print("MDD_API_KEY: PRESENT" if api_key else "MDD_API_KEY: MISSING", flush=True)
+    credential_status = pilot.validate_api_key_format(api_key)
+    print(pilot.credential_preflight_output(credential_status), flush=True)
     diagnostic_run_id = f"stage08-auth-{uuid.uuid4().hex}"
     # Select the diagnostic query anchor once, before Control A.  It is
     # intentionally independent from the pilot anchor selected by run_pilot.
     diagnostic_anchor_dep_arr_time = pilot.trias_utc(pilot.utc_now())
-    if not api_key:
+    if credential_status != pilot.CREDENTIAL_PREFLIGHT_VALID:
+        missing = credential_status == pilot.CREDENTIAL_PREFLIGHT_MISSING
         return {
             "record_type": "stage_08_authorization_diagnostic_summary",
             "script_version": SCRIPT_VERSION,
             "diagnostic_policy": DIAGNOSTIC_POLICY,
             "diagnostic_run_id": diagnostic_run_id,
-            "preflight": "MDD_API_KEY: MISSING",
+            "preflight": pilot.credential_preflight_output(credential_status),
+            "credential_preflight_status": credential_status,
             "diagnostic_anchor_dep_arr_time": diagnostic_anchor_dep_arr_time,
             "controls": {},
-            "classification": "DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING",
+            "classification": (
+                "DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING"
+                if missing
+                else "CREDENTIAL_FORMAT_INVALID"
+            ),
+            "preflight_classification": (
+                "MDD_API_KEY_MISSING" if missing else "CREDENTIAL_FORMAT_INVALID"
+            ),
+            "attempted_http_requests": 0,
             "full_pilot_permitted": False,
             "request_parameter_change": None,
             "effective_runtime_config": None,
@@ -447,6 +469,9 @@ def run_diagnostic() -> Dict[str, Any]:
             "diagnostic_cleanup_result": "NOT_CREATED",
             "diagnostic_cleanup_pending": False,
             "evidence_retention": "NOT_CREATED",
+            "diagnostic_cleanup_max_retention_hours": (
+                pilot.MAX_RAW_EVIDENCE_RETENTION_HOURS
+            ),
             "stage_9_or_later_work_performed": False,
         }
 
@@ -491,6 +516,13 @@ def run_diagnostic() -> Dict[str, Any]:
     finally:
         evidence_writer.close()
 
+    retained_raw_paths: Set[Path] = {
+        Path(record["raw_artifact_path"])
+        for record in controls.values()
+        if record.get("raw_evidence_status") == pilot.RECORDED_AT_TIME_RAW_EVIDENCE
+        and record.get("raw_artifact_path")
+    }
+
     pilot_summary: Optional[Dict[str, Any]] = None
     if decision.get("full_pilot_permitted"):
         selected_config = pilot.runtime_config_from_record(
@@ -517,7 +549,10 @@ def run_diagnostic() -> Dict[str, Any]:
     pilot_cleanup_result = pilot_execution.get("cleanup_result")
     if pilot_cleanup_result is None and pilot_summary:
         pilot_cleanup_result = pilot_summary.get("cleanup_result")
-    pilot_cleanup_complete = pilot_cleanup_result == "SUCCEEDED"
+    pilot_cleanup_complete = pilot_cleanup_result in {
+        "SUCCEEDED",
+        pilot.RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS,
+    }
 
     # Assemble and sanitize the diagnostic summary evidence before deciding
     # whether the directory may be deleted.  The cleanup outcome is added only
@@ -529,7 +564,8 @@ def run_diagnostic() -> Dict[str, Any]:
             "script_version": SCRIPT_VERSION,
             "diagnostic_policy": DIAGNOSTIC_POLICY,
             "diagnostic_run_id": diagnostic_run_id,
-            "preflight": "MDD_API_KEY: PRESENT",
+            "preflight": pilot.credential_preflight_output(credential_status),
+            "credential_preflight_status": credential_status,
             "diagnostic_anchor_dep_arr_time": diagnostic_anchor_dep_arr_time,
             "controls": controls,
             **decision,
@@ -539,38 +575,73 @@ def run_diagnostic() -> Dict[str, Any]:
             "stage_8_pilot_status": pilot_status,
             "stage_8_complete": stage_8_complete,
             "stage_8_pilot_summary": pilot_summary,
+            "recorded_at_time_raw_evidence_status": (
+                pilot.RECORDED_AT_TIME_RAW_EVIDENCE if retained_raw_paths else None
+            ),
+            "recorded_at_time_raw_evidence_response_count": len(retained_raw_paths),
+            "raw_evidence_secret_check": "PENDING",
             "stage_9_or_later_work_performed": False,
         },
         api_key,
     )
 
-    diagnostic_cleanup_result = "PENDING_MAX_24_HOURS"
+    diagnostic_raw_evidence_safe = True
+    if retained_raw_paths:
+        try:
+            pilot.verify_raw_artifacts_secret_free(retained_raw_paths, api_key)
+        except Exception:
+            diagnostic_raw_evidence_safe = False
+
+    diagnostic_cleanup_result = pilot.TEMP_FAILURE_RETENTION_STATUS
     if (
         decision.get("full_pilot_permitted")
         and stage_8_complete
         and pilot_evidence_complete
         and pilot_cleanup_complete
     ):
-        diagnostic_cleanup_result = pilot.cleanup_directory(directory)
+        if diagnostic_raw_evidence_safe:
+            diagnostic_cleanup_result = pilot.cleanup_directory(
+                directory,
+                retained_raw_paths=retained_raw_paths or None,
+            )
+        else:
+            diagnostic_cleanup_result = "FAILED_CREDENTIAL_SAFETY_CHECK"
 
-    diagnostic_cleanup_pending = diagnostic_cleanup_result != "SUCCEEDED"
+    diagnostic_cleanup_pending = diagnostic_cleanup_result in {
+        pilot.TEMP_FAILURE_RETENTION_STATUS,
+        pilot.RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS,
+    }
     run_ended = pilot.utc_now()
     cleanup_retention_deadline = (
-        pilot.iso_utc(run_ended + timedelta(hours=24))
+        pilot.iso_utc(
+            run_ended
+            + timedelta(hours=pilot.MAX_RAW_EVIDENCE_RETENTION_HOURS)
+        )
         if diagnostic_cleanup_pending
         else None
     )
-    evidence_retention = (
-        "CLEANED" if not diagnostic_cleanup_pending else "PENDING_MAX_24_HOURS"
-    )
+    if (
+        diagnostic_cleanup_result
+        == pilot.RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS
+    ):
+        evidence_retention = pilot.RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS
+    elif not diagnostic_cleanup_pending:
+        evidence_retention = "CLEANED"
+    else:
+        evidence_retention = pilot.TEMP_FAILURE_RETENTION_STATUS
     summary.update(
         {
             "diagnostic_cleanup_result": diagnostic_cleanup_result,
             "diagnostic_cleanup_pending": diagnostic_cleanup_pending,
-            "diagnostic_cleanup_max_retention_hours": 24,
+            "diagnostic_cleanup_max_retention_hours": (
+                pilot.MAX_RAW_EVIDENCE_RETENTION_HOURS
+            ),
             "diagnostic_cleanup_retention_deadline_utc": cleanup_retention_deadline,
             "evidence_retention": evidence_retention,
             "evidence_retention_deadline_utc": cleanup_retention_deadline,
+            "raw_evidence_secret_check": (
+                "PASS" if diagnostic_raw_evidence_safe else "FAIL"
+            ),
         }
     )
     return summary
