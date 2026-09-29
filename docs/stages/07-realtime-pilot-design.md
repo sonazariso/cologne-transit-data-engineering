@@ -753,6 +753,42 @@ implementation handoff is:
 Stage 8 execution, host-network access, runtime code, and any future
 PostgreSQL implementation are not part of this Stage 7 closeout.
 
+## 19.1 S40 authorization/request-contract diagnostic gate
+
+The separate Stage 8 diagnostic is implemented at
+[`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
+It is not the one-hour pilot and does not alter the V3 cadence, quota,
+persistence, parser, reconciliation, retention, or field-coverage contract.
+It makes only the decision-tree requests required to distinguish current
+authorization from result-set breadth/provider access:
+
+- Control A uses Köln Hbf, `de:05315:11201`, current `RequestTimestamp` and
+  `DepArrTime`, and `NumberOfResults=5`.
+- Control B runs only after A=`200` and changes only
+  `NumberOfResults` to `20`.
+- Control C runs only after A=`401`, uses Köln Heumarkt,
+  `de:05315:11110`, and otherwise keeps A's contract.
+
+The controls are sequential, zero-retry, redirect-free, and use the existing
+30-second timeout. They retain protected temporary evidence outside Git with
+status, content type, elapsed time, byte count, sanitized provider error text,
+and parser parseability. The API-key value is never printed, logged, hashed,
+fingerprinted, compared, or persisted.
+
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
+message that access to the data provider was not enabled. The available
+2026-09-29 process could not run Control A because its presence-only preflight
+reported `MDD_API_KEY: MISSING`; therefore no differential result exists yet,
+the active V3/N20 design remains unchanged, and the pilot was not started.
+
+Only a live A=`200`, B=`401` response carrying the supplier-access message may
+supersede `NumberOfResults=20` with `5` for Stage 8, under a new versioned
+sampling/request policy. A=`401`, C=`200` may move the bounded validation
+target to Heumarkt and use `5`; A=`401`, C=`401` stops before the pilot. No
+branch removes PreviousCalls, OnwardCalls, realtime data, parser fields, or
+changes the approved future 50-station objective. Stage 13 still owns the
+production `NumberOfResults` decision.
+
 ## 20. Stage 7 acceptance criteria
 
 | # | Criterion | Result |

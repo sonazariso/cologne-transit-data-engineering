@@ -220,15 +220,19 @@ not guarantee every response completes within 3 seconds. Three-second sampling
 reduces but cannot mathematically guarantee capture of a transient
 `RecordedAtTime`. Actual Delay remains unapproved.
 
-## Stage 8 — Small Realtime Pilot — BLOCKED AT PREFLIGHT
+## Stage 8 — Small Realtime Pilot — BLOCKED AT AUTHORIZATION DIAGNOSTIC GATE
 
-Stage 8 owns host execution of the approved MDD-only pilot. Its runtime is
-implemented, but the safe preflight found `MDD_API_KEY` missing and made zero
-HTTP attempts. The pilot therefore remains incomplete: no response was
-available for raw → parser → diagnostic-persistence validation, reconciliation,
-field coverage, or `RecordedAtTime` measurement. See the [sanitized blocker
-record](stages/08-small-realtime-pilot-blocked.md). Stage 9 remains not started
-and is not authorized by this blocker.
+Stage 8 owns host execution of the approved MDD-only pilot. The runtime and
+the separate bounded authorization/request-contract diagnostic are implemented.
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
+message that access to the data provider was not enabled. The diagnostic run
+available for the current repository process reported only
+`MDD_API_KEY: MISSING`, so Controls A/B/C made zero requests and no
+evidence-supported request-contract change was made. The pilot therefore
+remains incomplete: no successful response is available for raw → parser →
+diagnostic-persistence validation, reconciliation, field coverage, or
+`RecordedAtTime` measurement. See the [sanitized Stage 8 record](stages/08-small-realtime-pilot-blocked.md).
+Stage 9 remains not started and is not authorized by this blocker.
 
 ## Stage 9 — Matching & Data Quality
 Validate stop, route, service-date, trip/event identity, candidate richer

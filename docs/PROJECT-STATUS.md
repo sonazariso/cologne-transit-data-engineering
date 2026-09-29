@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-09-28
+**Status date:** 2026-09-29
 
 ## Authoritative status
 
@@ -16,7 +16,7 @@
 | 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
-| 8 | Small Realtime Pilot | BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT |
+| 8 | Small Realtime Pilot | BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED |
 | 9 | Matching & Data Quality | Not started |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
@@ -120,7 +120,8 @@ for the authoritative closeout record.
   data loading, network retrieval, realtime work, matching, operational facts,
   and Power BI work did not occur. The [Stage 6 completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
   records the closeout. Stage 7 is now separately closed as **COMPLETE —
-  APPROVED PILOT DESIGN**; Stage 8 is currently blocked at its safe preflight.
+  APPROVED PILOT DESIGN**; Stage 8 is currently blocked at its authorization
+  diagnostic gate.
 
 ### Stage 7 closeout
 
@@ -151,17 +152,29 @@ for the authoritative closeout record.
   matching. Actual Delay remains **NOT APPROVED**. One-station evidence is not
   Cologne-wide coverage.
 - The [Stage 7 completion decision](stages/07-realtime-pilot-design-completion-decision.md)
-  is authoritative. Stage 8 execution has not occurred: no MDD or GTFS-RT
-  request, network access, SQL/database access, runtime pilot, or PostgreSQL
-  implementation was performed by this closeout.
+  remains authoritative for the design closeout. That closeout itself
+  performed no MDD or GTFS-RT request, SQL/database access, runtime pilot, or
+  PostgreSQL implementation; the later Stage 8 HTTP attempt and current
+  diagnostic gate are recorded below.
 
-### Stage 8 preflight blocker
+### Stage 8 authorization/request-contract diagnostic gate
 
-- **Stage 8 — BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT.** The Stage 8 runtime
-  exists at [scripts/stage_08_mdd_realtime_pilot.py](../scripts/stage_08_mdd_realtime_pilot.py),
-  but its safe credential preflight measured zero HTTP attempts. No raw or
-  JSONL temporary directory was created, and no MDD response was available for
-  parsing or reconciliation. See the [sanitized blocker record](stages/08-small-realtime-pilot-blocked.md).
+- **Stage 8 — BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED.**
+  The Stage 8 runtime exists at
+  [scripts/stage_08_mdd_realtime_pilot.py](../scripts/stage_08_mdd_realtime_pilot.py),
+  and the separate bounded diagnostic exists at
+  [scripts/stage_08_authorization_request_contract_diagnostic.py](../scripts/stage_08_authorization_request_contract_diagnostic.py).
+- The historical 2026-09-28 Stage 8 HTTP attempt returned `401` with the
+  sanitized supplier-access message that access to the data provider was not
+  enabled. This is preserved as current Stage 8 failure evidence; it does not
+  prove that the credential itself is invalid or that MDD is unusable.
+- The diagnostic execution available for this update reported only
+  `MDD_API_KEY: MISSING`, so Controls A/B/C made zero HTTP requests. Its
+  classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no request
+  parameter change is evidence-supported and the full pilot was not started.
+- The earlier missing-key preflight remains historical evidence in the
+  [Stage 8 record](stages/08-small-realtime-pilot-blocked.md), not the current
+  sole explanation for the later HTTP 401.
 - Stage 9 and all later stages remain not started and untouched.
 
 ## Post-Stage-02 validation
@@ -241,11 +254,16 @@ Existing GTFS-RT validation:
 Current authoritative transport and authorization state:
 
 - `HOST_DNS_RESULT: NORMAL_RESOLVER_WORKS`.
-- `MDD_API_KEY VALUE COMPARISON: SAME`.
-- `CURRENT MDD AUTHORIZATION: WORKING`.
-- The earlier 401 is historical evidence and is strongly explained by the
-  earlier different macOS credential value; no provider-side entitlement
-  change is claimed.
+- The historical Stage 02 comparison established that the then-tested macOS
+  value matched the then-tested Windows/Legacy value; it does not prove that
+  the current process has that value.
+- The historical Stage 02 controlled request returned HTTP 200. The later
+  2026-09-28 Stage 8 attempt returned HTTP 401 with the sanitized
+  supplier-access message. Current Stage 8 authorization is therefore **NOT
+  PROVEN** pending the S40 differential diagnostic.
+- The available 2026-09-29 process preflight reported `MDD_API_KEY: MISSING`.
+  No credential value or credential-derived information was inspected or
+  exposed.
 - The S14 technical-closure package remains the approved Stage 02 baseline.
   Stage 02 received explicit user approval in S17 after S16 completed the
   deferred historical actual-time gate evidence.

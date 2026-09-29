@@ -3,7 +3,7 @@
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
 **Document state:** Approved Stage 02 source contract; Stage 7 pilot selection appended<br>
 **Version:** TRIAS 1.2<br>
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-29
 
 This document defines the Stage 02 request contract for the audited MDD NRW
 `/delfi` endpoint. It records the VDV 431-2 TRIAS 1.2 semantics supplied for
@@ -121,6 +121,19 @@ not larger result-set breadth. At pilot start, select
 `DepArrTime` in every request; do not advance it with wall-clock time. A failed
 request is not retried in the same slot.
 
+The later 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
+provider message that access to the data provider was not enabled. It is
+preserved as current Stage 8 failure evidence rather than being rewritten as
+the earlier missing-key preflight. The separate
+[Stage 8 authorization/request-contract diagnostic](../../scripts/stage_08_authorization_request_contract_diagnostic.py)
+must run the bounded A/B/C decision tree before this pilot setting is changed.
+The available 2026-09-29 process reported `MDD_API_KEY: MISSING` before
+Control A, so the documented Stage 8 setting remains 20 pending live
+differential evidence. If and only if A=`200` and B=`401` with the sanitized
+supplier-access message, Stage 8 may supersede 20 with 5 under a new versioned
+sampling/request policy; Stage 13 still owns the final production result-limit
+decision.
+
 ## Result count, HTTP requests, retries, and quota
 
 These terms are separate:
@@ -169,10 +182,13 @@ production polling schedule is approved by this document.
 
 ## Permission boundary
 
-Current authentication/access is working for the audited request. MDD access
-is understood to depend on registration/activation, provider terms, and the
-agreed use purpose. A public dataset description that advertises TRIAS as an
-available NRW resource is not treated as an open-license or unrestricted
+The historical audited request returned HTTP 200. Current Stage 8
+authentication/access is **not proven**: the later Stage 8 HTTP 401 carried the
+sanitized supplier-access message described above, and the available
+differential diagnostic process had no visible credential to run Control A.
+MDD access is understood to depend on registration/activation, provider terms,
+and the agreed use purpose. A public dataset description that advertises TRIAS
+as an available NRW resource is not treated as an open-license or unrestricted
 redistribution grant.
 
 The request contract therefore permits documenting and validating the source

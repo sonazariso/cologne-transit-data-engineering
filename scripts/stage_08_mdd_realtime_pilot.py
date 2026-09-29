@@ -796,8 +796,14 @@ def read_bounded(stream: Any, maximum_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def build_request_body(request_timestamp_utc: str, pilot_anchor_dep_arr_time: str) -> bytes:
-    """Build exactly the approved TRIAS 1.2 pilot request."""
+def build_request_body(
+    request_timestamp_utc: str,
+    pilot_anchor_dep_arr_time: str,
+    *,
+    stop_point_ref: str = STOP_POINT_REF,
+    number_of_results: int = NUMBER_OF_RESULTS,
+) -> bytes:
+    """Build the approved TRIAS 1.2 request with bounded diagnostic overrides."""
 
     request_timestamp_utc = xml_escape(request_timestamp_utc)
     pilot_anchor_dep_arr_time = xml_escape(pilot_anchor_dep_arr_time)
@@ -812,12 +818,12 @@ def build_request_body(request_timestamp_utc: str, pilot_anchor_dep_arr_time: st
       <StopEventRequest>
         <Location>
           <LocationRef>
-            <StopPointRef>{STOP_POINT_REF}</StopPointRef>
+            <StopPointRef>{xml_escape(stop_point_ref)}</StopPointRef>
           </LocationRef>
           <DepArrTime>{pilot_anchor_dep_arr_time}</DepArrTime>
         </Location>
         <Params>
-          <NumberOfResults>{NUMBER_OF_RESULTS}</NumberOfResults>
+          <NumberOfResults>{number_of_results}</NumberOfResults>
           <StopEventType>{STOP_EVENT_TYPE}</StopEventType>
           <IncludePreviousCalls>true</IncludePreviousCalls>
           <IncludeOnwardCalls>true</IncludeOnwardCalls>
@@ -830,10 +836,26 @@ def build_request_body(request_timestamp_utc: str, pilot_anchor_dep_arr_time: st
 '''.encode("utf-8")
 
 
-def perform_http_request(api_key: str, pilot_anchor_dep_arr_time: str) -> HTTPResult:
+def perform_http_request(
+    api_key: str,
+    pilot_anchor_dep_arr_time: Optional[str] = None,
+    *,
+    stop_point_ref: str = STOP_POINT_REF,
+    number_of_results: int = NUMBER_OF_RESULTS,
+) -> HTTPResult:
     request_timestamp = utc_now()
     request_timestamp_utc = trias_utc(request_timestamp)
-    body = build_request_body(request_timestamp_utc, pilot_anchor_dep_arr_time)
+    dep_arr_time = (
+        request_timestamp_utc
+        if pilot_anchor_dep_arr_time is None
+        else pilot_anchor_dep_arr_time
+    )
+    body = build_request_body(
+        request_timestamp_utc,
+        dep_arr_time,
+        stop_point_ref=stop_point_ref,
+        number_of_results=number_of_results,
+    )
     request = Request(
         ENDPOINT,
         data=body,

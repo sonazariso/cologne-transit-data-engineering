@@ -31,7 +31,7 @@ sufficient recorded/actual timing evidence.
 - Stage 5 — [Database Architecture](docs/stages/05-database-architecture.md): **COMPLETE — APPROVED ARCHITECTURE**. PostgreSQL 18 is approved as the future authoritative platform direction using a clean redesign with durable source-faithful evidence, explicit grains, lineage, and deferred physical implementation. [Completion decision](docs/stages/05-database-architecture-completion-decision.md) and [table/grain catalog](docs/stages/05-table-grain-catalog.md) are authoritative. Its static warehouse/analytics handoff is documented in Stage 6; physical implementation remains deferred until explicit user authorization.
 - Stage 6 — [Static Warehouse & Analytics Design](docs/stages/06-static-warehouse-analytics-design.md): **COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED**. The [completion decision](docs/stages/06-static-warehouse-analytics-completion-decision.md) finalizes source-to-Cologne scope, grains, time/calendar semantics, static analytics, lineage, and the future reconciliation contract without creating PostgreSQL objects or loading data.
 - Stage 7 — [Realtime Pilot Design](docs/stages/07-realtime-pilot-design.md): **COMPLETE — APPROVED PILOT DESIGN**. The active Stage 8 handoff is MDD/TRIAS-only at Köln Hbf (`de:05315:11201`) under `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`: fixed start-to-start 3-second slots for at most 60 minutes, at most 1200 scheduled logical slots and 1200 normal HTTP attempts, a fixed `DepArrTime` anchor, 20 results, zero retries, sequential/non-concurrent execution, overlap skipping, explicit lineage, append-only `RecordedAtTime` capture, and a temporary raw-response exception. The 3-second cadence is a bounded diagnostic design, not production approval. The conservative monthly ceiling remains 250,000 requests; normal planning is limited to 207,500–210,000 (83–84%), preserving 40,000–42,500 (16–17%) as unallocated headroom. [Completion decision](docs/stages/07-realtime-pilot-design-completion-decision.md) is authoritative.
-- Stage 8 — [Small Realtime Pilot preflight blocker](docs/stages/08-small-realtime-pilot-blocked.md): **BLOCKED — MDD_API_KEY MISSING AT PREFLIGHT**. The Stage 8 runtime exists, but the safe preflight made zero HTTP attempts; no MDD response, parser reconciliation, field-coverage, or `RecordedAtTime` measurement exists. Stage 9 remains not started and untouched.
+- Stage 8 — [Small Realtime Pilot authorization diagnostic blocker](docs/stages/08-small-realtime-pilot-blocked.md): **BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED**. The latest 2026-09-28 Stage 8 attempt returned HTTP 401 with the sanitized supplier-access message that access to the data provider was not enabled. The separate diagnostic is implemented, but the available process reported `MDD_API_KEY: MISSING`, so Controls A/B/C made zero requests and no request parameter was changed. Stage 9 remains not started and untouched.
 - Stage 4 evidence: [current approval snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The current snapshot contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Current ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
 - Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history or approve GTFS-RT for production; Stage 3A now separately validates current disruption evidence.
@@ -40,8 +40,9 @@ sufficient recorded/actual timing evidence.
 - [Stage 3 completion decision](docs/stage-03/stage-03-completion-decision.md) is the authoritative closeout record. [Realtime collection design readiness](docs/stage-03/realtime-collection-design-readiness.md) records the completed handoff; it does not authorize production implementation.
 - Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**. The audited
-  request was XML/TRIAS 1.2 and the successful `/delfi` response was JSON with
-  HTTP 200; current MDD authorization and host DNS are working.
+  request was XML/TRIAS 1.2 and the historical successful `/delfi` response was
+  JSON with HTTP 200; that historical result does not resolve the later Stage
+  8 HTTP 401.
 - Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
   The corrected offline evidence classifies 1D/7D/30D as
   `HISTORICAL_TIMETABLE_ONLY` and 90D/180D as `HISTORY_NO_EVENT`. No
@@ -54,8 +55,9 @@ sufficient recorded/actual timing evidence.
   [Project Status](docs/PROJECT-STATUS.md) for details.
 - [Realtime collector requirements](docs/collector-design/realtime-collector-requirements.md)
   are approved Stage 02/Stage 7 design inputs; the Stage 8 pilot handoff is
-  documented and the bounded runtime exists; activation remains blocked until
-  the required credential is available.
+  documented and the bounded runtime plus authorization diagnostic exist;
+  activation remains blocked until the live differential decision tree proves
+  the current authorization/request contract.
 - The [future source-observation and persistence contract](docs/source-contracts/future-observation-persistence-contract.md)
   keeps timetable, estimate, source-provided recorded time, and collector
   observation time separate; preserves estimate and Situation/Cause history;

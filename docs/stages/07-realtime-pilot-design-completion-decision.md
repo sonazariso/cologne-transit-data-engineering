@@ -210,3 +210,20 @@ Stage 7 design document. **Stage 8 execution has NOT occurred and remains NOT
 STARTED / NEXT.** Stage 6 remains `COMPLETE — APPROVED DESIGN; PHYSICAL
 IMPLEMENTATION DEFERRED`, and Stage 5 remains `COMPLETE — APPROVED
 ARCHITECTURE`.
+
+## Current Stage 8 diagnostic addendum — 2026-09-29
+
+This addendum preserves the historical Stage 7 closeout above while recording
+the later Stage 8 authorization evidence. The 2026-09-28 Stage 8 attempt
+returned HTTP `401` with the sanitized message that access to the data provider
+was not enabled. The separate S40 diagnostic is implemented at
+[`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py)
+and uses only the required sequential A/B/C decision tree.
+
+The available repository-process preflight reported `MDD_API_KEY: MISSING`, so
+Control A and its conditional B/C branch were not executed. No Stage 8 request
+parameter changed, the one-hour pilot was not started, the future 50-station
+objective remains unchanged, and Stage 9+ work was not started. The historical
+Stage 02 HTTP 200 remains historical evidence; current Stage 8 authorization
+is not proven until the diagnostic can run with the restored known working
+Legacy-equivalent credential.

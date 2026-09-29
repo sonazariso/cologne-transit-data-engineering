@@ -37,6 +37,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Historical pilot design; cadence detail superseded by D-032 and later D-033 |
 | D-032 | 2026-09-28 | Stage 7 pilot-design correction: bounded 10-second fixed-anchor MDD handoff for `RecordedAtTime` visibility; D-031's 60-second cadence detail is superseded while its historical record is retained | Historical pilot-design correction; superseded by D-033 |
 | D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
+| D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Current Stage 8 diagnostic gate; no pilot authorization change |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -535,3 +536,43 @@ The active decision is:
 D-033 authorizes no MDD request, GTFS-RT request, other network request, SQL or
 database work, or runtime pilot code. It does not start Stage 8. Historical V1
 and V2 policy decisions remain unchanged in the decision log.
+
+## D-034 — Stage 8 Authorization/Request-Contract Diagnostic Gate
+
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
+provider message that access to the data provider was not enabled. This is
+preserved as current Stage 8 failure evidence and does not replace the earlier
+successful historical MDD request or prove that the current credential value is
+invalid.
+
+The separate diagnostic at
+[`scripts/stage_08_authorization_request_contract_diagnostic.py`](../scripts/stage_08_authorization_request_contract_diagnostic.py)
+is limited to the required decision tree:
+
+- Control A: Köln Hbf, `de:05315:11201`, current request/`DepArrTime`, and
+  `NumberOfResults=5`.
+- Control B only after A=`200`, identical except `NumberOfResults=20`.
+- Control C only after A=`401`, Köln Heumarkt `de:05315:11110`, otherwise
+  identical to A.
+
+The diagnostic is sequential, zero-retry, redirect-free, and uses the existing
+30-second timeout. It records protected temporary evidence outside Git with
+status, content type, elapsed time, response bytes, sanitized provider error
+text, and parser parseability. The API-key value is never printed, logged,
+hashed, fingerprinted, compared, or persisted.
+
+The available 2026-09-29 repository-process preflight reported only
+`MDD_API_KEY: MISSING`, so no control request was executed. The resulting
+classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no Stage 8 request
+parameter changed and the full pilot was not started. A later authorized host
+run must restore/reload the known working Legacy-equivalent credential before
+running the decision tree.
+
+The conditional Stage 8 policy decision is fixed by evidence, not assumption:
+A=`200`, B=`200` preserves V3/N20; A=`200`, B=`401` with the supplier-access
+message changes only Stage 8 `NumberOfResults` to `5` under a new versioned
+policy; A=`401`, C=`200` changes the bounded validation target to Heumarkt and
+uses `5`; A=`401`, C=`401` stops before the pilot. Previous/This/Onward call
+coverage, realtime data, parser fields, cadence, quota, cleanup, the future
+50-station objective, and Stage 13 ownership of the production result-limit
+decision remain unchanged. Stage 9 and later stages were not started.
