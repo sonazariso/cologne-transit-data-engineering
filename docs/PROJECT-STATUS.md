@@ -177,6 +177,15 @@ for the authoritative closeout record.
   same pilot path with an explicit effective station, `StopPointRef`,
   `NumberOfResults`, and versioned sampling/request policy. Offline
   validation covers Hbf/N20/V3, Hbf/N5, Heumarkt/N5, and the no-pilot branch.
+- The current diagnostic correction selects one fixed
+  `DiagnosticAnchorDepArrTime` across its executed A/B/C controls while
+  retaining each control's independent actual `RequestTimestamp`. Its process
+  result now reflects the returned full-pilot status: a permitted-but-blocked
+  or failed pilot is non-zero, and only `stage_8_status=COMPLETE` is zero.
+  Diagnostic temporary evidence is cleaned after a successful pilot only when
+  the pilot's extraction, reconciliation, and cleanup gates are complete;
+  blocked or failed evidence remains protected and pending under the existing
+  maximum-24-hour boundary.
 - The repository/Codex execution process did not inherit `MDD_API_KEY`. The
   user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`;
   these are different process environments, not contradictory claims. No

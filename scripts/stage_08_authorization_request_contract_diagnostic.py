@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional, Tuple
 import stage_08_mdd_realtime_pilot as pilot
 
 
-SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.1"
+SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.2"
 DIAGNOSTIC_POLICY = "MDD_STAGE_8_AUTH_REQUEST_CONTRACT_DIAGNOSTIC_V1"
 CONTROL_A_STATION = "Köln Hbf"
 CONTROL_A_STOP_POINT_REF = "de:05315:11201"
@@ -139,6 +139,7 @@ def run_control(
     station: str,
     stop_point_ref: str,
     number_of_results: int,
+    diagnostic_anchor_dep_arr_time: Optional[str] = None,
     api_key: str,
     directory: Path,
     evidence_writer: pilot.JsonlWriter,
@@ -151,11 +152,13 @@ def run_control(
         number_of_results=number_of_results,
         sampling_policy=DIAGNOSTIC_POLICY,
     )
-    # Passing no anchor makes the shared transport use the same current UTC
-    # timestamp for RequestTimestamp and DepArrTime, as required by S40.
+    # The diagnostic isolates only the intended control variable.  Keep the
+    # query anchor fixed for every control, while perform_http_request still
+    # creates a fresh actual RequestTimestamp for this individual request.
+    diagnostic_anchor = diagnostic_anchor_dep_arr_time or pilot.trias_utc(pilot.utc_now())
     result = pilot.perform_http_request(
         api_key,
-        None,
+        diagnostic_anchor,
         runtime_config=control_runtime_config,
     )
 
@@ -183,8 +186,10 @@ def run_control(
         "station": station,
         "stop_point_ref": stop_point_ref,
         "effective_runtime_config": pilot.runtime_config_record(control_runtime_config),
+        "request_timestamp": pilot.iso_utc(result.request_timestamp),
         "request_timestamp_utc": result.request_timestamp_utc,
-        "dep_arr_time": result.request_timestamp_utc,
+        "diagnostic_anchor_dep_arr_time": diagnostic_anchor,
+        "dep_arr_time": diagnostic_anchor,
         "request_contract": {
             "endpoint": pilot.ENDPOINT,
             "method": "POST",
@@ -193,6 +198,7 @@ def run_control(
             "requestor_ref": pilot.REQUESTOR_REF,
             "number_of_results": number_of_results,
             "sampling_policy": DIAGNOSTIC_POLICY,
+            "dep_arr_time": diagnostic_anchor,
             "stop_event_type": pilot.STOP_EVENT_TYPE,
             "include_previous_calls": pilot.INCLUDE_PREVIOUS_CALLS,
             "include_onward_calls": pilot.INCLUDE_ONWARD_CALLS,
@@ -348,6 +354,9 @@ def run_diagnostic() -> Dict[str, Any]:
     api_key = os.environ.get(pilot.MDD_API_KEY_ENV)
     print("MDD_API_KEY: PRESENT" if api_key else "MDD_API_KEY: MISSING", flush=True)
     diagnostic_run_id = f"stage08-auth-{uuid.uuid4().hex}"
+    # Select the diagnostic query anchor once, before Control A.  It is
+    # intentionally independent from the pilot anchor selected by run_pilot.
+    diagnostic_anchor_dep_arr_time = pilot.trias_utc(pilot.utc_now())
     if not api_key:
         return {
             "record_type": "stage_08_authorization_diagnostic_summary",
@@ -355,15 +364,21 @@ def run_diagnostic() -> Dict[str, Any]:
             "diagnostic_policy": DIAGNOSTIC_POLICY,
             "diagnostic_run_id": diagnostic_run_id,
             "preflight": "MDD_API_KEY: MISSING",
+            "diagnostic_anchor_dep_arr_time": diagnostic_anchor_dep_arr_time,
             "controls": {},
             "classification": "DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING",
             "full_pilot_permitted": False,
             "request_parameter_change": None,
             "effective_runtime_config": None,
             "stage_8_pilot_started": False,
+            "stage_8_pilot_status": None,
+            "stage_8_complete": False,
             "stage_8_pilot_summary": None,
             "evidence_directory": None,
+            "diagnostic_cleanup_result": "NOT_CREATED",
+            "diagnostic_cleanup_pending": False,
             "evidence_retention": "NOT_CREATED",
+            "stage_9_or_later_work_performed": False,
         }
 
     directory = pilot.create_temp_directory()
@@ -376,6 +391,7 @@ def run_diagnostic() -> Dict[str, Any]:
             station=CONTROL_A_STATION,
             stop_point_ref=CONTROL_A_STOP_POINT_REF,
             number_of_results=CONTROL_RESULT_COUNT,
+            diagnostic_anchor_dep_arr_time=diagnostic_anchor_dep_arr_time,
             api_key=api_key,
             directory=directory,
             evidence_writer=evidence_writer,
@@ -386,6 +402,7 @@ def run_diagnostic() -> Dict[str, Any]:
                 station=CONTROL_A_STATION,
                 stop_point_ref=CONTROL_A_STOP_POINT_REF,
                 number_of_results=BASELINE_RESULT_COUNT,
+                diagnostic_anchor_dep_arr_time=diagnostic_anchor_dep_arr_time,
                 api_key=api_key,
                 directory=directory,
                 evidence_writer=evidence_writer,
@@ -396,6 +413,7 @@ def run_diagnostic() -> Dict[str, Any]:
                 station=CONTROL_C_STATION,
                 stop_point_ref=CONTROL_C_STOP_POINT_REF,
                 number_of_results=CONTROL_RESULT_COUNT,
+                diagnostic_anchor_dep_arr_time=diagnostic_anchor_dep_arr_time,
                 api_key=api_key,
                 directory=directory,
                 evidence_writer=evidence_writer,
@@ -404,7 +422,6 @@ def run_diagnostic() -> Dict[str, Any]:
     finally:
         evidence_writer.close()
 
-    recorded_at = pilot.utc_now()
     pilot_summary: Optional[Dict[str, Any]] = None
     if decision.get("full_pilot_permitted"):
         selected_config = pilot.runtime_config_from_record(
@@ -415,25 +432,79 @@ def run_diagnostic() -> Dict[str, Any]:
         # The actual pilot creates its own fixed-start anchor at its own start
         # time.  The diagnostic controls' timestamps are never reused.
         pilot_summary = pilot.run_pilot(selected_config)
-    return pilot.sanitize_for_artifact(
+    pilot_status = pilot_summary.get("stage_8_status") if pilot_summary else None
+    stage_8_complete = pilot_status == "COMPLETE"
+
+    # A diagnostic directory is removed only after the pilot itself has
+    # completed its evidence extraction/reconciliation gate and its own
+    # temporary artifacts have been cleaned.  A failed or blocked handoff
+    # retains the diagnostic evidence under the existing 24-hour boundary.
+    pilot_execution = pilot_summary.get("execution", {}) if pilot_summary else {}
+    if not isinstance(pilot_execution, dict):
+        pilot_execution = {}
+    pilot_evidence_complete = bool(
+        pilot_execution.get("evidence_extraction_and_reconciliation_complete")
+    )
+    pilot_cleanup_result = pilot_execution.get("cleanup_result")
+    if pilot_cleanup_result is None and pilot_summary:
+        pilot_cleanup_result = pilot_summary.get("cleanup_result")
+    pilot_cleanup_complete = pilot_cleanup_result == "SUCCEEDED"
+
+    # Assemble and sanitize the diagnostic summary evidence before deciding
+    # whether the directory may be deleted.  The cleanup outcome is added only
+    # after this evidence snapshot exists, so a successful cleanup cannot
+    # remove the material needed to construct the summary.
+    summary = pilot.sanitize_for_artifact(
         {
             "record_type": "stage_08_authorization_diagnostic_summary",
             "script_version": SCRIPT_VERSION,
             "diagnostic_policy": DIAGNOSTIC_POLICY,
             "diagnostic_run_id": diagnostic_run_id,
             "preflight": "MDD_API_KEY: PRESENT",
+            "diagnostic_anchor_dep_arr_time": diagnostic_anchor_dep_arr_time,
             "controls": controls,
             **decision,
             "evidence_directory": str(directory),
             "evidence_jsonl": str(evidence_path),
-            "evidence_retention": "PENDING_MAX_24_HOURS",
-            "evidence_retention_deadline_utc": pilot.iso_utc(recorded_at + timedelta(hours=24)),
             "stage_8_pilot_started": pilot_summary is not None,
+            "stage_8_pilot_status": pilot_status,
+            "stage_8_complete": stage_8_complete,
             "stage_8_pilot_summary": pilot_summary,
             "stage_9_or_later_work_performed": False,
         },
         api_key,
     )
+
+    diagnostic_cleanup_result = "PENDING_MAX_24_HOURS"
+    if (
+        decision.get("full_pilot_permitted")
+        and stage_8_complete
+        and pilot_evidence_complete
+        and pilot_cleanup_complete
+    ):
+        diagnostic_cleanup_result = pilot.cleanup_directory(directory)
+
+    diagnostic_cleanup_pending = diagnostic_cleanup_result != "SUCCEEDED"
+    run_ended = pilot.utc_now()
+    cleanup_retention_deadline = (
+        pilot.iso_utc(run_ended + timedelta(hours=24))
+        if diagnostic_cleanup_pending
+        else None
+    )
+    evidence_retention = (
+        "CLEANED" if not diagnostic_cleanup_pending else "PENDING_MAX_24_HOURS"
+    )
+    summary.update(
+        {
+            "diagnostic_cleanup_result": diagnostic_cleanup_result,
+            "diagnostic_cleanup_pending": diagnostic_cleanup_pending,
+            "diagnostic_cleanup_max_retention_hours": 24,
+            "diagnostic_cleanup_retention_deadline_utc": cleanup_retention_deadline,
+            "evidence_retention": evidence_retention,
+            "evidence_retention_deadline_utc": cleanup_retention_deadline,
+        }
+    )
+    return summary
 
 
 diagnostic_run_id = "UNINITIALIZED"
@@ -442,7 +513,7 @@ diagnostic_run_id = "UNINITIALIZED"
 def main() -> int:
     summary = run_diagnostic()
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)
-    return 0 if summary.get("full_pilot_permitted") else 2
+    return 0 if summary.get("stage_8_complete") else 2
 
 
 if __name__ == "__main__":

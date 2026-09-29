@@ -96,12 +96,17 @@ future 50-station plan is unusable.
 
 The diagnostic uses only the following decision-tree requests, in order:
 
-1. Control A: Köln Hbf, `de:05315:11201`, current request timestamp and
-   `DepArrTime`, `NumberOfResults=5`.
+1. Control A: Köln Hbf, `de:05315:11201`, `NumberOfResults=5`.
 2. Control B only when A returns HTTP `200`: identical to A with
    `NumberOfResults=20`.
 3. Control C only when A returns HTTP `401`: Köln Heumarkt,
    `de:05315:11110`, otherwise identical to A.
+
+At the beginning of one diagnostic run, the runtime selects one fixed
+`DiagnosticAnchorDepArrTime` and uses it for every control that executes. Each
+HTTP request still receives its own actual `RequestTimestamp`; the control
+evidence records both values explicitly. The later full pilot selects a new,
+independent pilot-start `DepArrTime` anchor.
 
 Each control records status, response content type, elapsed time, response
 byte count, sanitized provider error text, and Stage 8 parser parseability in
@@ -138,6 +143,15 @@ A=`401`, C=`401` stops before the pilot. Previous/This/Onward call parsing,
 realtime data, persistence, reconciliation, cadence, quota, and retention
 requirements are unchanged in every branch. Stage 13 still owns the final
 production `NumberOfResults` decision.
+
+The diagnostic summary exposes `stage_8_pilot_started`,
+`stage_8_pilot_status`, and `stage_8_complete`. Process exit status is zero only
+when the permitted full pilot returns `stage_8_status=COMPLETE`; permission to
+start the pilot alone is not completion. Diagnostic evidence is retained under
+the existing maximum-24-hour boundary for blocked or failed runs. After a
+successful pilot has completed its own extraction, reconciliation, and cleanup,
+the sanitized diagnostic summary is assembled and the separate diagnostic
+temporary directory is cleaned as well.
 
 ## Closeout boundary
 

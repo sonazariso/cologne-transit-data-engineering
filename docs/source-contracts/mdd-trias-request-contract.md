@@ -142,6 +142,13 @@ user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`.
 These are different process environments, not contradictory claims, and do not
 establish whether the separate Terminal credential is correct or incorrect.
 
+For the differential itself, the diagnostic selects one fixed
+`DiagnosticAnchorDepArrTime` before Control A and reuses it for Control B or C
+when executed. Each control retains its own actual `RequestTimestamp`, so A/B
+differs only in `NumberOfResults`, and A/C differs only in the station identity
+and unavoidable request timestamp. The full pilot then selects its own new
+pilot-start anchor; the diagnostic anchor is never reused for pilot slots.
+
 ## Result count, HTTP requests, retries, and quota
 
 These terms are separate:
