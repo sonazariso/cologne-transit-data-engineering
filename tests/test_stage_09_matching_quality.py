@@ -728,6 +728,30 @@ class Stage9MatchingQualityTests(unittest.TestCase):
             "BLOCKED",
         )
 
+    def test_incomplete_lineage_match_cannot_satisfy_source_backed_acceptance(self) -> None:
+        observation = replace(self.observations[0], sampling_era_id=None)
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_LINEAGE_INCOMPLETE)
+        core_matches = stage9_source._core_deterministic_matches([decision])
+        self.assertEqual(core_matches, [])
+        self.assertEqual(
+            stage9_source.source_backed_acceptance_status(
+                evidence_origin=stage9_source.SOURCE_BACKED_EVIDENCE_ORIGIN,
+                static_validation_status="PASS",
+                source_observation_count=1,
+                independent_service_date_count=1,
+                core_deterministic_match_count=len(core_matches),
+                mdd_http_attempts=1,
+                artifact_written=True,
+            ),
+            "BLOCKED",
+        )
+
     def test_cross_source_without_validated_correlation_is_not_evaluated(self) -> None:
         mdd = stage9.match_source_event(
             replace(self.observations[0], correlation_group_id=None),

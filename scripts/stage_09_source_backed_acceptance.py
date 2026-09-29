@@ -837,6 +837,27 @@ def source_backed_acceptance_status(
     return "BLOCKED"
 
 
+def _core_deterministic_matches(
+    decisions: Sequence[stage9.MatchDecision],
+) -> List[stage9.MatchDecision]:
+    """Return only auditable deterministic matches eligible for Stage 9 completion."""
+
+    return [
+        item
+        for item in decisions
+        if item.canonical_service_event_id
+        and item.evidence.get("canonical_stop_match")
+        and item.evidence.get("service_date_match")
+        and item.evidence.get("event_type_match")
+        and item.evidence.get("scheduled_time_match")
+        and item.data_quality_classification in {
+            stage9.QUALITY_CONTEXTUAL_MATCH,
+            stage9.QUALITY_SOURCE_LINE_IDENTITY_UNRESOLVED,
+            stage9.QUALITY_VALIDATED_MATCH,
+        }
+    ]
+
+
 def _empty_blocked_summary(
     *,
     preflight_status: str,
@@ -1081,21 +1102,7 @@ def run_source_backed_acceptance(
         )
         classifications = Counter(item.data_quality_classification for item in decisions)
         confidences = Counter(item.match_confidence for item in decisions)
-        core_matches = [
-            item
-            for item in decisions
-            if item.canonical_service_event_id
-            and item.evidence.get("canonical_stop_match")
-            and item.evidence.get("service_date_match")
-            and item.evidence.get("event_type_match")
-            and item.evidence.get("scheduled_time_match")
-            and item.data_quality_classification in {
-                stage9.QUALITY_CONTEXTUAL_MATCH,
-                stage9.QUALITY_LINEAGE_INCOMPLETE,
-                stage9.QUALITY_SOURCE_LINE_IDENTITY_UNRESOLVED,
-                stage9.QUALITY_VALIDATED_MATCH,
-            }
-        ]
+        core_matches = _core_deterministic_matches(decisions)
         independent_service_date_count = sum(
             1 for item in independent_dates if item.get("status") == "ESTABLISHED"
         )
