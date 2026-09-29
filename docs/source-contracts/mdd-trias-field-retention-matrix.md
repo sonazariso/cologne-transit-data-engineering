@@ -120,4 +120,25 @@ The detailed [future source-observation and persistence contract](future-observa
 defines the conceptual append-only evidence flow, source-only nullable
 `RecordedAtTime`, separate collector observation time, actual-time capture
 state, Situation/Cause history, and intended PostgreSQL direction. This matrix
-does not create a schema or approve implementation.
+does not create a source schema or approve collector activation. Stage 9
+consumes this contract through its source-qualified matching layer.
+
+## Stage 9 matching-retention extension
+
+The Stage 9 implementation retains the following candidate identity values
+when present in a MDD response, together with their source paths:
+
+- `VehicleJourneyRef`;
+- `DatedVehicleJourneyRef`;
+- `AffectedVehicleJourney`;
+- `VehicleJourneys`;
+- `OperatingDaysDescription`;
+- `Direction` distinct from `DirectionRef`; and
+- `Origins` / `Destinations`.
+
+These values are candidate evidence, not universal keys. `JourneyRef` remains
+source-faithful and is never equated with GTFS-RT `trip_id`. A missing richer
+field remains missing; no identifier is inferred from display text, route
+name, or a broad time match. The source parser retains the exact candidate
+value/path, while the Stage 9 matcher stores the resulting evidence and data-
+quality classification separately.

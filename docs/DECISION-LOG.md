@@ -39,6 +39,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
 | D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Historical Stage 8 diagnostic gate; superseded by D-035 |
 | D-035 | 2026-09-29 | Stage 8 successful Hbf differential and bounded pilot closeout: A=200 at N5, B=200 at N20, unchanged V3/N20 contract, successful 343-request pilot, and corrected diagnostic metadata semantics | Stage 8 complete; Stage 9+ not started |
+| D-036 | 2026-09-29 | Stage 9 matching/data-quality foundation: versioned source-identity bridges, stop-event-first indexed matching, explicit ambiguity/coverage/lineage classifications, richer MDD identity retention, and offline acceptance validation | Stage 9 complete; collector activation, operational fact, Power BI, and Tiered50 decisions remain later |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -641,3 +642,27 @@ including the German HTTP 401 body, remains sanitized and supplier-access
 detection remains distinct from generic 401. Offline validation made no MDD
 request. The future 50-station objective and Stage 13 production ownership
 remain unchanged.
+
+## D-036 — Stage 9 Matching and Data-Quality Foundation
+
+Stage 9 implements the approved Stage 3C reconciliation design as a reusable,
+source-first foundation. It keeps MDD/TRIAS and GTFS-RT namespaces separate,
+uses validated canonical stop/line mappings, matches at stop-event grain, and
+retains a versioned decision plus ranked candidate evidence for every source
+observation, including ambiguous and unmatched outcomes.
+
+The implementation includes the deterministic offline matcher at
+[`scripts/stage_09_matching_quality.py`](../scripts/stage_09_matching_quality.py),
+the PostgreSQL 18 contract at
+[`sql/stage_09_matching_quality.sql`](../sql/stage_09_matching_quality.sql),
+and the regression suite at
+[`tests/test_stage_09_matching_quality.py`](../tests/test_stage_09_matching_quality.py).
+The approved Stage 4 baseline and a bounded known-good/ambiguous/unresolved
+population pass offline validation with zero network requests and zero database
+connections.
+
+The railway Köln Hbf GTFS.de identity remains unresolved. Adjacent KVB parent
+complexes are not substituted. Stage 9 does not create the operational fact,
+Actual Delay, Power BI model, final 50-station panel, production collector, or
+Tiered50 cutover. The future 50-station objective, 250,000-request ceiling,
+Stage 13 ownership, and Stage 8 historical chronology remain unchanged.

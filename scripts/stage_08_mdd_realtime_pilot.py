@@ -209,8 +209,14 @@ RECOGNIZED_SOURCE_FIELDS = {
     "servicesection",
     "operatingdayref",
     "journeyref",
+    "vehiclejourneyref",
+    "datedvehiclejourneyref",
+    "affectedvehiclejourney",
+    "vehiclejourneys",
+    "operatingdaysdescription",
     "lineref",
     "directionref",
+    "direction",
     "operatorref",
     "ptmode",
     "mode",
@@ -223,11 +229,13 @@ RECOGNIZED_SOURCE_FIELDS = {
     "originstoppointref",
     "originstoppointname",
     "origintext",
+    "origins",
     "destination",
     "destinationref",
     "destinationstoppointref",
     "destinationstoppointname",
     "destinationtext",
+    "destinations",
     "previouscall",
     "thiscall",
     "onwardcall",
@@ -1309,6 +1317,26 @@ def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
         if value is None:
             _path, value = first_named_source(stop_event, names)
         identity[field_name] = value
+        identity[f"{field_name}_source_path"] = _path
+    # Stage 9 matching may use these as candidate evidence, but none is
+    # promoted to a universal key.  The source value and path remain separate
+    # so a later crosswalk can be versioned and audited without rewriting the
+    # original MDD JourneyRef identity.
+    for field_name, names in (
+        ("vehicle_journey_ref", {"vehiclejourneyref"}),
+        ("dated_vehicle_journey_ref", {"datedvehiclejourneyref"}),
+        ("affected_vehicle_journey", {"affectedvehiclejourney"}),
+        ("vehicle_journeys", {"vehiclejourneys"}),
+        ("operating_days_description", {"operatingdaysdescription"}),
+        ("direction", {"direction"}),
+        ("origins", {"origins"}),
+        ("destinations", {"destinations"}),
+    ):
+        field_path, value = first_named_source(service, names)
+        if value is None:
+            field_path, value = first_named_source(stop_event, names)
+        identity[field_name] = value
+        identity[f"{field_name}_source_path"] = field_path
     for field_name, names in (
         ("pt_mode", {"ptmode", "mode", "modes"}),
         ("rail_submode", {"railsubmode", "submode"}),
@@ -1629,6 +1657,23 @@ def stop_event_record(
         service,
         service_path or stop_event_path or f"{result_path}.stopEvent.service",
     )
+    source_identity_extensions = {}
+    for field_name in (
+        "vehicle_journey_ref",
+        "dated_vehicle_journey_ref",
+        "affected_vehicle_journey",
+        "vehicle_journeys",
+        "operating_days_description",
+        "direction",
+        "origins",
+        "destinations",
+    ):
+        if identity.get(field_name) is None and identity.get(f"{field_name}_source_path") is None:
+            continue
+        source_identity_extensions[field_name] = {
+            "value": identity.get(field_name),
+            "source_path": identity.get(f"{field_name}_source_path"),
+        }
     return {
         "record_type": "stop_event_observation",
         "stop_event_observation_id": stop_event_id,
@@ -1653,6 +1698,29 @@ def stop_event_record(
         "pt_mode": identity.get("pt_mode"),
         "rail_submode": identity.get("rail_submode"),
         "published_line_name": identity.get("published_line_name"),
+        "source_identity_extensions": source_identity_extensions,
+        "vehicle_journey_ref": identity.get("vehicle_journey_ref"),
+        "vehicle_journey_ref_source_path": identity.get("vehicle_journey_ref_source_path"),
+        "dated_vehicle_journey_ref": identity.get("dated_vehicle_journey_ref"),
+        "dated_vehicle_journey_ref_source_path": identity.get(
+            "dated_vehicle_journey_ref_source_path"
+        ),
+        "affected_vehicle_journey": identity.get("affected_vehicle_journey"),
+        "affected_vehicle_journey_source_path": identity.get(
+            "affected_vehicle_journey_source_path"
+        ),
+        "vehicle_journeys": identity.get("vehicle_journeys"),
+        "vehicle_journeys_source_path": identity.get("vehicle_journeys_source_path"),
+        "operating_days_description": identity.get("operating_days_description"),
+        "operating_days_description_source_path": identity.get(
+            "operating_days_description_source_path"
+        ),
+        "direction": identity.get("direction"),
+        "direction_source_path": identity.get("direction_source_path"),
+        "origins": identity.get("origins"),
+        "origins_source_path": identity.get("origins_source_path"),
+        "destinations": identity.get("destinations"),
+        "destinations_source_path": identity.get("destinations_source_path"),
         "origin_destination": origin_destination_values,
         "origin_stop_point_ref": origin_destination_values.get("origin_stop_point_ref"),
         "origin_stop_point_ref_source_path": origin_destination_values.get(

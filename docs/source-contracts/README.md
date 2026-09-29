@@ -7,7 +7,8 @@ gate. Stage 02A.1, Stage 02A.2, and Stage 02A.3 are completed.
 
 Current stage position: Stage 0 — **APPROVED**; Stage 1 — **APPROVED**;
 Stage 2 — **APPROVED**; Stage 3 — **COMPLETE** as a source-evidence,
-collection-design, and matching-design stage.
+collection-design, and matching-design stage; Stage 9 — **COMPLETE —
+MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED**.
 
 ## Approved Stage 02 contract
 
@@ -24,7 +25,9 @@ These documents are the current Stage 02 source-contract record:
 The [future source-observation and persistence contract](future-observation-persistence-contract.md)
 is a post-Stage-02 semantic/design guardrail. It preserves the independent
 timing fields, append-only estimate and Situation/Cause history, and intended
-PostgreSQL direction without creating a schema or approving implementation.
+PostgreSQL direction. It does not create the source-observation schema or
+activate source persistence; Stage 9 separately implements the derived
+matching/data-quality layer and its source-controlled SQL contract.
 
 Stage 02A.3 is implemented in
 [`scripts/stage_02a3_historical_actual_time_probe.py`](../../scripts/stage_02a3_historical_actual_time_probe.py).
@@ -64,8 +67,8 @@ The [future source-observation and persistence contract](future-observation-pers
 records the later architecture's non-negotiable separation of timetable,
 estimate, source-provided recorded time, and collector observation time. It
 also requires append-only estimate and Situation/Cause history and records
-PostgreSQL as an intended future persistence direction only; it does not create
-tables, migrate SQL Server assets, or approve production persistence.
+PostgreSQL as an intended future persistence direction for source observations;
+it does not migrate SQL Server assets or approve production source persistence.
 The [near-event RecordedAtTime lifecycle validation](mdd-trias-event-lifecycle-validation.md)
 is separate post-approval evidence for later collector design and is now
 **BOUNDED VALIDATION COMPLETE**. Six live journeys were reviewed (three at
@@ -107,15 +110,16 @@ records the completed design handoff; it does not approve production
 implementation.
 
 The [Stage 3 completion decision](../stage-03/stage-03-completion-decision.md)
-is the authoritative closeout record. The [Stage 3B collection/cadence
+is the historical design closeout record. The [Stage 3B collection/cadence
 contract](../stage-03/03b-collection-strategy-cadence-contract.md) and [Stage
-3C matching design](../stage-03/03c-cross-source-matching-design.md) close the
-two design substages without activating a collector or matching engine.
+3C matching design](../stage-03/03c-cross-source-matching-design.md) remain
+the design inputs; the current matching implementation and offline validation
+are recorded in the [Stage 9 matching/data-quality record](../stages/09-matching-data-quality.md).
 
 ## Cross-source reconciliation and Cologne scope guardrail
 
 The [Cross-Source Reconciliation Contract](cross-source-reconciliation-contract.md)
-is **APPROVED DESIGN CONTRACT — IMPLEMENTATION NOT STARTED**. It makes the
+is **APPROVED CONTRACT — STAGE 9 FOUNDATION IMPLEMENTED**. It makes the
 GTFS-RT analytical scope Cologne-only even when the source feed is Germany-wide,
 requires validated canonical stop/line/service-event identity evidence, and
 prohibits direct equality between MDD `JourneyRef` and GTFS-RT `trip_id`.
@@ -125,9 +129,9 @@ stop-event-first matching, auditable HIGH/MEDIUM/LOW confidence, distinct
 trip/route/stop/agency alert scopes, Cologne-only KPI evidence, and explicit
 through-service and long-distance exclusions. Provider-reported cause/effect
 remains distinct from proven root cause, and MDD Situation association remains
-distinct from causality. The contract is the Stage 3C reconciliation handoff;
-it does not define final schemas, persistence algorithms, or production
-implementation.
+distinct from causality. The contract remains the Stage 3C design handoff;
+Stage 9 defines the current matching implementation, SQL contract, and offline
+validation without activating production collection.
 
 ## Historical / Legacy implementation evidence
 

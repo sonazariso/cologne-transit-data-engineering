@@ -17,7 +17,7 @@
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
 | 8 | Small Realtime Pilot | COMPLETE |
-| 9 | Matching & Data Quality | Not started |
+| 9 | Matching & Data Quality | COMPLETE — MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
 | 12 | 50-Station Selection | Not started |
@@ -35,7 +35,7 @@
 - **Stage 3B — Collection Strategy & Cadence — COMPLETE — APPROVED DESIGN;
   ACTIVATION DEFERRED.**
 - **Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN;
-  IMPLEMENTATION NOT STARTED.**
+  Stage 9 implementation complete.**
 - Stage 3 completion does not authorize production implementation,
   database/schema work, collector changes, scheduler changes, Power BI work,
   or the next project stage.
@@ -248,8 +248,8 @@ an MDD request.
 
 The future 50-station objective is unchanged. Stage 13 retains ownership of
 future Tiered50 production `NumberOfResults`, cadence, concurrency, and
-readiness decisions. Stage 9 and all later stages remain not started and
-untouched.
+readiness decisions. At this Stage 8 closeout point, Stage 9 and all later
+stages remained not started and untouched.
 
 ### Post-Stage-8 hardening boundary
 
@@ -271,7 +271,31 @@ prospective hardening only: the historical Stage 8 `COMPLETE` result and its
 successful original cleanup remain unchanged; no live MDD request was made by
 this hardening change; the future 50-station objective and `250,000` monthly
 quota are unchanged; Stage 13 retains production ownership; and Stage 9+
-implementation was not started.
+implementation was not started at that hardening closeout point.
+
+### Stage 9 closeout — COMPLETE
+
+The [Stage 9 matching and data-quality record](stages/09-matching-data-quality.md)
+and the [offline matcher](../scripts/stage_09_matching_quality.py) are now the
+current implementation authority. Stage 9 provides:
+
+- versioned, namespace-qualified canonical stop and line bridges;
+- stop-event-first date/time candidate generation with deterministic indexes;
+- auditable HIGH/MEDIUM/LOW/UNMATCHED decisions and retained candidates;
+- explicit service-date, source-field, static-coverage, ambiguity, lineage,
+  and sampling-era quality classifications;
+- prospective retention of richer MDD identity candidates with source paths;
+- source-aware cross-source reconciliation that never equates MDD `JourneyRef`
+  with GTFS-RT `trip_id`; and
+- PostgreSQL DDL/index/view contracts under `sql/stage_09_matching_quality.sql`.
+
+The offline acceptance population passed with zero network requests and zero
+database connections. It includes known-good MDD/GTFS-RT stop-event evidence,
+an ambiguous candidate, missing service-date evidence, repeated observations,
+route-level alert context, and the unresolved railway Köln Hbf bridge. The
+railway Hbf identity remains unresolved; adjacent KVB complexes are not
+substituted. No operational fact, Power BI model, 50-station selection, or
+Tiered50 activation was started.
 
 ## Post-Stage-02 validation
 
@@ -314,9 +338,10 @@ Existing GTFS-RT validation:
 | GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
 | GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
 | Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
-| Cross-source reconciliation and Cologne scope contract | **APPROVED DESIGN CONTRACT** — implementation not started |
+| Cross-source reconciliation and Cologne scope contract | **APPROVED CONTRACT** — Stage 9 matching foundation implemented |
+| Stage 9 matching/data-quality foundation | **COMPLETE** — offline validation PASS; production activation deferred |
 | Stage 3 collection/cadence contract | **COMPLETE — APPROVED DESIGN** — activation deferred |
-| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — implementation not started |
+| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — Stage 9 implementation complete |
 | Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
 | Actual Delay KPI | **NOT APPROVED** |
 

@@ -1,8 +1,9 @@
 # Future Source-Observation and Persistence Contract
 
-**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — IMPLEMENTATION NOT STARTED`<br>
-**Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED` and
-Stage 3B/3C design contracts are approved with implementation deferred
+**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 MATCHING FOUNDATION IMPLEMENTED`<br>
+**Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED`,
+Stage 3B/3C design contracts are approved, and Stage 9 consumes this contract
+without activating source persistence
 
 This document records the approved semantic contract for a later source-faithful
 observation and persistence architecture. It is not a database schema, table
@@ -206,6 +207,17 @@ documented. The Stage 3B collection/cadence policy and Stage 3C matching design
 are approved separately. This contract still does not authorize PostgreSQL
 migration, database schema, production collector persistence, scheduler
 changes, Power BI changes, Actual Delay KPIs, or prediction-accuracy KPIs.
+
+## 9. Stage 9 matching handoff
+
+Stage 9 now implements the derived matching/data-quality layer that consumes
+this source-observation contract. The implementation preserves source rows
+and source namespaces, requires explicit sampling-policy/era lineage for
+matching decisions, and records canonical stop-event associations separately
+from MDD and GTFS-RT observations. It does not create an operational outcome
+fact, synthesize `RecordedAtTime`, or activate a collector. See the
+[Stage 9 implementation record](../stages/09-matching-data-quality.md) and
+[matching SQL contract](../../sql/stage_09_matching_quality.sql).
 
 Related documentation:
 

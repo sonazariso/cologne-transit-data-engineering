@@ -1,0 +1,237 @@
+# Stage 9 — Matching & Data Quality
+
+**Status:** `COMPLETE — MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED`<br>
+**Date:** `2026-09-29`<br>
+**Validation mode:** offline, deterministic, source-faithful
+
+Stage 9 implements the matching and data-quality foundation handed off by the
+Stage 3C design.  It is designed for the eventual Tiered50 collector without
+activating Tiered50, selecting the final 50 stations, building the operational
+fact, or changing the production cadence/result-limit decisions owned by later
+stages.
+
+The implementation is deliberately evidence-preserving. An unresolved or
+ambiguous identity is a retained data-quality result; it is not converted into
+a guessed canonical mapping.
+
+## 1. Authoritative inputs and evidence boundary
+
+The implementation uses these existing authorities:
+
+- the current Stage 4 VRS Global-ID snapshot and its direct Cologne rule
+  (`stop_id` beginning with `de:05315:`);
+- the Stage 5 logical layers and source-event grains;
+- the Stage 3C stop-event-first reconciliation contract;
+- Stage 8 MDD source-faithful observations and lineage; and
+- the bounded GTFS.de identity-bridge evidence.
+
+The current Stage 4 baseline remains source evidence rather than a claim that
+a PostgreSQL warehouse has already been loaded: 3,137 Cologne stop IDs,
+1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805
+Cologne-serving trip patterns, and 137 Cologne-serving routes. The offline
+validation reconciles these recorded counts and checks the zero-anomaly
+acceptance findings in the approved Stage 4 JSON.
+
+No new MDD or GTFS-RT request was made for Stage 9. No production database
+connection was made. The SQL migration is prepared for the approved
+PostgreSQL architecture and is not an excuse to claim that a live warehouse
+load occurred.
+
+## 2. Implemented artifacts
+
+| Artifact | Responsibility |
+|---|---|
+| [`scripts/stage_09_matching_quality.py`](../../scripts/stage_09_matching_quality.py) | Standard-library matching engine, identity bridges, indexed candidate generation, confidence/method decisions, field coverage, service-date checks, repeated-observation continuity, alert-scope checks, and offline acceptance population |
+| [`sql/stage_09_matching_quality.sql`](../../sql/stage_09_matching_quality.sql) | PostgreSQL 18 control, canonical, match-candidate, data-quality, view, and index contract |
+| [`tests/test_stage_09_matching_quality.py`](../../tests/test_stage_09_matching_quality.py) | Offline regression tests for known-good, ambiguous, unresolved, namespace, lineage, and parser-retention behavior |
+| [`scripts/stage_08_mdd_realtime_pilot.py`](../../scripts/stage_08_mdd_realtime_pilot.py) | Prospective source-contract hardening: retains candidate `vehicleJourneyRef`, `datedVehicleJourneyRef`, `affectedVehicleJourney`, `vehicleJourneys`, `operatingDaysDescription`, `direction`, `origins`, and `destinations` with source paths |
+
+Run the bounded validation with:
+
+```bash
+python3 scripts/stage_09_matching_quality.py --offline-validation
+```
+
+The command performs zero network requests and zero database connections.
+
+## 3. Identity and scope contract
+
+### Source namespaces remain separate
+
+MDD/TRIAS `JourneyRef`, MDD richer journey references, GTFS-RT `trip_id`,
+GTFS-RT `route_id`, VRS `trip_id`, and VRS `route_id` remain separate source
+values. The implementation never uses:
+
+```text
+MDD JourneyRef == GTFS-RT trip_id
+```
+
+as a match rule. A same-looking value in another namespace is retained as
+candidate evidence only. A source trip identity can contribute only when an
+explicit same-namespace/static identity condition is validated; otherwise the
+match relies on independent stop-event dimensions.
+
+### Canonical stops
+
+The bridge is versioned and source-qualified by
+`source_system + source_namespace + source_identifier`. It supports one
+canonical stop with many validated source child/platform identities and
+retains `VALIDATED`, `UNRESOLVED`, and `AMBIGUOUS` outcomes.
+
+- VRS Cologne scope uses the actual `stop_id` referenced by `stop_times.txt`.
+  `parent_station` does not pull a non-Cologne event into scope.
+- The bounded GTFS.de Neumarkt evidence maps parent `493082` and children
+  `106842`, `207108`, `441164`, `581903`, and `96309` to one canonical
+  Neumarkt identity for the evidenced snapshot/era.
+- Railway Köln Hbf remains `UNRESOLVED_RAILWAY_HBF_IDENTITY` in the GTFS.de
+  bridge. Adjacent KVB parents `106448` and `437741` are not substituted for
+  railway Köln Hbf.
+- A source stop not in the bridge produces `SOURCE_IDENTITY_UNRESOLVED` and
+  cannot be rescued by station name, route name, coordinates, or broad time.
+
+### Canonical lines
+
+Line mappings are explicit, versioned, and namespace-qualified. A line number,
+route label, agency, or text similarity alone does not create a canonical line.
+Conflicting source-to-line mappings remain ambiguous and are excluded from a
+validated line match.
+
+## 4. Stop-event matching
+
+The canonical unit is a date-expanded stop event:
+
+```text
+service date
+canonical stop
+canonical line (when validated)
+event type: ARRIVAL or DEPARTURE
+scheduled time in service-day seconds
+direction / stop sequence / operator evidence
+static feed snapshot and source-row lineage
+```
+
+The runtime builds exact composite indexes on service date, canonical stop,
+event type, and scheduled time, plus a sorted time index for an explicitly
+requested tolerance. It does not scan the complete schedule for every
+observation. This supports additional monitored stations and higher
+Tiered50 observation volume without changing the evidence rule.
+
+Candidate ranking uses only independent, source-qualified evidence:
+
+- validated canonical stop, service date, event type, and scheduled time;
+- validated canonical line;
+- direction;
+- stop sequence or multi-stop sequence consistency;
+- operator where available; and
+- same-namespace source trip identity only where that namespace is explicitly
+  shared with the static candidate.
+
+`ObservedAt` is never a fallback for service date or scheduled event time. A
+missing date, invalid time, unresolved stop, line disagreement, or ambiguous
+top candidate remains unmatched with its reason and candidate IDs.
+
+| Outcome | Meaning |
+|---|---|
+| `HIGH` | Unique stop/date/time/event candidate with validated line plus direction, sequence, or multi-stop evidence; eligible for a stop-event cross-source association |
+| `MEDIUM` | Useful unique contextual match with missing or incomplete disambiguation; not a strong trip-specific causal claim |
+| `LOW` | Weak context such as a permitted time-tolerance result; diagnostic only |
+| `UNMATCHED` | No defensible candidate, unresolved identity, ambiguous top candidates, or source disagreement |
+
+Every decision records `MatchConfidence`, `MatchMethod`, candidate count,
+candidate IDs, score/evidence flags, matching-version lineage, source event
+identity, and source observation identity. Ambiguous candidates are retained
+for review rather than arbitrarily selecting the first row.
+
+## 5. Data-quality contract
+
+Required observation lineage and matching fields are measured independently:
+
+- source event identity and source observation identity;
+- `ObservedAt`;
+- service/operating date;
+- source stop identity;
+- arrival/departure event type;
+- source timetable/scheduled time;
+- collector run;
+- sampling policy; and
+- sampling era.
+
+Optional fields remain optional and are reported as coverage, not filled with
+synthetic defaults. `NULL` remains distinct from `FALSE`, zero, empty text,
+and not-observed. The implementation reports, among others:
+
+`MISSING_REQUIRED_IDENTITY`, `STATIC_COVERAGE_GAP`,
+`SOURCE_IDENTITY_UNRESOLVED`, `SOURCE_LINE_IDENTITY_UNRESOLVED`,
+`SOURCE_LINE_DISAGREEMENT`, `INVALID_SERVICE_DATE`,
+`INVALID_SCHEDULE_TIME`, `LINEAGE_INCOMPLETE`, `DUPLICATE_SOURCE_OBSERVATION`,
+`CROSS_SOURCE_DISAGREEMENT`, and `OUT_OF_CORE_SCOPE`.
+
+Repeated observations are not collapsed because estimate values happen to be
+equal. Their response/observation IDs, `ObservedAt`, sampling policy, and
+sampling era remain available for historical continuity. An exact replay may
+be idempotent at ingestion, but it is not treated as permission to discard a
+legitimate later observation.
+
+MDD Situation and GTFS-RT ServiceAlert scope remains provider-reported
+context. Route-, stop-, and agency-level alerts remain context only. A
+trip-level alert requires a HIGH canonical service-event reconciliation before
+it can be described as reported for that matched service; no implementation
+path creates a root-cause or causal-delay claim.
+
+## 6. Persistence and working-layer contract
+
+The migration adds:
+
+- versioned canonical stop and source-identity bridge rows;
+- versioned canonical line and source-identity bridge rows;
+- date-expanded canonical service events;
+- one source-event match decision per source observation, including unmatched
+  decisions;
+- one auditable row per retained candidate;
+- append-only matching validation results and data-quality issues; and
+- rebuildable review/coverage views in `wrk`.
+
+Frequently queried matching fields are relational. Bounded source-shaped
+evidence and candidate-detail flags use `jsonb`; full realtime payloads and
+credentials are not moved into the matching layer. Matching indexes cover
+stop/date/event/time, line/date/stop/time, source trip lookup, bridge lookup,
+review by confidence/era, and candidate rank. Conditional source indexes are
+created only when the corresponding Stage 5 source tables exist.
+
+## 7. Offline acceptance result
+
+The current offline validation returns `overall_status = PASS` and
+`stage_9_status = COMPLETE`. It proves:
+
+- the approved Stage 4 baseline reconciles;
+- known-good MDD and GTFS-RT stop events reach HIGH through canonical evidence;
+- cross-source agreement is through one canonical event, not source-ID
+  equality;
+- equal-looking cross-source journey values are not used as a key;
+- ambiguous candidates are quarantined as `UNMATCHED`;
+- unresolved railway Hbf is not replaced with an adjacent KVB complex;
+- missing service date is not derived from `ObservedAt`;
+- repeated observations and sampling-era lineage are retained;
+- candidate richer MDD identity fields remain available with source paths;
+- extended schedule hours do not wrap at midnight; and
+- route-level alert context remains non-causal.
+
+This is an implementation/contract validation population, not a new claim of
+GTFS-RT coverage or a production-wide precision estimate. The real GTFS.de
+railway-Hbf bridge remains an explicit open identity-quality result.
+
+## 8. Boundary to later stages
+
+Stage 9 does not:
+
+- build or approve `dw.fact_operational_service_event`;
+- define first/latest/actual-time consolidation or Actual Delay;
+- create a Power BI model or semantic report;
+- select the final 50 stations;
+- choose production cadence, concurrency, retries, or `NumberOfResults`;
+- activate a Tiered50 collector or cutover; or
+- claim that a provider-reported Situation/alert caused an outcome.
+
+Those remain Stage 10 and later work. The Stage 8 historical completion record,
+the future 50-station objective, and the 250,000-request ceiling remain
+unchanged.

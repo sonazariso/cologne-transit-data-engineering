@@ -3,11 +3,12 @@
 **Status:** APPROVED ARCHITECTURE CATALOG
 **Parent decision:** [Stage 5 database architecture](05-database-architecture.md)
 
-This is a logical contract catalog. It does not mean that any schema, table,
-view, function, index, or constraint already exists. Physical names and DDL
-are not approved here. The final column records future stage ownership,
-design-contract governance, and authorization status; a listed stage is not
-necessarily a physical implementation stage.
+This is the Stage 5 logical contract catalog. Its original 42 entries remain
+the historical architecture baseline. Stage 9 adds the implementation-owned
+matching/control extension at the end of this document; that extension is
+source-controlled contract/DDL and does not mean that a PostgreSQL database has
+already been created or loaded. The final column records future stage
+ownership, design-contract governance, and authorization status.
 
 The catalog contains 42 named logical entity contracts. `wrk` and `analytics`
 are also approved as layers, but neither has one universal grain: their
@@ -34,7 +35,7 @@ single pre-created table.
 | `src` | `src.gtfs_shape_point_row` | One `shapes.txt` source row within one feed snapshot | VRS GTFS `shapes.txt` | Internal row key plus unique snapshot/row identity | `shape_id`, `shape_pt_sequence`, coordinates, distance | Append-only per snapshot | Stage 6 design contract; physical implementation deferred until explicit user authorization | Multi-million-row static loads must remain reproducible |
 | `src` | `src.gtfs_feed_info_row` | One `feed_info.txt` source row within one feed snapshot | VRS GTFS `feed_info.txt` | Internal row key plus unique snapshot/row identity | Publisher, version, start/end dates, source row number | Append-only per snapshot | Stage 6 design contract; physical implementation deferred until explicit user authorization | Feed metadata is evidence; promoted snapshot identity lives in `ctl` |
 | `src` | `src.mdd_response_snapshot` | One executed MDD HTTP response | MDD response plus `ctl.ingestion_run` lineage | Internal response key; response execution/run lineage prevents exact rerun duplication | Collector run, sampling policy, requested stop, request timestamp, status, size/hash, content type, parser version | Append-only | Stage 7/8 | No API key; response history is not a mutable current journey row |
-| `src` | `src.mdd_stop_event_observation` | One `StopEventResult` observed in one MDD response snapshot | Parsed MDD response | Internal row key plus response key/result ordinal | JourneyRef, LineRef, OperatingDayRef, StopPointRef, direction, source event IDs | Append-only | Stage 8 | Repeated observations remain historical evidence |
+| `src` | `src.mdd_stop_event_observation` | One `StopEventResult` observed in one MDD response snapshot | Parsed MDD response | Internal row key plus response key/result ordinal | JourneyRef, LineRef, OperatingDayRef, StopPointRef, direction, source event IDs, and candidate VehicleJourney/DatedVehicleJourney/AffectedVehicleJourney values | Append-only | Stage 8/9 | Repeated observations remain historical evidence; richer identifiers retain source paths and do not replace JourneyRef |
 | `src` | `src.mdd_call_observation` | One `CallAtStop` occurrence belonging to one observed stop event | Parsed MDD response | Internal row key plus stop-event observation and call ordinal/sequence | Call scope (`THIS`/`PREVIOUS`/`ONWARD`), stop ref, arrival/departure context | Append-only | Stage 8 | Arrival/departure and all timing fields remain separate |
 | `src` | `src.mdd_situation_observation` | One Situation object observed in one MDD response snapshot | Parsed MDD response | Internal row key plus response/occurrence lineage | ParticipantRef, SituationNumber, Version, SituationFullRef, validity, text | Append-only | Stage 8 | Preserve version evolution; absence later does not erase it |
 | `src` | `src.mdd_stop_event_situation_link` | One observed association between one MDD stop-event observation and one Situation | Parsed MDD association | Internal row key plus both observation references and association occurrence | SituationFullRef, association scope, service/event reference | Append-only | Stage 8/9 | Association is not proof of causal delay explanation |
@@ -71,3 +72,25 @@ single pre-created table.
 - Full nationwide GTFS-RT snapshots are not approved for permanent storage.
 - No row in this catalog is a physical implementation approval. Stage ownership
   and empirical validation remain binding.
+
+## Stage 9 implementation extension
+
+The following logical grains are required to keep matching decisions and data
+quality auditable. They extend, rather than rewrite, the Stage 5 42-entry
+architecture baseline.
+
+| Layer/schema | Logical table/entity name | Exact grain | Important guardrail |
+|---|---|---|---|
+| `ctl` | `ctl.matching_run` | One versioned Stage 9 matching execution | Append-only control lineage; does not activate a collector or operational fact |
+| `ctl` | `ctl.matching_validation_result` | One validation result for one matching run, check, and entity type | Preserve PASS, WARN, FAIL, and NOT_EVALUATED outcomes |
+| `ctl` | `ctl.data_quality_issue` | One classified data-quality issue for one matching run/entity/evidence occurrence | Unresolved, ambiguous, missing, conflicting, and out-of-scope states remain explicit |
+| `core` | `core.canonical_stop_source_identity` | One source-system/namespace/source-stop identity mapping within one mapping version | One-to-many source child/platform mappings are allowed; one source identity cannot silently map to multiple canonical stops |
+| `core` | `core.canonical_line_source_identity` | One source-system/namespace/source-line identity mapping within one mapping version | Source route/line strings are not universal keys; conflicts remain ambiguous |
+| `core` | `core.source_event_match_candidate` | One ranked candidate retained for one source-event match decision | Candidate evidence is retained even when the decision is UNMATCHED or ambiguous |
+
+The Stage 9 migration also implements the existing Stage 5 conceptual grains
+`core.canonical_stop`, `core.canonical_line`,
+`core.canonical_service_event`, and `core.source_event_match` with the
+version, source namespace, sampling-era, candidate-evidence, and data-quality
+lineage required by the Stage 9 record. The `wrk` review and coverage views
+remain rebuildable and are not source-of-truth tables.

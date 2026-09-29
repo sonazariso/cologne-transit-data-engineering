@@ -1,15 +1,18 @@
 # Cross-Source Reconciliation Contract
 
-**Status:** `APPROVED DESIGN CONTRACT — IMPLEMENTATION NOT STARTED`<br>
+**Status:** `APPROVED CONTRACT — STAGE 9 FOUNDATION IMPLEMENTED; PRODUCTION ACTIVATION DEFERRED`<br>
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **COMPLETE**
 
 This document defines the approved design contract for reconciling MDD/TRIAS
-and GTFS-RT evidence within the Cologne Transport Intelligence project. It is
-a documentation and design contract only. It does not approve production
-implementation, final schemas, SQL tables, migrations, collectors, ETL,
-matching algorithms, DAX, Power BI pages, production mappings, or scheduler
-changes.
+and GTFS-RT evidence within the Cologne Transport Intelligence project. The
+contract was originally closed as a Stage 3 design-only handoff. Stage 9 now
+implements the bounded matching/data-quality foundation in
+[`docs/stages/09-matching-data-quality.md`](../stages/09-matching-data-quality.md)
+and [`scripts/stage_09_matching_quality.py`](../../scripts/stage_09_matching_quality.py).
+The Stage 9 implementation does not activate collectors, select Tiered50,
+build the Stage 10 operational fact, create Power BI pages, or make causal
+claims.
 
 ## 1. Purpose
 
@@ -166,8 +169,8 @@ operational identities and retain their original source values for audit.
 
 ## 9. Canonical stop concept
 
-The future design needs a conceptual **CanonicalStop** identity bridge. This
-is a design concept, not a final table or schema definition. It may include
+The Stage 9 implementation materializes a versioned **CanonicalStop** identity
+bridge. It may include
 conceptual attributes such as:
 
 ```text
@@ -197,14 +200,15 @@ forcing an identity.
 
 ## 10. Canonical line concept
 
-The future design needs a conceptual **CanonicalLine** identity that can map
+The Stage 9 implementation materializes a versioned **CanonicalLine** identity
+that can map
 source-specific line/route identifiers, names, modes, and operators where the
 mapping is validated. It must retain source identifiers and mapping evidence,
 including validity or ambiguity where relevant.
 
 Line name, route name, agency, or line number alone is not sufficient evidence
-for a stop or service identity. The final canonical-line mapping is not yet
-implemented and must not be invented as part of this documentation contract.
+for a stop or service identity. Production mappings remain explicit inputs;
+the implementation does not invent mappings when those inputs are absent.
 
 ## 11. Canonical service-event concept
 
@@ -272,12 +276,13 @@ not automatically prove full-journey equality.
 
 Confidence in a service/trip-level match increases when the sources agree on
 multiple stops, sequence, service date, canonical line, scheduled times,
-direction, and event context. The future implementation must keep the
-stop-event evidence that supports any journey-level conclusion.
+direction, and event context. The Stage 9 implementation keeps the stop-event
+evidence that supports any later journey-level conclusion; it does not itself
+promote a stop-event match to full-journey equivalence.
 
 ## 14. Match confidence levels
 
-The future reconciliation layer must define conceptual levels:
+The reconciliation layer uses these levels:
 
 ### HIGH
 
@@ -312,9 +317,9 @@ Reconciliation must preserve both `MatchConfidence` and an auditable
 - `STOP_TIME_CONTEXT_ONLY`; and
 - `UNMATCHED`.
 
-These are conceptual examples, not a final SQL enum or implementation
-contract. The stored method must make clear which evidence supported the
-association and which dimensions were unavailable or ambiguous.
+These values are implemented in the Stage 9 matcher and SQL check contract.
+The stored method makes clear which evidence supported the association and
+which dimensions were unavailable or ambiguous.
 
 ## 16. GTFS-RT ServiceAlert scopes
 
@@ -388,7 +393,7 @@ MDD `SituationFullRef` establishes an association with a reported MDD
 Situation. It does not automatically prove that the Situation caused a
 specific amount of `EstimatedTime` delay or any other measured outcome.
 
-Future design should preserve conceptual fields such as:
+The Stage 9 association output preserves fields such as:
 
 ```text
 SituationAssociation
@@ -422,9 +427,9 @@ validates causality:
 ## 23. Cross-source agreement
 
 When MDD and GTFS-RT independently report compatible disruption context for
-the same HIGH-confidence canonical service event, the future design may record
-a conceptual `CrossSourceConfirmation = TRUE` (or an equivalent approved
-term).
+the same HIGH-confidence canonical service event, Stage 9 records a bounded
+cross-source agreement through the canonical event. This remains evidence
+agreement, not causal confirmation.
 
 For example, an MDD construction-related Situation and a GTFS-RT trip alert
 with `cause = CONSTRUCTION` and `effect = SIGNIFICANT_DELAYS` provide stronger
@@ -467,8 +472,8 @@ becoming fabricated performance outcomes.
 
 ## 26. Source-faithful storage
 
-Before reconciliation, preserve the sources independently. Conceptually, the
-future design has separate source observations and an association layer:
+Before reconciliation, preserve the sources independently. The implemented
+design has separate source observations and an association layer:
 
 ```text
 MDD source observation       GTFS-RT source observation
@@ -482,14 +487,15 @@ Do not put one blended `Cause` field inside the primary raw/source observation.
 Source-specific reported cause/effect, situation, alert scope, identity, and
 observation time must remain available alongside any derived association.
 
-The following are conceptual future entities only; they are not approved table
-names or schemas: `CanonicalStop`, `CanonicalLine`, `CanonicalServiceEvent`,
-`SourceEventMatch`, `MddObservation`, `MddSituation`, `GtfsRtObservation`,
-`GtfsRtAlert`, `GtfsRtAlertEntity`, and `AlertAssociation`.
+The Stage 9 migration implements the canonical stop/line/service-event and
+source-event-match structures, candidate evidence, and data-quality control
+records. Source-specific observations and alert/Situation persistence remain
+owned by their source contracts; Stage 9 does not replace them with a blended
+record.
 
 ## 27. Cologne GTFS-RT filtering
 
-Future conceptual processing follows this boundary:
+Stage 9 processing follows this boundary:
 
 ```text
 Germany-wide GTFS-RT feed
@@ -628,12 +634,15 @@ Stage 3 design completion:
 3. Prediction Accuracy vs Actual remains unapproved.
 4. Railway Köln Hbf GTFS.de identity remains unresolved.
 5. The full Cologne GTFS.de stop-identity bridge is not yet built.
-6. Canonical line mapping between MDD and GTFS.de is not yet implemented.
-7. Cross-source service-event matching has not yet been empirically validated
-   across a representative sample.
+6. Production canonical line mapping between MDD and GTFS.de remains an
+   explicit evidence/load responsibility; Stage 9 does not infer it.
+7. Cross-source service-event matching has been validated offline with
+   known-good, ambiguous, and unresolved populations, but not with a new
+   representative live collector sample.
 8. GTFS-RT cause/effect population quality has not yet been validated beyond
    the bounded inspected snapshot.
-9. Final alert persistence and filtering implementation is not yet designed.
+9. Final alert persistence/filtering and operational-fact use remain later
+   stage work; Stage 9 preserves alert scope and non-causal interpretation.
 
 The bounded Köln Neumarkt identity evidence must not be generalized into
 historical identity stability or used to substitute for the unresolved railway
@@ -657,9 +666,10 @@ address at least:
 - source-specific missingness and provenance; and
 - validation of representative matching and cause/effect coverage.
 
-This list is a later implementation handoff, not an implementation plan or
-approval. Stage 3 is **COMPLETE**; no SQL tables, C# models, collector code,
-ETL, matching algorithms, DAX measures, Power BI pages, or production mappings
-are created by this document. See the [Stage 3C matching design](../stage-03/03c-cross-source-matching-design.md)
+This list remains the Stage 3 design handoff. Stage 3 is **COMPLETE** and Stage
+9 now supplies the bounded matching algorithm, SQL contract, and offline
+validation described above. Collector activation, source loading, operational
+facts, DAX measures, Power BI pages, and production station mappings remain
+outside Stage 9. See the [Stage 3C matching design](../stage-03/03c-cross-source-matching-design.md)
 and the [Stage 3 completion decision](../stage-03/stage-03-completion-decision.md)
-for the authoritative design closeout.
+for the historical design closeout.

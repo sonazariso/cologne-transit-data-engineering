@@ -119,7 +119,7 @@ Sampling Policy/Era, bounded retries, overlap protection, and independent
 source/collector timestamps. It does not approve the historical 10/20/20
 schedule, final station tiers, final intervals, or production activation.
 
-### Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN; IMPLEMENTATION NOT STARTED
+### Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN HANDOFF
 
 The [Stage 3C cross-source matching design](stage-03/03c-cross-source-matching-design.md)
 defines stop-event-first reconciliation, canonical service-event dimensions,
@@ -131,10 +131,10 @@ The [Stage 3 completion decision](stage-03/stage-03-completion-decision.md)
 is the authoritative closeout record. Stage 4 was subsequently revalidated and
 approved under its own current static-source validation gate below.
 
-Authoritative-feed coverage, canonical bridge construction, final collector
-readiness, and implementation validation remain later work. The cross-source
-contract is now the Stage 3C design handoff and does not authorize
-implementation.
+Authoritative-feed coverage and final collector readiness remain later work.
+The cross-source contract was the Stage 3C design handoff; Stage 9 now owns the
+implemented matching/data-quality foundation described in
+[the Stage 9 record](stages/09-matching-data-quality.md).
 
 ## Stage 4 — Cologne Scope & Mode Classification — COMPLETE — APPROVED
 
@@ -269,13 +269,20 @@ normal Situation/passenger-information text no longer populates
 including the observed German 401 body, remains available for supplier-access
 detection. Offline validation for these corrections used no MDD request.
 The future 50-station objective is unchanged, Stage 13 retains ownership of
-future Tiered50 production result-limit/cadence/concurrency decisions, and
-Stage 9 remains not started.
+future Tiered50 production result-limit/cadence/concurrency decisions, and at
+this Stage 8 closeout point Stage 9 remained not started.
 
-## Stage 9 — Matching & Data Quality
-Validate stop, route, service-date, trip/event identity, candidate richer
-identifiers, static coverage, field coverage, and ambiguous cases using
-known-good populations.
+## Stage 9 — Matching & Data Quality — COMPLETE — FOUNDATION IMPLEMENTED
+
+The [Stage 9 implementation and validation record](stages/09-matching-data-quality.md)
+and [offline matcher](../scripts/stage_09_matching_quality.py) validate stop,
+route, service-date, trip/event identity, candidate richer identifiers, static
+coverage, field coverage, repeated observations, alert scope, and ambiguous
+cases using known-good and deliberately unresolved populations. The
+source-controlled PostgreSQL contract is in
+`sql/stage_09_matching_quality.sql`. Railway Köln Hbf remains unresolved in
+the bounded GTFS.de bridge, and the implementation does not substitute an
+adjacent KVB identity. Stage 10 and later stages remain separate.
 
 ## Stage 10 — Operational Fact
 Approve fact grain, consolidation semantics, first/latest/actual timing semantics, NULL handling, platform evidence, situation evidence, and lineage.
