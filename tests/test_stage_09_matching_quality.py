@@ -12,6 +12,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
 import stage_08_mdd_realtime_pilot as stage8  # noqa: E402
 import stage_09_matching_quality as stage9  # noqa: E402
+import stage_09_source_backed_acceptance as stage9_source  # noqa: E402
 
 
 class Stage9MatchingQualityTests(unittest.TestCase):
@@ -93,7 +94,12 @@ class Stage9MatchingQualityTests(unittest.TestCase):
 
     def test_incomplete_collector_lineage_is_retained_as_a_quality_issue(self) -> None:
         observation = replace(self.observations[0], sampling_era_id=None)
-        decision = stage9.match_source_event(observation, self.schedule, self.bridge)
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
         self.assertEqual(decision.match_confidence, stage9.MATCH_MEDIUM)
         self.assertEqual(decision.data_quality_classification, stage9.QUALITY_LINEAGE_INCOMPLETE)
         self.assertEqual(decision.evidence["lineage_missing_fields"], ["sampling_era_id"])
@@ -103,7 +109,12 @@ class Stage9MatchingQualityTests(unittest.TestCase):
 
     def test_unresolved_line_identity_is_not_promoted_to_validated_match(self) -> None:
         observation = replace(self.observations[0], source_line_id="line-not-in-bridge")
-        decision = stage9.match_source_event(observation, self.schedule, self.bridge)
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
         self.assertEqual(decision.match_confidence, stage9.MATCH_MEDIUM)
         self.assertEqual(
             decision.data_quality_classification,
@@ -461,11 +472,75 @@ class Stage9MatchingQualityTests(unittest.TestCase):
 
     def test_sequence_and_direction_supporting_evidence_do_not_raise_high_by_themselves(self) -> None:
         decision = stage9.match_source_event(self.observations[0], self.schedule, self.bridge)
-        self.assertEqual(decision.match_confidence, stage9.MATCH_MEDIUM)
-        self.assertTrue(decision.evidence["stop_sequence_match"])
-        self.assertTrue(decision.evidence["direction_match"])
-        self.assertFalse(decision.evidence["stop_sequence_evidence_validated"])
-        self.assertFalse(decision.evidence["direction_evidence_validated"])
+        self.assertEqual(decision.match_confidence, stage9.MATCH_UNMATCHED)
+        self.assertEqual(
+            decision.data_quality_classification,
+            stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES,
+        )
+        candidate_evidence = list(decision.evidence["candidate_evidence"].values())
+        self.assertTrue(any(item["stop_sequence_match"] for item in candidate_evidence))
+        self.assertTrue(any(item["direction_match"] for item in candidate_evidence))
+        self.assertTrue(all(not item["stop_sequence_evidence_validated"] for item in candidate_evidence))
+        self.assertTrue(all(not item["direction_evidence_validated"] for item in candidate_evidence))
+
+    def test_unvalidated_stop_sequence_cannot_break_candidate_tie(self) -> None:
+        rows = [
+            stage9.StaticServiceEvent(
+                feed_snapshot_key="tie-feed",
+                source_namespace="VRS_GLOBAL_ID",
+                source_trip_id="trip-sequence-match",
+                source_route_id="route-18",
+                source_stop_id="de:05315:11111",
+                canonical_stop_id="CS:COLOGNE:NEUMARKT",
+                canonical_line_id="CL:KVB:18",
+                service_date="2026-09-29",
+                event_type="ARRIVAL",
+                scheduled_time="10:15:00",
+                direction="N",
+                stop_sequence=7,
+                source_row_identity="tie:sequence:7",
+            ),
+            stage9.StaticServiceEvent(
+                feed_snapshot_key="tie-feed",
+                source_namespace="VRS_GLOBAL_ID",
+                source_trip_id="trip-sequence-other",
+                source_route_id="route-18",
+                source_stop_id="de:05315:11111",
+                canonical_stop_id="CS:COLOGNE:NEUMARKT",
+                canonical_line_id="CL:KVB:18",
+                service_date="2026-09-29",
+                event_type="ARRIVAL",
+                scheduled_time="10:15:00",
+                direction="N",
+                stop_sequence=8,
+                source_row_identity="tie:sequence:8",
+            ),
+        ]
+        schedule = stage9.build_schedule_index(rows)
+        observation = replace(self.observations[0], direction=None, direction_ref=None, stop_sequence=7)
+        decision = stage9.match_source_event(observation, schedule, self.bridge)
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES)
+        self.assertEqual(decision.candidate_count, 2)
+        self.assertIsNone(decision.canonical_service_event_id)
+
+    def test_unvalidated_direction_cannot_break_candidate_tie(self) -> None:
+        observation = replace(self.observations[0], stop_sequence=None)
+        decision = stage9.match_source_event(observation, self.schedule, self.bridge)
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES)
+        self.assertEqual(decision.candidate_count, 2)
+        self.assertIsNone(decision.canonical_service_event_id)
+
+    def test_validated_auxiliary_direction_resolves_an_otherwise_ambiguous_candidate(self) -> None:
+        observation = replace(self.observations[0], stop_sequence=None)
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        self.assertTrue(decision.matched)
+        self.assertEqual(decision.match_confidence, stage9.MATCH_HIGH)
+        self.assertEqual(decision.evidence["direction_evidence_validated"], True)
 
     def test_versioned_mapping_validity_blocks_future_mapping_for_historical_event(self) -> None:
         bridge = stage9.IdentityBridge(
@@ -525,6 +600,37 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         )
         self.assertEqual(resolution.status, "AMBIGUOUS")
 
+    def test_overlapping_conflicting_mapping_versions_are_detected(self) -> None:
+        bridge = stage9.IdentityBridge(
+            stop_mappings=[
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "cross-version-overlap-stop",
+                    "CS:ONE",
+                    "map-v1",
+                    valid_from="2026-01-01",
+                    valid_to="2026-12-31",
+                ),
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "cross-version-overlap-stop",
+                    "CS:TWO",
+                    "map-v2",
+                    valid_from="2026-06-01",
+                    valid_to="2027-01-01",
+                ),
+            ]
+        )
+        report = bridge.validation_report()
+        self.assertEqual(report["status"], "FAIL")
+        self.assertEqual(report["stops"]["overlapping_conflict_count"], 1)
+        overlap = report["stops"]["overlap_examples"][0]
+        self.assertEqual(overlap["left_mapping_version"], "map-v1")
+        self.assertEqual(overlap["right_mapping_version"], "map-v2")
+        self.assertTrue(overlap["conflicting"])
+
     def test_non_overlapping_mapping_versions_resolve_by_service_date(self) -> None:
         bridge = stage9.IdentityBridge(
             stop_mappings=[
@@ -561,6 +667,66 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         )
         self.assertEqual(old.canonical_identifier, "CS:OLD")
         self.assertEqual(new.canonical_identifier, "CS:NEW")
+
+    def test_sql_overlap_review_includes_cross_version_ranges_and_targets(self) -> None:
+        sql = (REPOSITORY_ROOT / "sql" / "stage_09_matching_quality.sql").read_text(encoding="utf-8")
+        view_sql = sql.split("CREATE OR REPLACE VIEW wrk.v_identity_mapping_overlap_conflicts AS", 1)[1]
+        view_sql = view_sql.split("COMMENT ON TABLE", 1)[0]
+        self.assertNotIn("right_row.mapping_version = left_row.mapping_version", view_sql)
+        for fragment in (
+            "left_mapping_version",
+            "right_mapping_version",
+            "left_valid_from",
+            "left_valid_to",
+            "right_valid_from",
+            "right_valid_to",
+            "left_canonical_key",
+            "right_canonical_key",
+            "conflicting",
+        ):
+            self.assertIn(fragment, view_sql)
+
+    def test_source_backed_evidence_schema_contract_is_explicit(self) -> None:
+        expected = {
+            "source_system",
+            "source_namespace",
+            "mdd_source_event_identity",
+            "mdd_source_observation_identity",
+            "operating_day_ref",
+            "stop_point_ref",
+            "timetabled_time",
+            "static_feed_version",
+            "static_feed_sha256",
+            "independent_gtfs_service_date",
+            "static_candidate_identities",
+            "selected_candidate_id",
+            "confidence",
+            "match_method",
+            "data_quality_classification",
+            "identity_mapping_version",
+            "evidence_used",
+            "evidence_explicitly_not_used",
+        }
+        self.assertTrue(expected.issubset(stage9_source.SOURCE_BACKED_REQUIRED_FIELDS))
+        evidence_path = REPOSITORY_ROOT / "docs" / "stages" / "09-source-backed-matching-evidence.jsonl"
+        if evidence_path.exists():
+            rows = [json.loads(line) for line in evidence_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertTrue(rows)
+            self.assertTrue(all(expected.issubset(row) for row in rows))
+
+    def test_source_backed_acceptance_cannot_complete_from_synthetic_fixtures(self) -> None:
+        self.assertEqual(
+            stage9_source.source_backed_acceptance_status(
+                evidence_origin="SYNTHETIC_UNIT_TEST_FIXTURES",
+                static_validation_status="PASS",
+                source_observation_count=10,
+                independent_service_date_count=10,
+                core_deterministic_match_count=10,
+                mdd_http_attempts=0,
+                artifact_written=True,
+            ),
+            "BLOCKED",
+        )
 
     def test_cross_source_without_validated_correlation_is_not_evaluated(self) -> None:
         mdd = stage9.match_source_event(

@@ -685,3 +685,21 @@ plus an independently date-compatible MDD-to-VRS static event population.
 MDD-to-VRS line, direction, StopSeqNumber, endpoint, and cross-source
 disagreement conclusions therefore remain `NOT_EVALUATED` or supporting-only.
 Stage 10 and later stages remain **NOT STARTED**.
+
+## D-038 — Stage 9 Ranking Hardening and Bounded Acceptance Probe
+
+Stage 9 candidate ranking now treats raw StopSeqNumber, Direction/DirectionRef,
+operator, origin/destination, and other auxiliary coincidences as evidence only
+until their source/namespace semantics are explicitly validated. Validated line
+mappings, same-namespace trip identity, and explicitly validated auxiliary
+policies remain eligible to resolve a candidate tie. The SQL overlap-review
+view now detects overlapping effective ranges across different mapping versions
+and reports both versions, ranges, canonical targets, and the conflict flag.
+
+The bounded source-backed acceptance probe was invoked on 2026-09-29 with the
+three approved Cologne targets, but safe credential preflight returned
+`MDD_API_KEY: MISSING`. It made zero MDD attempts and did not download a VRS
+snapshot. Stage 9 therefore remains **BLOCKED**; the synthetic implementation
+regression remains **PASS**. The exact run status is retained in
+[`09-source-backed-matching-summary.json`](stages/09-source-backed-matching-summary.json).
+Stage 10 remains **NOT STARTED**, and Tiered50 was not activated.

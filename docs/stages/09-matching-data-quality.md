@@ -1,16 +1,16 @@
 # Stage 9 — Matching & Data Quality
 
-**Status:** `BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED`<br>
+**Status:** `BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED ACCEPTANCE BLOCKED AT CREDENTIAL PREFLIGHT`<br>
 **Date:** `2026-09-29`<br>
-**Validation mode:** offline, deterministic, source-faithful
+**Validation mode:** deterministic implementation regression plus bounded source-backed probe
 
 Stage 9 implements the matching and data-quality foundation handed off by the
 Stage 3C design. The implementation regression is passing, but the
-source-backed acceptance gate remains blocked because the repository does not
-retain a successful Stage 8 parser bundle plus a date-compatible MDD-to-VRS
-static event population. Synthetic fixtures are explicitly regression evidence
-only; they do not close Stage 9. The implementation is designed for the
-eventual Tiered50 collector without
+source-backed acceptance gate remains blocked. The bounded source-backed probe
+was invoked, but the host process reported `MDD_API_KEY: MISSING` before any
+MDD or VRS network request, so no source-backed row-level population exists.
+Synthetic fixtures are explicitly regression evidence only; they do not close
+Stage 9. The implementation is designed for the eventual Tiered50 collector without
 activating Tiered50, selecting the final 50 stations, building the operational
 fact, or changing the production cadence/result-limit decisions owned by later
 stages.
@@ -37,8 +37,9 @@ Cologne-serving trip patterns, and 137 Cologne-serving routes. The offline
 validation reconciles these recorded counts and checks the zero-anomaly
 acceptance findings in the approved Stage 4 JSON.
 
-No new MDD or GTFS-RT request was made for Stage 9. No production database
-connection was made. The SQL migration is prepared for the approved
+The source-backed probe was invoked with zero MDD attempts because credential
+preflight failed; it made no static-feed request either. No GTFS-RT request or
+production database connection was made. The SQL migration is prepared for the approved
 PostgreSQL architecture and is not an excuse to claim that a live warehouse
 load occurred. The machine-readable evidence audit is the authoritative
 classification of synthetic, source-backed, unresolved, and not-evaluated
@@ -49,10 +50,13 @@ populations: [`09-matching-data-quality-evidence.json`](09-matching-data-quality
 | Artifact | Responsibility |
 |---|---|
 | [`scripts/stage_09_matching_quality.py`](../../scripts/stage_09_matching_quality.py) | Standard-library matching engine, identity bridges, indexed candidate generation, confidence/method decisions, field coverage, service-date checks, repeated-observation continuity, alert-scope checks, and offline acceptance population |
+| [`scripts/stage_09_source_backed_acceptance.py`](../../scripts/stage_09_source_backed_acceptance.py) | Strictly bounded source-backed acceptance probe: one official VRS download and at most one sequential MDD request for each of three approved Cologne targets; raw responses are never persisted |
 | [`sql/stage_09_matching_quality.sql`](../../sql/stage_09_matching_quality.sql) | PostgreSQL 18 control, canonical, match-candidate, data-quality, view, and index contract |
 | [`tests/test_stage_09_matching_quality.py`](../../tests/test_stage_09_matching_quality.py) | Offline regression tests for known-good, ambiguous, unresolved, namespace, lineage, and parser-retention behavior |
 | [`scripts/stage_08_mdd_realtime_pilot.py`](../../scripts/stage_08_mdd_realtime_pilot.py) | Prospective source-contract hardening: retains candidate `vehicleJourneyRef`, `datedVehicleJourneyRef`, `affectedVehicleJourney`, `vehicleJourneys`, `operatingDaysDescription`, `direction`, `origins`, and `destinations` with source paths |
 | [`09-matching-data-quality-evidence.json`](09-matching-data-quality-evidence.json) | Source-classified Stage 9 evidence artifact; synthetic regression is separated from the blocked source-backed acceptance gate |
+| [`09-source-backed-matching-summary.json`](09-source-backed-matching-summary.json) | Latest bounded source-backed probe status, request count, source snapshot metadata when available, and exact blocker |
+| `09-source-backed-matching-evidence.jsonl` | Created only after a parseable source-backed population exists; contains sanitized row-level Stage 9 evidence and no credentials/raw payloads |
 
 Run the bounded validation with:
 
@@ -138,11 +142,17 @@ Candidate ranking uses only independent, source-qualified evidence:
 
 - validated canonical stop, service date, event type, and scheduled time;
 - validated canonical line;
-- direction;
-- stop sequence or multi-stop sequence consistency;
-- operator where available; and
+- validated direction mapping;
+- validated stop sequence or multi-stop sequence consistency;
+- operator only under same-source/static identity or an explicit mapping; and
 - same-namespace source trip identity only where that namespace is explicitly
   shared with the static candidate.
+
+Raw Direction/DirectionRef, StopSeqNumber, origin/destination, and operator
+equality remain retained evidence, but cannot alter score, rank, or tie
+resolution until their source/namespace semantics are validated. A validated
+line mapping may filter/rank candidates. This prevents an unvalidated provider
+coincidence from selecting one otherwise equal static event.
 
 `ObservedAt` is never a fallback for service date or scheduled event time. A
 missing date, invalid time, unresolved stop, line disagreement, or ambiguous
@@ -260,6 +270,12 @@ The current offline regression returns `overall_status = PASS`,
 - timezone, DST, midnight, extended-hour, adapter, and mapping-validity
   regressions pass.
 
+The regression suite also proves that unvalidated StopSeqNumber and direction
+coincidences cannot break an otherwise equal candidate tie, while an explicitly
+validated auxiliary policy can resolve that tie. The SQL overlap-review view
+compares effective ranges across different mapping versions and reports both
+mapping versions, both ranges, both canonical targets, and the conflict flag.
+
 The source-backed audit is separate and remains blocked. Existing evidence is
 useful but supporting only:
 
@@ -273,10 +289,15 @@ useful but supporting only:
   retained successful Stage 8 parser bundle supplies a row-level MDD-to-VRS
   replay population.
 
-Consequently MDD-to-VRS route/line, direction, StopSeqNumber,
-origin/destination, and cross-source disagreement are `NOT_EVALUATED` or
-supporting-only in the evidence artifact. No source-backed HIGH/MEDIUM/LOW/
-UNMATCHED end-to-end count is claimed.
+The latest probe result is recorded in
+[`09-source-backed-matching-summary.json`](09-source-backed-matching-summary.json):
+`source_backed_acceptance_status = BLOCKED`, `stage_9_status = BLOCKED`,
+`mdd_http_attempts = 0`, and the exact blocker is missing `MDD_API_KEY`
+preflight. Consequently no VRS snapshot or MDD-to-VRS row-level decision
+population is claimed. Once a usable credential is available, rerunning the
+bounded script produces the JSONL population through the real
+Stage 8 parser → Stage 9 adapter → matcher path and updates the evidence
+artifact; it remains capped at three sequential MDD attempts with zero retries.
 
 This is not a production-wide precision estimate, and the real GTFS.de
 railway-Hbf bridge remains an explicit open identity-quality result.

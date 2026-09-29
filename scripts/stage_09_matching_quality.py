@@ -1085,6 +1085,13 @@ class StaticServiceEvent:
     destination_text: Optional[str] = None
     scope_code: str = "IN_SCOPE"
     scope_reason: Optional[str] = None
+    service_id: Optional[str] = None
+    parent_station: Optional[str] = None
+    agency_id: Optional[str] = None
+    agency_name: Optional[str] = None
+    route_short_name: Optional[str] = None
+    route_long_name: Optional[str] = None
+    route_type: Optional[str] = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "StaticServiceEvent":
@@ -1110,6 +1117,13 @@ class StaticServiceEvent:
             destination_text=_text(value.get("destination_text")),
             scope_code=_text(value.get("scope_code") or value.get("cologne_scope_code")) or "IN_SCOPE",
             scope_reason=_text(value.get("scope_reason")),
+            service_id=_text(value.get("service_id")),
+            parent_station=_text(value.get("parent_station")),
+            agency_id=_text(value.get("agency_id")),
+            agency_name=_text(value.get("agency_name")),
+            route_short_name=_text(value.get("route_short_name")),
+            route_long_name=_text(value.get("route_long_name")),
+            route_type=_text(value.get("route_type")),
         )
 
 
@@ -1138,6 +1152,13 @@ class CanonicalServiceEvent:
     destination_text: Optional[str] = None
     scope_code: str = "IN_SCOPE"
     scope_reason: Optional[str] = None
+    service_id: Optional[str] = None
+    parent_station: Optional[str] = None
+    agency_id: Optional[str] = None
+    agency_name: Optional[str] = None
+    route_short_name: Optional[str] = None
+    route_long_name: Optional[str] = None
+    route_type: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -1180,18 +1201,34 @@ class ScheduleIndex:
     snapshot, or sampling era adds rows without changing the matching rule.
     """
 
-    def __init__(self, events: Sequence[CanonicalServiceEvent], issues: Sequence[Dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        events: Sequence[CanonicalServiceEvent],
+        issues: Sequence[Dict[str, Any]],
+        *,
+        known_stop_ids: Iterable[str] = (),
+        active_service_dates: Iterable[str] = (),
+        known_line_ids: Iterable[str] = (),
+    ) -> None:
         self.events = tuple(events)
         self.issues = tuple(issues)
         self.by_id = {event.canonical_service_event_id: event for event in events}
-        self.canonical_stop_ids = {event.canonical_stop_id for event in events}
-        self.service_dates = {event.service_date for event in events}
+        self.canonical_stop_ids = {
+            event.canonical_stop_id for event in events
+        } | {_text(item) for item in known_stop_ids if _present(item)}
+        self.service_dates = {
+            event.service_date for event in events
+        } | {
+            normalized
+            for item in active_service_dates
+            if (normalized := normalize_service_date(item)) is not None
+        }
         self.by_date_stop: Set[Tuple[str, str]] = {
             (event.service_date, event.canonical_stop_id) for event in events
         }
         self.canonical_line_ids = {
             event.canonical_line_id for event in events if event.canonical_line_id
-        }
+        } | {_text(item) for item in known_line_ids if _present(item)}
         self.by_date_line: Set[Tuple[str, str]] = {
             (event.service_date, event.canonical_line_id)
             for event in events
@@ -1249,6 +1286,7 @@ def _canonical_event_id(event: StaticServiceEvent, service_date: str, event_type
             service_date,
             event.source_namespace,
             event.source_trip_id,
+            event.service_id,
             event.source_stop_id,
             event.source_row_identity,
             event.stop_sequence,
@@ -1259,7 +1297,13 @@ def _canonical_event_id(event: StaticServiceEvent, service_date: str, event_type
     return f"CSE|{event.feed_snapshot_key}|{digest}"
 
 
-def build_schedule_index(events: Iterable[StaticServiceEvent | Mapping[str, Any]]) -> ScheduleIndex:
+def build_schedule_index(
+    events: Iterable[StaticServiceEvent | Mapping[str, Any]],
+    *,
+    known_stop_ids: Iterable[str] = (),
+    active_service_dates: Iterable[str] = (),
+    known_line_ids: Iterable[str] = (),
+) -> ScheduleIndex:
     """Build canonical date-expanded events and the scalable lookup indexes."""
 
     canonical: List[CanonicalServiceEvent] = []
@@ -1335,9 +1379,22 @@ def build_schedule_index(events: Iterable[StaticServiceEvent | Mapping[str, Any]
                 destination_text=event.destination_text,
                 scope_code=event.scope_code,
                 scope_reason=event.scope_reason,
+                service_id=event.service_id,
+                parent_station=event.parent_station,
+                agency_id=event.agency_id,
+                agency_name=event.agency_name,
+                route_short_name=event.route_short_name,
+                route_long_name=event.route_long_name,
+                route_type=event.route_type,
             )
         )
-    return ScheduleIndex(canonical, issues)
+    return ScheduleIndex(
+        canonical,
+        issues,
+        known_stop_ids=known_stop_ids,
+        active_service_dates=active_service_dates,
+        known_line_ids=known_line_ids,
+    )
 
 
 def _string_equal(left: Any, right: Any) -> bool:
@@ -1358,6 +1415,7 @@ class MatchingEvidenceValidation:
     validated_sequence_scopes: Tuple[Tuple[str, str], ...] = ()
     validated_direction_mappings: Mapping[Tuple[str, str, str], Tuple[str, ...]] = field(default_factory=dict)
     validated_origin_destination_scopes: Tuple[Tuple[str, str], ...] = ()
+    validated_operator_mappings: Mapping[Tuple[str, str, str], Tuple[str, ...]] = field(default_factory=dict)
 
     def sequence_validated(self, observation: SourceEventObservation) -> bool:
         return (
@@ -1396,6 +1454,32 @@ class MatchingEvidenceValidation:
             (_normalized_source_system(system), _normalized_key(namespace))
             for system, namespace in self.validated_origin_destination_scopes
         }
+
+    def operator_validated(
+        self,
+        observation: SourceEventObservation,
+        static_operator: Optional[str],
+        static_source_namespace: Optional[str],
+    ) -> bool:
+        """Require same-source identity or an explicit operator mapping."""
+
+        if not _present(observation.operator_id) or not _present(static_operator):
+            return False
+        if (
+            _normalized_source_system(observation.source_system)
+            == _normalized_source_system(SOURCE_STATIC_GTFS)
+            and _normalized_key(observation.source_namespace)
+            == _normalized_key(static_source_namespace)
+            and _string_equal(observation.operator_id, static_operator)
+        ):
+            return True
+        key = (
+            _normalized_source_system(observation.source_system),
+            _normalized_key(observation.source_namespace),
+            _normalized_key(observation.operator_id),
+        )
+        allowed = self.validated_operator_mappings.get(key, ())
+        return _normalized_key(static_operator) in {_normalized_key(item) for item in allowed}
 
 
 def _candidate_evidence(
@@ -1439,6 +1523,16 @@ def _candidate_evidence(
         origin_destination_match
         and evidence_validation.origin_destination_validated(observation)
     )
+    line_evidence_validated = line_match and line_resolution.status in {
+        "RESOLVED",
+        "EXPLICIT_CANONICAL_ID",
+    }
+    operator_validated = operator_match and evidence_validation.operator_validated(
+        observation,
+        event.operator_id,
+        event.source_namespace,
+    )
+    multi_stop_validated = multi_stop_match and evidence_validation.sequence_validated(observation)
     prohibited_identity_equality = bool(
         observation.source_journey_ref
         and event.source_trip_id
@@ -1449,6 +1543,7 @@ def _candidate_evidence(
         )
     )
     score = 4 + 3 + 2 + (4 if exact_time else 1)
+    raw_auxiliary_score = score
     for matched, weight in (
         (line_match, 2),
         (direction_match, 1),
@@ -1456,6 +1551,17 @@ def _candidate_evidence(
         (operator_match, 1),
         (same_namespace_trip_match, 3),
         (multi_stop_match, 3),
+        (origin_destination_match, 1),
+    ):
+        if matched:
+            raw_auxiliary_score += weight
+    for matched, weight in (
+        (line_evidence_validated, 2),
+        (direction_validated, 1),
+        (sequence_validated, 2),
+        (operator_validated, 1),
+        (same_namespace_trip_match, 3),
+        (multi_stop_validated, 3),
         (origin_destination_validated, 1),
     ):
         if matched:
@@ -1477,12 +1583,16 @@ def _candidate_evidence(
         "direction_evidence_validated": direction_validated,
         "stop_sequence_evidence_validated": sequence_validated,
         "operator_match": operator_match,
+        "operator_evidence_validated": operator_validated,
         "same_namespace_trip_identity_match": same_namespace_trip_match,
         "multi_stop_sequence_match": multi_stop_match,
+        "multi_stop_sequence_evidence_validated": multi_stop_validated,
         "origin_destination_match": origin_destination_match,
         "origin_destination_evidence_validated": origin_destination_validated,
+        "line_evidence_validated": line_evidence_validated,
         "prohibited_cross_source_identity_equality_observed": prohibited_identity_equality,
         "source_trip_identity_used": same_namespace_trip_match,
+        "raw_auxiliary_score": raw_auxiliary_score,
         "score": score,
     }
 
@@ -1751,11 +1861,12 @@ def match_source_event(
         strong_count = sum(
             1
             for field_name in (
-                "line_match",
-                "direction_match",
-                "stop_sequence_match",
-                "operator_match",
-                "multi_stop_sequence_match",
+                "line_evidence_validated",
+                "direction_evidence_validated",
+                "stop_sequence_evidence_validated",
+                "operator_evidence_validated",
+                "multi_stop_sequence_evidence_validated",
+                "origin_destination_evidence_validated",
                 "same_namespace_trip_identity_match",
             )
             if evidence[field_name]
@@ -1792,6 +1903,13 @@ def match_source_event(
                 "line_resolution_status": line_resolution.status,
                 "stop_mapping_versions": list(stop_resolution.mapping_versions),
                 "line_mapping_versions": list(line_resolution.mapping_versions),
+                "source_trip_identity_used": any(
+                    item[4].get("source_trip_identity_used", False) for item in tied
+                ),
+                "prohibited_cross_source_identity_equality_observed": any(
+                    item[4].get("prohibited_cross_source_identity_equality_observed", False)
+                    for item in tied
+                ),
             },
             matching_version=matching_version,
             correlation_group_id=event.correlation_group_id,
@@ -2617,6 +2735,169 @@ def _synthetic_evidence_snapshot() -> Dict[str, Any]:
     }
 
 
+def _source_backed_evidence_artifact(
+    *,
+    stage4: Mapping[str, Any],
+    synthetic: Mapping[str, Any],
+    summary_path: Path,
+    evidence_path: Path,
+) -> Optional[Dict[str, Any]]:
+    """Project the bounded live probe into the durable Stage 9 evidence file."""
+
+    if not summary_path.is_file():
+        return None
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if summary.get("evidence_origin") != "LIVE_MDD_AND_OFFICIAL_GTFS":
+        return None
+    observation_records: List[Dict[str, Any]] = []
+    if evidence_path.is_file():
+        try:
+            observation_records = [
+                json.loads(line)
+                for line in evidence_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except (OSError, ValueError):
+            observation_records = []
+    source_status = summary.get("source_backed_acceptance_status", "BLOCKED")
+    stage_status = summary.get("stage_9_status", "BLOCKED")
+    row_level_artifact = (
+        str(evidence_path.relative_to(REPOSITORY_ROOT))
+        if evidence_path.is_file()
+        else None
+    )
+    not_evaluated = "NOT_EVALUATED"
+    source_metrics = {
+        "source_backed_observation_count": summary.get("source_backed_observation_count", 0),
+        "confidence_counts": summary.get("source_backed_confidence_counts", not_evaluated),
+        "ambiguity_count": summary.get("ambiguity_count", not_evaluated),
+        "stop_point_and_hierarchy": summary.get("stop_point_and_hierarchy", not_evaluated),
+        "independently_established_service_date": summary.get("independently_established_service_date", not_evaluated),
+        "operating_day_ref": summary.get("operating_day_ref", not_evaluated),
+        "exact_scheduled_time_alignment_count": summary.get("exact_scheduled_time_alignment_count", not_evaluated),
+        "route_line_identity": summary.get("route_line_identity", not_evaluated),
+        "stop_sequence": summary.get("stop_sequence", not_evaluated),
+        "direction": summary.get("direction", not_evaluated),
+        "origin_destination": summary.get("origin_destination", not_evaluated),
+        "data_quality_counts": summary.get("data_quality_counts", not_evaluated),
+    }
+    stage4_source = stage4["source_metadata"]
+    return {
+        "record_type": "stage_09_matching_data_quality_evidence",
+        "artifact_version": "stage-09-evidence-2.0",
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "stage_9_status": stage_status,
+        "implementation_regression_status": summary.get("implementation_regression_status", "PASS"),
+        "source_backed_acceptance_status": source_status,
+        "evidence_status": {
+            "source_backed_core_matching": "COMPLETE" if source_status == "PASS" else "BLOCKED",
+            "source_backed_core_matching_blocker": summary.get("blocker"),
+            "source_backed_evidence_origin": summary.get("evidence_origin"),
+            "source_backed_row_level_artifact": row_level_artifact,
+            "optional_dimensions_without_authority": [
+                "MDD-to-VRS route/line identity unless a validated line bridge is added",
+                "MDD DirectionRef to GTFS direction_id mapping",
+                "MDD origin/destination identity bridge",
+                "MDD StopSeqNumber to VRS stop_sequence mapping",
+                "cross-source disagreement without an independently validated correlation basis",
+            ],
+        },
+        "source_snapshots_and_versions": {
+            "vrs_static": summary.get("vrs_snapshot", not_evaluated),
+            "approved_stage4_snapshot": {
+                "feed_version": stage4_source["feed_info"].get("feed_version"),
+                "zip_sha256": stage4_source.get("zip_sha256"),
+                "feed_start_date": stage4_source["feed_info"].get("feed_start_date"),
+                "feed_end_date": stage4_source["feed_info"].get("feed_end_date"),
+                "source_url": stage4_source.get("source_url"),
+            },
+            "stage9_source_backed_run": {
+                "run_id": summary.get("run_id"),
+                "mdd_http_attempts": summary.get("mdd_http_attempts"),
+                "request_contract": summary.get("mdd_request_contract"),
+                "request_contexts": summary.get("mdd_request_contexts", []),
+                "stage4_revalidation": summary.get("stage4_revalidation", {}),
+                "raw_mdd_payloads_persisted": summary.get("raw_mdd_payloads_persisted", False),
+            },
+            "gtfsde_identity_bridge": {
+                "status": EXPECTED_RAILWAY_HBF_STATUS,
+                "adjacent_kvb_parent_ids_not_substituted": ["106448", "437741"],
+            },
+        },
+        "evidence_classes": {
+            "synthetic_unit_test": synthetic,
+            "source_backed_acceptance_probe": {
+                "population_type": "BOUNDED_LIVE_MDD_AND_OFFICIAL_VRS_GTFS",
+                "status": "ACCEPTED" if source_status == "PASS" else "SUPPORTING_ONLY",
+                "observation_record_count": len(observation_records),
+                "metrics": source_metrics,
+                "evidence_artifact": row_level_artifact,
+                "historical_supporting_evidence_does_not_substitute": True,
+            },
+            "historical_supporting": {
+                "stage3a_artifact": str(STAGE3A_EVIDENCE_PATH.relative_to(REPOSITORY_ROOT)),
+                "gtfsde_identity_bridge_artifact": "docs/source-contracts/gtfsde-static-identity-bridge-audit.md",
+                "role": "SUPPORTING_ONLY; not the source-backed row-level acceptance population",
+            },
+        },
+        "source_backed_metrics": source_metrics,
+        "source_backed_decision_counts": summary.get("source_backed_confidence_counts", not_evaluated),
+        "source_backed_data_quality_counts": summary.get("data_quality_counts", not_evaluated),
+        "source_backed_row_level_evidence": {
+            "artifact": row_level_artifact,
+            "record_count": len(observation_records),
+            "required_fields_present": bool(observation_records)
+            and all(
+                all(field in row for field in (
+                    "source_system",
+                    "source_namespace",
+                    "mdd_source_event_identity",
+                    "operating_day_ref",
+                    "stop_point_ref",
+                    "timetabled_time",
+                    "static_feed_sha256",
+                    "independent_gtfs_service_date",
+                    "confidence",
+                    "match_method",
+                    "data_quality_classification",
+                    "evidence_used",
+                    "evidence_explicitly_not_used",
+                ))
+                for row in observation_records
+            ),
+        },
+        "stop_identity_and_hierarchy": summary.get("stop_point_and_hierarchy", not_evaluated),
+        "service_date_operating_day_metrics": {
+            "independent_gtfs_service_date": summary.get("independently_established_service_date", not_evaluated),
+            "operating_day_ref": summary.get("operating_day_ref", not_evaluated),
+        },
+        "optional_dimension_metrics": {
+            "route_line": summary.get("route_line_identity", not_evaluated),
+            "stop_sequence": summary.get("stop_sequence", not_evaluated),
+            "direction": summary.get("direction", not_evaluated),
+            "origin_destination": summary.get("origin_destination", not_evaluated),
+        },
+        "static_coverage_classifications": summary.get("data_quality_counts", not_evaluated),
+        "mapping_versions_used": {
+            "source_backed": (
+                [summary["identity_mapping_version"]]
+                if summary.get("identity_mapping_version")
+                else []
+            ),
+            "synthetic_fixture": synthetic.get("mapping_versions_used", []),
+        },
+        "stage_10_plus": {
+            "stage_10_status": "NOT_STARTED",
+            "tiered50_activation": False,
+            "actual_delay_approved": False,
+            "operational_fact_started": False,
+        },
+    }
+
+
 def build_stage9_evidence_artifact() -> Dict[str, Any]:
     """Build the machine-readable, source-classified Stage 9 evidence audit."""
 
@@ -2642,6 +2923,14 @@ def build_stage9_evidence_artifact() -> Dict[str, Any]:
     stage4_hierarchy = stage4["scope_anomalies"]["hierarchy"]
     synthetic = _synthetic_evidence_snapshot()
     now_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    source_backed = _source_backed_evidence_artifact(
+        stage4=stage4,
+        synthetic=synthetic,
+        summary_path=REPOSITORY_ROOT / "docs" / "stages" / "09-source-backed-matching-summary.json",
+        evidence_path=REPOSITORY_ROOT / "docs" / "stages" / "09-source-backed-matching-evidence.jsonl",
+    )
+    if source_backed is not None:
+        return source_backed
 
     return {
         "record_type": "stage_09_matching_data_quality_evidence",

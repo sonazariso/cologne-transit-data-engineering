@@ -419,17 +419,21 @@ SELECT
     'STOP'::text AS identity_type,
     left_row.canonical_stop_source_identity_key AS left_identity_key,
     right_row.canonical_stop_source_identity_key AS right_identity_key,
-    left_row.mapping_version,
+    left_row.mapping_version AS left_mapping_version,
+    right_row.mapping_version AS right_mapping_version,
     left_row.source_system,
     left_row.source_namespace,
     left_row.source_stop_id AS source_identifier,
+    left_row.valid_from AS left_valid_from,
+    left_row.valid_to AS left_valid_to,
+    right_row.valid_from AS right_valid_from,
+    right_row.valid_to AS right_valid_to,
     left_row.canonical_stop_key AS left_canonical_key,
     right_row.canonical_stop_key AS right_canonical_key,
     (left_row.canonical_stop_key IS DISTINCT FROM right_row.canonical_stop_key) AS conflicting
 FROM core.canonical_stop_source_identity AS left_row
 JOIN core.canonical_stop_source_identity AS right_row
   ON right_row.canonical_stop_source_identity_key > left_row.canonical_stop_source_identity_key
- AND right_row.mapping_version = left_row.mapping_version
  AND right_row.source_system = left_row.source_system
  AND right_row.source_namespace = left_row.source_namespace
  AND right_row.source_stop_id = left_row.source_stop_id
@@ -440,17 +444,21 @@ SELECT
     'LINE'::text AS identity_type,
     left_row.canonical_line_source_identity_key AS left_identity_key,
     right_row.canonical_line_source_identity_key AS right_identity_key,
-    left_row.mapping_version,
+    left_row.mapping_version AS left_mapping_version,
+    right_row.mapping_version AS right_mapping_version,
     left_row.source_system,
     left_row.source_namespace,
     left_row.source_line_id AS source_identifier,
+    left_row.valid_from AS left_valid_from,
+    left_row.valid_to AS left_valid_to,
+    right_row.valid_from AS right_valid_from,
+    right_row.valid_to AS right_valid_to,
     left_row.canonical_line_key AS left_canonical_key,
     right_row.canonical_line_key AS right_canonical_key,
     (left_row.canonical_line_key IS DISTINCT FROM right_row.canonical_line_key) AS conflicting
 FROM core.canonical_line_source_identity AS left_row
 JOIN core.canonical_line_source_identity AS right_row
   ON right_row.canonical_line_source_identity_key > left_row.canonical_line_source_identity_key
- AND right_row.mapping_version = left_row.mapping_version
  AND right_row.source_system = left_row.source_system
  AND right_row.source_namespace = left_row.source_namespace
  AND right_row.source_line_id = left_row.source_line_id

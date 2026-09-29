@@ -274,24 +274,29 @@ this hardening change; the future 50-station objective and `250,000` monthly
 quota are unchanged; Stage 13 retains production ownership; and Stage 9+
 implementation was not started at that hardening closeout point.
 
-### Stage 9 review correction — BLOCKED
+### Stage 9 review correction and bounded acceptance probe — BLOCKED
 
-The [Stage 9 matching and data-quality record](stages/09-matching-data-quality.md)
-the [offline matcher](../scripts/stage_09_matching_quality.py), and the
+The [Stage 9 matching and data-quality record](stages/09-matching-data-quality.md),
+the [offline matcher](../scripts/stage_09_matching_quality.py), the bounded
+[source-backed probe](../scripts/stage_09_source_backed_acceptance.py), and the
 [machine-readable evidence audit](stages/09-matching-data-quality-evidence.json)
 are now the current implementation/evidence authorities. The implementation
 regression is PASS, but the source-backed Stage 9 acceptance gate is BLOCKED:
-the repository does not retain a successful Stage 8 parser bundle together
-with a date-compatible MDD-to-VRS static event population. Stage 9 provides:
+the probe reported `MDD_API_KEY: MISSING`, made `0` MDD attempts, and therefore
+did not obtain a date-compatible MDD-to-VRS static event population. Stage 9 provides:
 
 - versioned, namespace-qualified canonical stop and line bridges;
 - stop-event-first date/time candidate generation with deterministic indexes;
 - auditable HIGH/MEDIUM/LOW/UNMATCHED decisions and retained candidates;
 - explicit service-date, source-field, static-coverage, ambiguity, lineage,
   and sampling-era quality classifications;
+- ranking protection against unvalidated auxiliary evidence breaking candidate
+  ties, with validated-policy regression coverage;
 - prospective retention of richer MDD identity candidates with source paths;
 - source-aware cross-source reconciliation that never equates MDD `JourneyRef`
-  with GTFS-RT `trip_id`; and
+  with GTFS-RT `trip_id`;
+- a mapping-overlap review view that compares effective ranges across mapping
+  versions; and
 - PostgreSQL DDL/index/view contracts under `sql/stage_09_matching_quality.sql`.
 
 The synthetic offline acceptance population passed with zero network requests
@@ -303,7 +308,9 @@ the VRS scope/hierarchy, controlled MDD field presence, and bounded GTFS.de
 Neumarkt sequence equality; they do not establish MDD-to-VRS row-level
 matching. Railway Hbf remains unresolved and adjacent KVB complexes are not
 substituted. No operational fact, Power BI model, 50-station selection, or
-Tiered50 activation was started. Stage 10 remains **NOT STARTED**.
+Tiered50 activation has been started. Stage 10 remains **NOT STARTED**. The exact
+probe result is retained in
+`stages/09-source-backed-matching-summary.json`.
 
 ## Post-Stage-02 validation
 

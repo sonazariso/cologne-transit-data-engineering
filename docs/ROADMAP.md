@@ -272,7 +272,7 @@ The future 50-station objective is unchanged, Stage 13 retains ownership of
 future Tiered50 production result-limit/cadence/concurrency decisions, and at
 this Stage 8 closeout point Stage 9 remained not started.
 
-## Stage 9 — Matching & Data Quality — BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED ACCEPTANCE PENDING
+## Stage 9 — Matching & Data Quality — BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED ACCEPTANCE BLOCKED AT CREDENTIAL PREFLIGHT
 
 The [Stage 9 implementation and validation record](stages/09-matching-data-quality.md)
 the [offline matcher](../scripts/stage_09_matching_quality.py), and the
@@ -284,8 +284,11 @@ scope handling, and lineage. The source-backed gate remains blocked because
 no successful Stage 8 parser bundle plus date-compatible MDD-to-VRS static
 event population is retained. The current VRS hierarchy and bounded GTFS.de
 Neumarkt sequence sample remain supporting evidence; railway Köln Hbf remains
-unresolved and no adjacent KVB identity is substituted. Stage 10 and later
-stages remain **NOT STARTED**.
+unresolved and no adjacent KVB identity is substituted. The new bounded
+source-backed probe made zero MDD attempts because its safe preflight reported
+`MDD_API_KEY: MISSING`; its exact result is in
+`stages/09-source-backed-matching-summary.json`. Stage 10 and later stages
+remain **NOT STARTED**.
 
 ## Stage 10 — Operational Fact
 Approve fact grain, consolidation semantics, first/latest/actual timing semantics, NULL handling, platform evidence, situation evidence, and lineage.
