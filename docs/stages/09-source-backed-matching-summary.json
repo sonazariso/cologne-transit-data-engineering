@@ -1,18 +1,246 @@
 {
   "artifact_version": "stage-09-source-backed-summary-1.0",
-  "blocker": "usable MDD_API_KEY preflight was not available; no MDD HTTP attempt was made",
-  "credential_preflight_status": "MISSING",
+  "blocker": "successful MDD bundles contained no selected THIS-call stop events",
+  "credential_preflight_status": "VALID",
   "evidence_origin": "LIVE_MDD_AND_OFFICIAL_GTFS",
   "evidence_path": "docs/stages/09-source-backed-matching-evidence.jsonl",
-  "generated_at_utc": "2026-09-29T15:36:18Z",
+  "generated_at_utc": "2026-09-29T16:45:50Z",
   "implementation_regression_status": "PASS",
-  "mdd_http_attempts": 0,
+  "mdd_http_attempts": 3,
+  "mdd_request_contexts": [
+    {
+      "application_error": false,
+      "bundle_stop_event_count": 20,
+      "content_type": "application/json;charset=UTF-8",
+      "elapsed_ms": 569.456,
+      "http_status": 200,
+      "parser_status": "PARSED",
+      "request_timestamp_utc": "2026-09-29T16:45:42Z",
+      "requested_stop_point_ref": "de:05315:11201",
+      "response_id": "MDD_RESPONSE|b36cd948e850d3e6471cd462e57893052ab19208cb7597b733f0ede0c5f18ae1",
+      "station": "Köln Hbf",
+      "target_index": 0,
+      "transport_failure": null,
+      "transport_failure_detail": null
+    },
+    {
+      "application_error": false,
+      "bundle_stop_event_count": 20,
+      "content_type": "application/json;charset=UTF-8",
+      "elapsed_ms": 631.739,
+      "http_status": 200,
+      "parser_status": "PARSED",
+      "request_timestamp_utc": "2026-09-29T16:45:45Z",
+      "requested_stop_point_ref": "de:05315:11110",
+      "response_id": "MDD_RESPONSE|20ae085c34b0836664881ab0084e2d6b034d931404c01b31d5b99559ed538ebf",
+      "station": "Köln Heumarkt",
+      "target_index": 1,
+      "transport_failure": null,
+      "transport_failure_detail": null
+    },
+    {
+      "application_error": false,
+      "bundle_stop_event_count": 20,
+      "content_type": "application/json;charset=UTF-8",
+      "elapsed_ms": 638.176,
+      "http_status": 200,
+      "parser_status": "PARSED",
+      "request_timestamp_utc": "2026-09-29T16:45:47Z",
+      "requested_stop_point_ref": "de:05315:11111",
+      "response_id": "MDD_RESPONSE|f853f53c54f511dd2c5330f28d82eea7bcffd99e8c83e97e13f406937112676b",
+      "station": "Köln Neumarkt",
+      "target_index": 2,
+      "transport_failure": null,
+      "transport_failure_detail": null
+    }
+  ],
   "record_type": "stage_09_source_backed_acceptance_summary",
+  "run_id": "stage09-source-8e1d8c27cbb6488387057974f47dddb0",
   "script_version": "stage-09-source-backed-acceptance-1.0",
   "source_backed_acceptance_status": "BLOCKED",
   "source_backed_observation_count": 0,
+  "stage4_revalidation": {
+    "acceptance_check_count": 17,
+    "failed_acceptance_checks": [],
+    "hierarchy": {
+      "cologne_child_parent_also_cologne_distinct_ids": 2273,
+      "cologne_child_parent_also_cologne_rows": 2273,
+      "cologne_child_parent_outside_cologne_distinct_ids": 0,
+      "cologne_child_parent_outside_cologne_rows": 0,
+      "cologne_child_without_parent_rows": 0,
+      "cologne_prefix_child_stop_position_distinct_ids": 2273,
+      "cologne_prefix_child_stop_position_rows": 2273,
+      "cologne_prefix_parent_station_distinct_ids": 864,
+      "cologne_prefix_parent_station_rows": 864,
+      "non_cologne_child_parent_cologne_distinct_ids": 0,
+      "non_cologne_child_parent_cologne_rows": 0,
+      "orphan_parent_station_reference_distinct_values": 0,
+      "orphan_parent_station_reference_rows": 0
+    },
+    "scope_counts": {
+      "cologne_distinct_stop_ids": 3137,
+      "cologne_events_with_missing_trip_id": 0,
+      "cologne_events_with_unknown_trip_row": 0,
+      "cologne_internal_consecutive_segments": 1082490,
+      "cologne_internal_trips": 39566,
+      "cologne_parent_station_rows": 864,
+      "cologne_scheduled_stop_events": 1144295,
+      "cologne_serving_routes": 137,
+      "cologne_serving_trips": 61805,
+      "cologne_serving_trips_with_unknown_trip_row": 0,
+      "cologne_stop_position_rows": 2273,
+      "cologne_stop_rows": 3137,
+      "cross_boundary_cologne_trips": 22239,
+      "cross_boundary_trips_with_internal_segments": 20633,
+      "percentage_cologne_serving_trips_cross_boundary": 35.982526,
+      "touch_only_cologne_trips": 1606,
+      "unresolved_stop_scope_trips": 0
+    },
+    "source_metadata": {
+      "archive_files": [
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        },
+        {
+          "compressed_bytes": "<TRUNCATED_DEPTH>",
+          "name": "<TRUNCATED_DEPTH>",
+          "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+        }
+      ],
+      "feed_info": {
+        "feed_end_date": "20261212",
+        "feed_lang": "de",
+        "feed_publisher_name": "VRS",
+        "feed_publisher_url": "http://www.vrs.de",
+        "feed_start_date": "20260902",
+        "feed_version": "VERSION__20260929_0106"
+      },
+      "network_request_count": 1,
+      "official_source_page_url": "https://www.vrs.de/fuer-unternehmen/open-data-service",
+      "optional_file_inventory": {
+        "calendar.txt": {
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "calendar_dates.txt": {
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "frequencies.txt": {
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "shapes.txt": {
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "transfers.txt": {
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        }
+      },
+      "retrieval_timestamp_utc": "2026-09-29T16:44:18Z",
+      "service_calendar": {
+        "calendar": {
+          "invalid_date_value_count": "<TRUNCATED_DEPTH>",
+          "max_end_date": "<TRUNCATED_DEPTH>",
+          "min_start_date": "<TRUNCATED_DEPTH>",
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "calendar_dates": {
+          "invalid_date_value_count": "<TRUNCATED_DEPTH>",
+          "max_date": "<TRUNCATED_DEPTH>",
+          "min_date": "<TRUNCATED_DEPTH>",
+          "present": "<TRUNCATED_DEPTH>",
+          "row_count": "<TRUNCATED_DEPTH>"
+        },
+        "earliest_service_calendar_date": "20260902",
+        "feed_end_date": "20261212",
+        "feed_start_date": "20260902",
+        "freshness_classification": "CURRENT_OR_OPERATIONALLY_RELEVANT",
+        "freshness_reason": "The reference date falls within the represented service/calendar validity",
+        "freshness_reference_date": "2026-09-29",
+        "invalid_date_value_count": 0,
+        "latest_service_calendar_date": "20261212"
+      },
+      "source_profile": "VRS Global-ID GTFS",
+      "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+      "zip_bytes": 35384459,
+      "zip_filename": "vrs-current.zip",
+      "zip_sha256": "ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0"
+    },
+    "status": "PASS"
+  },
   "stage_10_status": "NOT_STARTED",
   "stage_9_status": "BLOCKED",
   "summary_path": "docs/stages/09-source-backed-matching-summary.json",
-  "tiered50_activated": false
+  "tiered50_activated": false,
+  "vrs_snapshot": {
+    "approved_stage4_snapshot": {
+      "feed_end_date": "20261212",
+      "feed_start_date": "20260902",
+      "feed_version": "VERSION__20260928_0042",
+      "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+      "zip_sha256": "6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b"
+    },
+    "feed_end_date": "20261212",
+    "feed_publisher_name": "VRS",
+    "feed_publisher_url": "http://www.vrs.de",
+    "feed_start_date": "20260902",
+    "feed_version": "VERSION__20260929_0106",
+    "retrieval_timestamp_utc": "2026-09-29T16:44:18Z",
+    "same_as_approved_stage4_snapshot": false,
+    "snapshot_comparison": "CHANGED_OFFICIAL_SNAPSHOT_REVALIDATED_WITH_STAGE4_CONTRACT",
+    "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+    "zip_bytes": 35384459,
+    "zip_sha256": "ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0"
+  }
 }
