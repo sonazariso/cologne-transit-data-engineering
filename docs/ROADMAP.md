@@ -290,7 +290,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 and later stages remain **NOT STARTED**.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design and Stage 12 and later stages remain **NOT STARTED**.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -301,12 +301,22 @@ first/latest timing, NULL handling, PlannedBay/EstimatedBay evidence,
 non-causal Situation linkage, and repeat-refresh validation. Completion remains
 blocked because this checkout has no usable PostgreSQL/source-observation
 population and the current Stage 9 source-backed artifact contains zero HIGH
-rows. Stage 11 and later stages remain **NOT STARTED**.
+rows. Stage 11 is now closed as an approved design; Stage 12 and later stages
+remain **NOT STARTED**.
 
-## Stage 11 — Power BI Model
-Build only after a stable semantic layer. Review relationships, DAX, thresholds, terminology, executive reporting, drill-down, and data-quality context.
+## Stage 11 — Power BI Model — COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED
 
-## Stage 12 — 50-Station Selection
+The [Stage 11 semantic-model design](stages/11-power-bi-model-design.md) and
+[completion decision](stages/11-power-bi-model-completion-decision.md) approve
+the three subject areas, semantic table grains, single-direction relationship
+matrix, governed Date strategy, static VRS/canonical operational identity
+boundary, explicit DAX measure groups, estimated-delay threshold and NULL
+semantics, bay/Situation terminology, sampling and network-coverage language,
+and executive versus technical reporting boundaries. The future implementation
+contract is PBIP + TMDL + PBIR with Power BI Desktop binding and QA, but no
+Power BI artifact or Desktop execution is part of this stage.
+
+## Stage 12 — 50-Station Selection — NOT STARTED
 Re-evaluate and approve a defensible fixed monitoring panel and versioning policy.
 
 ## Stage 13 — Tiered Collector Readiness

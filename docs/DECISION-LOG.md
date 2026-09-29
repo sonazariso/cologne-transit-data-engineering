@@ -45,6 +45,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-039 | 2026-09-29 | Stage 9 acceptance-probe correction: adapt raw Stage 8 stop-event records before inspecting adapter-selected THIS scope, retain parser-versus-adapter diagnostics, and preserve separate Stage 4 reference/current VRS snapshot lineage | Bounded source-backed acceptance PASS; 60 observations and 51 core deterministic matches; Stage 10+ remain NOT STARTED |
 | D-040 | 2026-09-29 | Stage 9 evidence-integrity correction: serialize the live in-memory match decisions losslessly in the row-level JSONL, require semantic JSONL-to-summary reconciliation before PASS, and retain the current VRS snapshot/version/hash | Bounded source-backed acceptance PASS after one corrected live run; 60 rows, 53 established service dates, 51 core matches, 51 MEDIUM / 9 UNMATCHED, row-level integrity PASS; Stage 10+ remain NOT STARTED |
 | D-041 | 2026-09-29 | Stage 10 operational-fact contract: derive one deterministic outcome per approved HIGH-confidence canonical service event and service date, preserve explicit Stage 9 run/version lineage, first/latest and NULL timing semantics, PlannedBay/EstimatedBay evidence, and non-causal Situation linkage | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED. The current checkout has no usable PostgreSQL/source-observation population and the current Stage 9 evidence contains zero HIGH rows |
+| D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -734,3 +735,30 @@ all 17 Stage 4 revalidation checks. The approved Stage 4 reference snapshot
 separate; Stage 4 semantics were revalidated for the changed official feed.
 The exact run is retained in the Stage 9 summary/evidence artifacts. Stage 10
 and later stages remain **NOT STARTED**.
+
+## D-042 — Stage 11 Power BI Model Design
+
+Stage 11 approves a semantic-model design/contract for a non-technical
+operational and management audience. The design separates Static Schedule /
+Network Context, Operational Evidence, and Matching / Data Quality. It fixes
+the grain of each semantic table, uses one-to-many single-direction
+relationships, keeps Stage 6 pattern facts separate from date-expanded Daily
+Schedule output, and prohibits fact-to-fact, bidirectional, many-to-many, and
+unsafe text-ID relationships.
+
+The decision adopts one governed Date dimension with Auto Date/Time disabled,
+keeps VRS/static identities separate from Stage 9 canonical operational
+identities, and defines explicit DAX measures with explicit denominators and
+NULL behavior. Estimated timing remains estimated; the disconnected
+`Estimated Delay Threshold (Minutes)` parameter is an analytical `0..15`
+integer range with default `0`, not official punctuality policy. Bay evidence
+preserves Changed/Unchanged/Unknown, and Situation evidence remains associated
+and non-causal. Matching coverage uses all Stage 9 confidence outcomes and is
+not measured from the HIGH-only Stage 10 fact.
+
+The approved implementation contract is PBIP + TMDL + PBIR under source
+control, with Power BI Desktop required later for binding, refresh, render QA,
+interaction QA, and save round-trip validation. No PBIP/TMDL/PBIR/PBIX artifact,
+Power BI Desktop execution, PostgreSQL work, SQL execution, or data load was
+performed. Stage 10 retains its blocked runtime-validation status and Stage 12
+was not started.

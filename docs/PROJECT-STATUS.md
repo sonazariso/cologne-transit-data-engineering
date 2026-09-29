@@ -19,7 +19,7 @@
 | 8 | Small Realtime Pilot | COMPLETE |
 | 9 | Matching & Data Quality | COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS |
 | 10 | Operational Fact | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED |
-| 11 | Power BI Model | Not started |
+| 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | Not started |
 | 13 | Tiered Collector Readiness | Not started |
 | 14 | Controlled 50-Station Cutover | Not started |
@@ -315,8 +315,8 @@ current VRS snapshot
 `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b` remains
 separate; Stage 4 semantics, rather than historical exact row counts, were
 revalidated for the changed official feed. Railway Hbf remains unresolved and
-adjacent KVB complexes are not substituted. No Power BI model, 50-station
-selection, or Tiered50 activation has been started. Stage 10 has a corrected
+adjacent KVB complexes are not substituted. No Power BI runtime model or PBIP
+artifact, 50-station selection, or Tiered50 activation has been started. Stage 10 has a corrected
 source-controlled `dw.fact_operational_service_event` contract and semantic
 validator. Its current status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED** because this checkout has no usable
 PostgreSQL database or durable source-observation population. The current
@@ -325,6 +325,26 @@ Stage 10 validation is blocked rather than promoted from MEDIUM context.
 The exact probe result is retained in
 `stages/09-source-backed-matching-summary.json` and the sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`.
+
+### Stage 11 closeout
+
+- **Stage 11 — COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION
+  DEFERRED.** The [Power BI semantic-model design](stages/11-power-bi-model-design.md)
+  defines the Static Schedule / Network Context, Operational Evidence, and
+  Matching / Data Quality subject areas; exact table grains; single-direction
+  relationship rules; the governed Date dimension; the VRS/static versus
+  canonical operational identity boundary; explicit DAX measures and
+  denominators; estimated-delay threshold and NULL semantics; bay and
+  Situation terminology; sampling/coverage language; and executive versus
+  technical reporting boundaries.
+- The [Stage 11 completion decision](stages/11-power-bi-model-completion-decision.md)
+  records that no PBIP, TMDL, PBIR, PBIX, Power BI Desktop execution,
+  datasource binding, refresh, render QA, PostgreSQL work, SQL execution, or
+  data load occurred. The `powerbi/` directory contains the implementation
+  boundary README only.
+- Stage 10 remains **NOT COMPLETE — IMPLEMENTATION CORRECTED;
+  SOURCE/DATABASE VALIDATION BLOCKED**. Stage 12 — 50-Station Selection —
+  remains not started.
 
 ## Post-Stage-02 validation
 
