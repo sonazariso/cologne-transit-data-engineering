@@ -289,11 +289,15 @@ integrity reconciliation. The current VRS hierarchy passed all 17 Stage 4
 revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
-evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 and
-later stages remain **NOT STARTED**.
+evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 is now
+in progress under its own blocked validation gate; Stage 11 and later stages
+remain **NOT STARTED**.
 
-## Stage 10 — Operational Fact
-Approve fact grain, consolidation semantics, first/latest/actual timing semantics, NULL handling, platform evidence, situation evidence, and lineage.
+## Stage 10 — Operational Fact — IN PROGRESS; VALIDATION BLOCKED
+The source-controlled PostgreSQL fact contract covers the approved grain,
+consolidation semantics, first/latest timing, NULL handling, platform evidence,
+situation evidence, and lineage. Completion is blocked until the physical
+database and approved Stage 9 `wrk.vwCologneRealtimeTripMatch` input exist.
 
 ## Stage 11 — Power BI Model
 Build only after a stable semantic layer. Review relationships, DAX, thresholds, terminology, executive reporting, drill-down, and data-quality context.

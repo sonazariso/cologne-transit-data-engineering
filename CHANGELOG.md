@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Stage 10 operational-fact contract and semantic validator: the derived fact
+  uses the approved `(DateKey, ScheduledStopEventKey)` grain, deterministic
+  first/latest observation ordering, latest-row NULL timing semantics,
+  conservative platform evidence, non-causal situation-link evidence, exact
+  Stage 9 reconciliation checks, and repeat-refresh repeatability checks. The
+  stage remains incomplete because the current checkout has no physical
+  database, loaded source history, or approved Stage 9 operational-input view.
 - Stage 9 row-level evidence-integrity correction: audit fields are now
   serialized losslessly from the in-memory decisions, malformed/null/truncated
   decision artifacts are blocked by an explicit JSONL integrity gate, and seven
