@@ -17,7 +17,7 @@
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
 | 8 | Small Realtime Pilot | COMPLETE |
-| 9 | Matching & Data Quality | BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED |
+| 9 | Matching & Data Quality | COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
 | 12 | 50-Station Selection | Not started |
@@ -35,8 +35,7 @@
 - **Stage 3B — Collection Strategy & Cadence — COMPLETE — APPROVED DESIGN;
   ACTIVATION DEFERRED.**
 - **Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN;
-  Stage 9 implementation regression passes; source-backed acceptance remains
-  blocked.**
+  Stage 9 implementation regression and bounded source-backed acceptance pass.**
 - Stage 3 completion does not authorize production implementation,
   database/schema work, collector changes, scheduler changes, Power BI work,
   or the next project stage.
@@ -274,16 +273,17 @@ this hardening change; the future 50-station objective and `250,000` monthly
 quota are unchanged; Stage 13 retains production ownership; and Stage 9+
 implementation was not started at that hardening closeout point.
 
-### Stage 9 review correction and bounded acceptance probe — BLOCKED
+### Stage 9 review correction and bounded acceptance probe — COMPLETE
 
 The [Stage 9 matching and data-quality record](stages/09-matching-data-quality.md),
 the [offline matcher](../scripts/stage_09_matching_quality.py), the bounded
 [source-backed probe](../scripts/stage_09_source_backed_acceptance.py), and the
 [machine-readable evidence audit](stages/09-matching-data-quality-evidence.json)
 are now the current implementation/evidence authorities. The implementation
-regression is PASS, but the source-backed Stage 9 acceptance gate is BLOCKED:
-the probe reported `MDD_API_KEY: MISSING`, made `0` MDD attempts, and therefore
-did not obtain a date-compatible MDD-to-VRS static event population. Stage 9 provides:
+regression and bounded source-backed Stage 9 acceptance gate are PASS/COMPLETE:
+the corrected probe reported `MDD_API_KEY: PRESENT`, made exactly `3` bounded
+MDD attempts, and obtained a date-compatible MDD-to-VRS static event
+population. Stage 9 provides:
 
 - versioned, namespace-qualified canonical stop and line bridges;
 - stop-event-first date/time candidate generation with deterministic indexes;
@@ -300,17 +300,23 @@ did not obtain a date-compatible MDD-to-VRS static event population. Stage 9 pro
 - PostgreSQL DDL/index/view contracts under `sql/stage_09_matching_quality.sql`.
 
 The synthetic offline acceptance population passed with zero network requests
-and zero database connections, but it is regression evidence only. It includes
-known-good/ambiguous fixture events, missing service-date evidence, repeated
-observations, route-level alert context, timezone/DST boundaries, and the
-unresolved railway Köln Hbf bridge. Source-backed artifacts separately confirm
-the VRS scope/hierarchy, controlled MDD field presence, and bounded GTFS.de
-Neumarkt sequence equality; they do not establish MDD-to-VRS row-level
-matching. Railway Hbf remains unresolved and adjacent KVB complexes are not
-substituted. No operational fact, Power BI model, 50-station selection, or
-Tiered50 activation has been started. Stage 10 remains **NOT STARTED**. The exact
-probe result is retained in
-`stages/09-source-backed-matching-summary.json`.
+and zero database connections, and remains regression evidence only. The
+corrected bounded live run returned three HTTP 200 parseable responses with 20
+stop events each; all 60 raw records contained a THIS call and all 60 were
+retained after Stage 9 adaptation. It independently established 54 GTFS service
+dates and produced 51 core deterministic matches. The current VRS snapshot
+`VERSION__20260929_0106` / SHA-256
+`ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` passed all
+17 Stage 4 revalidation checks. The approved Stage 4 reference snapshot
+`VERSION__20260928_0042` / SHA-256
+`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b` remains
+separate; Stage 4 semantics, rather than historical exact row counts, were
+revalidated for the changed official feed. Railway Hbf remains unresolved and
+adjacent KVB complexes are not substituted. No operational fact, Power BI
+model, 50-station selection, or Tiered50 activation has been started. Stage 10
+remains **NOT STARTED**. The exact probe result is retained in
+`stages/09-source-backed-matching-summary.json` and the sanitized row-level
+evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 
 ## Post-Stage-02 validation
 
@@ -353,10 +359,10 @@ Existing GTFS-RT validation:
 | GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
 | GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
 | Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
-| Cross-source reconciliation and Cologne scope contract | **APPROVED CONTRACT** — Stage 9 regression implemented; source-backed acceptance blocked |
-| Stage 9 matching/data-quality foundation | **BLOCKED** — implementation regression PASS; source-backed core match population not established |
+| Cross-source reconciliation and Cologne scope contract | **APPROVED CONTRACT** — Stage 9 regression implemented; bounded source-backed acceptance PASS |
+| Stage 9 matching/data-quality foundation | **COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS** — 60 live observations; 51 core deterministic matches |
 | Stage 3 collection/cadence contract | **COMPLETE — APPROVED DESIGN** — activation deferred |
-| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — Stage 9 implementation regression passes; source-backed acceptance remains blocked |
+| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — Stage 9 implementation regression and bounded source-backed acceptance pass |
 | Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
 | Actual Delay KPI | **NOT APPROVED** |
 

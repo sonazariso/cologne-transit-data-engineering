@@ -45,7 +45,8 @@ MAX_MDD_HTTP_ATTEMPTS = 3
 MAX_STATIC_DOWNLOAD_BYTES = 200 * 1024 * 1024
 MAX_CANDIDATE_SERVICE_DATE_OFFSET_DAYS = 2
 SOURCE_BACKED_EVIDENCE_ORIGIN = "LIVE_MDD_AND_OFFICIAL_GTFS"
-SCRIPT_VERSION = "stage-09-source-backed-acceptance-1.0"
+SCRIPT_VERSION = "stage-09-source-backed-acceptance-1.1"
+ARTIFACT_MAX_ITEMS = 100
 SAMPLING_POLICY = "STAGE_09_SOURCE_BACKED_MAX_3_STATIONS_1_REQUEST"
 SAMPLING_ERA = "STAGE_09_SOURCE_BACKED_ACCEPTANCE"
 MAPPING_VERSION_PREFIX = "VRS_GTFS"
@@ -588,6 +589,82 @@ def _independent_service_date(
     return result
 
 
+def _request_context_key(request_context: Mapping[str, Any]) -> str:
+    """Return the stable key used to attach diagnostics to one MDD request."""
+
+    target_index = request_context.get("target_index")
+    if target_index is not None:
+        return str(target_index)
+    return str(
+        request_context.get("response_id")
+        or request_context.get("station")
+        or "UNKNOWN_REQUEST"
+    )
+
+
+def _raw_record_has_this_call(record: Mapping[str, Any]) -> bool:
+    """Inspect only the raw Stage 8 call rows for parser-level THIS evidence."""
+
+    calls = record.get("call_observations")
+    if not isinstance(calls, Sequence) or isinstance(calls, (str, bytes)):
+        return False
+    return any(
+        isinstance(call, Mapping)
+        and str(call.get("call_scope", "")).upper() == "THIS"
+        for call in calls
+    )
+
+
+def _prepare_preliminary_observations(
+    raw_bundle_rows: Sequence[Tuple[Mapping[str, Any], Mapping[str, Any]]],
+    *,
+    feed_timezone: str = FEED_TIMEZONE,
+) -> Tuple[
+    List[Tuple[Mapping[str, Any], Mapping[str, Any], stage9.SourceEventObservation]],
+    Dict[str, Dict[str, int]],
+]:
+    """Adapt raw Stage 8 rows before selecting the Stage 9 THIS-call population.
+
+    Stage 8 records contain scoped ``call_observations`` but no Stage 9
+    ``source_attributes``.  The adapter is therefore the only authority for
+    selecting THIS and for determining which rows enter source-backed
+    processing.  The returned preliminary observation is intentionally kept
+    alongside its raw record so the main loop can perform the required final
+    adaptation after independent GTFS service-date establishment.
+    """
+
+    prepared: List[
+        Tuple[Mapping[str, Any], Mapping[str, Any], stage9.SourceEventObservation]
+    ] = []
+    diagnostics: Dict[str, Dict[str, int]] = {}
+    for record, request_context in raw_bundle_rows:
+        request_key = _request_context_key(request_context)
+        counts = diagnostics.setdefault(
+            request_key,
+            {
+                "bundle_stop_event_count": int(request_context.get("bundle_stop_event_count") or 0),
+                "raw_stop_events_with_this_call_count": 0,
+                "adapted_stop_events_with_selected_this_count": 0,
+                "adapted_stop_events_missing_this_count": 0,
+            },
+        )
+        if _raw_record_has_this_call(record):
+            counts["raw_stop_events_with_this_call_count"] += 1
+
+        preliminary = stage9.adapt_stage8_stop_event(
+            record,
+            service_date=None,
+            feed_timezone=feed_timezone,
+        )
+        if preliminary.source_attributes.get("selected_call_scope") != "THIS":
+            counts["adapted_stop_events_missing_this_count"] += 1
+            continue
+
+        counts["adapted_stop_events_with_selected_this_count"] += 1
+        prepared.append((record, request_context, preliminary))
+    return prepared, diagnostics
+
+
 def _line_metrics(
     observations: Sequence[stage9.SourceEventObservation],
     decisions: Sequence[stage9.MatchDecision],
@@ -804,12 +881,28 @@ def _write_jsonl(path: Path, records: Sequence[Mapping[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as stream:
         for record in records:
-            stream.write(json.dumps(_json_value(record), ensure_ascii=False, sort_keys=True) + "\n")
+            stream.write(
+                json.dumps(
+                    _json_value(record, max_items=ARTIFACT_MAX_ITEMS),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                + "\n"
+            )
 
 
 def _write_summary(path: Path, summary: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(_json_value(summary), ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            _json_value(summary, max_items=ARTIFACT_MAX_ITEMS),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def source_backed_acceptance_status(
@@ -952,6 +1045,9 @@ def run_source_backed_acceptance(
                 "transport_failure_detail": result.failure_detail,
                 "parser_status": "NOT_ATTEMPTED",
                 "bundle_stop_event_count": 0,
+                "raw_stop_events_with_this_call_count": 0,
+                "adapted_stop_events_with_selected_this_count": 0,
+                "adapted_stop_events_missing_this_count": 0,
             }
             if result.http_status is not None and result.body:
                 stage8.raw_payload_secret_check(result.body, api_key)
@@ -1010,11 +1106,31 @@ def run_source_backed_acceptance(
             _write_summary(summary_path, summary)
             return summary
 
-        preliminary_observations = [
-            stage9.adapt_stage8_stop_event(record, service_date=None, feed_timezone=FEED_TIMEZONE)
-            for record, _context in raw_bundle_rows
-            if record.get("source_attributes", {}).get("selected_call_scope") == "THIS"
-        ]
+        prepared_rows, preparation_diagnostics = _prepare_preliminary_observations(raw_bundle_rows)
+        for request_context in request_contexts:
+            request_context.update(
+                preparation_diagnostics.get(
+                    _request_context_key(request_context),
+                    {
+                        "raw_stop_events_with_this_call_count": 0,
+                        "adapted_stop_events_with_selected_this_count": 0,
+                        "adapted_stop_events_missing_this_count": 0,
+                    },
+                )
+            )
+        for _record, request_context in raw_bundle_rows:
+            if isinstance(request_context, dict):
+                request_context.update(
+                    preparation_diagnostics.get(
+                        _request_context_key(request_context),
+                        {
+                            "raw_stop_events_with_this_call_count": 0,
+                            "adapted_stop_events_with_selected_this_count": 0,
+                            "adapted_stop_events_missing_this_count": 0,
+                        },
+                    )
+                )
+        preliminary_observations = [preliminary for _record, _context, preliminary in prepared_rows]
         if not preliminary_observations:
             blocker = "successful MDD bundles contained no selected THIS-call stop events"
             summary = _empty_blocked_summary(
@@ -1051,10 +1167,7 @@ def run_source_backed_acceptance(
         decisions: List[stage9.MatchDecision] = []
         independent_dates: List[Dict[str, Any]] = []
         record_context_index = 0
-        for record, request_context in raw_bundle_rows:
-            if record.get("source_attributes", {}).get("selected_call_scope") != "THIS":
-                continue
-            preliminary = stage9.adapt_stage8_stop_event(record, service_date=None, feed_timezone=FEED_TIMEZONE)
+        for record, request_context, preliminary in prepared_rows:
             date_evidence = _independent_service_date(preliminary, schedule)
             independent_dates.append(date_evidence)
             service_date = date_evidence.get("established_service_date")
@@ -1238,7 +1351,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         evidence_path=args.evidence_path.expanduser().resolve(),
         summary_path=args.summary_path.expanduser().resolve(),
     )
-    print(json.dumps(_json_value(summary), ensure_ascii=False, sort_keys=True, indent=2), flush=True)
+    print(
+        json.dumps(
+            _json_value(summary, max_items=ARTIFACT_MAX_ITEMS),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        ),
+        flush=True,
+    )
     return 0 if summary.get("source_backed_acceptance_status") == "PASS" else 2
 
 

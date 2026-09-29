@@ -349,6 +349,102 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         self.assertEqual(decision.match_confidence, stage9.MATCH_HIGH)
         self.assertTrue(decision.matched)
 
+    def test_source_backed_preparation_adapts_raw_this_call_before_filtering(self) -> None:
+        body = json.dumps(
+            {
+                "serviceDelivery": {
+                    "status": "OK",
+                    "stopEventResponse": {
+                        "stopEventResult": [
+                            {
+                                "resultId": "preparation-result-1",
+                                "stopEvent": {
+                                    "service": {
+                                        "operatingDayRef": {"value": "20260929"},
+                                        "lineRef": {"value": "mdd-line-18"},
+                                    },
+                                    "previousCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:00000"},
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:00:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                    "thisCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:11111"},
+                                                "stopSeqNumber": 7,
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:15:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                    "onwardCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:22222"},
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:30:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    },
+                }
+            }
+        ).encode("utf-8")
+        parsed = stage8.parse_response(body, "application/json")
+        bundle = stage8.build_bundle(
+            parsed=parsed,
+            response_id="preparation-response",
+            run_id="preparation-run",
+            observed_at="2026-09-29T08:00:00Z",
+        )
+        raw_record = bundle["stop_events"][0]
+
+        self.assertNotIn("source_attributes", raw_record)
+        self.assertTrue(
+            any(
+                call.get("call_scope") == "THIS"
+                for call in raw_record["call_observations"]
+            )
+        )
+        self.assertNotEqual(
+            raw_record.get("source_attributes", {}).get("selected_call_scope"),
+            "THIS",
+        )
+
+        prepared, diagnostics = stage9_source._prepare_preliminary_observations(
+            [
+                (
+                    raw_record,
+                    {"target_index": 0, "bundle_stop_event_count": len(bundle["stop_events"])},
+                )
+            ]
+        )
+
+        self.assertEqual(len(prepared), 1)
+        preliminary = prepared[0][2]
+        self.assertEqual(preliminary.source_attributes["selected_call_scope"], "THIS")
+        self.assertEqual(preliminary.scheduled_time, "2026-09-29T08:15:00Z[GMT]")
+        self.assertEqual(
+            diagnostics["0"],
+            {
+                "bundle_stop_event_count": 1,
+                "raw_stop_events_with_this_call_count": 1,
+                "adapted_stop_events_with_selected_this_count": 1,
+                "adapted_stop_events_missing_this_count": 0,
+            },
+        )
+
     def test_stage8_adapter_does_not_use_previous_or_onward_timing(self) -> None:
         record = {
             "record_type": "stop_event_observation",

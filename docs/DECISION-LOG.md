@@ -39,8 +39,10 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
 | D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Historical Stage 8 diagnostic gate; superseded by D-035 |
 | D-035 | 2026-09-29 | Stage 8 successful Hbf differential and bounded pilot closeout: A=200 at N5, B=200 at N20, unchanged V3/N20 contract, successful 343-request pilot, and corrected diagnostic metadata semantics | Stage 8 complete; Stage 9+ not started |
-| D-036 | 2026-09-29 | Stage 9 matching/data-quality foundation: versioned source-identity bridges, stop-event-first indexed matching, explicit ambiguity/coverage/lineage classifications, richer MDD identity retention, and offline regression validation | Implementation regression PASS; source-backed Stage 9 acceptance corrected to BLOCKED; collector activation, operational fact, Power BI, and Tiered50 decisions remain later |
-| D-037 | 2026-09-29 | Stage 9 review correction: synthetic fixtures are regression evidence only; source-backed acceptance requires a retained successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event population | Stage 9 BLOCKED pending source-backed core match population; Stage 10+ NOT STARTED |
+| D-036 | 2026-09-29 | Stage 9 matching/data-quality foundation: versioned source-identity bridges, stop-event-first indexed matching, explicit ambiguity/coverage/lineage classifications, richer MDD identity retention, and offline regression validation | Implementation regression PASS; source-backed Stage 9 acceptance initially BLOCKED; collector activation, operational fact, Power BI, and Tiered50 decisions remain later |
+| D-037 | 2026-09-29 | Stage 9 review correction: synthetic fixtures are regression evidence only; source-backed acceptance requires a retained successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event population | Historical gate definition; initial Stage 9 status BLOCKED pending source-backed core match population; Stage 10+ NOT STARTED |
+| D-038 | 2026-09-29 | Stage 9 ranking hardening and bounded acceptance probe | Historical initial probe BLOCKED at credential preflight; superseded by D-039 |
+| D-039 | 2026-09-29 | Stage 9 acceptance-probe correction: adapt raw Stage 8 stop-event records before inspecting adapter-selected THIS scope, retain parser-versus-adapter diagnostics, and preserve separate Stage 4 reference/current VRS snapshot lineage | Bounded source-backed acceptance PASS; 60 observations and 51 core deterministic matches; Stage 10+ remain NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -678,13 +680,12 @@ validity, ambiguity/static-scope classifications, and SQL semantic checks are
 implemented and regression-tested. The machine-readable audit is
 [`docs/stages/09-matching-data-quality-evidence.json`](stages/09-matching-data-quality-evidence.json).
 
-The source-backed gate is **BLOCKED**, not complete: the repository has
-supporting Stage 4/VRS, controlled MDD field-retention, and bounded GTFS.de
-Neumarkt evidence, but it does not retain a successful Stage 8 parser bundle
-plus an independently date-compatible MDD-to-VRS static event population.
-MDD-to-VRS line, direction, StopSeqNumber, endpoint, and cross-source
-disagreement conclusions therefore remain `NOT_EVALUATED` or supporting-only.
-Stage 10 and later stages remain **NOT STARTED**.
+At the time of this evidence-gate decision, the source-backed gate was
+**BLOCKED**, not complete: the repository had supporting Stage 4/VRS,
+controlled MDD field-retention, and bounded GTFS.de Neumarkt evidence, but no
+retained successful Stage 8 parser bundle plus independently date-compatible
+MDD-to-VRS static event population. The later bounded acceptance correction
+and run are recorded in D-039; Stage 10 and later stages remain **NOT STARTED**.
 
 ## D-038 — Stage 9 Ranking Hardening and Bounded Acceptance Probe
 
@@ -696,10 +697,38 @@ policies remain eligible to resolve a candidate tie. The SQL overlap-review
 view now detects overlapping effective ranges across different mapping versions
 and reports both versions, ranges, canonical targets, and the conflict flag.
 
-The bounded source-backed acceptance probe was invoked on 2026-09-29 with the
-three approved Cologne targets, but safe credential preflight returned
+The initial bounded source-backed acceptance probe was invoked on 2026-09-29
+with the three approved Cologne targets, but safe credential preflight returned
 `MDD_API_KEY: MISSING`. It made zero MDD attempts and did not download a VRS
-snapshot. Stage 9 therefore remains **BLOCKED**; the synthetic implementation
-regression remains **PASS**. The exact run status is retained in
+snapshot. That historical run remains **BLOCKED**; the exact initial status is
+retained in
 [`09-source-backed-matching-summary.json`](stages/09-source-backed-matching-summary.json).
 Stage 10 remains **NOT STARTED**, and Tiered50 was not activated.
+
+## D-039 — Stage 9 Acceptance-Probe Correction and Bounded Source-Backed Run
+
+The review identified that the acceptance probe was filtering raw Stage 8
+`stop_event_observation` records on the Stage 9-derived
+`source_attributes.selected_call_scope` field before the Stage 9 adapter had
+created that field. The correction makes the authoritative path explicit:
+Stage 8 `parse_response()` → `build_bundle()` → raw stop-event record →
+`adapt_stage8_stop_event()` → adapter-selected THIS call → independent GTFS
+service-date establishment → final Stage 9 adaptation and matching.
+
+The regression test uses the real Stage 8 parser and bundle shape and proves
+that the old raw filter rejects a record that the adapter correctly retains.
+The probe now records, per request, bundle stop-event count, raw records with a
+THIS call, adapted records with a selected THIS call, and adapted records
+missing THIS. One bounded live execution made three sequential HTTP 200 MDD
+requests with 20 records each; all 60 raw records had THIS and all 60 were
+retained after adaptation. The run established 54 GTFS service dates and 51
+core deterministic matches.
+
+The run used current official VRS feed `VERSION__20260929_0106` with SHA-256
+`ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0`. It passed
+all 17 Stage 4 revalidation checks. The approved Stage 4 reference snapshot
+`VERSION__20260928_0042` and SHA-256
+`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b` remains
+separate; Stage 4 semantics were revalidated for the changed official feed.
+The exact run is retained in the Stage 9 summary/evidence artifacts. Stage 10
+and later stages remain **NOT STARTED**.

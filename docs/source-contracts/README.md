@@ -7,8 +7,8 @@ gate. Stage 02A.1, Stage 02A.2, and Stage 02A.3 are completed.
 
 Current stage position: Stage 0 — **APPROVED**; Stage 1 — **APPROVED**;
 Stage 2 — **APPROVED**; Stage 3 — **COMPLETE** as a source-evidence,
-collection-design, and matching-design stage; Stage 9 — **BLOCKED —
-IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED**.
+collection-design, and matching-design stage; Stage 9 — **COMPLETE — APPROVED
+MATCHING & DATA QUALITY SEMANTICS**.
 
 ## Approved Stage 02 contract
 

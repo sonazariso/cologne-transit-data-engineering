@@ -272,23 +272,23 @@ The future 50-station objective is unchanged, Stage 13 retains ownership of
 future Tiered50 production result-limit/cadence/concurrency decisions, and at
 this Stage 8 closeout point Stage 9 remained not started.
 
-## Stage 9 — Matching & Data Quality — BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED ACCEPTANCE BLOCKED AT CREDENTIAL PREFLIGHT
+## Stage 9 — Matching & Data Quality — COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS
 
-The [Stage 9 implementation and validation record](stages/09-matching-data-quality.md)
+The [Stage 9 implementation and validation record](stages/09-matching-data-quality.md),
 the [offline matcher](../scripts/stage_09_matching_quality.py), and the
 [evidence artifact](stages/09-matching-data-quality-evidence.json) separate
 implementation regression from source-backed acceptance. The regression
 validates stop-event-first matching, explicit Stage 8 adapter projection,
 timezone/DST service-day alignment, mapping validity, ambiguity handling,
-scope handling, and lineage. The source-backed gate remains blocked because
-no successful Stage 8 parser bundle plus date-compatible MDD-to-VRS static
-event population is retained. The current VRS hierarchy and bounded GTFS.de
-Neumarkt sequence sample remain supporting evidence; railway Köln Hbf remains
-unresolved and no adjacent KVB identity is substituted. The new bounded
-source-backed probe made zero MDD attempts because its safe preflight reported
-`MDD_API_KEY: MISSING`; its exact result is in
-`stages/09-source-backed-matching-summary.json`. Stage 10 and later stages
-remain **NOT STARTED**.
+scope handling, and lineage. The corrected bounded source-backed gate passed
+after three sequential HTTP 200 MDD responses: 60 parsed/adapted observations
+were retained, 54 service dates were independently established, and 51 core
+deterministic matches were produced. The current VRS hierarchy passed all 17
+Stage 4 revalidation checks; railway Köln Hbf remains unresolved and no
+adjacent KVB identity is substituted. The exact run is in
+`stages/09-source-backed-matching-summary.json`, with sanitized row-level
+evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 and
+later stages remain **NOT STARTED**.
 
 ## Stage 10 — Operational Fact
 Approve fact grain, consolidation semantics, first/latest/actual timing semantics, NULL handling, platform evidence, situation evidence, and lineage.

@@ -7,25 +7,43 @@
       "stage3a_artifact": "stage03a-mdd-discovery.jsonl"
     },
     "source_backed_acceptance_probe": {
-      "evidence_artifact": null,
+      "evidence_artifact": "docs/stages/09-source-backed-matching-evidence.jsonl",
       "historical_supporting_evidence_does_not_substitute": true,
       "metrics": {
-        "ambiguity_count": "NOT_EVALUATED",
-        "confidence_counts": "NOT_EVALUATED",
+        "ambiguity_count": 3,
+        "confidence_counts": {
+          "HIGH": 0,
+          "LOW": 0,
+          "MEDIUM": 51,
+          "UNMATCHED": 9
+        },
         "data_quality_counts": "NOT_EVALUATED",
         "direction": "NOT_EVALUATED",
         "exact_scheduled_time_alignment_count": "NOT_EVALUATED",
-        "independently_established_service_date": "NOT_EVALUATED",
+        "independently_established_service_date": {
+          "count": 54,
+          "status_counts": {
+            "ESTABLISHED": 54,
+            "UNRESOLVED": 6
+          },
+          "unresolved_count": 6
+        },
         "operating_day_ref": "NOT_EVALUATED",
         "origin_destination": "NOT_EVALUATED",
         "route_line_identity": "NOT_EVALUATED",
-        "source_backed_observation_count": 0,
-        "stop_point_and_hierarchy": "NOT_EVALUATED",
+        "source_backed_observation_count": 60,
+        "stop_point_and_hierarchy": {
+          "exact_mdd_stoppointref_to_vrs_stop_count": 60,
+          "explicit_child_to_parent_hierarchy_count": 59,
+          "parent_fallback_used": false,
+          "suffix_stripping_used": false,
+          "unresolved_stop_identity_count": 0
+        },
         "stop_sequence": "NOT_EVALUATED"
       },
-      "observation_record_count": 0,
+      "observation_record_count": 60,
       "population_type": "BOUNDED_LIVE_MDD_AND_OFFICIAL_VRS_GTFS",
-      "status": "SUPPORTING_ONLY"
+      "status": "ACCEPTED"
     },
     "synthetic_unit_test": {
       "ambiguity_count": 1,
@@ -88,15 +106,17 @@
       "MDD StopSeqNumber to VRS stop_sequence mapping",
       "cross-source disagreement without an independently validated correlation basis"
     ],
-    "source_backed_core_matching": "BLOCKED",
-    "source_backed_core_matching_blocker": "usable MDD_API_KEY preflight was not available; no MDD HTTP attempt was made",
+    "source_backed_core_matching": "COMPLETE",
+    "source_backed_core_matching_blocker": null,
     "source_backed_evidence_origin": "LIVE_MDD_AND_OFFICIAL_GTFS",
-    "source_backed_row_level_artifact": null
+    "source_backed_row_level_artifact": "docs/stages/09-source-backed-matching-evidence.jsonl"
   },
-  "generated_at_utc": "2026-09-29T15:36:18Z",
+  "generated_at_utc": "2026-09-29T17:03:49Z",
   "implementation_regression_status": "PASS",
   "mapping_versions_used": {
-    "source_backed": [],
+    "source_backed": [
+      "VRS_GTFS|VERSION__20260929_0106"
+    ],
     "synthetic_fixture": [
       "2026-09-28"
     ]
@@ -109,30 +129,60 @@
   },
   "record_type": "stage_09_matching_data_quality_evidence",
   "service_date_operating_day_metrics": {
-    "independent_gtfs_service_date": "NOT_EVALUATED",
+    "independent_gtfs_service_date": {
+      "count": 54,
+      "status_counts": {
+        "ESTABLISHED": 54,
+        "UNRESOLVED": 6
+      },
+      "unresolved_count": 6
+    },
     "operating_day_ref": "NOT_EVALUATED"
   },
-  "source_backed_acceptance_status": "BLOCKED",
+  "source_backed_acceptance_status": "PASS",
   "source_backed_data_quality_counts": "NOT_EVALUATED",
-  "source_backed_decision_counts": "NOT_EVALUATED",
+  "source_backed_decision_counts": {
+    "HIGH": 0,
+    "LOW": 0,
+    "MEDIUM": 51,
+    "UNMATCHED": 9
+  },
   "source_backed_metrics": {
-    "ambiguity_count": "NOT_EVALUATED",
-    "confidence_counts": "NOT_EVALUATED",
+    "ambiguity_count": 3,
+    "confidence_counts": {
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 51,
+      "UNMATCHED": 9
+    },
     "data_quality_counts": "NOT_EVALUATED",
     "direction": "NOT_EVALUATED",
     "exact_scheduled_time_alignment_count": "NOT_EVALUATED",
-    "independently_established_service_date": "NOT_EVALUATED",
+    "independently_established_service_date": {
+      "count": 54,
+      "status_counts": {
+        "ESTABLISHED": 54,
+        "UNRESOLVED": 6
+      },
+      "unresolved_count": 6
+    },
     "operating_day_ref": "NOT_EVALUATED",
     "origin_destination": "NOT_EVALUATED",
     "route_line_identity": "NOT_EVALUATED",
-    "source_backed_observation_count": 0,
-    "stop_point_and_hierarchy": "NOT_EVALUATED",
+    "source_backed_observation_count": 60,
+    "stop_point_and_hierarchy": {
+      "exact_mdd_stoppointref_to_vrs_stop_count": 60,
+      "explicit_child_to_parent_hierarchy_count": 59,
+      "parent_fallback_used": false,
+      "suffix_stripping_used": false,
+      "unresolved_stop_identity_count": 0
+    },
     "stop_sequence": "NOT_EVALUATED"
   },
   "source_backed_row_level_evidence": {
-    "artifact": null,
-    "record_count": 0,
-    "required_fields_present": false
+    "artifact": "docs/stages/09-source-backed-matching-evidence.jsonl",
+    "record_count": 60,
+    "required_fields_present": true
   },
   "source_snapshots_and_versions": {
     "approved_stage4_snapshot": {
@@ -150,14 +200,257 @@
       "status": "UNRESOLVED_RAILWAY_HBF_IDENTITY"
     },
     "stage9_source_backed_run": {
-      "mdd_http_attempts": 0,
+      "mdd_http_attempts": 3,
       "raw_mdd_payloads_persisted": false,
-      "request_contexts": [],
-      "request_contract": null,
-      "run_id": null,
-      "stage4_revalidation": {}
+      "request_contexts": [
+        {
+          "adapted_stop_events_missing_this_count": 0,
+          "adapted_stop_events_with_selected_this_count": 20,
+          "application_error": false,
+          "bundle_stop_event_count": 20,
+          "content_type": "application/json;charset=UTF-8",
+          "elapsed_ms": 851.768,
+          "http_status": 200,
+          "parser_status": "PARSED",
+          "raw_stop_events_with_this_call_count": 20,
+          "request_timestamp_utc": "2026-09-29T17:02:53Z",
+          "requested_stop_point_ref": "de:05315:11201",
+          "response_id": "MDD_RESPONSE|c3cf708ed5ac602cccbbad3bd566c0d757adfb8d5bd3e0b2904619df2047cc0d",
+          "station": "Köln Hbf",
+          "target_index": 0,
+          "transport_failure": null,
+          "transport_failure_detail": null
+        },
+        {
+          "adapted_stop_events_missing_this_count": 0,
+          "adapted_stop_events_with_selected_this_count": 20,
+          "application_error": false,
+          "bundle_stop_event_count": 20,
+          "content_type": "application/json;charset=UTF-8",
+          "elapsed_ms": 750.236,
+          "http_status": 200,
+          "parser_status": "PARSED",
+          "raw_stop_events_with_this_call_count": 20,
+          "request_timestamp_utc": "2026-09-29T17:02:56Z",
+          "requested_stop_point_ref": "de:05315:11110",
+          "response_id": "MDD_RESPONSE|99a7817b9f443be79e81d0c22c8aec55d0e8f3dd2a5c39ab2be0315e0f503808",
+          "station": "Köln Heumarkt",
+          "target_index": 1,
+          "transport_failure": null,
+          "transport_failure_detail": null
+        },
+        {
+          "adapted_stop_events_missing_this_count": 0,
+          "adapted_stop_events_with_selected_this_count": 20,
+          "application_error": false,
+          "bundle_stop_event_count": 20,
+          "content_type": "application/json;charset=UTF-8",
+          "elapsed_ms": 807.13,
+          "http_status": 200,
+          "parser_status": "PARSED",
+          "raw_stop_events_with_this_call_count": 20,
+          "request_timestamp_utc": "2026-09-29T17:02:59Z",
+          "requested_stop_point_ref": "de:05315:11111",
+          "response_id": "MDD_RESPONSE|7d5e4f583b11c898bd00ba0e942c26c5ddda5263404b4b52152404824e49eac4",
+          "station": "Köln Neumarkt",
+          "target_index": 2,
+          "transport_failure": null,
+          "transport_failure_detail": null
+        }
+      ],
+      "request_contract": {
+        "include_onward_calls": true,
+        "include_previous_calls": true,
+        "include_realtime_data": true,
+        "number_of_results": 20,
+        "one_request_per_station": true,
+        "retries": 0,
+        "sequential": true,
+        "station_count_maximum": 3,
+        "stop_event_type": "arrival"
+      },
+      "run_id": "stage09-source-2c74ec88a73b4b6880d2384e8ec36880",
+      "stage4_revalidation": {
+        "acceptance_check_count": 17,
+        "failed_acceptance_checks": [],
+        "hierarchy": {
+          "cologne_child_parent_also_cologne_distinct_ids": 2273,
+          "cologne_child_parent_also_cologne_rows": 2273,
+          "cologne_child_parent_outside_cologne_distinct_ids": 0,
+          "cologne_child_parent_outside_cologne_rows": 0,
+          "cologne_child_without_parent_rows": 0,
+          "cologne_prefix_child_stop_position_distinct_ids": 2273,
+          "cologne_prefix_child_stop_position_rows": 2273,
+          "cologne_prefix_parent_station_distinct_ids": 864,
+          "cologne_prefix_parent_station_rows": 864,
+          "non_cologne_child_parent_cologne_distinct_ids": 0,
+          "non_cologne_child_parent_cologne_rows": 0,
+          "orphan_parent_station_reference_distinct_values": 0,
+          "orphan_parent_station_reference_rows": 0
+        },
+        "scope_counts": {
+          "cologne_distinct_stop_ids": 3137,
+          "cologne_events_with_missing_trip_id": 0,
+          "cologne_events_with_unknown_trip_row": 0,
+          "cologne_internal_consecutive_segments": 1082490,
+          "cologne_internal_trips": 39566,
+          "cologne_parent_station_rows": 864,
+          "cologne_scheduled_stop_events": 1144295,
+          "cologne_serving_routes": 137,
+          "cologne_serving_trips": 61805,
+          "cologne_serving_trips_with_unknown_trip_row": 0,
+          "cologne_stop_position_rows": 2273,
+          "cologne_stop_rows": 3137,
+          "cross_boundary_cologne_trips": 22239,
+          "cross_boundary_trips_with_internal_segments": 20633,
+          "percentage_cologne_serving_trips_cross_boundary": 35.982526,
+          "touch_only_cologne_trips": 1606,
+          "unresolved_stop_scope_trips": 0
+        },
+        "source_metadata": {
+          "archive_files": [
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            },
+            {
+              "compressed_bytes": "<TRUNCATED_DEPTH>",
+              "name": "<TRUNCATED_DEPTH>",
+              "uncompressed_bytes": "<TRUNCATED_DEPTH>"
+            }
+          ],
+          "feed_info": {
+            "feed_end_date": "20261212",
+            "feed_lang": "de",
+            "feed_publisher_name": "VRS",
+            "feed_publisher_url": "http://www.vrs.de",
+            "feed_start_date": "20260902",
+            "feed_version": "VERSION__20260929_0106"
+          },
+          "network_request_count": 1,
+          "official_source_page_url": "https://www.vrs.de/fuer-unternehmen/open-data-service",
+          "optional_file_inventory": {
+            "calendar.txt": {
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "calendar_dates.txt": {
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "frequencies.txt": {
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "shapes.txt": {
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "transfers.txt": {
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            }
+          },
+          "retrieval_timestamp_utc": "2026-09-29T17:01:13Z",
+          "service_calendar": {
+            "calendar": {
+              "invalid_date_value_count": "<TRUNCATED_DEPTH>",
+              "max_end_date": "<TRUNCATED_DEPTH>",
+              "min_start_date": "<TRUNCATED_DEPTH>",
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "calendar_dates": {
+              "invalid_date_value_count": "<TRUNCATED_DEPTH>",
+              "max_date": "<TRUNCATED_DEPTH>",
+              "min_date": "<TRUNCATED_DEPTH>",
+              "present": "<TRUNCATED_DEPTH>",
+              "row_count": "<TRUNCATED_DEPTH>"
+            },
+            "earliest_service_calendar_date": "20260902",
+            "feed_end_date": "20261212",
+            "feed_start_date": "20260902",
+            "freshness_classification": "CURRENT_OR_OPERATIONALLY_RELEVANT",
+            "freshness_reason": "The reference date falls within the represented service/calendar validity",
+            "freshness_reference_date": "2026-09-29",
+            "invalid_date_value_count": 0,
+            "latest_service_calendar_date": "20261212"
+          },
+          "source_profile": "VRS Global-ID GTFS",
+          "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+          "zip_bytes": 35384459,
+          "zip_filename": "vrs-current.zip",
+          "zip_sha256": "ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0"
+        },
+        "status": "PASS"
+      }
     },
-    "vrs_static": "NOT_EVALUATED"
+    "vrs_static": {
+      "approved_stage4_snapshot": {
+        "feed_end_date": "20261212",
+        "feed_start_date": "20260902",
+        "feed_version": "VERSION__20260928_0042",
+        "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+        "zip_sha256": "6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b"
+      },
+      "feed_end_date": "20261212",
+      "feed_publisher_name": "VRS",
+      "feed_publisher_url": "http://www.vrs.de",
+      "feed_start_date": "20260902",
+      "feed_version": "VERSION__20260929_0106",
+      "retrieval_timestamp_utc": "2026-09-29T17:01:13Z",
+      "same_as_approved_stage4_snapshot": false,
+      "snapshot_comparison": "CHANGED_OFFICIAL_SNAPSHOT_REVALIDATED_WITH_STAGE4_CONTRACT",
+      "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+      "zip_bytes": 35384459,
+      "zip_sha256": "ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0"
+    }
   },
   "stage_10_plus": {
     "actual_delay_approved": false,
@@ -165,7 +458,13 @@
     "stage_10_status": "NOT_STARTED",
     "tiered50_activation": false
   },
-  "stage_9_status": "BLOCKED",
+  "stage_9_status": "COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS",
   "static_coverage_classifications": "NOT_EVALUATED",
-  "stop_identity_and_hierarchy": "NOT_EVALUATED"
+  "stop_identity_and_hierarchy": {
+    "exact_mdd_stoppointref_to_vrs_stop_count": 60,
+    "explicit_child_to_parent_hierarchy_count": 59,
+    "parent_fallback_used": false,
+    "suffix_stripping_used": false,
+    "unresolved_stop_identity_count": 0
+  }
 }

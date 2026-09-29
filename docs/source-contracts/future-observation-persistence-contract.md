@@ -216,9 +216,10 @@ source rows and source namespaces, requires explicit sampling-policy/era
 lineage for matching decisions, records stop/line mapping versions and
 validated correlation basis separately from MDD and GTFS-RT observations, and
 does not create an operational outcome fact, synthesize `RecordedAtTime`, or
-activate a collector. Source-backed Stage 9 acceptance remains blocked until
-a successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event
-population are retained. See the
+activate a collector. The bounded source-backed Stage 9 acceptance is complete
+for the retained live evidence population: the run used the Stage 8 parser and
+bundle builder, the Stage 9 adapter, independent GTFS service-date
+establishment, and final matching. See the
 [Stage 9 implementation record](../stages/09-matching-data-quality.md) and
 [matching SQL contract](../../sql/stage_09_matching_quality.sql).
 
