@@ -332,16 +332,21 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   DEFERRED.** The [Power BI semantic-model design](stages/11-power-bi-model-design.md)
   defines the Static Schedule / Network Context, Operational Evidence, and
   Matching / Data Quality subject areas; exact table grains; single-direction
-  relationship rules; the governed Date dimension; the VRS/static versus
-  canonical operational identity boundary; explicit DAX measures and
-  denominators; estimated-delay threshold and NULL semantics; bay and
-  Situation terminology; sampling/coverage language; and executive versus
-  technical reporting boundaries.
+  relationship rules; the distinction between the semantic Scheduled Trip
+  projection and the physical Stage 6 scheduled facts; the governed Date
+  dimension; the VRS/static versus canonical operational identity boundary;
+  explicit DAX measures and denominators; service-date-scoped matching
+  coverage with separate missing-service-date evidence; estimated-delay
+  threshold and NULL semantics; bay and Situation terminology; and
+  sampling/coverage language with no unvalidated operational Sampling Era
+  slicer.
 - The [Stage 11 completion decision](stages/11-power-bi-model-completion-decision.md)
   records that no PBIP, TMDL, PBIR, PBIX, Power BI Desktop execution,
   datasource binding, refresh, render QA, PostgreSQL work, SQL execution, or
-  data load occurred. The `powerbi/` directory contains the implementation
-  boundary README only.
+  data load occurred. Sampling-era operational attribution remains deferred
+  pending validated Stage 9/10 lineage; until then, operational KPI pages must
+  constrain compatible era/time scope or show a coverage/methodology warning.
+  The `powerbi/` directory contains the implementation boundary README only.
 - Stage 10 remains **NOT COMPLETE — IMPLEMENTATION CORRECTED;
   SOURCE/DATABASE VALIDATION BLOCKED**. Stage 12 — 50-Station Selection —
   remains not started.

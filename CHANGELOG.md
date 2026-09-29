@@ -6,12 +6,16 @@
 - Stage 11 approved Power BI semantic-model design: separate static schedule,
   HIGH-only operational evidence, and all-confidence matching/data-quality
   subject areas; explicit table grains and single-direction relationships;
+  an explicit physical Stage 6 fact versus semantic Scheduled Trip boundary;
   governed Date strategy; static VRS versus canonical operational identity
   boundary; DAX measures with explicit denominators and NULL semantics;
-  estimated-delay threshold policy; bay/Situation terminology; sampling and
-  executive/technical reporting boundaries; and a deferred PBIP/TMDL/PBIR
-  implementation contract. No Power BI runtime artifacts or Desktop execution
-  were created; Stage 10 remains runtime-blocked and Stage 12 was not started.
+  service-date-scoped matching coverage with separate missing-service-date
+  evidence; estimated-delay threshold policy; bay/Situation terminology;
+  sampling and executive/technical reporting boundaries; and a deferred
+  PBIP/TMDL/PBIR implementation contract. Sampling Era is not an operational
+  KPI slicer until validated operational-event lineage exists. No Power BI
+  runtime artifacts or Desktop execution were created; Stage 10 remains
+  runtime-blocked and Stage 12 was not started.
 - Stage 10 operational-fact correction: the derived
   `dw.fact_operational_service_event` uses the canonical
   `(service_date, canonical_service_event_key)` grain, explicit

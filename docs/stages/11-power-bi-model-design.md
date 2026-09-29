@@ -117,7 +117,7 @@ preserve the stated grains and lineage.
 | Operational | `Dim Operational Mode` | Validated operational mode projection, when available | One validated operational mode assignment/version | It is separate from static `Dim Mode`; unresolved operational mode remains explicit. |
 | Operational | `Fact Operational Service Event` | `dw.fact_operational_service_event` | One consolidated outcome per `(service_date, canonical_service_event_key)` | HIGH Stage 9 associations only; latest NULL timing remains NULL; matching run/version is lineage, not an extra business grain. |
 | Data quality | `Dim Matching Run` | `ctl.matching_run` | One Stage 9 matching execution/version | Measures must select a run/version explicitly; no implicit latest-run union. |
-| Data quality | `Dim Sampling Era` | Sampling-policy/era lineage | One approved sampling policy/era | Historical eras remain distinguishable and are not silently pooled. |
+| Data quality | `Dim Sampling Era` | Sampling-policy/era lineage | One approved sampling policy/era | The current relationship is to matching/Data Quality evidence only where `SamplingEraKey` lineage is validated; it is not an operational KPI slicer until a validated operational-event projection exists. Historical eras remain distinguishable and are not silently pooled. |
 | Data quality | `Fact Matching Decision` | `core.source_event_match` | One matching decision for one source observation within one selected matching run/version | Contains all `HIGH`, `MEDIUM`, `LOW`, and `UNMATCHED` decisions plus method, classification, candidates, and mapping limitations. |
 | Data quality | `Fact Data Quality Issue` | `ctl.data_quality_issue` | One classified data-quality issue for one run/entity/evidence occurrence | Issue evidence is separate from matching-result counts. |
 | Parameter | `Param Estimated Delay Threshold` | Disconnected analytical parameter | One integer threshold option in the governed `0..15` range | Not source truth, provider policy, or an official punctuality threshold. |
@@ -168,9 +168,27 @@ relationships.
 | `Dim Matching Run[MatchingRunKey]` | `Fact Operational Service Event[MatchingRunKey]` | 1 → many, single | Technical lineage filter only; it does not change HIGH-only operational eligibility. |
 | `Dim Sampling Era[SamplingEraKey]` | `Fact Matching Decision[SamplingEraKey]` | 1 → many, single | Sampling-era coverage analysis. |
 
+The matrix intentionally has no relationship from `Dim Sampling Era` to `Fact
+Operational Service Event`. At present, `Dim Sampling Era` may filter matching
+and Data Quality evidence where validated lineage exists, including the
+explicit `Fact Matching Decision` relationship above. It must not be presented
+as an operational KPI slicer until a validated operational-event-to-sampling-
+era projection exists. A future governed projection or bridge may be added only
+after its grain, uniqueness, and lineage are validated. If one operational
+service event contains source observations crossing an era boundary, the
+implementation must not arbitrarily assign that event to one era.
+
+The approved semantic Scheduled Trip relationships are also deliberately
+distinct from physical fact joins. `Dim Scheduled Trip` is a dimension-like
+semantic projection of the Stage 6 physical `dw.fact_scheduled_trip` object.
+Its approved one-to-many, single-direction relationships to `Fact Scheduled
+Stop Event` and `Fact Daily Scheduled Trip` remain in force; they do not join
+the two physical Stage 6 facts directly.
+
 The following relationships are explicitly prohibited:
 
-- `Fact Scheduled Trip`/`Dim Scheduled Trip` directly to `Fact Scheduled Stop Event`;
+- a direct physical fact-to-fact relationship between the Stage 6 physical
+  `dw.fact_scheduled_trip` object and `dw.fact_scheduled_stop_event`;
 - `Bridge Service Date` directly to the pattern-level scheduled stop-event fact;
 - `Dim Operational Stop[canonical_stop_id]` directly to a VRS `stop_id`;
 - `Dim Operational Line[canonical_line_id]` directly to a VRS `route_id`;
@@ -178,6 +196,10 @@ The following relationships are explicitly prohibited:
 - any fact-to-fact relationship, bidirectional relationship, or accidental
   many-to-many relationship; and
 - any relationship discovered solely because text IDs look alike.
+
+Therefore, the semantic `Dim Scheduled Trip -> Fact Scheduled Stop Event` and
+`Dim Scheduled Trip -> Fact Daily Scheduled Trip` paths are approved, while no
+physical fact-to-fact or bidirectional relationship is introduced.
 
 The `Dim Feed Snapshot` links terminate at the bridge and static/date-expanded
 facts; the feed key is retained as lineage on the trip-pattern dimension but is
@@ -201,9 +223,15 @@ attributes where approved, day-of-week, day-of-week number, and weekend flag.
 - Operational filtering uses `Fact Operational Service Event[ServiceDate]`.
   `service_date` is the operational business date, not `ObservedAt`,
   `CapturedAt`, or a collector date.
-- Matching decisions use a validated service date when one exists. A missing
-  service date remains a data-quality outcome and is not derived from
-  `ObservedAt`.
+- Matching decisions use a validated service date when one exists. The active
+  `Dim Date` relationship therefore filters only decisions with a valid
+  `ServiceDate`; a missing service date remains a data-quality outcome and is
+  not derived from `ObservedAt`.
+- A Date-filtered matching population, including Date-filtered HIGH counts and
+  coverage, contains only decisions with a valid service date. Decisions
+  without a service date remain explicit Data Quality evidence outside that
+  date slice and must not silently disappear from the interpretation of
+  overall matching quality.
 - `Fact Data Quality Issue` has no active Date relationship in the base model;
   issue timestamps and feed-validity dates have multiple technical meanings
   and require an explicitly named inactive/technical measure if exposed later.
@@ -487,8 +515,42 @@ LOW Matches :=
 Unmatched Decisions :=
     CALCULATE ( [Matching Decisions], 'Fact Matching Decision'[MatchConfidence] = "UNMATCHED" )
 
+Matching Decisions Without Service Date :=
+    CALCULATE (
+        [Matching Decisions],
+        REMOVEFILTERS ( 'Dim Date' ),
+        KEEPFILTERS (
+            FILTER (
+                'Fact Matching Decision',
+                ISBLANK ( 'Fact Matching Decision'[ServiceDate] )
+            )
+        )
+    )
+
 HIGH Match Coverage % :=
     DIVIDE ( [HIGH Matches], [Matching Decisions] )
+
+Service-Date-Scoped HIGH Match Coverage % :=
+    DIVIDE (
+        CALCULATE (
+            [HIGH Matches],
+            KEEPFILTERS (
+                FILTER (
+                    'Fact Matching Decision',
+                    NOT ISBLANK ( 'Fact Matching Decision'[ServiceDate] )
+                )
+            )
+        ),
+        CALCULATE (
+            [Matching Decisions],
+            KEEPFILTERS (
+                FILTER (
+                    'Fact Matching Decision',
+                    NOT ISBLANK ( 'Fact Matching Decision'[ServiceDate] )
+                )
+            )
+        )
+    )
 
 Timing Unavailable Count :=
     CALCULATE (
@@ -513,17 +575,28 @@ Data Quality Issue Count :=
 | `MEDIUM Matches` | Same matching-decision grain | Filter `MatchConfidence = MEDIUM`; BLANK when none. | Contextual evidence; never promoted to the operational fact. |
 | `LOW Matches` | Same matching-decision grain | Filter `MatchConfidence = LOW`; BLANK when none. | Diagnostic evidence; not an operational KPI population. |
 | `Unmatched Decisions` | Same matching-decision grain | Filter `MatchConfidence = UNMATCHED`; BLANK when none. | Explicit unresolved/ambiguous/missing evidence; not zero operation. |
+| `Matching Decisions Without Service Date` | Same matching-decision grain | Counts NULL `ServiceDate`; deliberately removes the `Dim Date` filter because no service-date period can be assigned; BLANK when none. | Explicit missing-service-date Data Quality evidence; not attributable to a selected service-date period and never derived from `ObservedAt`. |
 | `HIGH Match Coverage %` | Same matching-decision grain | `HIGH Matches / Matching Decisions`; `DIVIDE` returns BLANK when no decisions. | Overall HIGH share of matching decisions; not operational-fact coverage. |
+| `Service-Date-Scoped HIGH Match Coverage %` | Same matching-decision grain | HIGH decisions with non-NULL `ServiceDate` / all decisions with non-NULL `ServiceDate`; `DIVIDE` returns BLANK when no valid-service-date decisions. | Explicit HIGH share among decisions with an established service date; not overall matching quality and not operational-fact coverage. |
 | `Timing Unavailable Count` | One latest estimated-delay value per operational fact row | Count of NULL latest estimated delay; BLANK when no rows. | Timing unavailable; not on-time or cancelled. |
 | `Bay Unknown Count` | One consolidated bay-evidence value per operational fact row | Same as `Bay Unknown Events`; BLANK when none. | Bay evidence unavailable; not unchanged. |
 | `Data Quality Issue Count` | One classified issue per run/entity/evidence occurrence | No denominator; BLANK when no issue rows. | Count of recorded quality issues; not a service-performance rate. |
 
 `HIGH Match Coverage %` uses every selected matching decision as its explicit
-denominator, including MEDIUM, LOW, and UNMATCHED. It never uses HIGH-only
-operational fact rows as an overall matching denominator. `MatchMethod`,
-`DataQualityClassification`, mapping version, source namespace, candidate
-evidence, and limitation codes remain fields for technical drill-down; they
-are not silently converted to a new confidence category.
+denominator, including MEDIUM, LOW, and UNMATCHED. With no Date filter, that
+population also includes decisions whose `ServiceDate` is NULL. Under a
+`Dim Date` filter, the active relationship excludes those NULL-service-date
+rows; use `Service-Date-Scoped HIGH Match Coverage %` when the report needs
+that scope to be explicit. `Matching Decisions Without Service Date` removes
+the Date filter deliberately so the missing-date population remains visible as
+Data Quality evidence, but it cannot be assigned to a service-date period.
+Report and tooltip language must state: **service-date-filtered matching
+coverage includes only decisions with a valid `ServiceDate`; decisions without
+a valid service date are excluded from that slice and are reported separately
+as Data Quality evidence.** `MatchMethod`, `DataQualityClassification`, mapping
+version, source namespace, candidate evidence, and limitation codes remain
+fields for technical drill-down; they are not silently converted to a new
+confidence category.
 
 ### 7.7 Disconnected threshold parameter
 
@@ -599,6 +672,11 @@ tooltips:
 3. **Matching coverage** — all Stage 9 source-event matching decisions and
    their confidence/quality outcomes.
 
+Any Date-filtered matching-coverage visual must use or be documented as
+service-date-scoped. It must warn that decisions without a valid service date
+are outside the Date slice and remain separately reported Data Quality
+evidence.
+
 ## 10. Sampling and network-scope language
 
 Operational report pages must use wording such as:
@@ -611,10 +689,22 @@ Operational report pages must use wording such as:
 
 The model must never imply that the monitored realtime sample equals the
 entire Cologne network. A station panel, bounded pilot, or historical sampling
-era is not a network-wide operational population. Sampling policy and era must
-remain available for filtering and displayed in technical context. Different
-cadences/eras must not be pooled into one KPI without an approved coverage
-methodology.
+era is not a network-wide operational population. `Dim Sampling Era` may
+currently filter matching/Data Quality evidence where validated lineage exists,
+but it is not an operational KPI slicer. The current relationship matrix does
+not relate it directly to `Fact Operational Service Event`; no such direct
+relationship may be added unless a validated Stage 9/10 operational-event-to-
+sampling-era projection supports it. A future governed projection/bridge must
+validate grain, uniqueness, and lineage, and must not arbitrarily assign an
+operational event whose source observations cross an era boundary.
+
+Operational KPI pages must not silently pool different sampling eras or
+cadences when that pooling can change interpretation. Until validated
+operational-era attribution exists, the report must either constrain
+operational KPI analysis to one compatible era/time period or show a clear
+coverage/methodology warning. Sampling era remains available in technical
+context and for matching/Data Quality filtering where the current lineage
+supports it.
 
 The executive report must show a prominent Data Quality/coverage warning when
 matching, timing, station, or source coverage is incomplete. It must not
@@ -626,7 +716,8 @@ publish a network-wide operational conclusion from a sampled station panel.
 
 The executive layer may emphasize:
 
-- selected period and the applicable sampling era;
+- selected period and, where supported, sampling-era context for
+  matching/Data Quality evidence;
 - observed operational-service-event count;
 - estimated timing coverage;
 - latest estimated-delay evidence using the selected analytical threshold;
@@ -634,7 +725,8 @@ The executive layer may emphasize:
 - bay-change evidence and bay-unknown count;
 - Situation-associated evidence;
 - scheduled Cologne network context; and
-- a prominent Data Quality/coverage warning.
+- a prominent Data Quality/coverage warning, including service-date and
+  sampling-era limitations.
 
 Executive cards must not expose unexplained `MatchMethod`, mapping-version,
 source-namespace, candidate-score, or raw observation fields as KPIs.
@@ -649,7 +741,8 @@ Technical pages may expose:
 - matching run/version and sampling policy/era;
 - candidate count/evidence and mapping limitations;
 - source evidence availability and NULL states; and
-- methodology/coverage notes.
+- service-date limitations, missing-service-date evidence, and methodology/
+  coverage notes.
 
 Technical detail is explanatory lineage. It does not turn a MEDIUM decision
 into an operational outcome or a Situation link into a cause.
@@ -689,6 +782,9 @@ The following remain deferred and are not silently assumed by this design:
 - live Stage 10 refresh/validation and any operational fact row population;
 - physical canonical-to-static identity projections where Stage 9 has not
   validated the mapping;
+- validated operational-event-to-sampling-era projection/bridge, including
+  grain, uniqueness, lineage, and crossing-era handling; until then,
+  `Dim Sampling Era` is not an operational KPI slicer;
 - Power BI datasource binding, refresh, report rendering, and interaction QA;
 - any Actual Physical Delay or confirmed actual on-time KPI;
 - cancellation inference and causal Situation attribution; and
@@ -700,7 +796,7 @@ The following remain deferred and are not silently assumed by this design:
 |---|---|
 | Static Schedule / Network, Operational Evidence, and Matching/Data Quality subject areas are explicit. | PASS |
 | Every approved semantic table has an exact grain. | PASS |
-| Relationships are one-to-many, single-direction, and free of fact-to-fact joins. | PASS |
+| Relationships are one-to-many and single-direction; the physical Stage 6 scheduled facts have no direct fact-to-fact join while the approved semantic `Dim Scheduled Trip` paths remain explicit. | PASS |
 | No bidirectional, accidental many-to-many, or automatic relationship design is approved. | PASS |
 | Static VRS identities and canonical operational identities are explicitly separated. | PASS |
 | One governed Date dimension, operational `service_date`, and no Auto Date/Time are explicit. | PASS |
@@ -710,7 +806,8 @@ The following remain deferred and are not silently assumed by this design:
 | Estimated-delay threshold policy is disconnected, `0..15`, default `0`, and not official punctuality. | PASS |
 | Bay semantics preserve Changed / Unchanged / Unknown. | PASS |
 | Situation semantics remain associated/non-causal. | PASS |
-| Sampling, coverage, and network-language limits are explicit. | PASS |
+| Sampling-era filtering is limited to validated matching/Data Quality lineage; operational KPI era attribution is deferred, cross-era pooling is constrained or warned, and monitored-sample/network-language limits are explicit. | PASS |
+| Date-filtered matching coverage is explicitly service-date-scoped; missing `ServiceDate` decisions have a separate evidence measure and warning. | PASS |
 | Executive and technical reporting boundaries are explicit. | PASS |
 | Future PBIP/TMDL/PBIR and Desktop validation requirements are documented without creating artifacts. | PASS |
 | Stage 10 runtime status remains unchanged and Stage 12 is not started. | PASS |
@@ -724,4 +821,6 @@ This approval authorizes the semantic design/contract only. It does not
 authorize PostgreSQL/runtime work, Power BI Desktop execution, PBIP/TMDL/PBIR
 creation, legacy-model copying, Stage 12, or any reinterpretation of
 estimated timing, bay evidence, Situation evidence, matching confidence, or
-network coverage.
+network coverage. The corrections in this revision clarify the existing
+semantic contract and do not alter the Stage 9/10 status or expose a deeper
+Stage 9/10 incompatibility.

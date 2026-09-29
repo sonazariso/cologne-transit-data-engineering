@@ -311,10 +311,18 @@ The [Stage 11 semantic-model design](stages/11-power-bi-model-design.md) and
 the three subject areas, semantic table grains, single-direction relationship
 matrix, governed Date strategy, static VRS/canonical operational identity
 boundary, explicit DAX measure groups, estimated-delay threshold and NULL
-semantics, bay/Situation terminology, sampling and network-coverage language,
-and executive versus technical reporting boundaries. The future implementation
-contract is PBIP + TMDL + PBIR with Power BI Desktop binding and QA, but no
-Power BI artifact or Desktop execution is part of this stage.
+semantics, bay/Situation terminology, service-date-scoped matching coverage
+with explicit missing-service-date evidence, sampling/network-coverage language,
+and executive versus technical reporting boundaries. `Dim Sampling Era` may
+currently filter matching/Data Quality evidence where lineage is validated, but
+it is not an operational KPI slicer and has no approved direct relationship to
+`Fact Operational Service Event`. A future operational-event projection or
+bridge requires validated grain, uniqueness, and lineage and must handle
+cross-era events without arbitrary assignment. Until then, operational KPI
+analysis must constrain compatible era/time scope or show a clear
+coverage/methodology warning. The future implementation contract is PBIP +
+TMDL + PBIR with Power BI Desktop binding and QA, but no Power BI artifact or
+Desktop execution is part of this stage.
 
 ## Stage 12 — 50-Station Selection — NOT STARTED
 Re-evaluate and approve a defensible fixed monitoring panel and versioning policy.

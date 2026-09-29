@@ -22,8 +22,15 @@ must:
 4. disable Power BI Auto Date/Time and use the governed Date dimension;
 5. create the explicit measures and disconnected estimated-delay threshold;
 6. keep HIGH-only operational evidence separate from all-confidence matching
-   and Data Quality decisions; and
-7. use Power BI Desktop for datasource binding, refresh, render QA,
+   and Data Quality decisions;
+7. use `Dim Sampling Era` for matching/Data Quality evidence only where
+   validated lineage exists; do not add an operational KPI relationship until
+   a governed operational-event projection/bridge has validated its grain,
+   uniqueness, and lineage, including events crossing era boundaries;
+8. label Date-filtered matching coverage as service-date-scoped and warn that
+   decisions without a valid service date remain separate Data Quality evidence;
+   and
+9. use Power BI Desktop for datasource binding, refresh, render QA,
    interaction QA, and save round-trip validation.
 
 Do not copy the legacy model or hand-edit generated Desktop-owned metadata

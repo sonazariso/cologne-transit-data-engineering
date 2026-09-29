@@ -743,8 +743,11 @@ operational and management audience. The design separates Static Schedule /
 Network Context, Operational Evidence, and Matching / Data Quality. It fixes
 the grain of each semantic table, uses one-to-many single-direction
 relationships, keeps Stage 6 pattern facts separate from date-expanded Daily
-Schedule output, and prohibits fact-to-fact, bidirectional, many-to-many, and
-unsafe text-ID relationships.
+Schedule output, explicitly distinguishes the semantic `Dim Scheduled Trip`
+projection from the physical Stage 6 scheduled-trip fact, and prohibits
+physical fact-to-fact, bidirectional, many-to-many, and unsafe text-ID
+relationships. The approved semantic `Dim Scheduled Trip` paths remain in the
+relationship matrix.
 
 The decision adopts one governed Date dimension with Auto Date/Time disabled,
 keeps VRS/static identities separate from Stage 9 canonical operational
@@ -753,8 +756,20 @@ NULL behavior. Estimated timing remains estimated; the disconnected
 `Estimated Delay Threshold (Minutes)` parameter is an analytical `0..15`
 integer range with default `0`, not official punctuality policy. Bay evidence
 preserves Changed/Unchanged/Unknown, and Situation evidence remains associated
-and non-causal. Matching coverage uses all Stage 9 confidence outcomes and is
-not measured from the HIGH-only Stage 10 fact.
+and non-causal. Date-filtered matching coverage is explicitly service-date-
+scoped; decisions without a valid service date remain separate Data Quality
+evidence and are never assigned a date from `ObservedAt`. Matching coverage
+uses all Stage 9 confidence outcomes and is not measured from the HIGH-only
+Stage 10 fact.
+
+`Dim Sampling Era` currently filters matching/Data Quality evidence only where
+validated lineage exists. It is not an operational KPI slicer and has no
+approved direct relationship to `Fact Operational Service Event`. A future
+governed operational-event projection or bridge requires validated grain,
+uniqueness, and lineage and must not arbitrarily assign an event whose source
+observations cross an era boundary. Until then, operational KPI analysis must
+constrain compatible era/time scope or show a clear coverage/methodology
+warning.
 
 The approved implementation contract is PBIP + TMDL + PBIR under source
 control, with Power BI Desktop required later for binding, refresh, render QA,
