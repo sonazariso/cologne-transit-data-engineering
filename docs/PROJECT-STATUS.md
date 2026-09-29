@@ -165,13 +165,23 @@ for the authoritative closeout record.
   and the separate bounded diagnostic exists at
   [scripts/stage_08_authorization_request_contract_diagnostic.py](../scripts/stage_08_authorization_request_contract_diagnostic.py).
 - The historical 2026-09-28 Stage 8 HTTP attempt returned `401` with the
-  sanitized supplier-access message that access to the data provider was not
-  enabled. This is preserved as current Stage 8 failure evidence; it does not
-  prove that the credential itself is invalid or that MDD is unusable.
+  The observed response was the German supplier-access message beginning
+  `Sie haben keinen Zugriff auf Daten diesen Datenlieferanten`. This is
+  preserved as current Stage 8 failure evidence; it does not prove that the
+  credential itself is invalid or that MDD is unusable.
 - The diagnostic execution available for this update reported only
   `MDD_API_KEY: MISSING`, so Controls A/B/C made zero HTTP requests. Its
   classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no request
   parameter change is evidence-supported and the full pilot was not started.
+  The runtime is now ready to automatically hand a permitted decision to the
+  same pilot path with an explicit effective station, `StopPointRef`,
+  `NumberOfResults`, and versioned sampling/request policy. Offline
+  validation covers Hbf/N20/V3, Hbf/N5, Heumarkt/N5, and the no-pilot branch.
+- The repository/Codex execution process did not inherit `MDD_API_KEY`. The
+  user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`;
+  these are different process environments, not contradictory claims. No
+  credential values were exposed or compared, and this does not establish
+  whether the separate Terminal credential is correct or incorrect.
 - The earlier missing-key preflight remains historical evidence in the
   [Stage 8 record](stages/08-small-realtime-pilot-blocked.md), not the current
   sole explanation for the later HTTP 401.

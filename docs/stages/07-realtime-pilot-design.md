@@ -753,12 +753,15 @@ implementation handoff is:
 Stage 8 execution, host-network access, runtime code, and any future
 PostgreSQL implementation are not part of this Stage 7 closeout.
 
-## 19.1 S40 authorization/request-contract diagnostic gate
+## 19.1 S40/S41 authorization/request-contract diagnostic gate
 
 The separate Stage 8 diagnostic is implemented at
 [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
 It is not the one-hour pilot and does not alter the V3 cadence, quota,
 persistence, parser, reconciliation, retention, or field-coverage contract.
+When a live branch permits the pilot, S41 passes one explicit effective
+configuration into the existing `run_pilot` path; the Hbf/N20/V3 values remain
+the defaults.
 It makes only the decision-tree requests required to distinguish current
 authorization from result-set breadth/provider access:
 
@@ -775,11 +778,25 @@ status, content type, elapsed time, byte count, sanitized provider error text,
 and parser parseability. The API-key value is never printed, logged, hashed,
 fingerprinted, compared, or persisted.
 
-The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
-message that access to the data provider was not enabled. The available
-2026-09-29 process could not run Control A because its presence-only preflight
-reported `MDD_API_KEY: MISSING`; therefore no differential result exists yet,
-the active V3/N20 design remains unchanged, and the pilot was not started.
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
+German response:
+
+`Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
+
+The available 2026-09-29 repository/Codex process could not run Control A
+because its presence-only preflight reported `MDD_API_KEY: MISSING`; therefore
+no differential result exists yet, the active V3/N20 design remains
+unchanged, and the pilot was not started. The user's separate local Terminal
+had previously reported `MDD_API_KEY: PRESENT`; these are different process
+environments, not contradictory claims, and this does not establish whether
+the separate Terminal credential is correct or incorrect.
+
+The S41 detector recognizes the German supplier-access evidence through
+normalized stable phrases as well as the existing English wording. A permitted
+decision selects Hbf/N20/V3, Hbf/N5 under a new policy, or Heumarkt/N5 under a
+separate new policy, and then invokes the same `run_pilot` path. The actual
+pilot creates its own fixed start-time `DepArrTime` anchor; diagnostic control
+timestamps are not reused.
 
 Only a live A=`200`, B=`401` response carrying the supplier-access message may
 supersede `NumberOfResults=20` with `5` for Stage 8, under a new versioned

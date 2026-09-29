@@ -227,3 +227,23 @@ objective remains unchanged, and Stage 9+ work was not started. The historical
 Stage 02 HTTP 200 remains historical evidence; current Stage 8 authorization
 is not proven until the diagnostic can run with the restored known working
 Legacy-equivalent credential.
+
+### Current Stage 8 implementation correction — S41
+
+The Stage 8 diagnostic now recognizes the observed German supplier-access
+response using normalized stable phrases as well as the existing English
+supplier-access wording. It still requires supplier-access evidence in the
+message and does not classify a generic HTTP `401` as that condition. Offline
+validation confirms that the exact observed German response sets
+`data_supplier_access_message=true` and selects
+`RESULT_SET_BREADTH_PROVIDER_ACCESS_INTERACTION` for A=`200`/B=`401`.
+
+The diagnostic now hands permitted decisions into the existing single
+`run_pilot` path with an explicit effective station, `StopPointRef`,
+`NumberOfResults`, and versioned sampling/request policy. The pilot creates a
+new fixed start-time `DepArrTime` anchor for itself; it never reuses a
+diagnostic control timestamp. No live controls or full pilot were executed in
+the repository/Codex process for this correction. That process did not inherit
+`MDD_API_KEY`; the user's separate local Terminal had previously reported it
+present. Those process/environment reports are not contradictory and do not
+establish whether the separate Terminal credential is correct or incorrect.

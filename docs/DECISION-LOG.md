@@ -539,11 +539,14 @@ and V2 policy decisions remain unchanged in the decision log.
 
 ## D-034 — Stage 8 Authorization/Request-Contract Diagnostic Gate
 
-The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
-provider message that access to the data provider was not enabled. This is
-preserved as current Stage 8 failure evidence and does not replace the earlier
-successful historical MDD request or prove that the current credential value is
-invalid.
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
+German provider message:
+
+`Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
+
+This is preserved as current Stage 8 failure evidence and does not replace the
+earlier successful historical MDD request or prove that the current credential
+value is invalid.
 
 The separate diagnostic at
 [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../scripts/stage_08_authorization_request_contract_diagnostic.py)
@@ -561,12 +564,21 @@ status, content type, elapsed time, response bytes, sanitized provider error
 text, and parser parseability. The API-key value is never printed, logged,
 hashed, fingerprinted, compared, or persisted.
 
-The available 2026-09-29 repository-process preflight reported only
+The available 2026-09-29 repository/Codex process preflight reported only
 `MDD_API_KEY: MISSING`, so no control request was executed. The resulting
 classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no Stage 8 request
-parameter changed and the full pilot was not started. A later authorized host
-run must restore/reload the known working Legacy-equivalent credential before
-running the decision tree.
+parameter changed and the full pilot was not started. The user's separate
+local Terminal had previously reported `MDD_API_KEY: PRESENT`; these are
+different process environments, not contradictory claims. The repository
+process did not inherit the credential, so the live decision tree was not
+executed; this does not establish whether the separate Terminal credential is
+correct or incorrect.
+
+The S41 implementation now recognizes the German supplier-access evidence via
+normalized stable phrases as well as the existing English wording. A permitted
+decision is handed to the same `run_pilot` path with an explicit effective
+station, stop identity, result count, and versioned sampling/request policy;
+the actual pilot creates its own fixed start-time `DepArrTime` anchor.
 
 The conditional Stage 8 policy decision is fixed by evidence, not assumption:
 A=`200`, B=`200` preserves V3/N20; A=`200`, B=`401` with the supplier-access

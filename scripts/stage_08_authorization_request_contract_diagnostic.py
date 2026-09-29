@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -26,7 +27,7 @@ from typing import Any, Dict, Optional, Tuple
 import stage_08_mdd_realtime_pilot as pilot
 
 
-SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.0"
+SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.1"
 DIAGNOSTIC_POLICY = "MDD_STAGE_8_AUTH_REQUEST_CONTRACT_DIAGNOSTIC_V1"
 CONTROL_A_STATION = "Köln Hbf"
 CONTROL_A_STOP_POINT_REF = "de:05315:11201"
@@ -38,6 +39,11 @@ SUPPLIER_ACCESS_PATTERNS = (
     re.compile(r"access\s+to\s+(?:this|the|relevant)\s+data\s+provider\s+is\s+not\s+enabled", re.I),
     re.compile(r"data\s+(?:provider|supplier).*not\s+enabled", re.I),
     re.compile(r"(?:provider|supplier).*access.*not\s+enabled", re.I),
+)
+GERMAN_SUPPLIER_ACCESS_PATTERNS = (
+    re.compile(r"keinen\s+zugriff\s+auf\s+daten"),
+    re.compile(r"datenlieferanten"),
+    re.compile(r"weitere\s+datenlieferanten\s+freischalten"),
 )
 ERROR_FIELD_NAMES = {
     "error",
@@ -101,7 +107,15 @@ def provider_error_text(
 def contains_supplier_access_message(text: Optional[str]) -> bool:
     if not text:
         return False
-    return any(pattern.search(text) for pattern in SUPPLIER_ACCESS_PATTERNS)
+    normalized = " ".join(
+        unicodedata.normalize("NFKC", text).casefold().split()
+    )
+    if any(pattern.search(normalized) for pattern in SUPPLIER_ACCESS_PATTERNS):
+        return True
+    german_has_access_phrase = bool(GERMAN_SUPPLIER_ACCESS_PATTERNS[0].search(normalized))
+    german_has_supplier_phrase = bool(GERMAN_SUPPLIER_ACCESS_PATTERNS[1].search(normalized))
+    german_has_enable_phrase = bool(GERMAN_SUPPLIER_ACCESS_PATTERNS[2].search(normalized))
+    return (german_has_access_phrase and german_has_supplier_phrase) or german_has_enable_phrase
 
 
 def parse_control_response(
@@ -131,13 +145,18 @@ def run_control(
 ) -> Dict[str, Any]:
     """Execute exactly one control and persist only sanitized evidence."""
 
+    control_runtime_config = pilot.Stage8RuntimeConfig(
+        station=station,
+        stop_point_ref=stop_point_ref,
+        number_of_results=number_of_results,
+        sampling_policy=DIAGNOSTIC_POLICY,
+    )
     # Passing no anchor makes the shared transport use the same current UTC
     # timestamp for RequestTimestamp and DepArrTime, as required by S40.
     result = pilot.perform_http_request(
         api_key,
         None,
-        stop_point_ref=stop_point_ref,
-        number_of_results=number_of_results,
+        runtime_config=control_runtime_config,
     )
 
     raw_artifact_path: Optional[Path] = None
@@ -163,6 +182,7 @@ def run_control(
         "control": control_name,
         "station": station,
         "stop_point_ref": stop_point_ref,
+        "effective_runtime_config": pilot.runtime_config_record(control_runtime_config),
         "request_timestamp_utc": result.request_timestamp_utc,
         "dep_arr_time": result.request_timestamp_utc,
         "request_contract": {
@@ -172,6 +192,7 @@ def run_control(
             "trias_version": pilot.TRIAS_VERSION,
             "requestor_ref": pilot.REQUESTOR_REF,
             "number_of_results": number_of_results,
+            "sampling_policy": DIAGNOSTIC_POLICY,
             "stop_event_type": pilot.STOP_EVENT_TYPE,
             "include_previous_calls": pilot.INCLUDE_PREVIOUS_CALLS,
             "include_onward_calls": pilot.INCLUDE_ONWARD_CALLS,
@@ -209,61 +230,81 @@ def decision_for_controls(
 ) -> Dict[str, Any]:
     """Apply S40's decision tree without issuing any additional request."""
 
+    def decision(
+        *,
+        classification: str,
+        full_pilot_permitted: bool,
+        request_parameter_change: Optional[Dict[str, Any]],
+        runtime_config: Optional[pilot.Stage8RuntimeConfig] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "classification": classification,
+            "full_pilot_permitted": full_pilot_permitted,
+            "request_parameter_change": request_parameter_change,
+            "effective_runtime_config": (
+                pilot.runtime_config_record(runtime_config)
+                if runtime_config is not None
+                else None
+            ),
+        }
+
     control_a = controls.get("A")
     if control_a is None:
-        return {
-            "classification": "CONTROL_A_NOT_EXECUTED",
-            "full_pilot_permitted": False,
-            "request_parameter_change": None,
-        }
+        return decision(
+            classification="CONTROL_A_NOT_EXECUTED",
+            full_pilot_permitted=False,
+            request_parameter_change=None,
+        )
 
     status_a = control_a.get("http_status")
     if status_a == 200:
         control_b = controls.get("B")
         if control_b is None:
-            return {
-                "classification": "CONTROL_B_NOT_EXECUTED",
-                "full_pilot_permitted": False,
-                "request_parameter_change": None,
-            }
+            return decision(
+                classification="CONTROL_B_NOT_EXECUTED",
+                full_pilot_permitted=False,
+                request_parameter_change=None,
+            )
         status_b = control_b.get("http_status")
         if status_b == 200:
-            return {
-                "classification": "CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING",
-                "full_pilot_permitted": True,
-                "request_parameter_change": None,
-            }
+            return decision(
+                classification="CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING",
+                full_pilot_permitted=True,
+                request_parameter_change=None,
+                runtime_config=pilot.DEFAULT_RUNTIME_CONFIG,
+            )
         if status_b == 401 and control_b.get("data_supplier_access_message"):
-            return {
-                "classification": "RESULT_SET_BREADTH_PROVIDER_ACCESS_INTERACTION",
-                "full_pilot_permitted": True,
-                "request_parameter_change": {
+            return decision(
+                classification="RESULT_SET_BREADTH_PROVIDER_ACCESS_INTERACTION",
+                full_pilot_permitted=True,
+                request_parameter_change={
                     "parameter": "NumberOfResults",
                     "from": BASELINE_RESULT_COUNT,
                     "to": CONTROL_RESULT_COUNT,
                     "policy_action": "VERSION_STAGE_8_POLICY_BEFORE_PILOT",
                 },
-            }
-        return {
-            "classification": "CONTROL_B_NON_SUPPLIER_ACCESS_FAILURE_AFTER_A_200",
-            "full_pilot_permitted": False,
-            "request_parameter_change": None,
-        }
+                runtime_config=pilot.HBF_N5_RUNTIME_CONFIG,
+            )
+        return decision(
+            classification="CONTROL_B_NON_SUPPLIER_ACCESS_FAILURE_AFTER_A_200",
+            full_pilot_permitted=False,
+            request_parameter_change=None,
+        )
 
     if status_a == 401:
         control_c = controls.get("C")
         if control_c is None:
-            return {
-                "classification": "CONTROL_C_NOT_EXECUTED",
-                "full_pilot_permitted": False,
-                "request_parameter_change": None,
-            }
+            return decision(
+                classification="CONTROL_C_NOT_EXECUTED",
+                full_pilot_permitted=False,
+                request_parameter_change=None,
+            )
         status_c = control_c.get("http_status")
         if status_c == 200:
-            return {
-                "classification": "KOELN_HBF_OR_PROVIDER_PATH_SPECIFIC_AUTHORIZATION",
-                "full_pilot_permitted": True,
-                "request_parameter_change": {
+            return decision(
+                classification="KOELN_HBF_OR_PROVIDER_PATH_SPECIFIC_AUTHORIZATION",
+                full_pilot_permitted=True,
+                request_parameter_change={
                     "parameters": {
                         "station": {
                             "from": CONTROL_A_STATION,
@@ -280,24 +321,25 @@ def decision_for_controls(
                     },
                     "policy_action": "VERSION_STAGE_8_POLICY_BEFORE_PILOT",
                 },
-            }
+                runtime_config=pilot.HEUMARKT_N5_RUNTIME_CONFIG,
+            )
         if status_c == 401:
-            return {
-                "classification": "CURRENT_CREDENTIAL_OR_GENERAL_AUTHORIZATION_NOT_PROVEN",
-                "full_pilot_permitted": False,
-                "request_parameter_change": None,
-            }
-        return {
-            "classification": "CONTROL_C_NON_401_FAILURE_AFTER_A_401",
-            "full_pilot_permitted": False,
-            "request_parameter_change": None,
-        }
+            return decision(
+                classification="CURRENT_CREDENTIAL_OR_GENERAL_AUTHORIZATION_NOT_PROVEN",
+                full_pilot_permitted=False,
+                request_parameter_change=None,
+            )
+        return decision(
+            classification="CONTROL_C_NON_401_FAILURE_AFTER_A_401",
+            full_pilot_permitted=False,
+            request_parameter_change=None,
+        )
 
-    return {
-        "classification": control_a.get("existing_stage_8_failure_classification"),
-        "full_pilot_permitted": False,
-        "request_parameter_change": None,
-    }
+    return decision(
+        classification=control_a.get("existing_stage_8_failure_classification"),
+        full_pilot_permitted=False,
+        request_parameter_change=None,
+    )
 
 
 def run_diagnostic() -> Dict[str, Any]:
@@ -317,6 +359,9 @@ def run_diagnostic() -> Dict[str, Any]:
             "classification": "DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING",
             "full_pilot_permitted": False,
             "request_parameter_change": None,
+            "effective_runtime_config": None,
+            "stage_8_pilot_started": False,
+            "stage_8_pilot_summary": None,
             "evidence_directory": None,
             "evidence_retention": "NOT_CREATED",
         }
@@ -360,6 +405,16 @@ def run_diagnostic() -> Dict[str, Any]:
         evidence_writer.close()
 
     recorded_at = pilot.utc_now()
+    pilot_summary: Optional[Dict[str, Any]] = None
+    if decision.get("full_pilot_permitted"):
+        selected_config = pilot.runtime_config_from_record(
+            decision.get("effective_runtime_config")
+        )
+        if selected_config is None:  # pragma: no cover - defensive decision-tree guard
+            raise RuntimeError("pilot-permitted diagnostic decision had no runtime configuration")
+        # The actual pilot creates its own fixed-start anchor at its own start
+        # time.  The diagnostic controls' timestamps are never reused.
+        pilot_summary = pilot.run_pilot(selected_config)
     return pilot.sanitize_for_artifact(
         {
             "record_type": "stage_08_authorization_diagnostic_summary",
@@ -373,7 +428,8 @@ def run_diagnostic() -> Dict[str, Any]:
             "evidence_jsonl": str(evidence_path),
             "evidence_retention": "PENDING_MAX_24_HOURS",
             "evidence_retention_deadline_utc": pilot.iso_utc(recorded_at + timedelta(hours=24)),
-            "stage_8_pilot_started": False,
+            "stage_8_pilot_started": pilot_summary is not None,
+            "stage_8_pilot_summary": pilot_summary,
             "stage_9_or_later_work_performed": False,
         },
         api_key,

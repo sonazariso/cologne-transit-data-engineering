@@ -12,9 +12,12 @@ The Stage 8-specific runtime is implemented at
 [`scripts/stage_08_mdd_realtime_pilot.py`](../../scripts/stage_08_mdd_realtime_pilot.py).
 The separate authorization/request-contract diagnostic is implemented at
 [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
-It is constrained to the approved MDD/TRIAS Köln Hbf contract and contains no
+It is constrained to the approved MDD/TRIAS Stage 8 contract and contains no
 GTFS-RT, SQL, PostgreSQL, matching, operational-fact, Power BI, or later-stage
-implementation.
+implementation. The same pilot path can receive an explicit bounded runtime
+configuration when the differential diagnostic authorizes the Hbf/N5 or
+Heumarkt/N5 validation branch; the approved Hbf/N20/V3 configuration remains
+the default.
 
 ## Runtime correction status
 
@@ -31,8 +34,13 @@ lineage to diagnostic records; preserves structured Situation `Source` and
 `SourceType` evidence; retains structured `SituationFullRef` values with
 identity, scope, source path, and inline-resolution status; and carries
 sanitized aggregated parser-gap findings into the final runtime summary.
-These are Stage 8 runtime corrections only; the approved pilot policy and the
-Stage 8 pilot completion requirements remain unchanged.
+It also carries one effective runtime configuration containing the station,
+`StopPointRef`, `NumberOfResults`, and sampling/request policy through the
+actual request, response snapshot, collection-slot, termination/failure, and
+final-summary lineage. These are Stage 8 runtime corrections only; the
+approved V3 defaults and the Stage 8 pilot completion requirements remain
+unchanged unless the live diagnostic proves one of its explicit conditional
+branches.
 
 Cleanup now deletes the protected temporary directory after successful evidence
 extraction and parser-to-persistence reconciliation. If an actual HTTP pilot
@@ -72,16 +80,19 @@ unexecuted and Stage 8 is not complete.
 
 The later Stage 8 attempt must remain in the chronology rather than being
 rewritten as the earlier missing-key preflight. It received HTTP `401`. The
-sanitized provider message stated that access to this data provider was not
-enabled. The response does not, by itself, prove whether the cause is the
-current credential value, provider/data-supplier entitlement, or another
-authorization condition.
+observed provider response was:
+
+`Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
+
+The response does not, by itself, prove whether the cause is the current
+credential value, provider/data-supplier entitlement, or another authorization
+condition.
 
 This is current Stage 8 failure evidence, not a replacement for the earlier
 successful historical MDD controls and not a conclusion that MDD or the
 future 50-station plan is unusable.
 
-## S40 differential diagnostic implementation and available execution
+## S40 differential diagnostic and S41 handoff implementation
 
 The diagnostic uses only the following decision-tree requests, in order:
 
@@ -99,13 +110,25 @@ requests, disabled redirects, the existing 30-second timeout, and the shared
 TRIAS 1.2 request builder. The credential value is never printed, logged,
 hashed, fingerprinted, compared, or persisted.
 
-The repository-process execution available for this update reported only
+The repository/Codex execution process available for this update reported only
 `MDD_API_KEY: MISSING`. Therefore Controls A, B, and C were not executed, no
 diagnostic HTTP evidence was created, and the diagnostic result is
-`DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`. No evidence-supported Stage 8 request
-parameter change is authorized by that local preflight. The known working
-Legacy-equivalent credential must be restored/reloaded locally before the
-decision tree can run.
+`DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`. The user's separate local Terminal
+had previously reported `MDD_API_KEY: PRESENT`; these are different process
+environments, not contradictory claims, and no credential values were exposed
+or compared. The repository process did not inherit the credential, so the
+live A/B/C diagnostic was not executed; this does not establish whether the
+credential present in the separate Terminal is correct or incorrect.
+
+The S41 implementation now automatically invokes the same `run_pilot` path
+after a permitted live decision. A=`200`, B=`200` selects Köln Hbf,
+`de:05315:11201`, N20, and the existing V3 policy. A=`200`, B=`401` with a
+supplier-access message selects Hbf/N5 under
+`MDD_STAGE_8_KOELN_HBF_3S_60MIN_V4_N5_DIAGNOSTIC`. A=`401`, C=`200` selects
+Heumarkt, `de:05315:11110`, N5, under
+`MDD_STAGE_8_KOELN_HEUMARKT_3S_60MIN_V1_N5_DIAGNOSTIC`. A=`401`, C=`401`
+does not start the pilot. The actual pilot creates its own fixed start-time
+`DepArrTime` anchor; diagnostic control timestamps are never reused.
 
 The conditional decision remains explicit: only A=`200`, B=`401` with the
 sanitized supplier-access message can supersede `NumberOfResults=20` with `5`

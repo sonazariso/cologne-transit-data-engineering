@@ -121,10 +121,13 @@ not larger result-set breadth. At pilot start, select
 `DepArrTime` in every request; do not advance it with wall-clock time. A failed
 request is not retried in the same slot.
 
-The later 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
-provider message that access to the data provider was not enabled. It is
-preserved as current Stage 8 failure evidence rather than being rewritten as
-the earlier missing-key preflight. The separate
+The later 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
+German provider response:
+
+`Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
+
+It is preserved as current Stage 8 failure evidence rather than being
+rewritten as the earlier missing-key preflight. The separate
 [Stage 8 authorization/request-contract diagnostic](../../scripts/stage_08_authorization_request_contract_diagnostic.py)
 must run the bounded A/B/C decision tree before this pilot setting is changed.
 The available 2026-09-29 process reported `MDD_API_KEY: MISSING` before
@@ -132,7 +135,12 @@ Control A, so the documented Stage 8 setting remains 20 pending live
 differential evidence. If and only if A=`200` and B=`401` with the sanitized
 supplier-access message, Stage 8 may supersede 20 with 5 under a new versioned
 sampling/request policy; Stage 13 still owns the final production result-limit
-decision.
+decision. The detector accepts normalized stable German supplier-access phrases
+as well as the existing English wording and does not classify a generic `401`
+as supplier access. The repository/Codex process did not inherit the key; the
+user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`.
+These are different process environments, not contradictory claims, and do not
+establish whether the separate Terminal credential is correct or incorrect.
 
 ## Result count, HTTP requests, retries, and quota
 

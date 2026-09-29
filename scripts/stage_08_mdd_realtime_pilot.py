@@ -2,14 +2,15 @@
 """Stage 8 bounded MDD/TRIAS realtime pilot.
 
 This is a Stage-8-specific diagnostic runtime.  It makes only the approved
-MDD requests for Köln Hbf, uses a fixed pilot-start request anchor, and keeps
-temporary raw responses and append-only diagnostic JSONL outside the
-repository.  It does not use GTFS-RT, SQL, PostgreSQL, a production cadence,
-or a mutable latest-event store.
+MDD requests for the effective evidence-supported pilot target, uses a fixed
+pilot-start request anchor, and keeps temporary raw responses and append-only
+diagnostic JSONL outside the repository.  It does not use GTFS-RT, SQL,
+PostgreSQL, a production cadence, or a mutable latest-event store.
 
-The script intentionally has no cadence or station CLI switches: changing the
-approved Stage 8 contract must happen in the approved project documents, not
-at runtime.
+The script intentionally has no cadence or station CLI switches.  The
+diagnostic may pass an explicit, evidence-supported Stage 8 runtime
+configuration into the same run path; otherwise the approved V3 defaults are
+used.
 """
 
 from __future__ import annotations
@@ -35,15 +36,15 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from xml.sax.saxutils import escape as xml_escape
 
 
-SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.1"
+SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.2"
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
 MDD_API_KEY_ENV = "MDD_API_KEY"
-STATION = "Köln Hbf"
-STOP_POINT_REF = "de:05315:11201"
+DEFAULT_STATION = "Köln Hbf"
+DEFAULT_STOP_POINT_REF = "de:05315:11201"
 REQUESTOR_REF = "CologneTransitIntelligence"
 TRIAS_VERSION = "1.2"
 STOP_EVENT_TYPE = "arrival"
-NUMBER_OF_RESULTS = 20
+DEFAULT_NUMBER_OF_RESULTS = 20
 INCLUDE_PREVIOUS_CALLS = True
 INCLUDE_ONWARD_CALLS = True
 INCLUDE_REALTIME_DATA = True
@@ -52,7 +53,9 @@ RETRIES = 0
 SAMPLE_INTERVAL_SECONDS = 3
 MAX_DURATION_SECONDS = 60 * 60
 MAX_LOGICAL_SLOTS = 1200
-SAMPLING_POLICY = "MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3"
+DEFAULT_SAMPLING_POLICY = "MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3"
+HBF_N5_SAMPLING_POLICY = "MDD_STAGE_8_KOELN_HBF_3S_60MIN_V4_N5_DIAGNOSTIC"
+HEUMARKT_N5_SAMPLING_POLICY = "MDD_STAGE_8_KOELN_HEUMARKT_3S_60MIN_V1_N5_DIAGNOSTIC"
 PARSER_VERSION = "stage-08-mdd-parser-1.1"
 RAW_TEMP_PREFIX = "cologne-transit-stage-08-"
 MAX_RESPONSE_BYTES = 25 * 1024 * 1024
@@ -60,6 +63,80 @@ MAX_EXCERPT_CHARS = 1000
 MAX_ERROR_CHARS = 500
 
 SUCCESS_APPLICATION_STATUSES = {"ok", "success", "successful", "completed", "true"}
+
+
+@dataclass(frozen=True)
+class Stage8RuntimeConfig:
+    """Effective configuration for one bounded Stage 8 pilot run."""
+
+    station: str
+    stop_point_ref: str
+    number_of_results: int
+    sampling_policy: str
+
+    def __post_init__(self) -> None:
+        if not self.station.strip():
+            raise ValueError("Stage 8 station must not be empty")
+        if not self.stop_point_ref.strip():
+            raise ValueError("Stage 8 StopPointRef must not be empty")
+        if self.number_of_results <= 0:
+            raise ValueError("Stage 8 NumberOfResults must be positive")
+        if not self.sampling_policy.strip():
+            raise ValueError("Stage 8 sampling policy must not be empty")
+
+
+DEFAULT_RUNTIME_CONFIG = Stage8RuntimeConfig(
+    station=DEFAULT_STATION,
+    stop_point_ref=DEFAULT_STOP_POINT_REF,
+    number_of_results=DEFAULT_NUMBER_OF_RESULTS,
+    sampling_policy=DEFAULT_SAMPLING_POLICY,
+)
+HBF_N5_RUNTIME_CONFIG = Stage8RuntimeConfig(
+    station=DEFAULT_STATION,
+    stop_point_ref=DEFAULT_STOP_POINT_REF,
+    number_of_results=5,
+    sampling_policy=HBF_N5_SAMPLING_POLICY,
+)
+HEUMARKT_N5_RUNTIME_CONFIG = Stage8RuntimeConfig(
+    station="Köln Heumarkt",
+    stop_point_ref="de:05315:11110",
+    number_of_results=5,
+    sampling_policy=HEUMARKT_N5_SAMPLING_POLICY,
+)
+
+# These names remain as the approved V3 module defaults for callers that use
+# the request-builder helpers directly.  The actual pilot path uses the
+# explicit Stage8RuntimeConfig passed through run_pilot().
+STATION = DEFAULT_RUNTIME_CONFIG.station
+STOP_POINT_REF = DEFAULT_RUNTIME_CONFIG.stop_point_ref
+NUMBER_OF_RESULTS = DEFAULT_RUNTIME_CONFIG.number_of_results
+SAMPLING_POLICY = DEFAULT_RUNTIME_CONFIG.sampling_policy
+
+
+def runtime_config_record(config: Stage8RuntimeConfig) -> Dict[str, Any]:
+    """Return the non-secret effective configuration for artifact lineage."""
+
+    return {
+        "station": config.station,
+        "stop_point_ref": config.stop_point_ref,
+        "number_of_results": config.number_of_results,
+        "sampling_policy": config.sampling_policy,
+    }
+
+
+def runtime_config_from_record(
+    value: Optional[Dict[str, Any]],
+) -> Optional[Stage8RuntimeConfig]:
+    """Rebuild a runtime configuration from a previously selected record."""
+
+    if not value:
+        return None
+    return Stage8RuntimeConfig(
+        station=str(value["station"]),
+        stop_point_ref=str(value["stop_point_ref"]),
+        number_of_results=int(value["number_of_results"]),
+        sampling_policy=str(value["sampling_policy"]),
+    )
 
 SCOPE_NAMES = {
     "thiscall": "THIS",
@@ -840,9 +917,21 @@ def perform_http_request(
     api_key: str,
     pilot_anchor_dep_arr_time: Optional[str] = None,
     *,
-    stop_point_ref: str = STOP_POINT_REF,
-    number_of_results: int = NUMBER_OF_RESULTS,
+    runtime_config: Optional[Stage8RuntimeConfig] = None,
+    stop_point_ref: Optional[str] = None,
+    number_of_results: Optional[int] = None,
 ) -> HTTPResult:
+    effective_config = runtime_config or DEFAULT_RUNTIME_CONFIG
+    effective_stop_point_ref = (
+        effective_config.stop_point_ref
+        if stop_point_ref is None
+        else stop_point_ref
+    )
+    effective_number_of_results = (
+        effective_config.number_of_results
+        if number_of_results is None
+        else number_of_results
+    )
     request_timestamp = utc_now()
     request_timestamp_utc = trias_utc(request_timestamp)
     dep_arr_time = (
@@ -853,8 +942,8 @@ def perform_http_request(
     body = build_request_body(
         request_timestamp_utc,
         dep_arr_time,
-        stop_point_ref=stop_point_ref,
-        number_of_results=number_of_results,
+        stop_point_ref=effective_stop_point_ref,
+        number_of_results=effective_number_of_results,
     )
     request = Request(
         ENDPOINT,
@@ -2755,6 +2844,7 @@ def write_collection_slot(
     http_status: Optional[int] = None,
     elapsed_ms: Optional[float] = None,
     detail: Optional[str] = None,
+    runtime_config: Stage8RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ) -> None:
     store.append(
         "collection_slots",
@@ -2762,7 +2852,15 @@ def write_collection_slot(
             "record_type": "collection_slot",
             "parser_version": PARSER_VERSION,
             "pilot_run_id": run_id,
-            "sampling_policy": SAMPLING_POLICY,
+            "effective_runtime_config": runtime_config_record(runtime_config),
+            "station": runtime_config.station,
+            "requested_stop_identity": {
+                "station": runtime_config.station,
+                "stop_point_ref": runtime_config.stop_point_ref,
+            },
+            "requested_stop_point_ref": runtime_config.stop_point_ref,
+            "number_of_results": runtime_config.number_of_results,
+            "sampling_policy": runtime_config.sampling_policy,
             "scheduled_slot": slot_index,
             "scheduled_slot_utc": iso_utc(scheduled_at),
             "observed_at": iso_utc(request_timestamp) if request_timestamp else None,
@@ -2791,22 +2889,29 @@ def response_snapshot_record(
     parsed: Optional[ParsedResponse],
     parse_error: Optional[str],
     credential_content_check: str,
+    runtime_config: Stage8RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ) -> Dict[str, Any]:
     return {
         "record_type": "response_snapshot",
         "pilot_run_id": run_id,
-        "sampling_policy": SAMPLING_POLICY,
+        "effective_runtime_config": runtime_config_record(runtime_config),
+        "station": runtime_config.station,
+        "requested_stop_identity": {
+            "station": runtime_config.station,
+            "stop_point_ref": runtime_config.stop_point_ref,
+        },
+        "sampling_policy": runtime_config.sampling_policy,
         "response_id": response_id,
         "scheduled_slot": slot_index,
         "scheduled_slot_utc": iso_utc(scheduled_at),
         "request_timestamp": iso_utc(result.request_timestamp),
         "observed_at": observed_at,
         "pilot_anchor_dep_arr_time": pilot_anchor,
-        "requested_stop_point_ref": STOP_POINT_REF,
+        "requested_stop_point_ref": runtime_config.stop_point_ref,
         "effective_request_parameters": {
             "requestor_ref": REQUESTOR_REF,
             "stop_event_type": STOP_EVENT_TYPE,
-            "number_of_results": NUMBER_OF_RESULTS,
+            "number_of_results": runtime_config.number_of_results,
             "include_previous_calls": INCLUDE_PREVIOUS_CALLS,
             "include_onward_calls": INCLUDE_ONWARD_CALLS,
             "include_realtime_data": INCLUDE_REALTIME_DATA,
@@ -2893,7 +2998,10 @@ def terminal_status(
     return "COMPLETE"
 
 
-def run_pilot() -> Dict[str, Any]:
+def run_pilot(
+    runtime_config: Optional[Stage8RuntimeConfig] = None,
+) -> Dict[str, Any]:
+    effective_runtime_config = runtime_config or DEFAULT_RUNTIME_CONFIG
     api_key = os.environ.get(MDD_API_KEY_ENV)
     print("MDD_API_KEY: PRESENT" if api_key else "MDD_API_KEY: MISSING", flush=True)
     run_id = f"stage08-{uuid.uuid4().hex}"
@@ -2903,6 +3011,15 @@ def run_pilot() -> Dict[str, Any]:
             "script_version": SCRIPT_VERSION,
             "stage_8_status": "BLOCKED",
             "pilot_run_id": run_id,
+            "effective_runtime_config": runtime_config_record(effective_runtime_config),
+            "station": effective_runtime_config.station,
+            "requested_stop_identity": {
+                "station": effective_runtime_config.station,
+                "stop_point_ref": effective_runtime_config.stop_point_ref,
+            },
+            "requested_stop_point_ref": effective_runtime_config.stop_point_ref,
+            "number_of_results": effective_runtime_config.number_of_results,
+            "sampling_policy": effective_runtime_config.sampling_policy,
             "preflight": "MDD_API_KEY: MISSING",
             "planned_slots": MAX_LOGICAL_SLOTS,
             "attempted_http_requests": 0,
@@ -2910,9 +3027,24 @@ def run_pilot() -> Dict[str, Any]:
             "cleanup_result": "NOT_CREATED",
             "cleanup_pending": False,
             "cleanup_max_retention_hours": 24,
+            "request_contract": {
+                "requestor_ref": REQUESTOR_REF,
+                "stop_event_type": STOP_EVENT_TYPE,
+                "number_of_results": effective_runtime_config.number_of_results,
+                "include_previous_calls": INCLUDE_PREVIOUS_CALLS,
+                "include_onward_calls": INCLUDE_ONWARD_CALLS,
+                "include_realtime_data": INCLUDE_REALTIME_DATA,
+                "time_window": "OMITTED",
+                "include_operating_days": "OMITTED",
+                "timeout_seconds": REQUEST_TIMEOUT_SECONDS,
+                "retries": RETRIES,
+                "concurrency": "none",
+            },
             "unmapped_source_field_count": 0,
             "parser_gap_findings": [],
             "recorded_at_time_result": "RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT",
+            "stage_8_pilot_started": False,
+            "stage_9_or_later_work_performed": False,
         }
 
     directory: Optional[Path] = None
@@ -2944,6 +3076,7 @@ def run_pilot() -> Dict[str, Any]:
                     state="SKIPPED",
                     outcome="SCHEDULED_SLOT_SKIPPED_OVERLAP",
                     detail=detail,
+                    runtime_config=effective_runtime_config,
                 )
             except Exception:
                 metrics.persistence_failure_count += 1
@@ -2957,7 +3090,17 @@ def run_pilot() -> Dict[str, Any]:
                         "record_type": "pilot_termination",
                         "parser_version": PARSER_VERSION,
                         "pilot_run_id": run_id,
-                        "sampling_policy": SAMPLING_POLICY,
+                        "effective_runtime_config": runtime_config_record(
+                            effective_runtime_config
+                        ),
+                        "station": effective_runtime_config.station,
+                        "requested_stop_identity": {
+                            "station": effective_runtime_config.station,
+                            "stop_point_ref": effective_runtime_config.stop_point_ref,
+                        },
+                        "requested_stop_point_ref": effective_runtime_config.stop_point_ref,
+                        "number_of_results": effective_runtime_config.number_of_results,
+                        "sampling_policy": effective_runtime_config.sampling_policy,
                         "observed_at": iso_utc(utc_now()),
                         "terminated_after_slot": slot_index - 1,
                         "stop_reason": stop_reason,
@@ -2988,7 +3131,11 @@ def run_pilot() -> Dict[str, Any]:
                         break
                     continue
             scheduled_at = run_started + timedelta(seconds=slot_index * SAMPLE_INTERVAL_SECONDS)
-            result = perform_http_request(api_key, pilot_anchor)
+            result = perform_http_request(
+                api_key,
+                pilot_anchor,
+                runtime_config=effective_runtime_config,
+            )
             metrics.record_http_result(result)
             response_id: Optional[str] = None
             outcome: str
@@ -3052,6 +3199,7 @@ def run_pilot() -> Dict[str, Any]:
                         parsed=parsed,
                         parse_error=None,
                         credential_content_check="PASS",
+                        runtime_config=effective_runtime_config,
                     )
                     if application_error(parsed):
                         outcome = "MDD_APPLICATION_ERROR"
@@ -3096,6 +3244,7 @@ def run_pilot() -> Dict[str, Any]:
                             parsed=None,
                             parse_error=parse_error,
                             credential_content_check="PASS",
+                            runtime_config=effective_runtime_config,
                         )
                         try:
                             store.append("response_snapshots", snapshot)
@@ -3135,6 +3284,7 @@ def run_pilot() -> Dict[str, Any]:
                     parsed=error_body_parsed,
                     parse_error=error_body_parse_error,
                     credential_content_check="PASS",
+                    runtime_config=effective_runtime_config,
                 )
                 try:
                     store.append("response_snapshots", snapshot)
@@ -3162,6 +3312,7 @@ def run_pilot() -> Dict[str, Any]:
                     http_status=result.http_status,
                     elapsed_ms=round(result.elapsed_ms, 3),
                     detail=detail,
+                    runtime_config=effective_runtime_config,
                 )
             except Exception:
                 metrics.persistence_failure_count += 1
@@ -3216,7 +3367,17 @@ def run_pilot() -> Dict[str, Any]:
                         "record_type": "pilot_runtime_failure",
                         "parser_version": PARSER_VERSION,
                         "pilot_run_id": run_id,
-                        "sampling_policy": SAMPLING_POLICY,
+                        "effective_runtime_config": runtime_config_record(
+                            effective_runtime_config
+                        ),
+                        "station": effective_runtime_config.station,
+                        "requested_stop_identity": {
+                            "station": effective_runtime_config.station,
+                            "stop_point_ref": effective_runtime_config.stop_point_ref,
+                        },
+                        "requested_stop_point_ref": effective_runtime_config.stop_point_ref,
+                        "number_of_results": effective_runtime_config.number_of_results,
+                        "sampling_policy": effective_runtime_config.sampling_policy,
                         "observed_at": iso_utc(utc_now()),
                         "stop_reason": stop_reason,
                         "detail": clean_error(error, api_key),
@@ -3261,20 +3422,27 @@ def run_pilot() -> Dict[str, Any]:
         "record_type": "stage_08_summary",
         "script_version": SCRIPT_VERSION,
         "stage_8_status": status,
+        "stage_8_pilot_started": True,
         "pilot_run_id": run_id,
-        "station": STATION,
-        "requested_stop_point_ref": STOP_POINT_REF,
+        "effective_runtime_config": runtime_config_record(effective_runtime_config),
+        "station": effective_runtime_config.station,
+        "requested_stop_identity": {
+            "station": effective_runtime_config.station,
+            "stop_point_ref": effective_runtime_config.stop_point_ref,
+        },
+        "requested_stop_point_ref": effective_runtime_config.stop_point_ref,
+        "number_of_results": effective_runtime_config.number_of_results,
         "source": "MDD/TRIAS",
         "endpoint": ENDPOINT,
         "trias_version": TRIAS_VERSION,
-        "sampling_policy": SAMPLING_POLICY,
+        "sampling_policy": effective_runtime_config.sampling_policy,
         "pilot_started_at_utc": iso_utc(run_started),
         "pilot_ended_at_utc": iso_utc(run_ended),
         "pilot_anchor_dep_arr_time": pilot_anchor,
         "request_contract": {
             "requestor_ref": REQUESTOR_REF,
             "stop_event_type": STOP_EVENT_TYPE,
-            "number_of_results": NUMBER_OF_RESULTS,
+            "number_of_results": effective_runtime_config.number_of_results,
             "include_previous_calls": INCLUDE_PREVIOUS_CALLS,
             "include_onward_calls": INCLUDE_ONWARD_CALLS,
             "include_realtime_data": INCLUDE_REALTIME_DATA,

@@ -149,13 +149,16 @@ Current status facts:
 - Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
 - Historical Stage 02 controlled MDD authorization: **Working for that audited
   request**. Current Stage 8 authorization is **NOT PROVEN**: the latest
-  2026-09-28 Stage 8 attempt returned HTTP 401 with the sanitized message that
-  access to the data provider was not enabled, and the available S40
-  diagnostic process reported `MDD_API_KEY: MISSING` before Control A.
+  2026-09-28 Stage 8 attempt returned HTTP 401 with the observed German
+  supplier-access message, and the available S40/S41 diagnostic process
+  reported `MDD_API_KEY: MISSING` before Control A.
 - The S40 diagnostic is implemented at
   [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
-  Its available execution made zero diagnostic requests and authorized no
-  request-parameter change.
+  Its available repository/Codex execution made zero diagnostic requests and
+  authorized no request-parameter change. The user's separate local Terminal
+  had previously reported `MDD_API_KEY: PRESENT`; these are different process
+  environments, not contradictory claims, and do not establish whether that
+  separate credential is correct or incorrect.
 - Host DNS result: `NORMAL_RESOLVER_WORKS`.
 - Stage 02 technical audit baseline: **Complete under S14**; current Stage 02
   status: **Approved** after the S17 approval synchronization.

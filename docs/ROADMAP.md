@@ -224,14 +224,18 @@ reduces but cannot mathematically guarantee capture of a transient
 
 Stage 8 owns host execution of the approved MDD-only pilot. The runtime and
 the separate bounded authorization/request-contract diagnostic are implemented.
-The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the sanitized
-message that access to the data provider was not enabled. The diagnostic run
-available for the current repository process reported only
-`MDD_API_KEY: MISSING`, so Controls A/B/C made zero requests and no
-evidence-supported request-contract change was made. The pilot therefore
-remains incomplete: no successful response is available for raw → parser →
-diagnostic-persistence validation, reconciliation, field coverage, or
-`RecordedAtTime` measurement. See the [sanitized Stage 8 record](stages/08-small-realtime-pilot-blocked.md).
+The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
+German supplier-access message. The diagnostic run available for the current
+repository/Codex process reported only `MDD_API_KEY: MISSING`, so Controls
+A/B/C made zero requests and no evidence-supported request-contract change was
+made. The runtime is ready to hand a permitted live branch into the same pilot
+path with explicit effective station, stop identity, result count, and policy
+metadata; its approved Hbf/N20/V3 values remain the defaults. The pilot
+therefore remains incomplete: no successful response is available for raw →
+parser → diagnostic-persistence validation, reconciliation, field coverage,
+or `RecordedAtTime` measurement. The user's separate local Terminal had
+previously reported `MDD_API_KEY: PRESENT`; these are different process
+environments, not contradictory claims. See the [sanitized Stage 8 record](stages/08-small-realtime-pilot-blocked.md).
 Stage 9 remains not started and is not authorized by this blocker.
 
 ## Stage 9 — Matching & Data Quality
