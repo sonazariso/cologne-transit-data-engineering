@@ -7,8 +7,8 @@ gate. Stage 02A.1, Stage 02A.2, and Stage 02A.3 are completed.
 
 Current stage position: Stage 0 — **APPROVED**; Stage 1 — **APPROVED**;
 Stage 2 — **APPROVED**; Stage 3 — **COMPLETE** as a source-evidence,
-collection-design, and matching-design stage; Stage 9 — **COMPLETE —
-MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED**.
+collection-design, and matching-design stage; Stage 9 — **BLOCKED —
+IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED**.
 
 ## Approved Stage 02 contract
 
@@ -119,7 +119,7 @@ are recorded in the [Stage 9 matching/data-quality record](../stages/09-matching
 ## Cross-source reconciliation and Cologne scope guardrail
 
 The [Cross-Source Reconciliation Contract](cross-source-reconciliation-contract.md)
-is **APPROVED CONTRACT — STAGE 9 FOUNDATION IMPLEMENTED**. It makes the
+is **APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED**. It makes the
 GTFS-RT analytical scope Cologne-only even when the source feed is Germany-wide,
 requires validated canonical stop/line/service-event identity evidence, and
 prohibits direct equality between MDD `JourneyRef` and GTFS-RT `trip_id`.

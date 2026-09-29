@@ -1,6 +1,6 @@
 # Cross-Source Reconciliation Contract
 
-**Status:** `APPROVED CONTRACT — STAGE 9 FOUNDATION IMPLEMENTED; PRODUCTION ACTIVATION DEFERRED`<br>
+**Status:** `APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED; PRODUCTION ACTIVATION DEFERRED`<br>
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **COMPLETE**
 
@@ -12,7 +12,11 @@ implements the bounded matching/data-quality foundation in
 and [`scripts/stage_09_matching_quality.py`](../../scripts/stage_09_matching_quality.py).
 The Stage 9 implementation does not activate collectors, select Tiered50,
 build the Stage 10 operational fact, create Power BI pages, or make causal
-claims.
+claims. Its implementation regression passes, but the source-backed core
+acceptance gate remains blocked until a retained successful Stage 8 parser
+bundle can be replayed against a date-compatible MDD-to-VRS static event
+population. Supporting source evidence must not be presented as a completed
+cross-source match population.
 
 ## 1. Purpose
 
@@ -427,9 +431,11 @@ validates causality:
 ## 23. Cross-source agreement
 
 When MDD and GTFS-RT independently report compatible disruption context for
-the same HIGH-confidence canonical service event, Stage 9 records a bounded
-cross-source agreement through the canonical event. This remains evidence
-agreement, not causal confirmation.
+the same HIGH-confidence canonical service event, and an independently
+validated correlation basis associates the observations, Stage 9 records a
+bounded cross-source agreement through the canonical event. This remains
+evidence agreement, not causal confirmation. Nearby timestamps, equal-looking
+source identifiers, or route/stop proximity do not create that correlation.
 
 For example, an MDD construction-related Situation and a GTFS-RT trip alert
 with `cause = CONSTRUCTION` and `effect = SIGNIFICANT_DELAYS` provide stronger
@@ -451,6 +457,12 @@ GTFS-RT reported: Alert B
 
 One source must not overwrite, normalize away, or silently replace the other
 source's reported evidence.
+
+If no validated correlation group is retained, the correct result is
+`NOT_EVALUATED`, not `CROSS_SOURCE_DISAGREEMENT`. A disagreement may be
+recorded only when the validated correlation basis points the observations to
+conflicting canonical events; otherwise the source observations remain
+independent evidence.
 
 ## 25. Missingness semantics
 

@@ -4,7 +4,7 @@
 **Current status date:** `2026-09-29`
 **Historical pre-success attempt:** `2026-09-28` — HTTP `401`
 
-**Stage 9 status:** `NOT STARTED / NEXT`
+**Stage 9 status at this historical Stage 8 closeout:** `NOT STARTED / NEXT`
 
 This document retains the earlier blocked/preflight attempts as chronology. The
 current authoritative Stage 8 status is `COMPLETE`; the closeout evidence is
@@ -237,7 +237,9 @@ contract decision, completed the bounded pilot, reconciled successful
 responses, produced the required measurements, and cleaned up protected
 temporary artifacts. Stage 8 is therefore **COMPLETE**. The fixed 50-station
 objective, 250,000/month quota, and all other approved boundaries remain
-unchanged. Stage 9 and all later stages were not started or modified.
+unchanged. At this historical Stage 8 closeout point, Stage 9 and all later
+stages were not started or modified; the current Stage 9 status is maintained
+in the [Stage 9 record](09-matching-data-quality.md).
 
 ## Prospective post-Stage-8 hardening
 

@@ -39,7 +39,8 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
 | D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Historical Stage 8 diagnostic gate; superseded by D-035 |
 | D-035 | 2026-09-29 | Stage 8 successful Hbf differential and bounded pilot closeout: A=200 at N5, B=200 at N20, unchanged V3/N20 contract, successful 343-request pilot, and corrected diagnostic metadata semantics | Stage 8 complete; Stage 9+ not started |
-| D-036 | 2026-09-29 | Stage 9 matching/data-quality foundation: versioned source-identity bridges, stop-event-first indexed matching, explicit ambiguity/coverage/lineage classifications, richer MDD identity retention, and offline acceptance validation | Stage 9 complete; collector activation, operational fact, Power BI, and Tiered50 decisions remain later |
+| D-036 | 2026-09-29 | Stage 9 matching/data-quality foundation: versioned source-identity bridges, stop-event-first indexed matching, explicit ambiguity/coverage/lineage classifications, richer MDD identity retention, and offline regression validation | Implementation regression PASS; source-backed Stage 9 acceptance corrected to BLOCKED; collector activation, operational fact, Power BI, and Tiered50 decisions remain later |
+| D-037 | 2026-09-29 | Stage 9 review correction: synthetic fixtures are regression evidence only; source-backed acceptance requires a retained successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event population | Stage 9 BLOCKED pending source-backed core match population; Stage 10+ NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -657,12 +658,30 @@ the PostgreSQL 18 contract at
 [`sql/stage_09_matching_quality.sql`](../sql/stage_09_matching_quality.sql),
 and the regression suite at
 [`tests/test_stage_09_matching_quality.py`](../tests/test_stage_09_matching_quality.py).
-The approved Stage 4 baseline and a bounded known-good/ambiguous/unresolved
-population pass offline validation with zero network requests and zero database
-connections.
+The approved Stage 4 baseline and the bounded synthetic
+known-good/ambiguous/unresolved population pass offline regression with zero
+network requests and zero database connections. This is not source-backed
+closure evidence.
 
 The railway Köln Hbf GTFS.de identity remains unresolved. Adjacent KVB parent
 complexes are not substituted. Stage 9 does not create the operational fact,
 Actual Delay, Power BI model, final 50-station panel, production collector, or
 Tiered50 cutover. The future 50-station objective, 250,000-request ceiling,
 Stage 13 ownership, and Stage 8 historical chronology remain unchanged.
+
+## D-037 — Stage 9 Evidence-Gate Correction
+
+The Stage 9 review separates `implementation_regression_status` from
+`stage_9_evidence_status`. The parser-to-adapter-to-matcher path, timezone and
+service-day semantics, `OperatingDayRef` separation, versioned mapping
+validity, ambiguity/static-scope classifications, and SQL semantic checks are
+implemented and regression-tested. The machine-readable audit is
+[`docs/stages/09-matching-data-quality-evidence.json`](stages/09-matching-data-quality-evidence.json).
+
+The source-backed gate is **BLOCKED**, not complete: the repository has
+supporting Stage 4/VRS, controlled MDD field-retention, and bounded GTFS.de
+Neumarkt evidence, but it does not retain a successful Stage 8 parser bundle
+plus an independently date-compatible MDD-to-VRS static event population.
+MDD-to-VRS line, direction, StopSeqNumber, endpoint, and cross-source
+disagreement conclusions therefore remain `NOT_EVALUATED` or supporting-only.
+Stage 10 and later stages remain **NOT STARTED**.

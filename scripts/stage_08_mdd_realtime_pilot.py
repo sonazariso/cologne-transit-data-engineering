@@ -37,6 +37,8 @@ from xml.sax.saxutils import escape as xml_escape
 
 
 SCRIPT_VERSION = "stage-08-mdd-realtime-pilot-1.3"
+SOURCE_SYSTEM = "MDD_TRIAS"
+SOURCE_NAMESPACE = "VRS_GLOBAL_ID"
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
 MDD_API_KEY_ENV = "MDD_API_KEY"
 DEFAULT_STATION = "Köln Hbf"
@@ -665,9 +667,13 @@ def direct_named_entries(value: Any, names: Set[str]) -> List[Tuple[str, Any]]:
     return entries
 
 
-def named_source_values(value: Any, names: Set[str]) -> List[Tuple[str, Any]]:
+def named_source_values(
+    value: Any,
+    names: Set[str],
+    root_path: str = "$",
+) -> List[Tuple[str, Any]]:
     output: List[Tuple[str, Any]] = []
-    for path, key, child, _parent_path, _parent in iter_dict_entries(value):
+    for path, key, child, _parent_path, _parent in iter_dict_entries(value, root_path):
         if normalized_key(key) not in names:
             continue
         extracted = source_value(child)
@@ -676,8 +682,12 @@ def named_source_values(value: Any, names: Set[str]) -> List[Tuple[str, Any]]:
     return output
 
 
-def first_named_source(value: Any, names: Set[str]) -> Tuple[Optional[str], Any]:
-    values = named_source_values(value, names)
+def first_named_source(
+    value: Any,
+    names: Set[str],
+    root_path: str = "$",
+) -> Tuple[Optional[str], Any]:
+    values = named_source_values(value, names, root_path)
     return values[0] if values else (None, None)
 
 
@@ -1304,7 +1314,13 @@ def service_for_stop_event(stop_event: Any) -> Dict[str, Any]:
     return {}
 
 
-def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
+def context_identity(
+    service: Any,
+    stop_event: Any,
+    *,
+    service_path: str = "$",
+    stop_event_path: str = "$",
+) -> Dict[str, Any]:
     identity: Dict[str, Any] = {}
     for field_name, names in (
         ("operating_day_ref", {"operatingdayref"}),
@@ -1313,9 +1329,9 @@ def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
         ("direction_ref", {"directionref"}),
         ("operator_ref", {"operatorref"}),
     ):
-        _path, value = first_named_source(service, names)
+        _path, value = first_named_source(service, names, service_path)
         if value is None:
-            _path, value = first_named_source(stop_event, names)
+            _path, value = first_named_source(stop_event, names, stop_event_path)
         identity[field_name] = value
         identity[f"{field_name}_source_path"] = _path
     # Stage 9 matching may use these as candidate evidence, but none is
@@ -1332,9 +1348,9 @@ def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
         ("origins", {"origins"}),
         ("destinations", {"destinations"}),
     ):
-        field_path, value = first_named_source(service, names)
+        field_path, value = first_named_source(service, names, service_path)
         if value is None:
-            field_path, value = first_named_source(stop_event, names)
+            field_path, value = first_named_source(stop_event, names, stop_event_path)
         identity[field_name] = value
         identity[f"{field_name}_source_path"] = field_path
     for field_name, names in (
@@ -1342,7 +1358,7 @@ def context_identity(service: Any, stop_event: Any) -> Dict[str, Any]:
         ("rail_submode", {"railsubmode", "submode"}),
         ("published_line_name", {"publishedlinename"}),
     ):
-        _path, value = first_named_source(service, names)
+        _path, value = first_named_source(service, names, service_path)
         identity[field_name] = value
     return identity
 
@@ -1411,9 +1427,13 @@ def origin_destination(service: Any, root_path: str = "$") -> Dict[str, Any]:
     return output
 
 
-def timing_context_records(call_stop: Any, context_name: str) -> List[Dict[str, Any]]:
+def timing_context_records(
+    call_stop: Any,
+    context_name: str,
+    root_path: str = "$",
+) -> List[Dict[str, Any]]:
     output: List[Dict[str, Any]] = []
-    for path, key, child, _parent_path, _parent in iter_dict_entries(call_stop):
+    for path, key, child, _parent_path, _parent in iter_dict_entries(call_stop, root_path):
         if normalized_key(key) != context_name:
             continue
         for context_path, context_value in as_object_occurrences(child, path):
@@ -1485,21 +1505,22 @@ def call_record(
 ) -> Dict[str, Any]:
     call_stop = call_at_stop(call)
     call_stop = call_stop or {}
-    stop_ref_path, stop_ref = first_named_source(call_stop, {"stoppointref"})
-    stop_name_path, stop_name = first_named_source(call_stop, {"stoppointname"})
-    seq_path, stop_seq = first_named_source(call_stop, {"stopseqnumber"})
+    call_stop_path = f"{call_path}.callAtStop"
+    stop_ref_path, stop_ref = first_named_source(call_stop, {"stoppointref"}, call_stop_path)
+    stop_name_path, stop_name = first_named_source(call_stop, {"stoppointname"}, call_stop_path)
+    seq_path, stop_seq = first_named_source(call_stop, {"stopseqnumber"}, call_stop_path)
     flags: Dict[str, Any] = {}
     flag_paths: Dict[str, Any] = {}
     for source_name, canonical_name in OPERATIONAL_CALL_FIELDS.items():
-        path, value = first_named_source(call_stop, {source_name})
+        path, value = first_named_source(call_stop, {source_name}, call_stop_path)
         flags[canonical_name] = value
         flag_paths[canonical_name] = path
     timing: Dict[str, List[Dict[str, Any]]] = {
-        "arrival": timing_context_records(call_stop, "servicearrival"),
-        "departure": timing_context_records(call_stop, "servicedeparture"),
+        "arrival": timing_context_records(call_stop, "servicearrival", call_stop_path),
+        "departure": timing_context_records(call_stop, "servicedeparture", call_stop_path),
     }
-    planned_path, planned_bay = first_named_source(call_stop, {"plannedbay"})
-    estimated_path, estimated_bay = first_named_source(call_stop, {"estimatedbay"})
+    planned_path, planned_bay = first_named_source(call_stop, {"plannedbay"}, call_stop_path)
+    estimated_path, estimated_bay = first_named_source(call_stop, {"estimatedbay"}, call_stop_path)
     return {
         "record_type": "call_observation",
         "call_observation_id": f"{stop_event_id}|call|{call_scope}|{call_ordinal}",
@@ -1586,6 +1607,8 @@ def stop_event_record(
     result_path: str,
     result: Dict[str, Any],
     result_ordinal: int,
+    sampling_policy_id: Optional[str] = None,
+    sampling_era_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     result_id_value, result_id_path = result_id(result, result_path, result_ordinal)
     stop_event_path, stop_event_raw = direct_named_raw(result, {"stopevent"}, result_path)
@@ -1596,13 +1619,20 @@ def stop_event_record(
         stop_event_path or f"{result_path}.stopEvent",
     )
     service = service_raw if isinstance(service_raw, dict) else service_for_stop_event(stop_event)
-    identity = context_identity(service, stop_event)
+    identity = context_identity(
+        service,
+        stop_event,
+        service_path=service_path or f"{result_path}.stopEvent.service",
+        stop_event_path=stop_event_path or f"{result_path}.stopEvent",
+    )
     this_calls = scope_calls(stop_event, "thiscall", stop_event_path or f"{result_path}.stopEvent")
+    this_call_path = this_calls[0][0] if this_calls else None
     this_call_stop = call_at_stop(this_calls[0][1]) if this_calls else None
     this_call_stop = this_call_stop or {}
-    stop_ref_path, stop_ref = first_named_source(this_call_stop, {"stoppointref"})
-    seq_path, stop_seq = first_named_source(this_call_stop, {"stopseqnumber"})
-    arrival_timing = timing_context_records(this_call_stop, "servicearrival")
+    this_call_stop_path = f"{this_call_path}.callAtStop" if this_call_path else f"{result_path}.stopEvent.thisCall[0].callAtStop"
+    stop_ref_path, stop_ref = first_named_source(this_call_stop, {"stoppointref"}, this_call_stop_path)
+    seq_path, stop_seq = first_named_source(this_call_stop, {"stopseqnumber"}, this_call_stop_path)
+    arrival_timing = timing_context_records(this_call_stop, "servicearrival", this_call_stop_path)
     timetable = None
     if arrival_timing:
         timetable_values = arrival_timing[0].get("field_values", {}).get("TimetabledTime", [])
@@ -1620,9 +1650,17 @@ def stop_event_record(
     event_flags: Dict[str, Any] = {}
     event_flag_paths: Dict[str, Any] = {}
     for source_name, canonical_name in OPERATIONAL_EVENT_FIELDS.items():
-        path, value = first_named_source(stop_event, {source_name})
+        path, value = first_named_source(
+            stop_event,
+            {source_name},
+            stop_event_path or f"{result_path}.stopEvent",
+        )
         if value is None:
-            path, value = first_named_source(service, {source_name})
+            path, value = first_named_source(
+                service,
+                {source_name},
+                service_path or f"{result_path}.stopEvent.service",
+            )
         if canonical_name in event_flags and event_flags[canonical_name] is not None:
             continue
         event_flags[canonical_name] = value
@@ -1676,6 +1714,8 @@ def stop_event_record(
         }
     return {
         "record_type": "stop_event_observation",
+        "source_system": SOURCE_SYSTEM,
+        "source_namespace": SOURCE_NAMESPACE,
         "stop_event_observation_id": stop_event_id,
         **parser_lineage(
             pilot_run_id=run_id,
@@ -1683,6 +1723,8 @@ def stop_event_record(
             observed_at=observed_at,
         ),
         "response_id": response_id,
+        "sampling_policy_id": sampling_policy_id,
+        "sampling_era_id": sampling_era_id,
         "source_result_id": result_id_value,
         "source_result_id_path": result_id_path,
         "result_ordinal": result_ordinal,
@@ -1691,10 +1733,15 @@ def stop_event_record(
         "event_source_identity": event_identity,
         "stable_event_identity": stable_event_identity(identity, result_id_value),
         "operating_day_ref": identity.get("operating_day_ref"),
+        "operating_day_ref_source_path": identity.get("operating_day_ref_source_path"),
         "journey_ref": identity.get("journey_ref"),
+        "journey_ref_source_path": identity.get("journey_ref_source_path"),
         "line_ref": identity.get("line_ref"),
+        "line_ref_source_path": identity.get("line_ref_source_path"),
         "direction_ref": identity.get("direction_ref"),
+        "direction_ref_source_path": identity.get("direction_ref_source_path"),
         "operator_ref": identity.get("operator_ref"),
+        "operator_ref_source_path": identity.get("operator_ref_source_path"),
         "pt_mode": identity.get("pt_mode"),
         "rail_submode": identity.get("rail_submode"),
         "published_line_name": identity.get("published_line_name"),
@@ -2007,6 +2054,8 @@ def build_bundle(
     response_id: str,
     run_id: str,
     observed_at: str,
+    sampling_policy_id: Optional[str] = None,
+    sampling_era_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     stop_events: List[Dict[str, Any]] = []
     result_paths: List[Tuple[str, str]] = []
@@ -2019,6 +2068,8 @@ def build_bundle(
             result_path=result_path,
             result=result,
             result_ordinal=ordinal,
+            sampling_policy_id=sampling_policy_id,
+            sampling_era_id=sampling_era_id,
         )
         stop_events.append(record)
         result_paths.append((result_path, record["stop_event_observation_id"]))
@@ -3458,6 +3509,7 @@ def run_pilot(
                         response_id=response_id,
                         run_id=run_id,
                         observed_at=observed_at,
+                        sampling_policy_id=effective_runtime_config.sampling_policy,
                     )
                     successful_source_response = not application_error(parsed)
                     if successful_source_response and bundle_has_recorded_at_time(bundle):

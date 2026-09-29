@@ -53,9 +53,16 @@ CREATE TABLE IF NOT EXISTS ctl.data_quality_issue (
         'UNMATCHED',
         'MISSING_REQUIRED_IDENTITY',
         'STATIC_COVERAGE_GAP',
+        'STATIC_STOP_MISSING',
+        'STATIC_ROUTE_MISSING',
+        'STATIC_SERVICE_DATE_NOT_ACTIVE',
+        'STATIC_EVENT_NOT_FOUND',
         'SOURCE_IDENTITY_UNRESOLVED',
         'SOURCE_LINE_IDENTITY_UNRESOLVED',
         'SOURCE_LINE_DISAGREEMENT',
+        'IDENTITY_CONFLICT',
+        'AMBIGUOUS_MULTIPLE_CANDIDATES',
+        'INSUFFICIENT_EVIDENCE',
         'INVALID_SERVICE_DATE',
         'INVALID_SCHEDULE_TIME',
         'LINEAGE_INCOMPLETE',
@@ -83,6 +90,7 @@ CREATE TABLE IF NOT EXISTS core.canonical_stop (
     valid_to           date,
     evidence           jsonb NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE (mapping_version, canonical_stop_id),
+    UNIQUE (mapping_version, canonical_stop_key),
     CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
 );
 
@@ -101,6 +109,9 @@ CREATE TABLE IF NOT EXISTS core.canonical_stop_source_identity (
     valid_to                           date,
     evidence                           jsonb NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE (mapping_version, source_system, source_namespace, source_stop_id),
+    FOREIGN KEY (mapping_version, canonical_stop_key)
+        REFERENCES core.canonical_stop(mapping_version, canonical_stop_key),
+    CHECK (mapping_status <> 'VALIDATED' OR canonical_stop_key IS NOT NULL),
     CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
 );
 
@@ -116,6 +127,7 @@ CREATE TABLE IF NOT EXISTS core.canonical_line (
     valid_to           date,
     evidence           jsonb NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE (mapping_version, canonical_line_id),
+    UNIQUE (mapping_version, canonical_line_key),
     CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
 );
 
@@ -134,6 +146,9 @@ CREATE TABLE IF NOT EXISTS core.canonical_line_source_identity (
     valid_to                           date,
     evidence                           jsonb NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE (mapping_version, source_system, source_namespace, source_line_id),
+    FOREIGN KEY (mapping_version, canonical_line_key)
+        REFERENCES core.canonical_line(mapping_version, canonical_line_key),
+    CHECK (mapping_status <> 'VALIDATED' OR canonical_line_key IS NOT NULL),
     CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
 );
 
@@ -158,7 +173,8 @@ CREATE TABLE IF NOT EXISTS core.canonical_service_event (
     source_row_identity         text,
     sequence_signature          jsonb NOT NULL DEFAULT '[]'::jsonb,
     evidence                    jsonb NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (matching_version, feed_snapshot_key, canonical_service_event_id)
+    UNIQUE (matching_version, feed_snapshot_key, canonical_service_event_id),
+    UNIQUE (matching_version, canonical_service_event_key)
 );
 
 CREATE TABLE IF NOT EXISTS core.source_event_match (
@@ -168,7 +184,9 @@ CREATE TABLE IF NOT EXISTS core.source_event_match (
     source_system                text NOT NULL,
     source_namespace             text NOT NULL,
     source_event_identity        text,
-    source_observation_identity  text,
+    source_observation_identity  text NOT NULL CHECK (length(btrim(source_observation_identity)) > 0),
+    stop_mapping_version         text,
+    line_mapping_version         text,
     source_stop_id               text,
     source_line_id               text,
     source_trip_id               text,
@@ -187,9 +205,13 @@ CREATE TABLE IF NOT EXISTS core.source_event_match (
     collector_run_id               text,
     sampling_policy_id             text,
     sampling_era_id                text,
+    correlation_basis               text,
+    correlation_validated           boolean NOT NULL DEFAULT false,
     candidate_identifiers          jsonb NOT NULL DEFAULT '{}'::jsonb,
     source_paths                   jsonb NOT NULL DEFAULT '{}'::jsonb,
     canonical_service_event_key  bigint REFERENCES core.canonical_service_event(canonical_service_event_key),
+    FOREIGN KEY (matching_version, canonical_service_event_key)
+        REFERENCES core.canonical_service_event(matching_version, canonical_service_event_key),
     match_confidence             text NOT NULL CHECK (match_confidence IN ('HIGH', 'MEDIUM', 'LOW', 'UNMATCHED')),
     match_method                 text NOT NULL CHECK (match_method IN (
         'EXACT_STOP_DATE_TIME_DIRECTION',
@@ -199,13 +221,47 @@ CREATE TABLE IF NOT EXISTS core.source_event_match (
         'STOP_TIME_CONTEXT_ONLY',
         'UNMATCHED'
     )),
-    data_quality_classification  text NOT NULL,
+    data_quality_classification  text NOT NULL CHECK (data_quality_classification IN (
+        'VALIDATED_MATCH',
+        'CONTEXTUAL_MATCH',
+        'WEAK_CONTEXT_MATCH',
+        'AMBIGUOUS_MATCH',
+        'UNMATCHED',
+        'MISSING_REQUIRED_IDENTITY',
+        'STATIC_COVERAGE_GAP',
+        'STATIC_STOP_MISSING',
+        'STATIC_ROUTE_MISSING',
+        'STATIC_SERVICE_DATE_NOT_ACTIVE',
+        'STATIC_EVENT_NOT_FOUND',
+        'SOURCE_IDENTITY_UNRESOLVED',
+        'SOURCE_LINE_IDENTITY_UNRESOLVED',
+        'SOURCE_LINE_DISAGREEMENT',
+        'IDENTITY_CONFLICT',
+        'AMBIGUOUS_MULTIPLE_CANDIDATES',
+        'INSUFFICIENT_EVIDENCE',
+        'INVALID_SERVICE_DATE',
+        'INVALID_SCHEDULE_TIME',
+        'LINEAGE_INCOMPLETE',
+        'DUPLICATE_SOURCE_OBSERVATION',
+        'CROSS_SOURCE_DISAGREEMENT',
+        'OUT_OF_CORE_SCOPE'
+    )),
     candidate_count              integer NOT NULL CHECK (candidate_count >= 0),
     selected_score               integer,
     candidate_event_ids          jsonb NOT NULL DEFAULT '[]'::jsonb,
     evidence                     jsonb NOT NULL DEFAULT '{}'::jsonb,
     decided_at_utc               timestamptz NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE (matching_run_key, source_system, source_namespace, source_observation_identity)
+    UNIQUE (matching_run_key, source_system, source_namespace, source_observation_identity),
+    CHECK (
+        (match_confidence = 'UNMATCHED'
+         AND match_method = 'UNMATCHED'
+         AND canonical_service_event_key IS NULL)
+        OR
+        (match_confidence IN ('HIGH', 'MEDIUM', 'LOW')
+         AND match_method <> 'UNMATCHED'
+         AND canonical_service_event_key IS NOT NULL)
+    ),
+    CHECK (canonical_service_event_key IS NULL OR stop_mapping_version IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS core.source_event_match_candidate (
@@ -217,7 +273,8 @@ CREATE TABLE IF NOT EXISTS core.source_event_match_candidate (
     selected                        boolean NOT NULL DEFAULT false,
     rejection_reason                 text,
     evidence                         jsonb NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (source_event_match_key, candidate_rank)
+    UNIQUE (source_event_match_key, candidate_rank),
+    CHECK (NOT selected OR canonical_service_event_key IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS ix_core_canonical_service_event_lookup
@@ -239,6 +296,14 @@ CREATE INDEX IF NOT EXISTS ix_core_stop_source_identity_lookup
 CREATE INDEX IF NOT EXISTS ix_core_line_source_identity_lookup
     ON core.canonical_line_source_identity
        (mapping_version, source_system, source_namespace, source_line_id);
+
+CREATE INDEX IF NOT EXISTS ix_core_stop_source_identity_validity
+    ON core.canonical_stop_source_identity
+       (source_system, source_namespace, source_stop_id, mapping_version, valid_from, valid_to);
+
+CREATE INDEX IF NOT EXISTS ix_core_line_source_identity_validity
+    ON core.canonical_line_source_identity
+       (source_system, source_namespace, source_line_id, mapping_version, valid_from, valid_to);
 
 CREATE INDEX IF NOT EXISTS ix_core_source_event_match_review
     ON core.source_event_match
@@ -301,6 +366,10 @@ SELECT
     sem.source_namespace,
     sem.source_event_identity,
     sem.source_observation_identity,
+    sem.stop_mapping_version,
+    sem.line_mapping_version,
+    sem.correlation_basis,
+    sem.correlation_validated,
     sem.sampling_policy_id,
     sem.sampling_era_id,
     sem.canonical_service_event_key,
@@ -344,6 +413,49 @@ SELECT
 FROM core.canonical_service_event
 GROUP BY matching_version, feed_snapshot_key, service_date,
          canonical_stop_id, canonical_line_id, event_type;
+
+CREATE OR REPLACE VIEW wrk.v_identity_mapping_overlap_conflicts AS
+SELECT
+    'STOP'::text AS identity_type,
+    left_row.canonical_stop_source_identity_key AS left_identity_key,
+    right_row.canonical_stop_source_identity_key AS right_identity_key,
+    left_row.mapping_version,
+    left_row.source_system,
+    left_row.source_namespace,
+    left_row.source_stop_id AS source_identifier,
+    left_row.canonical_stop_key AS left_canonical_key,
+    right_row.canonical_stop_key AS right_canonical_key,
+    (left_row.canonical_stop_key IS DISTINCT FROM right_row.canonical_stop_key) AS conflicting
+FROM core.canonical_stop_source_identity AS left_row
+JOIN core.canonical_stop_source_identity AS right_row
+  ON right_row.canonical_stop_source_identity_key > left_row.canonical_stop_source_identity_key
+ AND right_row.mapping_version = left_row.mapping_version
+ AND right_row.source_system = left_row.source_system
+ AND right_row.source_namespace = left_row.source_namespace
+ AND right_row.source_stop_id = left_row.source_stop_id
+ AND (left_row.valid_from IS NULL OR right_row.valid_to IS NULL OR left_row.valid_from <= right_row.valid_to)
+ AND (right_row.valid_from IS NULL OR left_row.valid_to IS NULL OR right_row.valid_from <= left_row.valid_to)
+UNION ALL
+SELECT
+    'LINE'::text AS identity_type,
+    left_row.canonical_line_source_identity_key AS left_identity_key,
+    right_row.canonical_line_source_identity_key AS right_identity_key,
+    left_row.mapping_version,
+    left_row.source_system,
+    left_row.source_namespace,
+    left_row.source_line_id AS source_identifier,
+    left_row.canonical_line_key AS left_canonical_key,
+    right_row.canonical_line_key AS right_canonical_key,
+    (left_row.canonical_line_key IS DISTINCT FROM right_row.canonical_line_key) AS conflicting
+FROM core.canonical_line_source_identity AS left_row
+JOIN core.canonical_line_source_identity AS right_row
+  ON right_row.canonical_line_source_identity_key > left_row.canonical_line_source_identity_key
+ AND right_row.mapping_version = left_row.mapping_version
+ AND right_row.source_system = left_row.source_system
+ AND right_row.source_namespace = left_row.source_namespace
+ AND right_row.source_line_id = left_row.source_line_id
+ AND (left_row.valid_from IS NULL OR right_row.valid_to IS NULL OR left_row.valid_from <= right_row.valid_to)
+ AND (right_row.valid_from IS NULL OR left_row.valid_to IS NULL OR right_row.valid_from <= left_row.valid_to);
 
 COMMENT ON TABLE core.canonical_stop IS
     'Versioned canonical stop identities; unresolved and ambiguous mappings remain explicit.';

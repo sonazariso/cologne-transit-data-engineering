@@ -131,6 +131,14 @@ for absolute-time work. Comparing its lexical calendar date with the
 requested Europe/Berlin date is permitted for **DATE-ALIGNMENT ONLY**; no UTC
 or Europe/Berlin offset may be fabricated.
 
+The Stage 9 adapter applies this timing rule explicitly: an MDD absolute
+`TimetabledTime` is converted from its explicit offset/`Z` value into
+`Europe/Berlin` civil-clock service-day seconds, preserving the original source
+timestamp and GTFS extended hours. `OperatingDayRef` remains separate source
+evidence and is not used as an implicit GTFS service date. A timezone-less
+absolute value is retained but classified as insufficient for an absolute-time
+match.
+
 The result-bearing historical responses contained empty `ErrorMessage` arrays,
 not populated errors. Corrected response- and result-level error-message
 counts are both zero for 1D/7D/30D. The 90D/180D responses contain populated

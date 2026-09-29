@@ -19,24 +19,48 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         self.bridge = stage9._fixture_bridge()
         self.schedule = stage9._fixture_schedule()
         self.observations = stage9._fixture_observations()
+        self.synthetic_validation = stage9.MatchingEvidenceValidation(
+            mapping_version="2026-09-28",
+            validated_sequence_scopes=(
+                (stage9.SOURCE_MDD, "VRS_GLOBAL_ID"),
+                (stage9.SOURCE_GTFS_RT, "GTFS_DE"),
+            ),
+            validated_direction_mappings={
+                (stage9.SOURCE_MDD, "vrs_global_id", "n"): ("N",),
+                (stage9.SOURCE_GTFS_RT, "gtfs_de", "n"): ("N",),
+            },
+        )
 
     def test_offline_acceptance_population_passes_without_network(self) -> None:
         summary = stage9.run_offline_validation()
         self.assertEqual(summary["overall_status"], "PASS")
-        self.assertEqual(summary["stage_9_status"], "COMPLETE")
+        self.assertEqual(summary["stage_9_status"], "BLOCKED")
+        self.assertEqual(summary["implementation_regression_status"], "PASS")
+        self.assertEqual(
+            summary["stage_9_evidence_status"],
+            "BLOCKED_SOURCE_BACKED_CORE_MATCH_POPULATION_NOT_ESTABLISHED",
+        )
         self.assertEqual(summary["network_requests"], 0)
         self.assertEqual(summary["database_connections"], 0)
         self.assertTrue(all(summary["checks"].values()))
 
     def test_mdd_and_gtfsrt_known_good_events_match_the_same_canonical_event(self) -> None:
-        mdd = stage9.match_source_event(self.observations[0], self.schedule, self.bridge)
-        gtfsrt = stage9.match_source_event(self.observations[1], self.schedule, self.bridge)
+        mdd = stage9.match_source_event(
+            self.observations[0], self.schedule, self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        gtfsrt = stage9.match_source_event(
+            self.observations[1], self.schedule, self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
         self.assertEqual(mdd.match_confidence, stage9.MATCH_HIGH)
         self.assertEqual(gtfsrt.match_confidence, stage9.MATCH_HIGH)
+        self.assertEqual(mdd.stop_mapping_version, "2026-09-28")
+        self.assertEqual(mdd.line_mapping_version, "2026-09-28")
         self.assertEqual(mdd.canonical_service_event_id, gtfsrt.canonical_service_event_id)
         cross_source = stage9.reconcile_cross_source([mdd, gtfsrt])
-        self.assertEqual(len(cross_source), 1)
-        self.assertFalse(cross_source[0]["source_identifier_equality_used"])
+        self.assertEqual(len(cross_source["agreements"]), 1)
+        self.assertFalse(cross_source["agreements"][0]["source_identifier_equality_used"])
 
     def test_mdd_journeyref_never_becomes_a_static_trip_key(self) -> None:
         decision = stage9.match_source_event(self.observations[0], self.schedule, self.bridge)
@@ -51,7 +75,7 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         decision = stage9.match_source_event(self.observations[2], self.schedule, self.bridge)
         self.assertEqual(decision.match_confidence, stage9.MATCH_UNMATCHED)
         self.assertEqual(decision.match_method, stage9.METHOD_UNMATCHED)
-        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_AMBIGUOUS_MATCH)
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES)
         self.assertEqual(decision.canonical_service_event_id, None)
         self.assertEqual(decision.candidate_count, 2)
 
@@ -130,7 +154,10 @@ class Stage9MatchingQualityTests(unittest.TestCase):
         self.assertFalse(report["causal_claim_permitted"])
 
     def test_gtfs_trip_alert_can_match_same_source_trip_context_only(self) -> None:
-        decision = stage9.match_source_event(self.observations[1], self.schedule, self.bridge)
+        decision = stage9.match_source_event(
+            self.observations[1], self.schedule, self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
         report = stage9.classify_alert_association(
             {
                 "alert_id": "trip-alert",
@@ -204,6 +231,394 @@ class Stage9MatchingQualityTests(unittest.TestCase):
                 for item in parsed.parser_gaps
             )
         )
+
+    def test_stage8_parser_bundle_adapter_and_match_are_end_to_end(self) -> None:
+        body = json.dumps(
+            {
+                "serviceDelivery": {
+                    "status": "OK",
+                    "stopEventResponse": {
+                        "stopEventResult": [
+                            {
+                                "resultId": "integration-result-1",
+                                "stopEvent": {
+                                    "service": {
+                                        "operatingDayRef": {"value": "20260929"},
+                                        "journeyRef": {"value": "mdd-journey-1"},
+                                        "lineRef": {"value": "mdd-line-18"},
+                                        "directionRef": {"value": "N"},
+                                        "operatorRef": {"value": "KVB"},
+                                        "originStopPointRef": {"value": "de:05315:10000"},
+                                        "destinationStopPointRef": {"value": "de:05315:20000"},
+                                        "originText": [{"text": "Origin"}],
+                                        "destinationText": [{"text": "Destination"}],
+                                    },
+                                    "thisCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:11111"},
+                                                "stopSeqNumber": 7,
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:15:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                    "previousCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:00000"},
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:00:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                    "onwardCall": [
+                                        {
+                                            "callAtStop": {
+                                                "stopPointRef": {"value": "de:05315:22222"},
+                                                "serviceArrival": {
+                                                    "timetabledTime": "2026-09-29T08:30:00Z[GMT]"
+                                                },
+                                            }
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    },
+                }
+            }
+        ).encode("utf-8")
+        parsed = stage8.parse_response(body, "application/json")
+        bundle = stage8.build_bundle(
+            parsed=parsed,
+            response_id="integration-response",
+            run_id="integration-run",
+            observed_at="2026-09-29T08:00:00Z",
+            sampling_policy_id="MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3",
+            sampling_era_id="ERA_STAGE_8_V3",
+        )
+        observation = stage9.adapt_stage8_stop_event(
+            bundle["stop_events"][0],
+            service_date="2026-09-29",
+        )
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        self.assertEqual(observation.source_system, stage9.SOURCE_MDD)
+        self.assertEqual(observation.source_namespace, "VRS_GLOBAL_ID")
+        self.assertEqual(observation.source_event_id, bundle["stop_events"][0]["event_source_identity"])
+        self.assertEqual(observation.observation_id, "integration-response|stop_event|0")
+        self.assertEqual(observation.operating_day_ref, "20260929")
+        self.assertEqual(observation.normalized_service_date, "2026-09-29")
+        self.assertEqual(observation.source_stop_id, "de:05315:11111")
+        self.assertEqual(observation.scheduled_time_seconds, 10 * 3600 + 15 * 60)
+        self.assertEqual(observation.stop_sequence, 7)
+        self.assertEqual(observation.origin_stop_point_ref, "de:05315:10000")
+        self.assertEqual(observation.destination_stop_point_ref, "de:05315:20000")
+        self.assertEqual(observation.origin_text, "Origin")
+        self.assertEqual(observation.destination_text, "Destination")
+        self.assertEqual(observation.direction_ref, "N")
+        self.assertIsNone(observation.direction)
+        self.assertEqual(observation.sampling_policy_id, "MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3")
+        self.assertEqual(observation.sampling_era_id, "ERA_STAGE_8_V3")
+        self.assertIn("THIS", observation.source_attributes["selected_call_scope"])
+        self.assertEqual(
+            observation.source_attributes["non_selected_call_scopes"],
+            ["ONWARD", "PREVIOUS"],
+        )
+        self.assertIn("serviceArrival.timetabledTime", observation.source_paths["scheduled_time"] if "scheduled_time" in observation.source_paths else observation.source_attributes["scheduled_time_source_path"])
+        self.assertTrue(observation.source_paths["origin_stop_point_ref"])
+        self.assertTrue(observation.source_paths["destination_stop_point_ref"])
+        self.assertEqual(decision.match_confidence, stage9.MATCH_HIGH)
+        self.assertTrue(decision.matched)
+
+    def test_stage8_adapter_does_not_use_previous_or_onward_timing(self) -> None:
+        record = {
+            "record_type": "stop_event_observation",
+            "source_system": "MDD_TRIAS",
+            "source_namespace": "VRS_GLOBAL_ID",
+            "event_source_identity": "event-1",
+            "stop_event_observation_id": "observation-1",
+            "pilot_run_id": "run-1",
+            "response_id": "response-1",
+            "observed_at": "2026-09-29T08:00:00Z",
+            "operating_day_ref": "20260929",
+            "stop_point_ref": "de:05315:11111",
+            "line_ref": "mdd-line-18",
+            "event_type": "ARRIVAL",
+            "call_observations": [
+                {
+                    "call_scope": "PREVIOUS",
+                    "stop_point_ref": "de:05315:00000",
+                    "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-29T08:00:00Z"]}}],
+                },
+                {
+                    "call_scope": "ONWARD",
+                    "stop_point_ref": "de:05315:22222",
+                    "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-29T08:30:00Z"]}}],
+                },
+            ],
+        }
+        observation = stage9.adapt_stage8_stop_event(record, service_date="2026-09-29")
+        self.assertIsNone(observation.scheduled_time)
+        self.assertIsNone(observation.scheduled_time_seconds)
+        self.assertEqual(observation.scheduled_time_alignment["status"], stage9.TIME_ALIGNMENT_INVALID)
+
+    def test_operating_day_ref_is_not_aliased_to_service_date(self) -> None:
+        observation = stage9.SourceEventObservation.from_mapping(
+            {
+                "source_system": stage9.SOURCE_MDD,
+                "source_namespace": "VRS_GLOBAL_ID",
+                "source_event_id": "date-test",
+                "observation_id": "date-test-observation",
+                "observed_at": "2026-09-29T10:00:00Z",
+                "operating_day_ref": "20260929",
+                "stop_point_ref": "de:05315:11111",
+                "event_type": "ARRIVAL",
+                "scheduled_time": "10:15:00",
+            }
+        )
+        self.assertIsNone(observation.service_date)
+        self.assertEqual(observation.operating_day_ref, "20260929")
+        report = stage9.validate_service_date_alignment([observation])
+        self.assertEqual(report["missing_service_date_count"], 1)
+        self.assertEqual(report["operating_day_ref"]["present_count"], 1)
+        self.assertEqual(report["operating_day_ref"]["unresolved_count"], 1)
+
+    def test_absolute_timetable_alignment_handles_timezone_dst_midnight_and_extended_hours(self) -> None:
+        self.assertEqual(
+            stage9.schedule_time_seconds(
+                "2026-01-15T08:00:00Z[GMT]",
+                service_date="2026-01-15",
+            ),
+            9 * 3600,
+        )
+        self.assertEqual(
+            stage9.schedule_time_seconds(
+                "2026-07-01T08:00:00Z[GMT]",
+                service_date="2026-07-01",
+            ),
+            10 * 3600,
+        )
+        self.assertEqual(
+            stage9.schedule_time_seconds(
+                "2026-03-29T01:30:00Z",
+                service_date="2026-03-29",
+            ),
+            3 * 3600 + 30 * 60,
+        )
+        self.assertEqual(
+            stage9.schedule_time_seconds(
+                "2026-09-28T22:30:00Z",
+                service_date="2026-09-29",
+            ),
+            30 * 60,
+        )
+        self.assertEqual(
+            stage9.schedule_time_seconds(
+                "2026-09-29T23:05:00Z",
+                service_date="2026-09-29",
+            ),
+            25 * 3600 + 5 * 60,
+        )
+        fall_back_first = stage9.align_schedule_time(
+            "2026-10-25T00:30:00Z",
+            service_date="2026-10-25",
+        )
+        fall_back_second = stage9.align_schedule_time(
+            "2026-10-25T01:30:00Z",
+            service_date="2026-10-25",
+        )
+        self.assertEqual(fall_back_first["service_day_seconds"], 2 * 3600 + 30 * 60)
+        self.assertEqual(fall_back_second["service_day_seconds"], 2 * 3600 + 30 * 60)
+        self.assertIn("+02:00", fall_back_first["local_timestamp"])
+        self.assertIn("+01:00", fall_back_second["local_timestamp"])
+        self.assertIsNone(
+            stage9.schedule_time_seconds(
+                "2026-09-29T10:15:00",
+                service_date="2026-09-29",
+            )
+        )
+
+    def test_timezone_unresolved_absolute_time_is_insufficient_evidence(self) -> None:
+        observation = replace(
+            self.observations[0],
+            scheduled_time="2026-09-29T10:15:00",
+        )
+        decision = stage9.match_source_event(observation, self.schedule, self.bridge)
+        self.assertEqual(decision.match_confidence, stage9.MATCH_UNMATCHED)
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_INSUFFICIENT_EVIDENCE)
+        self.assertEqual(
+            decision.evidence["scheduled_time_alignment"]["status"],
+            stage9.TIME_ALIGNMENT_TIMEZONE_UNRESOLVED,
+        )
+
+    def test_sequence_and_direction_supporting_evidence_do_not_raise_high_by_themselves(self) -> None:
+        decision = stage9.match_source_event(self.observations[0], self.schedule, self.bridge)
+        self.assertEqual(decision.match_confidence, stage9.MATCH_MEDIUM)
+        self.assertTrue(decision.evidence["stop_sequence_match"])
+        self.assertTrue(decision.evidence["direction_match"])
+        self.assertFalse(decision.evidence["stop_sequence_evidence_validated"])
+        self.assertFalse(decision.evidence["direction_evidence_validated"])
+
+    def test_versioned_mapping_validity_blocks_future_mapping_for_historical_event(self) -> None:
+        bridge = stage9.IdentityBridge(
+            stop_mappings=[
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "historical-stop",
+                    "CS:OLD",
+                    "map-v2",
+                    valid_from="2026-10-01",
+                )
+            ],
+            active_mapping_version="map-v2",
+        )
+        resolution = bridge.resolve_stop(
+            stage9.SOURCE_MDD,
+            "VRS_GLOBAL_ID",
+            "historical-stop",
+            service_date="2026-09-29",
+        )
+        self.assertEqual(resolution.status, "NO_VALID_MAPPING_FOR_DATE")
+        self.assertIsNone(resolution.canonical_identifier)
+
+    def test_overlapping_conflicting_mapping_windows_are_detected(self) -> None:
+        bridge = stage9.IdentityBridge(
+            stop_mappings=[
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "overlap-stop",
+                    "CS:ONE",
+                    "map-v1",
+                    valid_from="2026-01-01",
+                    valid_to="2026-12-31",
+                ),
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "overlap-stop",
+                    "CS:TWO",
+                    "map-v1",
+                    valid_from="2026-06-01",
+                    valid_to="2027-01-01",
+                ),
+            ],
+            active_mapping_version="map-v1",
+        )
+        report = bridge.validation_report()
+        self.assertEqual(report["status"], "FAIL")
+        self.assertEqual(report["stops"]["overlapping_conflict_count"], 1)
+        resolution = bridge.resolve_stop(
+            stage9.SOURCE_MDD,
+            "VRS_GLOBAL_ID",
+            "overlap-stop",
+            service_date="2026-07-01",
+        )
+        self.assertEqual(resolution.status, "AMBIGUOUS")
+
+    def test_non_overlapping_mapping_versions_resolve_by_service_date(self) -> None:
+        bridge = stage9.IdentityBridge(
+            stop_mappings=[
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "versioned-stop",
+                    "CS:OLD",
+                    "map-v1",
+                    valid_to="2026-09-28",
+                ),
+                stage9.IdentityMapping(
+                    stage9.SOURCE_MDD,
+                    "VRS_GLOBAL_ID",
+                    "versioned-stop",
+                    "CS:NEW",
+                    "map-v2",
+                    valid_from="2026-09-29",
+                ),
+            ]
+        )
+        self.assertEqual(bridge.validation_report()["status"], "PASS")
+        old = bridge.resolve_stop(
+            stage9.SOURCE_MDD,
+            "VRS_GLOBAL_ID",
+            "versioned-stop",
+            service_date="2026-09-28",
+        )
+        new = bridge.resolve_stop(
+            stage9.SOURCE_MDD,
+            "VRS_GLOBAL_ID",
+            "versioned-stop",
+            service_date="2026-09-29",
+        )
+        self.assertEqual(old.canonical_identifier, "CS:OLD")
+        self.assertEqual(new.canonical_identifier, "CS:NEW")
+
+    def test_cross_source_without_validated_correlation_is_not_evaluated(self) -> None:
+        mdd = stage9.match_source_event(
+            replace(self.observations[0], correlation_group_id=None),
+            self.schedule,
+            self.bridge,
+        )
+        gtfsrt = stage9.match_source_event(
+            replace(self.observations[1], correlation_group_id=None),
+            self.schedule,
+            self.bridge,
+        )
+        report = stage9.reconcile_cross_source([mdd, gtfsrt])
+        self.assertEqual(report["status"], "NOT_EVALUATED")
+        self.assertFalse(report["disagreements"])
+
+    def test_cross_source_group_without_validated_basis_is_not_evaluated(self) -> None:
+        mdd = stage9.match_source_event(self.observations[0], self.schedule, self.bridge)
+        gtfsrt = stage9.match_source_event(self.observations[1], self.schedule, self.bridge)
+        report = stage9.reconcile_cross_source(
+            [
+                replace(mdd, correlation_validated=False),
+                replace(gtfsrt, correlation_validated=False),
+            ]
+        )
+        self.assertEqual(report["status"], "NOT_EVALUATED")
+        self.assertFalse(report["agreements"])
+
+    def test_out_of_core_static_candidate_is_not_reported_as_static_gap(self) -> None:
+        out_of_scope_schedule = stage9.build_schedule_index(
+            [
+                stage9.StaticServiceEvent(
+                    feed_snapshot_key="VERSION__20260928_0042",
+                    source_namespace="VRS_GLOBAL_ID",
+                    source_trip_id="excluded-trip",
+                    source_route_id="excluded-route",
+                    source_stop_id="de:05315:11111",
+                    canonical_stop_id="CS:COLOGNE:NEUMARKT",
+                    canonical_line_id="CL:KVB:18",
+                    service_date="2026-09-29",
+                    event_type="ARRIVAL",
+                    scheduled_time="10:15:00",
+                    direction="N",
+                    stop_sequence=7,
+                    scope_code="OUT_OF_SCOPE",
+                    scope_reason="long-distance service excluded by Stage 4 core scope",
+                )
+            ]
+        )
+        decision = stage9.match_source_event(
+            self.observations[0],
+            out_of_scope_schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        self.assertEqual(decision.match_confidence, stage9.MATCH_UNMATCHED)
+        self.assertEqual(decision.data_quality_classification, stage9.QUALITY_OUT_OF_CORE_SCOPE)
+        self.assertIn("out_of_scope_candidate_ids", decision.evidence)
 
 
 if __name__ == "__main__":

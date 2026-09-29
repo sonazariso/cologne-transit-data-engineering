@@ -1,11 +1,16 @@
 # Stage 9 — Matching & Data Quality
 
-**Status:** `COMPLETE — MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED`<br>
+**Status:** `BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED`<br>
 **Date:** `2026-09-29`<br>
 **Validation mode:** offline, deterministic, source-faithful
 
 Stage 9 implements the matching and data-quality foundation handed off by the
-Stage 3C design.  It is designed for the eventual Tiered50 collector without
+Stage 3C design. The implementation regression is passing, but the
+source-backed acceptance gate remains blocked because the repository does not
+retain a successful Stage 8 parser bundle plus a date-compatible MDD-to-VRS
+static event population. Synthetic fixtures are explicitly regression evidence
+only; they do not close Stage 9. The implementation is designed for the
+eventual Tiered50 collector without
 activating Tiered50, selecting the final 50 stations, building the operational
 fact, or changing the production cadence/result-limit decisions owned by later
 stages.
@@ -35,7 +40,9 @@ acceptance findings in the approved Stage 4 JSON.
 No new MDD or GTFS-RT request was made for Stage 9. No production database
 connection was made. The SQL migration is prepared for the approved
 PostgreSQL architecture and is not an excuse to claim that a live warehouse
-load occurred.
+load occurred. The machine-readable evidence audit is the authoritative
+classification of synthetic, source-backed, unresolved, and not-evaluated
+populations: [`09-matching-data-quality-evidence.json`](09-matching-data-quality-evidence.json).
 
 ## 2. Implemented artifacts
 
@@ -45,6 +52,7 @@ load occurred.
 | [`sql/stage_09_matching_quality.sql`](../../sql/stage_09_matching_quality.sql) | PostgreSQL 18 control, canonical, match-candidate, data-quality, view, and index contract |
 | [`tests/test_stage_09_matching_quality.py`](../../tests/test_stage_09_matching_quality.py) | Offline regression tests for known-good, ambiguous, unresolved, namespace, lineage, and parser-retention behavior |
 | [`scripts/stage_08_mdd_realtime_pilot.py`](../../scripts/stage_08_mdd_realtime_pilot.py) | Prospective source-contract hardening: retains candidate `vehicleJourneyRef`, `datedVehicleJourneyRef`, `affectedVehicleJourney`, `vehicleJourneys`, `operatingDaysDescription`, `direction`, `origins`, and `destinations` with source paths |
+| [`09-matching-data-quality-evidence.json`](09-matching-data-quality-evidence.json) | Source-classified Stage 9 evidence artifact; synthetic regression is separated from the blocked source-backed acceptance gate |
 
 Run the bounded validation with:
 
@@ -86,6 +94,16 @@ retains `VALIDATED`, `UNRESOLVED`, and `AMBIGUOUS` outcomes.
 - Railway Köln Hbf remains `UNRESOLVED_RAILWAY_HBF_IDENTITY` in the GTFS.de
   bridge. Adjacent KVB parents `106448` and `437741` are not substituted for
   railway Köln Hbf.
+- The VRS snapshot reports the actual `stop_id`/`parent_station` hierarchy
+  used by `stop_times.txt`: 2,273 Cologne child/parent rows, 864 parent
+  station rows, and zero orphan or outside-Cologne parent references. This
+  validates exact child matching where a schedule row carries that child;
+  it does not authorize suffix stripping or a parent fallback for an
+  unresolved platform identity.
+- MDD platform examples such as `de:05315:11201:7:79` and
+  `de:05315:11201:7:72` remain unresolved against the retained VRS row-level
+  event population. A parent fallback is permitted only when an explicit,
+  versioned source bridge validates it.
 - A source stop not in the bridge produces `SOURCE_IDENTITY_UNRESOLVED` and
   cannot be rescued by station name, route name, coordinates, or broad time.
 
@@ -130,6 +148,19 @@ Candidate ranking uses only independent, source-qualified evidence:
 missing date, invalid time, unresolved stop, line disagreement, or ambiguous
 top candidate remains unmatched with its reason and candidate IDs.
 
+MDD absolute `TimetabledTime` values are preserved verbatim and converted from
+their explicit source timezone to `Europe/Berlin` before comparison with GTFS
+service-day seconds. Timezone-less absolute values remain
+`INSUFFICIENT_EVIDENCE`; GTFS clock values above 24:00 remain extended hours.
+`OperatingDayRef` is retained separately and does not become service-date
+truth by alias or by `ObservedAt` derivation.
+
+Raw DirectionRef, StopSeqNumber, and origin/destination identity are
+supporting evidence until a source-population mapping is validated. Display
+text is never an identity key. The current source-backed evidence artifact
+therefore records direction and MDD-to-VRS line/sequence/endpoint relationships
+as `NOT_EVALUATED` rather than promoting synthetic equality to HIGH.
+
 | Outcome | Meaning |
 |---|---|
 | `HIGH` | Unique stop/date/time/event candidate with validated line plus direction, sequence, or multi-stop evidence; eligible for a stop-event cross-source association |
@@ -138,9 +169,10 @@ top candidate remains unmatched with its reason and candidate IDs.
 | `UNMATCHED` | No defensible candidate, unresolved identity, ambiguous top candidates, or source disagreement |
 
 Every decision records `MatchConfidence`, `MatchMethod`, candidate count,
-candidate IDs, score/evidence flags, matching-version lineage, source event
-identity, and source observation identity. Ambiguous candidates are retained
-for review rather than arbitrarily selecting the first row.
+candidate IDs, score/evidence flags, mapping-version lineage, source event
+identity, source observation identity, and any validated correlation basis.
+Ambiguous candidates are retained for review rather than arbitrarily selecting
+the first row.
 
 ## 5. Data-quality contract
 
@@ -160,7 +192,10 @@ Optional fields remain optional and are reported as coverage, not filled with
 synthetic defaults. `NULL` remains distinct from `FALSE`, zero, empty text,
 and not-observed. The implementation reports, among others:
 
-`MISSING_REQUIRED_IDENTITY`, `STATIC_COVERAGE_GAP`,
+`MISSING_REQUIRED_IDENTITY`, `STATIC_COVERAGE_GAP`, `STATIC_STOP_MISSING`,
+`STATIC_ROUTE_MISSING`, `STATIC_SERVICE_DATE_NOT_ACTIVE`,
+`STATIC_EVENT_NOT_FOUND`, `IDENTITY_CONFLICT`,
+`AMBIGUOUS_MULTIPLE_CANDIDATES`, `INSUFFICIENT_EVIDENCE`,
 `SOURCE_IDENTITY_UNRESOLVED`, `SOURCE_LINE_IDENTITY_UNRESOLVED`,
 `SOURCE_LINE_DISAGREEMENT`, `INVALID_SERVICE_DATE`,
 `INVALID_SCHEDULE_TIME`, `LINEAGE_INCOMPLETE`, `DUPLICATE_SOURCE_OBSERVATION`,
@@ -191,6 +226,11 @@ The migration adds:
 - append-only matching validation results and data-quality issues; and
 - rebuildable review/coverage views in `wrk`.
 
+The SQL contract also requires a non-empty source-observation grain,
+version-compatible canonical-event foreign keys, mapping-version columns on
+match decisions, self-consistent matched/unmatched confidence/method pairs,
+and an overlap-review view for conflicting effective mappings.
+
 Frequently queried matching fields are relational. Bounded source-shaped
 evidence and candidate-detail flags use `jsonb`; full realtime payloads and
 credentials are not moved into the matching layer. Matching indexes cover
@@ -198,15 +238,17 @@ stop/date/event/time, line/date/stop/time, source trip lookup, bridge lookup,
 review by confidence/era, and candidate rank. Conditional source indexes are
 created only when the corresponding Stage 5 source tables exist.
 
-## 7. Offline acceptance result
+## 7. Validation and evidence gate
 
-The current offline validation returns `overall_status = PASS` and
-`stage_9_status = COMPLETE`. It proves:
+The current offline regression returns `overall_status = PASS`,
+`implementation_regression_status = PASS`, and
+`stage_9_status = BLOCKED`. It proves the implementation behavior only:
 
 - the approved Stage 4 baseline reconciles;
-- known-good MDD and GTFS-RT stop events reach HIGH through canonical evidence;
-- cross-source agreement is through one canonical event, not source-ID
-  equality;
+- synthetic known-good MDD and GTFS-RT stop events reach HIGH through
+  explicitly supplied fixture evidence;
+- synthetic cross-source agreement is through one canonical event and an
+  explicitly validated fixture correlation basis, not source-ID equality;
 - equal-looking cross-source journey values are not used as a key;
 - ambiguous candidates are quarantined as `UNMATCHED`;
 - unresolved railway Hbf is not replaced with an adjacent KVB complex;
@@ -214,10 +256,29 @@ The current offline validation returns `overall_status = PASS` and
 - repeated observations and sampling-era lineage are retained;
 - candidate richer MDD identity fields remain available with source paths;
 - extended schedule hours do not wrap at midnight; and
-- route-level alert context remains non-causal.
+- route-level alert context remains non-causal; and
+- timezone, DST, midnight, extended-hour, adapter, and mapping-validity
+  regressions pass.
 
-This is an implementation/contract validation population, not a new claim of
-GTFS-RT coverage or a production-wide precision estimate. The real GTFS.de
+The source-backed audit is separate and remains blocked. Existing evidence is
+useful but supporting only:
+
+- the current VRS snapshot proves the Cologne stop/event scope and hierarchy;
+- the controlled MDD response proves retention/presence of OperatingDayRef,
+  LineRef, DirectionRef, endpoint identities/text, StopSeqNumber, and
+  TimetabledTime;
+- the bounded GTFS.de Neumarkt sample proves 241/241 source-to-GTFS.de
+  sequence equality for that source/static namespace; and
+- the GTFS.de bridge still leaves railway Köln Hbf unresolved, while no
+  retained successful Stage 8 parser bundle supplies a row-level MDD-to-VRS
+  replay population.
+
+Consequently MDD-to-VRS route/line, direction, StopSeqNumber,
+origin/destination, and cross-source disagreement are `NOT_EVALUATED` or
+supporting-only in the evidence artifact. No source-backed HIGH/MEDIUM/LOW/
+UNMATCHED end-to-end count is claimed.
+
+This is not a production-wide precision estimate, and the real GTFS.de
 railway-Hbf bridge remains an explicit open identity-quality result.
 
 ## 8. Boundary to later stages
@@ -234,4 +295,4 @@ Stage 9 does not:
 
 Those remain Stage 10 and later work. The Stage 8 historical completion record,
 the future 50-station objective, and the 250,000-request ceiling remain
-unchanged.
+unchanged. Stage 10 is `NOT STARTED`.

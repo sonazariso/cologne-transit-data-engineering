@@ -17,7 +17,7 @@
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
 | 8 | Small Realtime Pilot | COMPLETE |
-| 9 | Matching & Data Quality | COMPLETE — MATCHING/DATA-QUALITY FOUNDATION IMPLEMENTED |
+| 9 | Matching & Data Quality | BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED CORE EVIDENCE NOT ESTABLISHED |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
 | 12 | 50-Station Selection | Not started |
@@ -35,7 +35,8 @@
 - **Stage 3B — Collection Strategy & Cadence — COMPLETE — APPROVED DESIGN;
   ACTIVATION DEFERRED.**
 - **Stage 3C — Cross-Source Matching Design — COMPLETE — APPROVED DESIGN;
-  Stage 9 implementation complete.**
+  Stage 9 implementation regression passes; source-backed acceptance remains
+  blocked.**
 - Stage 3 completion does not authorize production implementation,
   database/schema work, collector changes, scheduler changes, Power BI work,
   or the next project stage.
@@ -273,11 +274,15 @@ this hardening change; the future 50-station objective and `250,000` monthly
 quota are unchanged; Stage 13 retains production ownership; and Stage 9+
 implementation was not started at that hardening closeout point.
 
-### Stage 9 closeout — COMPLETE
+### Stage 9 review correction — BLOCKED
 
 The [Stage 9 matching and data-quality record](stages/09-matching-data-quality.md)
-and the [offline matcher](../scripts/stage_09_matching_quality.py) are now the
-current implementation authority. Stage 9 provides:
+the [offline matcher](../scripts/stage_09_matching_quality.py), and the
+[machine-readable evidence audit](stages/09-matching-data-quality-evidence.json)
+are now the current implementation/evidence authorities. The implementation
+regression is PASS, but the source-backed Stage 9 acceptance gate is BLOCKED:
+the repository does not retain a successful Stage 8 parser bundle together
+with a date-compatible MDD-to-VRS static event population. Stage 9 provides:
 
 - versioned, namespace-qualified canonical stop and line bridges;
 - stop-event-first date/time candidate generation with deterministic indexes;
@@ -289,13 +294,16 @@ current implementation authority. Stage 9 provides:
   with GTFS-RT `trip_id`; and
 - PostgreSQL DDL/index/view contracts under `sql/stage_09_matching_quality.sql`.
 
-The offline acceptance population passed with zero network requests and zero
-database connections. It includes known-good MDD/GTFS-RT stop-event evidence,
-an ambiguous candidate, missing service-date evidence, repeated observations,
-route-level alert context, and the unresolved railway Köln Hbf bridge. The
-railway Hbf identity remains unresolved; adjacent KVB complexes are not
+The synthetic offline acceptance population passed with zero network requests
+and zero database connections, but it is regression evidence only. It includes
+known-good/ambiguous fixture events, missing service-date evidence, repeated
+observations, route-level alert context, timezone/DST boundaries, and the
+unresolved railway Köln Hbf bridge. Source-backed artifacts separately confirm
+the VRS scope/hierarchy, controlled MDD field presence, and bounded GTFS.de
+Neumarkt sequence equality; they do not establish MDD-to-VRS row-level
+matching. Railway Hbf remains unresolved and adjacent KVB complexes are not
 substituted. No operational fact, Power BI model, 50-station selection, or
-Tiered50 activation was started.
+Tiered50 activation was started. Stage 10 remains **NOT STARTED**.
 
 ## Post-Stage-02 validation
 
@@ -338,10 +346,10 @@ Existing GTFS-RT validation:
 | GTFS-RT lifecycle validation | **BOUNDED VALIDATION COMPLETE** |
 | GTFS-RT historical availability | **BOUNDED VALIDATION COMPLETE** — zero exact-URL captures in both ±7-day and ±45-day metadata runs |
 | Realtime source-role direction | **APPROVED DIRECTION** — MDD primary; GTFS-RT complementary |
-| Cross-source reconciliation and Cologne scope contract | **APPROVED CONTRACT** — Stage 9 matching foundation implemented |
-| Stage 9 matching/data-quality foundation | **COMPLETE** — offline validation PASS; production activation deferred |
+| Cross-source reconciliation and Cologne scope contract | **APPROVED CONTRACT** — Stage 9 regression implemented; source-backed acceptance blocked |
+| Stage 9 matching/data-quality foundation | **BLOCKED** — implementation regression PASS; source-backed core match population not established |
 | Stage 3 collection/cadence contract | **COMPLETE — APPROVED DESIGN** — activation deferred |
-| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — Stage 9 implementation complete |
+| Stage 3 cross-source matching design | **COMPLETE — APPROVED DESIGN** — Stage 9 implementation regression passes; source-backed acceptance remains blocked |
 | Confirmed Actual Time | **UNRESOLVED / UNAVAILABLE** |
 | Actual Delay KPI | **NOT APPROVED** |
 

@@ -1,0 +1,441 @@
+{
+  "artifact_version": "stage-09-evidence-1.0",
+  "evidence_classes": {
+    "source_backed_known_good": {
+      "ambiguity_counts": {
+        "identity_bridge_unresolved_examples": 1,
+        "source_backed_match_ambiguities": 0,
+        "source_backed_match_ambiguities_status": "NOT_EVALUATED"
+      },
+      "cross_source_disagreement": {
+        "reason": "No independently validated cross-source correlation group in retained source artifacts.",
+        "status": "NOT_EVALUATED"
+      },
+      "direction": {
+        "deterministic_gtfs_direction_mapping": "NOT_EVALUATED",
+        "direction_ref_observed_count": 5,
+        "high_confidence_use": false,
+        "raw_values_observed": true,
+        "richer_direction_observed_count": "NOT_EVALUATED"
+      },
+      "gtfsrt_static_known_good_sequence_sample": {
+        "call_scope_effects": "NOT_EVALUATED",
+        "disagreement_count": 0,
+        "duplicate_or_ambiguous_sequence_cases": "NOT_REPORTED",
+        "exact_equality_count": 241,
+        "gtfs_stop_sequence_coverage": 241,
+        "population": "bounded Köln Neumarkt lifecycle sample #1",
+        "relevant_realtime_updates": 241,
+        "scope_note": "GTFS.de realtime-to-GTFS.de static only; not MDD-to-VRS proof.",
+        "source_namespace": "GTFS_DE",
+        "source_stop_sequence_coverage": 241,
+        "systematic_offset": 0
+      },
+      "match_decision_counts": {
+        "HIGH": null,
+        "LOW": null,
+        "MEDIUM": null,
+        "UNMATCHED": null,
+        "population": "No source-backed end-to-end MDD-to-VRS decisions retained in repository.",
+        "source_backed_decision_population": 0,
+        "status": "NOT_EVALUATED"
+      },
+      "mdd_parser_field_coverage": {
+        "controlled_response_result_population": 5,
+        "destination_stop_point_ref": {
+          "coverage_ratio": 1.0,
+          "identity_agreement": "NOT_EVALUATED",
+          "present_count": 5
+        },
+        "destination_text": {
+          "coverage_ratio": 1.0,
+          "key_role": false,
+          "present_count": 5
+        },
+        "direction_ref": {
+          "coverage_ratio": 1.0,
+          "mapping_to_gtfs_direction_id": "NOT_EVALUATED",
+          "present_count": 5
+        },
+        "discovery_result_population": 50,
+        "line_ref": {
+          "coverage_ratio": 1.0,
+          "identity_agreement_with_vrs": "NOT_EVALUATED",
+          "present_count": 5
+        },
+        "operating_day_ref": {
+          "agreement_with_gtfs_service_date": "NOT_EVALUATED",
+          "coverage_ratio": 1.0,
+          "present_count": 5
+        },
+        "origin_stop_point_ref": {
+          "coverage_ratio": 1.0,
+          "identity_agreement": "NOT_EVALUATED",
+          "present_count": 5
+        },
+        "origin_text": {
+          "coverage_ratio": 1.0,
+          "key_role": false,
+          "present_count": 5
+        },
+        "richer_destinations_structure": {
+          "identity_validation": "NOT_EVALUATED",
+          "source_retained": true
+        },
+        "richer_origins_structure": {
+          "identity_validation": "NOT_EVALUATED",
+          "source_retained": true
+        },
+        "stop_seq_number": {
+          "agreement_with_vrs": "NOT_EVALUATED",
+          "controlled_response_call_count": 111,
+          "source_coverage": "OBSERVED"
+        },
+        "successful_station_responses": 10,
+        "timetabled_time": {
+          "absolute_timezone_alignment_to_vrs_service_date": "NOT_EVALUATED",
+          "source_timestamp_presence": "OBSERVED"
+        }
+      },
+      "origin_destination": {
+        "destination_identity_observed_count": 5,
+        "destination_text_observed_count": 5,
+        "display_text_can_create_match": false,
+        "identity_bridge_status": "NOT_EVALUATED",
+        "origin_identity_observed_count": 5,
+        "origin_text_observed_count": 5,
+        "richer_origins_destinations_retained": true,
+        "textual_context_status": "SUPPORTING_ONLY"
+      },
+      "population_type": "HISTORICAL_AND_BOUNDED_SOURCE_ARTIFACTS",
+      "representative_known_good_matches": [
+        {
+          "exact_stop_sequence_agreement_count": 241,
+          "mdd_to_vrs_matching_authority": "NOT_ESTABLISHED",
+          "population": "bounded Köln Neumarkt lifecycle sample #1",
+          "source_and_static_namespace": "GTFS.de only",
+          "source_namespace": "GTFS_DE",
+          "source_system": "GTFS_RT",
+          "stop_identity": "106842"
+        }
+      ],
+      "route_line_identity": {
+        "classification": "SOURCE_LINE_IDENTITY_UNRESOLVED",
+        "mdd_line_ref_population": 5,
+        "synthetic_line_fixture_not_used_for_closure": true,
+        "validated_mdd_to_vrs_line_bridge_count": 0,
+        "vrs_static_cologne_routes": 137
+      },
+      "source_artifacts": [
+        "docs/stages/04-cologne-scope-mode-evidence.json",
+        "docs/source-contracts/mdd-trias-field-retention-matrix.md",
+        "docs/source-contracts/gtfsde-static-identity-bridge-audit.md",
+        "docs/source-contracts/gtfs-rt-source-feasibility-audit.md",
+        "stage03a-mdd-discovery.jsonl"
+      ],
+      "static_scope": {
+        "actual_stop_id_controls_scope": true,
+        "cologne_distinct_stop_ids": 3137,
+        "cologne_scheduled_stop_events": 1144295,
+        "cologne_serving_routes": 137,
+        "cologne_serving_trips": 61805,
+        "parent_station_non_override": true
+      },
+      "status": "SUPPORTING_ONLY",
+      "timezone_alignment_sample": {
+        "explicit_utc_timestamp_form": "YYYY-MM-DDTHH:mm:ssZ[GMT]",
+        "independent_gtfs_service_date_agreement": "NOT_EVALUATED",
+        "original_timestamp_preserved": true,
+        "population": "historical MDD 1-day/7-day/30-day result-bearing responses",
+        "timezone_conversion_to_europe_berlin": "IMPLEMENTED_AND_UNIT_TESTED"
+      }
+    },
+    "synthetic_unit_test": {
+      "ambiguity_count": 1,
+      "classification_counts": {
+        "AMBIGUOUS_MULTIPLE_CANDIDATES": 1,
+        "MISSING_REQUIRED_IDENTITY": 1,
+        "SOURCE_IDENTITY_UNRESOLVED": 1,
+        "VALIDATED_MATCH": 4
+      },
+      "completion_role": "implementation_regression_only; never source-backed acceptance evidence",
+      "cross_source_reconciliation": {
+        "agreements": [
+          {
+            "canonical_service_event_id": "CSE|VERSION__20260928_0042|c96256ff69f12fe1902d6da0c3e3d061a99a4e806c4213f9580cf059e96e0e6a",
+            "correlation_basis": [
+              "SYNTHETIC_KNOWN_GOOD_PAIR"
+            ],
+            "correlation_group_id": "fixture-correlation-neumarkt-1",
+            "interpretation": "cross-source evidence agrees on one canonical stop event; not causality or full-trip proof",
+            "match_confidence": "HIGH",
+            "match_method": "EXACT_STOP_DATE_TIME_SEQUENCE",
+            "source_event_identities": [
+              "MDD_TRIAS|VRS_GLOBAL_ID|mdd-event-neu-1",
+              "GTFS_RT|GTFS_DE|gtfs-event-neu-1"
+            ],
+            "source_identifier_equality_used": false,
+            "source_systems": [
+              "GTFS_RT",
+              "MDD_TRIAS"
+            ]
+          }
+        ],
+        "disagreements": [],
+        "interpretation": "Sources are associated only through a validated correlation group and canonical event; this is not causality.",
+        "not_evaluated": [],
+        "status": "EVALUATED"
+      },
+      "decision_confidence_counts": {
+        "HIGH": 4,
+        "UNMATCHED": 3
+      },
+      "evidence_refs": [
+        "tests/test_stage_09_matching_quality.py",
+        "scripts/stage_09_matching_quality.py"
+      ],
+      "mapping_versions_used": [
+        "2026-09-28"
+      ],
+      "observation_count": 7,
+      "out_of_core_scope_count": 0,
+      "population_type": "SYNTHETIC_UNIT_TEST_FIXTURES",
+      "status": "PASS"
+    },
+    "unresolved": {
+      "adjacent_kvb_parent_ids_not_substituted": [
+        "106448",
+        "437741"
+      ],
+      "mdd_to_vrs_event_population": "INSUFFICIENT_EVIDENCE",
+      "mdd_to_vrs_line_bridge": "SOURCE_LINE_IDENTITY_UNRESOLVED",
+      "population_type": "RETAINED_SOURCE_QUALITY_GAPS",
+      "railway_koeln_hbf_gtfs_de": "UNRESOLVED_RAILWAY_HBF_IDENTITY",
+      "representative_examples": [
+        {
+          "classification": "SOURCE_IDENTITY_UNRESOLVED",
+          "reason": "successful Stage 8 parser row not retained in repository for date-compatible replay",
+          "source_identity": "MDD/TRIAS Köln Hbf returned call identity"
+        },
+        {
+          "classification": "OUT_OF_CORE_SCOPE",
+          "reason": "rail-served child evidence belongs to explicitly excluded adjacent KVB complex, not approved railway Köln Hbf",
+          "source_identity": "GTFS.de adjacent KVB parent 437741"
+        },
+        {
+          "classification": "AMBIGUOUS_MULTIPLE_CANDIDATES",
+          "reason": "retained as a regression example; not source-backed closure evidence",
+          "source_identity": "synthetic fixture only"
+        }
+      ]
+    }
+  },
+  "evidence_status": {
+    "optional_dimensions_without_authority": [
+      "MDD-to-VRS route/line identity agreement",
+      "MDD DirectionRef to GTFS direction_id mapping",
+      "MDD origin/destination identity bridge",
+      "MDD StopSeqNumber to VRS stop_sequence agreement",
+      "cross-source disagreement without an independently validated correlation basis"
+    ],
+    "source_backed_core_matching": "BLOCKED",
+    "source_backed_core_matching_blocker": "No retained successful Stage 8 parser bundle plus date-compatible MDD-to-VRS static event population is available in repository artifacts; synthetic line/stop bridges are not accepted as closure evidence."
+  },
+  "generated_at_utc": "2026-09-29T14:42:11Z",
+  "implementation_regression_status": "PASS",
+  "mapping_versions_used": {
+    "gtfsde_identity_bridge": [],
+    "runtime_rule": "service-date-valid mapping or explicit mapping version required; future mappings cannot resolve historical observations",
+    "synthetic_fixture": [
+      "2026-09-28"
+    ],
+    "vrs_static_feed_snapshot": [
+      "VERSION__20260928_0042"
+    ]
+  },
+  "record_type": "stage_09_matching_data_quality_evidence",
+  "representative_match_examples": {
+    "source_backed_known_good": [
+      {
+        "identity": "Neumarkt child stop 106842",
+        "result": "241/241 source stop sequences exactly matched GTFS.de static in bounded lifecycle sample #1",
+        "scope": "supporting only; not MDD-to-VRS evidence",
+        "source": "GTFS_RT/GTFS_DE"
+      }
+    ],
+    "source_backed_unresolved": [
+      {
+        "classification": "SOURCE_IDENTITY_UNRESOLVED",
+        "identity": "railway Köln Hbf in GTFS.de bridge",
+        "status": "UNRESOLVED_RAILWAY_HBF_IDENTITY"
+      }
+    ],
+    "synthetic_ambiguous": [
+      {
+        "classification": "AMBIGUOUS_MULTIPLE_CANDIDATES",
+        "status": "PASS_REGRESSION_ONLY"
+      }
+    ],
+    "synthetic_known_good": [
+      {
+        "canonical_service_event_id": "CSE|VERSION__20260928_0042|c96256ff69f12fe1902d6da0c3e3d061a99a4e806c4213f9580cf059e96e0e6a",
+        "correlation_basis": [
+          "SYNTHETIC_KNOWN_GOOD_PAIR"
+        ],
+        "correlation_group_id": "fixture-correlation-neumarkt-1",
+        "interpretation": "cross-source evidence agrees on one canonical stop event; not causality or full-trip proof",
+        "match_confidence": "HIGH",
+        "match_method": "EXACT_STOP_DATE_TIME_SEQUENCE",
+        "source_event_identities": [
+          "MDD_TRIAS|VRS_GLOBAL_ID|mdd-event-neu-1",
+          "GTFS_RT|GTFS_DE|gtfs-event-neu-1"
+        ],
+        "source_identifier_equality_used": false,
+        "source_systems": [
+          "GTFS_RT",
+          "MDD_TRIAS"
+        ]
+      }
+    ]
+  },
+  "scheduled_time_timezone_alignment_metrics": {
+    "dst_cases": [
+      "CET",
+      "CEST",
+      "spring_forward",
+      "fall_back"
+    ],
+    "explicit_timezone_values": "OBSERVED",
+    "extended_gtfs_hours_preserved": true,
+    "feed_timezone": "Europe/Berlin",
+    "midnight_crossing": "TESTED",
+    "source_backed_alignment_to_static_service_date": "NOT_EVALUATED",
+    "timezone_less_values": "REMAIN_UNRESOLVED"
+  },
+  "service_date_operating_day_metrics": {
+    "agreement_count": 0,
+    "controlled_mdd_population": 5,
+    "disagreement_count": 0,
+    "matching_participation": "NOT_USED_UNTIL_INDEPENDENT_GTFS_SERVICE_DATE_EVIDENCE",
+    "normalized_format": "PARSER_ACCEPTS_YYYYMMDD_OR_ISO; SOURCE_FORMAT_NOT_EVALUATED",
+    "operating_day_ref_is_service_date": false,
+    "presence_rate": 1.0,
+    "representative_disagreement_examples": [],
+    "unresolved_count": 5
+  },
+  "source_snapshots_and_versions": {
+    "gtfsde_identity_bridge": {
+      "bounded_lifecycle_evidence_dates": [
+        "2026-09-26"
+      ],
+      "current_mapping_status": "PARTIAL",
+      "durable_feed_version_or_hash_in_repository": null,
+      "evidence_document": "docs/source-contracts/gtfsde-static-identity-bridge-audit.md",
+      "mapping_version_used_by_stage9": null
+    },
+    "mdd_stage3a": {
+      "artifact": "stage03a-mdd-discovery.jsonl",
+      "network_replayed_by_stage9": false,
+      "observed_request_timestamps_utc": [
+        "2026-09-28T11:36:58Z",
+        "2026-09-28T11:36:59Z",
+        "2026-09-28T11:37:00Z",
+        "2026-09-28T11:37:00Z",
+        "2026-09-28T11:37:01Z",
+        "2026-09-28T11:37:03Z",
+        "2026-09-28T11:37:03Z",
+        "2026-09-28T11:37:04Z",
+        "2026-09-28T11:37:05Z",
+        "2026-09-28T11:37:06Z"
+      ],
+      "result_population": 50,
+      "station_count": 10,
+      "successful_http_response_count": 10
+    },
+    "stage8_successful_parser_bundle": {
+      "parser_and_bundle_implementation": "scripts/stage_08_mdd_realtime_pilot.py",
+      "reason": "The repository retains Stage 3A aggregate/source-contract evidence but no successful Stage 8 parser bundle with row-level MDD observations.",
+      "source_backed_replay_status": "BLOCKED",
+      "successful_bundle_artifact_retained": false
+    },
+    "vrs_static": {
+      "feed_end_date": "20261212",
+      "feed_start_date": "20260902",
+      "feed_version": "VERSION__20260928_0042",
+      "retrieval_timestamp_utc": "2026-09-28T13:44:03Z",
+      "source_profile": "VRS Global-ID GTFS",
+      "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
+      "zip_sha256": "6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b"
+    }
+  },
+  "stage_10_plus": {
+    "actual_delay_approved": false,
+    "stage_10_status": "NOT_STARTED",
+    "tiered50_activation": false
+  },
+  "stage_9_status": "BLOCKED_SOURCE_BACKED_CORE_MATCH_POPULATION_NOT_ESTABLISHED",
+  "static_coverage_classifications": {
+    "AMBIGUOUS_MULTIPLE_CANDIDATES": 0,
+    "IDENTITY_CONFLICT": 0,
+    "INSUFFICIENT_EVIDENCE": 1,
+    "OUT_OF_CORE_SCOPE": 1,
+    "SOURCE_IDENTITY_UNRESOLVED": 1,
+    "STATIC_EVENT_NOT_FOUND": 0,
+    "STATIC_ROUTE_MISSING": 0,
+    "STATIC_SERVICE_DATE_NOT_ACTIVE": 0,
+    "STATIC_STOP_MISSING": 0,
+    "UNMATCHED": 0,
+    "population_note": "Counts refer to source-backed audit classifications, not a fabricated end-to-end match population."
+  },
+  "stop_identity_and_hierarchy": {
+    "gtfsde_neumarkt": {
+      "child_stop_ids": [
+        "106842",
+        "207108",
+        "441164",
+        "581903",
+        "96309"
+      ],
+      "exact_child_matching_possible": true,
+      "parent_fallback_justified": "only when the source bridge explicitly maps the child to this parent; never by prefix",
+      "parent_station_id": "493082"
+    },
+    "gtfsde_railway_hbf": {
+      "adjacent_parent_ids": [
+        "106448",
+        "437741"
+      ],
+      "parent_fallback_justified": false,
+      "resolved_child_stop_ids": [],
+      "status": "UNRESOLVED_RAILWAY_HBF_IDENTITY"
+    },
+    "mdd_hbf_platform_child_to_vrs_static": {
+      "mdd_platform_examples": [
+        "de:05315:11201:7:79",
+        "de:05315:11201:7:72"
+      ],
+      "reason": "No retained source-backed row-level bridge for the reported MDD platform/call identities.",
+      "status": "NOT_EVALUATED"
+    },
+    "vrs_parent_child": {
+      "child_parent_also_cologne_rows": 2273,
+      "exact_stop_id_controls_schedule": true,
+      "orphan_parent_station_rows": 0,
+      "parent_station_rows": 864,
+      "suffix_stripping_fallback": false
+    },
+    "vrs_rule": "validated stop_id starts with 'de:05315:'"
+  },
+  "stop_sequence_metrics": {
+    "gtfsrt_to_gtfsde_known_good": {
+      "disagreements": 0,
+      "exact_equality": 241,
+      "gtfs_coverage": 241,
+      "source_coverage": 241,
+      "systematic_offset": 0,
+      "systematic_offset_units": "stop_sequence values"
+    },
+    "high_confidence_rule": "supporting_only_until_source_population_and_call_scope_are validated",
+    "mdd_to_vrs": "NOT_EVALUATED"
+  }
+}

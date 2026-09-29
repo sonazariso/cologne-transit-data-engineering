@@ -142,3 +142,13 @@ field remains missing; no identifier is inferred from display text, route
 name, or a broad time match. The source parser retains the exact candidate
 value/path, while the Stage 9 matcher stores the resulting evidence and data-
 quality classification separately.
+
+Stage 9 keeps `OperatingDayRef` separate from an independently established
+GTFS `service_date`; the former is measured for presence, format, agreement,
+disagreement, and unresolved status before it can participate in matching.
+MDD absolute `TimetabledTime` values retain their original lexical timestamp
+and are converted with an explicit timezone to the validated local feed
+timezone (`Europe/Berlin`) before service-day comparison. Timezone-less values
+remain unresolved for absolute-time matching. `ThisCall`, `PreviousCall`, and
+`OnwardCall` timing scope remains explicit; the adapter selects only the
+requested `ThisCall` branch.

@@ -1,6 +1,6 @@
 # Future Source-Observation and Persistence Contract
 
-**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 MATCHING FOUNDATION IMPLEMENTED`<br>
+**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED`<br>
 **Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED`,
 Stage 3B/3C design contracts are approved, and Stage 9 consumes this contract
 without activating source persistence
@@ -210,12 +210,15 @@ changes, Power BI changes, Actual Delay KPIs, or prediction-accuracy KPIs.
 
 ## 9. Stage 9 matching handoff
 
-Stage 9 now implements the derived matching/data-quality layer that consumes
-this source-observation contract. The implementation preserves source rows
-and source namespaces, requires explicit sampling-policy/era lineage for
-matching decisions, and records canonical stop-event associations separately
-from MDD and GTFS-RT observations. It does not create an operational outcome
-fact, synthesize `RecordedAtTime`, or activate a collector. See the
+Stage 9 implements the derived matching/data-quality layer that consumes this
+source-observation contract at regression level. The implementation preserves
+source rows and source namespaces, requires explicit sampling-policy/era
+lineage for matching decisions, records stop/line mapping versions and
+validated correlation basis separately from MDD and GTFS-RT observations, and
+does not create an operational outcome fact, synthesize `RecordedAtTime`, or
+activate a collector. Source-backed Stage 9 acceptance remains blocked until
+a successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event
+population are retained. See the
 [Stage 9 implementation record](../stages/09-matching-data-quality.md) and
 [matching SQL contract](../../sql/stage_09_matching_quality.sql).
 

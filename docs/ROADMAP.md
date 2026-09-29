@@ -272,17 +272,20 @@ The future 50-station objective is unchanged, Stage 13 retains ownership of
 future Tiered50 production result-limit/cadence/concurrency decisions, and at
 this Stage 8 closeout point Stage 9 remained not started.
 
-## Stage 9 — Matching & Data Quality — COMPLETE — FOUNDATION IMPLEMENTED
+## Stage 9 — Matching & Data Quality — BLOCKED — IMPLEMENTATION REGRESSION PASS; SOURCE-BACKED ACCEPTANCE PENDING
 
 The [Stage 9 implementation and validation record](stages/09-matching-data-quality.md)
-and [offline matcher](../scripts/stage_09_matching_quality.py) validate stop,
-route, service-date, trip/event identity, candidate richer identifiers, static
-coverage, field coverage, repeated observations, alert scope, and ambiguous
-cases using known-good and deliberately unresolved populations. The
-source-controlled PostgreSQL contract is in
-`sql/stage_09_matching_quality.sql`. Railway Köln Hbf remains unresolved in
-the bounded GTFS.de bridge, and the implementation does not substitute an
-adjacent KVB identity. Stage 10 and later stages remain separate.
+the [offline matcher](../scripts/stage_09_matching_quality.py), and the
+[evidence artifact](stages/09-matching-data-quality-evidence.json) separate
+implementation regression from source-backed acceptance. The regression
+validates stop-event-first matching, explicit Stage 8 adapter projection,
+timezone/DST service-day alignment, mapping validity, ambiguity handling,
+scope handling, and lineage. The source-backed gate remains blocked because
+no successful Stage 8 parser bundle plus date-compatible MDD-to-VRS static
+event population is retained. The current VRS hierarchy and bounded GTFS.de
+Neumarkt sequence sample remain supporting evidence; railway Köln Hbf remains
+unresolved and no adjacent KVB identity is substituted. Stage 10 and later
+stages remain **NOT STARTED**.
 
 ## Stage 10 — Operational Fact
 Approve fact grain, consolidation semantics, first/latest/actual timing semantics, NULL handling, platform evidence, situation evidence, and lineage.
