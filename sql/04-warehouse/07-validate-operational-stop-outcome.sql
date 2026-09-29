@@ -48,7 +48,13 @@ DECLARE
     situation_evidence_mismatch_count     bigint;
     situation_flag_mismatch_count         bigint;
     canonical_identity_mismatch_count     bigint;
+    match_method_lineage_mismatch_count    bigint;
     data_quality_lineage_mismatch_count   bigint;
+    source_identity_tuple_mismatch_count  bigint;
+    orphan_matching_run_reference_count   bigint;
+    orphan_canonical_event_reference_count bigint;
+    orphan_first_source_match_count       bigint;
+    orphan_latest_source_match_count      bigint;
     repeatability_difference_count        bigint;
 BEGIN
     IF p_matching_run_key IS NULL
@@ -268,6 +274,42 @@ BEGIN
         GROUP BY source_system, source_namespace, source_observation_identity
         HAVING count(*) > 1
     ) AS duplicates;
+
+    SELECT count(*)
+    INTO source_identity_tuple_mismatch_count
+    FROM pg_temp.stage10_validation_input AS input
+    WHERE input.source_system IS DISTINCT FROM input.input_source_system
+       OR input.source_namespace IS DISTINCT FROM input.input_source_namespace
+       OR input.source_observation_identity IS DISTINCT FROM input.input_source_observation_identity;
+
+    SELECT count(*)
+    INTO orphan_matching_run_reference_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN ctl.matching_run AS run
+      ON run.matching_run_key = fact.matching_run_key
+    WHERE run.matching_run_key IS NULL;
+
+    SELECT count(*)
+    INTO orphan_canonical_event_reference_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN core.canonical_service_event AS canonical_event
+      ON canonical_event.matching_version = fact.matching_version
+     AND canonical_event.canonical_service_event_key = fact.canonical_service_event_key
+    WHERE canonical_event.canonical_service_event_key IS NULL;
+
+    SELECT count(*)
+    INTO orphan_first_source_match_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN core.source_event_match AS source_match
+      ON source_match.source_event_match_key = fact.first_source_event_match_key
+    WHERE source_match.source_event_match_key IS NULL;
+
+    SELECT count(*)
+    INTO orphan_latest_source_match_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN core.source_event_match AS source_match
+      ON source_match.source_event_match_key = fact.latest_source_event_match_key
+    WHERE source_match.source_event_match_key IS NULL;
 
     SELECT count(*)
     INTO missing_event_grain_count
@@ -514,19 +556,38 @@ BEGIN
        OR fact.scheduled_time_seconds IS DISTINCT FROM source_identity.scheduled_time_seconds
        OR fact.canonical_scheduled_time_utc IS DISTINCT FROM source_identity.canonical_scheduled_time_utc;
 
-    SELECT count(*)
-    INTO data_quality_lineage_mismatch_count
+    WITH ranked AS (
+        SELECT
+            input.*,
+            row_number() OVER (
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc DESC,
+                         input.source_observation_identity DESC
+            ) AS latest_row_number
+        FROM pg_temp.stage10_validation_input AS input
+    ), latest_metadata AS (
+        SELECT
+            service_date,
+            canonical_service_event_key,
+            match_method,
+            data_quality_classification
+        FROM ranked
+        WHERE latest_row_number = 1
+    )
+    SELECT
+        count(*) FILTER (
+            WHERE latest_metadata.canonical_service_event_key IS NULL
+               OR fact.data_quality_classification IS DISTINCT FROM latest_metadata.data_quality_classification
+        ),
+        count(*) FILTER (
+            WHERE latest_metadata.canonical_service_event_key IS NULL
+               OR fact.match_method IS DISTINCT FROM latest_metadata.match_method
+        )
+    INTO data_quality_lineage_mismatch_count, match_method_lineage_mismatch_count
     FROM dw.fact_operational_service_event AS fact
-    LEFT JOIN (
-        SELECT service_date, canonical_service_event_key,
-               min(data_quality_classification) AS data_quality_classification
-        FROM pg_temp.stage10_validation_input
-        GROUP BY service_date, canonical_service_event_key
-    ) AS source_quality
-      ON source_quality.service_date = fact.service_date
-     AND source_quality.canonical_service_event_key = fact.canonical_service_event_key
-    WHERE source_quality.canonical_service_event_key IS NULL
-       OR fact.data_quality_classification IS DISTINCT FROM source_quality.data_quality_classification;
+    LEFT JOIN latest_metadata
+      ON latest_metadata.service_date = fact.service_date
+     AND latest_metadata.canonical_service_event_key = fact.canonical_service_event_key;
 
     RETURN QUERY
     SELECT
@@ -567,6 +628,41 @@ BEGIN
            source_observation_duplication_count,
            0::bigint,
            'The operational input is scoped to one selected matching run; historical matching runs are not unioned into the fact.';
+
+    RETURN QUERY
+    SELECT 'full_source_identity_tuple_mismatch',
+           CASE WHEN source_identity_tuple_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           source_identity_tuple_mismatch_count,
+           0::bigint,
+           'Stage 10 reconciles source_system, source_namespace, and source_observation_identity as one complete identity; the identity value alone is not a universal key.';
+
+    RETURN QUERY
+    SELECT 'orphan_matching_run_reference',
+           CASE WHEN orphan_matching_run_reference_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           orphan_matching_run_reference_count,
+           0::bigint,
+           'Every fact matching_run_key must reference ctl.matching_run.';
+
+    RETURN QUERY
+    SELECT 'orphan_canonical_service_event_reference',
+           CASE WHEN orphan_canonical_event_reference_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           orphan_canonical_event_reference_count,
+           0::bigint,
+           'Every (matching_version, canonical_service_event_key) fact reference must exist in core.canonical_service_event.';
+
+    RETURN QUERY
+    SELECT 'orphan_first_source_event_match_reference',
+           CASE WHEN orphan_first_source_match_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           orphan_first_source_match_count,
+           0::bigint,
+           'Every first_source_event_match_key must reference core.source_event_match.';
+
+    RETURN QUERY
+    SELECT 'orphan_latest_source_event_match_reference',
+           CASE WHEN orphan_latest_source_match_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           orphan_latest_source_match_count,
+           0::bigint,
+           'Every latest_source_event_match_key must reference core.source_event_match.';
 
     RETURN QUERY
     SELECT 'missing_selected_stage9_event_grains',
@@ -660,11 +756,18 @@ BEGIN
            'Service date, canonical event identity, event type, scheduled seconds, and canonical timetable come from core.canonical_service_event.';
 
     RETURN QUERY
+    SELECT 'match_method_lineage',
+           CASE WHEN match_method_lineage_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           match_method_lineage_mismatch_count,
+           0::bigint,
+           'Stage 10 retains match_method from the deterministic latest source observation when repeated HIGH observations evolve.';
+
+    RETURN QUERY
     SELECT 'data_quality_classification_lineage',
            CASE WHEN data_quality_lineage_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
            data_quality_lineage_mismatch_count,
            0::bigint,
-           'Stage 9 data_quality_classification is retained separately and is not translated into a legacy status.';
+           'Stage 10 retains data_quality_classification from the deterministic latest source observation; it remains separate and is not translated into a legacy status.';
 
     RETURN QUERY
     SELECT 'repeat_refresh_semantic_difference',
@@ -676,7 +779,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION dw.validate_operational_service_event(bigint, text) IS
-    'Stage 10 current-architecture validator. Requires an explicit COMPLETE matching run/version, blocks on missing database/source prerequisites, and proves repeat-refresh idempotency with refresh #1 -> snapshot A -> refresh #2 -> snapshot B.';
+    'Stage 10 current-architecture validator. Requires an explicit COMPLETE matching run/version and the Stage 10 input adapter, checks namespace-qualified source identity and relational lineage, blocks on missing database/source prerequisites, and proves repeat-refresh idempotency with refresh #1 -> snapshot A -> refresh #2 -> snapshot B.';
 
 SELECT * FROM dw.validate_operational_service_event(NULL, NULL);
 

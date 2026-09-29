@@ -12,25 +12,26 @@
 --       JOIN core.canonical_service_event
 --
 -- Matching decisions do not contain the operational fields. The procedure
--- therefore requires the approved durable MDD source relations and their
--- explicit Stage 10 source projection. It never creates guessed source
--- tables, fills missing values, or modifies source/control history.
+-- therefore requires the future source-owned Stage 10 input projection:
 --
--- Required source projection (the source owner must physically implement these
--- columns before the procedure can run):
---   src.mdd_stop_event_observation
---       mdd_stop_event_observation_key, source_observation_identity,
---       observed_at_utc
---   src.mdd_call_observation
---       mdd_call_observation_key, mdd_stop_event_observation_key,
---       call_scope, event_type, estimated_time_utc, planned_bay,
---       estimated_bay
---   src.mdd_stop_event_situation_link
---       mdd_stop_event_situation_link_key, mdd_stop_event_observation_key
+--   wrk.v_stage10_operational_observation_input
 --
--- These are exact prerequisites, not tables created by Stage 10. Arrival and
--- departure semantics remain explicit through event_type. TimetabledTime is
--- not used as the canonical identity: core.canonical_service_event supplies
+-- This is a derived working-layer interface between future durable source
+-- persistence and this fact. It is not a source table and is not created here.
+-- It must expose exactly one operational evidence row per source observation
+-- and event type, with these logical fields:
+--   source_system text, source_namespace text,
+--   source_observation_identity text, source_observed_at_utc timestamptz,
+--   event_type text, estimated_time_utc timestamptz,
+--   planned_bay text, estimated_bay text, situation_link_count bigint
+--
+-- Stage 10 deliberately does not name the future physical source tables,
+-- source internal keys, call collections, or Situation-link storage. The
+-- adapter owns that translation without redefining the underlying source
+-- persistence contract.
+--
+-- Arrival/departure semantics remain explicit through event_type. TimetabledTime
+-- is not used as the canonical identity: core.canonical_service_event supplies
 -- service_date and scheduled_time_seconds.
 
 BEGIN;
@@ -44,9 +45,7 @@ CREATE OR REPLACE PROCEDURE dw.refresh_operational_service_event(
 LANGUAGE plpgsql
 AS $procedure$
 DECLARE
-    stop_event_relation       regclass;
-    call_relation             regclass;
-    situation_link_relation   regclass;
+    adapter_relation          regclass;
     required_column           text;
     invalid_count             bigint;
     expected_high_observation_count bigint;
@@ -54,7 +53,6 @@ DECLARE
     duplicate_observation_count bigint;
     conflicting_event_metadata_count bigint;
     unsupported_source_count  bigint;
-    relation_name             text;
 BEGIN
     IF p_matching_run_key IS NULL OR NULLIF(btrim(p_matching_version), '') IS NULL THEN
         RAISE EXCEPTION USING
@@ -109,61 +107,29 @@ BEGIN
             );
     END IF;
 
-    stop_event_relation := to_regclass('src.mdd_stop_event_observation');
-    call_relation := to_regclass('src.mdd_call_observation');
-    situation_link_relation := to_regclass('src.mdd_stop_event_situation_link');
+    adapter_relation := to_regclass('wrk.v_stage10_operational_observation_input');
 
-    FOREACH relation_name IN ARRAY ARRAY[
-        'src.mdd_stop_event_observation',
-        'src.mdd_call_observation',
-        'src.mdd_stop_event_situation_link'
-    ] LOOP
-        IF to_regclass(relation_name) IS NULL THEN
-            RAISE EXCEPTION USING
-                ERRCODE = '55000',
-                MESSAGE = format(
-                    'Stage 10 refresh is blocked: required durable source relation %s is absent; Stage 10 does not create a guessed source schema',
-                    relation_name
-                );
-        END IF;
-    END LOOP;
+    IF adapter_relation IS NULL THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'Stage 10 refresh is blocked: required input adapter wrk.v_stage10_operational_observation_input is absent; Stage 10 does not create or guess a physical source schema';
+    END IF;
 
     FOREACH required_column IN ARRAY ARRAY[
-        'mdd_stop_event_observation_key',
+        'source_system',
+        'source_namespace',
         'source_observation_identity',
-        'observed_at_utc'
-    ] LOOP
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_attribute
-            WHERE attrelid = stop_event_relation
-              AND attname = required_column
-              AND attnum > 0
-              AND NOT attisdropped
-        ) THEN
-            RAISE EXCEPTION USING
-                ERRCODE = '55000',
-                MESSAGE = format(
-                    'Stage 10 refresh is blocked: %s is missing required source column %s',
-                    stop_event_relation,
-                    required_column
-                );
-        END IF;
-    END LOOP;
-
-    FOREACH required_column IN ARRAY ARRAY[
-        'mdd_call_observation_key',
-        'mdd_stop_event_observation_key',
-        'call_scope',
+        'source_observed_at_utc',
         'event_type',
         'estimated_time_utc',
         'planned_bay',
-        'estimated_bay'
+        'estimated_bay',
+        'situation_link_count'
     ] LOOP
         IF NOT EXISTS (
             SELECT 1
             FROM pg_attribute
-            WHERE attrelid = call_relation
+            WHERE attrelid = adapter_relation
               AND attname = required_column
               AND attnum > 0
               AND NOT attisdropped
@@ -171,30 +137,8 @@ BEGIN
             RAISE EXCEPTION USING
                 ERRCODE = '55000',
                 MESSAGE = format(
-                    'Stage 10 refresh is blocked: %s is missing required source column %s',
-                    call_relation,
-                    required_column
-                );
-        END IF;
-    END LOOP;
-
-    FOREACH required_column IN ARRAY ARRAY[
-        'mdd_stop_event_situation_link_key',
-        'mdd_stop_event_observation_key'
-    ] LOOP
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_attribute
-            WHERE attrelid = situation_link_relation
-              AND attname = required_column
-              AND attnum > 0
-              AND NOT attisdropped
-        ) THEN
-            RAISE EXCEPTION USING
-                ERRCODE = '55000',
-                MESSAGE = format(
-                    'Stage 10 refresh is blocked: %s is missing required source column %s',
-                    situation_link_relation,
+                    'Stage 10 refresh is blocked: %s is missing required Stage 10 input column %s',
+                    adapter_relation,
                     required_column
                 );
         END IF;
@@ -216,6 +160,11 @@ BEGIN
             sem.source_namespace,
             sem.source_observation_identity,
             sem.source_observed_at_utc,
+            operational_input.source_system AS input_source_system,
+            operational_input.source_namespace AS input_source_namespace,
+            operational_input.source_observation_identity AS input_source_observation_identity,
+            operational_input.source_observed_at_utc AS input_source_observed_at_utc,
+            operational_input.event_type AS input_event_type,
             sem.match_confidence,
             sem.match_method,
             sem.data_quality_classification,
@@ -230,41 +179,25 @@ BEGIN
                 cse.service_date::timestamp
                 + (cse.scheduled_time_seconds * interval '1 second')
             ) AT TIME ZONE 'Europe/Berlin' AS canonical_scheduled_time_utc,
-            source_event.observed_at_utc AS source_table_observed_at_utc,
-            NULLIF(btrim(call_observation.estimated_time_utc::text), '')::timestamptz
-                AS estimated_time_utc,
-            NULLIF(btrim(call_observation.planned_bay::text), '') AS planned_bay,
-            NULLIF(btrim(call_observation.estimated_bay::text), '') AS estimated_bay,
-            CASE
-                WHEN situation_counts.situation_link_count IS NULL THEN 0::bigint
-                ELSE situation_counts.situation_link_count
-            END AS situation_link_count
+            operational_input.estimated_time_utc,
+            NULLIF(btrim(operational_input.planned_bay::text), '') AS planned_bay,
+            NULLIF(btrim(operational_input.estimated_bay::text), '') AS estimated_bay,
+            operational_input.situation_link_count
         FROM core.source_event_match AS sem
         JOIN core.canonical_service_event AS cse
           ON cse.canonical_service_event_key = sem.canonical_service_event_key
          AND cse.matching_version = sem.matching_version
-        JOIN %s AS source_event
-          ON source_event.source_observation_identity = sem.source_observation_identity
-        JOIN %s AS call_observation
-          ON call_observation.mdd_stop_event_observation_key
-             = source_event.mdd_stop_event_observation_key
-         AND call_observation.call_scope = 'THIS'
-         AND call_observation.event_type = cse.event_type
-        LEFT JOIN (
-            SELECT
-                mdd_stop_event_observation_key,
-                count(*)::bigint AS situation_link_count
-            FROM %s
-            GROUP BY mdd_stop_event_observation_key
-        ) AS situation_counts
-          ON situation_counts.mdd_stop_event_observation_key
-             = source_event.mdd_stop_event_observation_key
+        JOIN %s AS operational_input
+          ON operational_input.source_system = sem.source_system
+         AND operational_input.source_namespace = sem.source_namespace
+         AND operational_input.source_observation_identity = sem.source_observation_identity
+         AND operational_input.event_type = cse.event_type
         WHERE sem.matching_run_key = $1
           AND sem.matching_version = $2
           AND sem.source_system = 'MDD_TRIAS'
           AND sem.match_confidence = 'HIGH'
           AND sem.canonical_service_event_key IS NOT NULL
-    $sql$, stop_event_relation, call_relation, situation_link_relation)
+    $sql$, adapter_relation)
     USING p_matching_run_key, p_matching_version;
 
     CREATE INDEX stage10_refresh_input_event_ix
@@ -287,7 +220,7 @@ BEGIN
         RAISE EXCEPTION USING
             ERRCODE = '55000',
             MESSAGE = format(
-                'Stage 10 refresh is blocked: %s HIGH Stage 9 source observations were eligible but only %s joined to the durable source operational-evidence projection; no eligible row is silently omitted',
+                'Stage 10 refresh is blocked: %s HIGH Stage 9 source observations were eligible but only %s joined to the Stage 10 input adapter; no eligible row is silently omitted',
                 expected_high_observation_count,
                 joined_high_observation_count
             );
@@ -303,8 +236,10 @@ BEGIN
        OR match_confidence IS DISTINCT FROM 'HIGH'
        OR NULLIF(btrim(source_observation_identity), '') IS NULL
        OR source_observed_at_utc IS NULL
-       OR source_table_observed_at_utc IS NULL
-       OR source_table_observed_at_utc IS DISTINCT FROM source_observed_at_utc
+       OR input_source_observed_at_utc IS NULL
+       OR input_source_observed_at_utc IS DISTINCT FROM source_observed_at_utc
+       OR input_event_type IS DISTINCT FROM event_type
+       OR situation_link_count IS NULL
        OR situation_link_count < 0;
 
     IF invalid_count > 0 THEN
@@ -334,6 +269,10 @@ BEGIN
             );
     END IF;
 
+    -- Stage 9 does not require match_method or data_quality_classification to
+    -- remain identical across repeated HIGH observations for one canonical
+    -- event. Those valid values are governed below by the deterministic latest
+    -- source observation; MIN() is deliberately not used as a textual tie-break.
     SELECT count(*)
     INTO conflicting_event_metadata_count
     FROM (
@@ -343,15 +282,13 @@ BEGIN
         HAVING count(DISTINCT matching_run_key) > 1
             OR count(DISTINCT matching_version) > 1
             OR count(DISTINCT match_confidence) > 1
-            OR count(DISTINCT match_method) > 1
-            OR count(DISTINCT data_quality_classification) > 1
     ) AS conflicts;
 
     IF conflicting_event_metadata_count > 0 THEN
         RAISE EXCEPTION USING
             ERRCODE = '23514',
             MESSAGE = format(
-                'Stage 10 refresh rejected %s canonical service-event grains with conflicting selected-run or Stage 9 decision metadata',
+                'Stage 10 refresh rejected %s canonical service-event grains with conflicting selected-run or Stage 9 confidence metadata',
                 conflicting_event_metadata_count
             );
     END IF;
@@ -385,8 +322,6 @@ BEGIN
             min(scheduled_time_seconds) AS scheduled_time_seconds,
             min(canonical_scheduled_time_utc) AS canonical_scheduled_time_utc,
             min(match_confidence) AS match_confidence,
-            min(match_method) AS match_method,
-            min(data_quality_classification) AS data_quality_classification,
             count(*)::bigint AS source_observation_count,
             count(*) FILTER (
                 WHERE planned_bay IS NOT NULL
@@ -419,8 +354,8 @@ BEGIN
         grouped.scheduled_time_seconds,
         grouped.canonical_scheduled_time_utc,
         grouped.match_confidence,
-        grouped.match_method,
-        grouped.data_quality_classification,
+        latest_rows.match_method,
+        latest_rows.data_quality_classification,
         grouped.source_observation_count,
         first_rows.source_event_match_key AS first_source_event_match_key,
         latest_rows.source_event_match_key AS latest_source_event_match_key,
@@ -593,6 +528,6 @@ END;
 $procedure$;
 
 COMMENT ON PROCEDURE dw.refresh_operational_service_event(bigint, text) IS
-    'Stage 10 explicit-run refresh. Uses only one COMPLETE matching_run_key/matching_version, admits HIGH decisions only, joins Stage 9 lineage to canonical service events, and reads operational fields from durable source observations.';
+    'Stage 10 explicit-run refresh. Uses only one COMPLETE matching_run_key/matching_version, admits HIGH decisions only, joins the namespace-qualified Stage 9 source identity tuple to the Stage 10 input adapter, takes match_method and data_quality_classification from the deterministic latest observation, and reads no guessed physical source schema.';
 
 COMMIT;

@@ -75,6 +75,18 @@ CREATE TABLE IF NOT EXISTS dw.fact_operational_service_event (
     -- grain. A current fact contains one row per service_date/event identity.
     CONSTRAINT uq_fact_operational_service_event_grain
         UNIQUE (service_date, canonical_service_event_key),
+    CONSTRAINT fk_fact_operational_service_event_matching_run
+        FOREIGN KEY (matching_run_key)
+        REFERENCES ctl.matching_run (matching_run_key),
+    CONSTRAINT fk_fact_operational_service_event_canonical_event
+        FOREIGN KEY (matching_version, canonical_service_event_key)
+        REFERENCES core.canonical_service_event (matching_version, canonical_service_event_key),
+    CONSTRAINT fk_fact_operational_service_event_first_source_match
+        FOREIGN KEY (first_source_event_match_key)
+        REFERENCES core.source_event_match (source_event_match_key),
+    CONSTRAINT fk_fact_operational_service_event_latest_source_match
+        FOREIGN KEY (latest_source_event_match_key)
+        REFERENCES core.source_event_match (source_event_match_key),
     CONSTRAINT ck_fact_operational_service_event_observation_order
         CHECK (latest_source_observed_at_utc >= first_source_observed_at_utc),
     CONSTRAINT ck_fact_operational_service_event_bay_counts
@@ -82,6 +94,61 @@ CREATE TABLE IF NOT EXISTS dw.fact_operational_service_event (
     CONSTRAINT ck_fact_operational_service_event_situation_evidence
         CHECK (has_situation_evidence = (situation_link_count > 0))
 );
+
+-- CREATE TABLE IF NOT EXISTS does not add constraints to a fact table created
+-- by an earlier Stage 10 implementation. Reassert the same Stage 9-supported
+-- relationships idempotently for that upgrade path.
+DO $constraint_upgrade$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'dw.fact_operational_service_event'::regclass
+          AND conname = 'fk_fact_operational_service_event_matching_run'
+    ) THEN
+        ALTER TABLE dw.fact_operational_service_event
+            ADD CONSTRAINT fk_fact_operational_service_event_matching_run
+            FOREIGN KEY (matching_run_key)
+            REFERENCES ctl.matching_run (matching_run_key);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'dw.fact_operational_service_event'::regclass
+          AND conname = 'fk_fact_operational_service_event_canonical_event'
+    ) THEN
+        ALTER TABLE dw.fact_operational_service_event
+            ADD CONSTRAINT fk_fact_operational_service_event_canonical_event
+            FOREIGN KEY (matching_version, canonical_service_event_key)
+            REFERENCES core.canonical_service_event (matching_version, canonical_service_event_key);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'dw.fact_operational_service_event'::regclass
+          AND conname = 'fk_fact_operational_service_event_first_source_match'
+    ) THEN
+        ALTER TABLE dw.fact_operational_service_event
+            ADD CONSTRAINT fk_fact_operational_service_event_first_source_match
+            FOREIGN KEY (first_source_event_match_key)
+            REFERENCES core.source_event_match (source_event_match_key);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'dw.fact_operational_service_event'::regclass
+          AND conname = 'fk_fact_operational_service_event_latest_source_match'
+    ) THEN
+        ALTER TABLE dw.fact_operational_service_event
+            ADD CONSTRAINT fk_fact_operational_service_event_latest_source_match
+            FOREIGN KEY (latest_source_event_match_key)
+            REFERENCES core.source_event_match (source_event_match_key);
+    END IF;
+END;
+$constraint_upgrade$;
 
 CREATE INDEX IF NOT EXISTS ix_fact_operational_service_event_lineage
     ON dw.fact_operational_service_event

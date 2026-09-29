@@ -296,7 +296,8 @@ STARTED**.
 ## Stage 10 — Operational Fact — IMPLEMENTATION CORRECTED; VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
 uses the canonical service-event identity, explicit Stage 9 run/version
-selection, HIGH-only eligibility, durable source operational evidence,
+selection, HIGH-only eligibility, the derived
+`wrk.v_stage10_operational_observation_input` evidence boundary,
 first/latest timing, NULL handling, PlannedBay/EstimatedBay evidence,
 non-causal Situation linkage, and repeat-refresh validation. Completion remains
 blocked because this checkout has no usable PostgreSQL/source-observation

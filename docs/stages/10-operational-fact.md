@@ -43,6 +43,12 @@ the canonical event identity come from `core.canonical_service_event`.
 retains `matching_run_key`, `matching_version`, `match_confidence`,
 `match_method`, and `data_quality_classification` for auditability.
 
+The physical fact enforces foreign keys to `ctl.matching_run`, the composite
+`(matching_version, canonical_service_event_key)` identity in
+`core.canonical_service_event`, and both first/latest `source_event_match`
+keys. Stage 10 validation also checks those relationships and the selected-run
+lineage without changing Stage 9.
+
 The canonical timetable is derived from the Stage 9
 `service_date`/`scheduled_time_seconds` representation with the already
 approved `Europe/Berlin` service-day interpretation. Extended service-day
@@ -89,33 +95,39 @@ authorize promotion of `MEDIUM` rows.
 
 `core.source_event_match` supplies matching decisions and lineage only. It does
 not supply `EstimatedTime`, `PlannedBay`, `EstimatedBay`, or Situation links.
-The refresh therefore reads those fields from durable source observations only
-after checking for these exact physical relations and columns:
+Stage 10 therefore requires this source-owned working-layer adapter/input
+relation:
 
 ```text
-src.mdd_stop_event_observation
-  mdd_stop_event_observation_key
-  source_observation_identity
-  observed_at_utc
-
-src.mdd_call_observation
-  mdd_call_observation_key
-  mdd_stop_event_observation_key
-  call_scope
-  event_type
-  estimated_time_utc
-  planned_bay
-  estimated_bay
-
-src.mdd_stop_event_situation_link
-  mdd_stop_event_situation_link_key
-  mdd_stop_event_observation_key
+wrk.v_stage10_operational_observation_input
 ```
 
-Stage 10 does not create or guess these source schemas. `event_type` and
-`call_scope = 'THIS'` keep arrival/departure and call context explicit. If a
-relation or column is missing, refresh and validation return `BLOCKED` with the
-precise prerequisite rather than fabricating operational values.
+This is a derived Stage 10 interface contract between future durable source
+persistence and the operational fact. It is not a new physical source schema,
+and Stage 10 does not create it. The adapter must represent exactly one
+operational evidence row for each
+`(source_system, source_namespace, source_observation_identity, event_type)`
+and expose only this logical input:
+
+| Field | Logical type | Meaning |
+| --- | --- | --- |
+| `source_system` | non-null `text` | Source-system identity used by Stage 9. |
+| `source_namespace` | non-null `text` | Source namespace; it is part of the source identity. |
+| `source_observation_identity` | non-null `text` | Source observation identity within the system and namespace. |
+| `source_observed_at_utc` | non-null `timestamptz` | Observation timestamp used for first/latest ordering; it must reconcile to the selected Stage 9 observation. |
+| `event_type` | non-null `text` | `ARRIVAL` or `DEPARTURE` operational evidence row. |
+| `estimated_time_utc` | nullable `timestamptz` | Nullable source estimate; it is never an Actual Time. |
+| `planned_bay` | nullable `text` | Nullable/blank-normalized planned-bay evidence. |
+| `estimated_bay` | nullable `text` | Nullable/blank-normalized estimated-bay evidence. |
+| `situation_link_count` | non-null `bigint` | Non-negative persisted observation-to-Situation association-row count; no association is represented as `0`. |
+
+The adapter may translate richer future source structures, including separate
+arrival/departure timing collections and association storage, without exposing
+source internal keys, call-scope storage, or guessed `src` table names here.
+Stage 10 joins the complete namespace-qualified identity tuple and the event
+type; `source_observation_identity` alone is never treated as universal. If the
+adapter relation or any required field is missing, refresh and validation return
+`BLOCKED` rather than fabricating operational values or source persistence.
 
 ## Consolidation semantics
 
@@ -128,6 +140,13 @@ source_observed_at_utc ASC, source_observation_identity ASC
 for the first row, and the exact reverse for the latest row. The fact retains
 the first/latest source match keys, source observation identities, source
 timestamps, observation count, and first/latest estimates.
+
+Stage 9 does not guarantee that repeated `HIGH` observations for one canonical
+event use identical `match_method` or `data_quality_classification` values.
+Stage 10 therefore retains both values from the deterministically latest source
+observation, using the same descending ordering above, instead of rejecting an
+otherwise valid event or choosing an arbitrary `MIN()` value. The data-quality
+classification remains separate lineage and is not translated into a status.
 
 If an earlier observation has an estimate but the latest observation has no
 estimate, the latest estimate and latest estimated delay remain `NULL`. No
@@ -156,6 +175,8 @@ The validator requires explicit run/version parameters and checks:
 - duplicate final fact grain;
 - `HIGH`-only fact eligibility;
 - explicit matching-run/version lineage;
+- complete source identity tuple reconciliation;
+- orphan matching-run, canonical-event, first-source-match, and latest-source-match references;
 - selected-run source-observation duplication and historical-run isolation;
 - missing and stale current event grains;
 - first/latest source lineage;
@@ -164,6 +185,7 @@ The validator requires explicit run/version parameters and checks:
 - PlannedBay/EstimatedBay evidence;
 - Situation association count and flag;
 - canonical service-event identity and separate data-quality classification;
+- latest-observation `match_method` and `data_quality_classification` lineage;
 - repeat-refresh semantic differences.
 
 Repeatability is validated in the required order:
