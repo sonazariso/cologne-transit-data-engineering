@@ -23,10 +23,16 @@ must:
 5. create the explicit measures and disconnected estimated-delay threshold;
 6. keep HIGH-only operational evidence separate from all-confidence matching
    and Data Quality decisions;
-7. use `Dim Sampling Era` for matching/Data Quality evidence only where
-   validated lineage exists; do not add an operational KPI relationship until
-   a governed operational-event projection/bridge has validated its grain,
-   uniqueness, and lineage, including events crossing era boundaries;
+7. use `Dim Sampling Era` only for the `Fact Matching Decision` population;
+   Data Quality classifications carried by those decisions inherit that
+   context. Do not treat the independent `Fact Data Quality Issue` or `Data
+   Quality Issue Count` as Sampling-Era-filterable in the base model. Add a
+   future relationship to that issue fact only after explicit `SamplingEraKey`
+   lineage at its grain is established and projection grain, key uniqueness,
+   historical-era semantics, and lineage are validated. Do not add an
+   operational KPI relationship until a governed operational-event
+   projection/bridge has met the same validation requirements, including
+   events crossing era boundaries;
 8. label Date-filtered matching coverage as service-date-scoped and warn that
    decisions without a valid service date remain separate Data Quality evidence;
    and

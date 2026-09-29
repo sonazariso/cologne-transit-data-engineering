@@ -762,14 +762,20 @@ evidence and are never assigned a date from `ObservedAt`. Matching coverage
 uses all Stage 9 confidence outcomes and is not measured from the HIGH-only
 Stage 10 fact.
 
-`Dim Sampling Era` currently filters matching/Data Quality evidence only where
-validated lineage exists. It is not an operational KPI slicer and has no
-approved direct relationship to `Fact Operational Service Event`. A future
-governed operational-event projection or bridge requires validated grain,
-uniqueness, and lineage and must not arbitrarily assign an event whose source
-observations cross an era boundary. Until then, operational KPI analysis must
-constrain compatible era/time scope or show a clear coverage/methodology
-warning.
+`Dim Sampling Era` currently filters the `Fact Matching Decision` population
+only through the approved `SamplingEraKey` relationship. Data Quality
+classifications carried by those matching decisions inherit that context. The
+separate independent `Fact Data Quality Issue` is not Sampling-Era-filtered in
+the base model, and `Data Quality Issue Count` must not be described or
+implemented as Sampling-Era-filterable under that model. It is not an
+operational KPI slicer and has no approved relationship to `Fact Operational
+Service Event`. A future relationship to the independent issue fact or a
+governed operational-event projection requires explicit `SamplingEraKey`
+lineage at that fact's grain, with validated projection grain, key uniqueness,
+historical-era semantics, and lineage; an event whose source observations
+cross an era boundary must not be assigned arbitrarily. Until then,
+operational KPI analysis must constrain compatible era/time scope or show a
+clear coverage/methodology warning.
 
 The approved implementation contract is PBIP + TMDL + PBIR under source
 control, with Power BI Desktop required later for binding, refresh, render QA,

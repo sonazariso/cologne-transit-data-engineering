@@ -117,7 +117,7 @@ preserve the stated grains and lineage.
 | Operational | `Dim Operational Mode` | Validated operational mode projection, when available | One validated operational mode assignment/version | It is separate from static `Dim Mode`; unresolved operational mode remains explicit. |
 | Operational | `Fact Operational Service Event` | `dw.fact_operational_service_event` | One consolidated outcome per `(service_date, canonical_service_event_key)` | HIGH Stage 9 associations only; latest NULL timing remains NULL; matching run/version is lineage, not an extra business grain. |
 | Data quality | `Dim Matching Run` | `ctl.matching_run` | One Stage 9 matching execution/version | Measures must select a run/version explicitly; no implicit latest-run union. |
-| Data quality | `Dim Sampling Era` | Sampling-policy/era lineage | One approved sampling policy/era | The current relationship is to matching/Data Quality evidence only where `SamplingEraKey` lineage is validated; it is not an operational KPI slicer until a validated operational-event projection exists. Historical eras remain distinguishable and are not silently pooled. |
+| Data quality | `Dim Sampling Era` | Sampling-policy/era lineage | One approved sampling policy/era | The current relationship is only to the `Fact Matching Decision` population through validated `SamplingEraKey` lineage. Data Quality classifications carried by those matching decisions inherit that context; the independent `Fact Data Quality Issue` is not Sampling-Era-filtered in the base model. It is not an operational KPI slicer until a validated operational-event projection exists. Historical eras remain distinguishable and are not silently pooled. |
 | Data quality | `Fact Matching Decision` | `core.source_event_match` | One matching decision for one source observation within one selected matching run/version | Contains all `HIGH`, `MEDIUM`, `LOW`, and `UNMATCHED` decisions plus method, classification, candidates, and mapping limitations. |
 | Data quality | `Fact Data Quality Issue` | `ctl.data_quality_issue` | One classified data-quality issue for one run/entity/evidence occurrence | Issue evidence is separate from matching-result counts. |
 | Parameter | `Param Estimated Delay Threshold` | Disconnected analytical parameter | One integer threshold option in the governed `0..15` range | Not source truth, provider policy, or an official punctuality threshold. |
@@ -168,13 +168,21 @@ relationships.
 | `Dim Matching Run[MatchingRunKey]` | `Fact Operational Service Event[MatchingRunKey]` | 1 → many, single | Technical lineage filter only; it does not change HIGH-only operational eligibility. |
 | `Dim Sampling Era[SamplingEraKey]` | `Fact Matching Decision[SamplingEraKey]` | 1 → many, single | Sampling-era coverage analysis. |
 
-The matrix intentionally has no relationship from `Dim Sampling Era` to `Fact
-Operational Service Event`. At present, `Dim Sampling Era` may filter matching
-and Data Quality evidence where validated lineage exists, including the
-explicit `Fact Matching Decision` relationship above. It must not be presented
-as an operational KPI slicer until a validated operational-event-to-sampling-
-era projection exists. A future governed projection or bridge may be added only
-after its grain, uniqueness, and lineage are validated. If one operational
+The matrix intentionally has no relationship from `Dim Sampling Era` to either
+`Fact Data Quality Issue` or `Fact Operational Service Event`. `Dim Sampling Era`
+currently filters the `Fact Matching Decision` population only through the
+explicit relationship above. Data Quality classifications carried by those
+matching decisions inherit that context. The separate `Fact Data Quality Issue`
+is not Sampling-Era-filtered in the base model, so `Data Quality Issue Count`
+must not be described or implemented as Sampling-Era-filterable under the
+current base model. It must not be presented as an operational KPI slicer and
+has no approved relationship to `Fact Operational Service Event`.
+
+A future relationship to the independent `Fact Data Quality Issue` or to
+operational evidence may be considered only after a future stage establishes
+and validates explicit `SamplingEraKey` lineage at that fact's grain. The
+projection or bridge must validate its grain, key uniqueness, historical-era
+semantics, and lineage before a relationship is approved. If one operational
 service event contains source observations crossing an era boundary, the
 implementation must not arbitrarily assign that event to one era.
 
@@ -580,7 +588,7 @@ Data Quality Issue Count :=
 | `Service-Date-Scoped HIGH Match Coverage %` | Same matching-decision grain | HIGH decisions with non-NULL `ServiceDate` / all decisions with non-NULL `ServiceDate`; `DIVIDE` returns BLANK when no valid-service-date decisions. | Explicit HIGH share among decisions with an established service date; not overall matching quality and not operational-fact coverage. |
 | `Timing Unavailable Count` | One latest estimated-delay value per operational fact row | Count of NULL latest estimated delay; BLANK when no rows. | Timing unavailable; not on-time or cancelled. |
 | `Bay Unknown Count` | One consolidated bay-evidence value per operational fact row | Same as `Bay Unknown Events`; BLANK when none. | Bay evidence unavailable; not unchanged. |
-| `Data Quality Issue Count` | One classified issue per run/entity/evidence occurrence | No denominator; BLANK when no issue rows. | Count of recorded quality issues; not a service-performance rate. |
+| `Data Quality Issue Count` | One classified issue per run/entity/evidence occurrence | No denominator; BLANK when no issue rows. | Count of recorded quality issues; not Sampling-Era-filterable in the base model and not a service-performance rate. |
 
 `HIGH Match Coverage %` uses every selected matching decision as its explicit
 denominator, including MEDIUM, LOW, and UNMATCHED. With no Date filter, that
@@ -689,22 +697,26 @@ Operational report pages must use wording such as:
 
 The model must never imply that the monitored realtime sample equals the
 entire Cologne network. A station panel, bounded pilot, or historical sampling
-era is not a network-wide operational population. `Dim Sampling Era` may
-currently filter matching/Data Quality evidence where validated lineage exists,
-but it is not an operational KPI slicer. The current relationship matrix does
-not relate it directly to `Fact Operational Service Event`; no such direct
-relationship may be added unless a validated Stage 9/10 operational-event-to-
-sampling-era projection supports it. A future governed projection/bridge must
-validate grain, uniqueness, and lineage, and must not arbitrarily assign an
-operational event whose source observations cross an era boundary.
+era is not a network-wide operational population. `Dim Sampling Era` currently
+filters the `Fact Matching Decision` population only. Data Quality
+classifications carried by those matching decisions inherit that context; the
+separate `Fact Data Quality Issue` and `Data Quality Issue Count` are not
+Sampling-Era-filtered in the base model. `Dim Sampling Era` is not an
+operational KPI slicer and has no approved relationship to `Fact Operational
+Service Event`. A future relationship to the independent issue fact or an
+operational-event projection may be added only after explicit `SamplingEraKey`
+lineage at that fact's grain is established and the projection's grain, key
+uniqueness, historical-era semantics, and lineage are validated. A future
+operational projection must not arbitrarily assign an operational event whose
+source observations cross an era boundary.
 
 Operational KPI pages must not silently pool different sampling eras or
 cadences when that pooling can change interpretation. Until validated
 operational-era attribution exists, the report must either constrain
 operational KPI analysis to one compatible era/time period or show a clear
 coverage/methodology warning. Sampling era remains available in technical
-context and for matching/Data Quality filtering where the current lineage
-supports it.
+context for the matching-decision population and the Data Quality
+classifications it carries; it does not filter the independent issue fact.
 
 The executive report must show a prominent Data Quality/coverage warning when
 matching, timing, station, or source coverage is incomplete. It must not
@@ -716,8 +728,8 @@ publish a network-wide operational conclusion from a sampled station panel.
 
 The executive layer may emphasize:
 
-- selected period and, where supported, sampling-era context for
-  matching/Data Quality evidence;
+- selected period and, where supported, sampling-era context for matching
+  decisions and the Data Quality classifications carried by those decisions;
 - observed operational-service-event count;
 - estimated timing coverage;
 - latest estimated-delay evidence using the selected analytical threshold;
@@ -782,6 +794,10 @@ The following remain deferred and are not silently assumed by this design:
 - live Stage 10 refresh/validation and any operational fact row population;
 - physical canonical-to-static identity projections where Stage 9 has not
   validated the mapping;
+- any future `Dim Sampling Era` relationship to the independent `Fact Data
+  Quality Issue`; explicit `SamplingEraKey` lineage at that fact's grain and
+  validation of projection grain, key uniqueness, historical-era semantics,
+  and lineage are required before approval;
 - validated operational-event-to-sampling-era projection/bridge, including
   grain, uniqueness, lineage, and crossing-era handling; until then,
   `Dim Sampling Era` is not an operational KPI slicer;
@@ -806,7 +822,7 @@ The following remain deferred and are not silently assumed by this design:
 | Estimated-delay threshold policy is disconnected, `0..15`, default `0`, and not official punctuality. | PASS |
 | Bay semantics preserve Changed / Unchanged / Unknown. | PASS |
 | Situation semantics remain associated/non-causal. | PASS |
-| Sampling-era filtering is limited to validated matching/Data Quality lineage; operational KPI era attribution is deferred, cross-era pooling is constrained or warned, and monitored-sample/network-language limits are explicit. | PASS |
+| Sampling-era filtering is limited to the `Fact Matching Decision` population and the Data Quality classifications it carries; the independent `Fact Data Quality Issue` is excluded, operational KPI era attribution is deferred, cross-era pooling is constrained or warned, and monitored-sample/network-language limits are explicit. | PASS |
 | Date-filtered matching coverage is explicitly service-date-scoped; missing `ServiceDate` decisions have a separate evidence measure and warning. | PASS |
 | Executive and technical reporting boundaries are explicit. | PASS |
 | Future PBIP/TMDL/PBIR and Desktop validation requirements are documented without creating artifacts. | PASS |

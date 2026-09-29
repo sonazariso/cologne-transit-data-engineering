@@ -313,14 +313,19 @@ matrix, governed Date strategy, static VRS/canonical operational identity
 boundary, explicit DAX measure groups, estimated-delay threshold and NULL
 semantics, bay/Situation terminology, service-date-scoped matching coverage
 with explicit missing-service-date evidence, sampling/network-coverage language,
-and executive versus technical reporting boundaries. `Dim Sampling Era` may
-currently filter matching/Data Quality evidence where lineage is validated, but
-it is not an operational KPI slicer and has no approved direct relationship to
-`Fact Operational Service Event`. A future operational-event projection or
-bridge requires validated grain, uniqueness, and lineage and must handle
-cross-era events without arbitrary assignment. Until then, operational KPI
-analysis must constrain compatible era/time scope or show a clear
-coverage/methodology warning. The future implementation contract is PBIP +
+and executive versus technical reporting boundaries. `Dim Sampling Era`
+currently filters the `Fact Matching Decision` population only. Data Quality
+classifications carried by those matching decisions inherit that context; the
+separate `Fact Data Quality Issue` and `Data Quality Issue Count` are not
+Sampling-Era-filtered in the base model. `Dim Sampling Era` is not an
+operational KPI slicer and has no approved relationship to `Fact Operational
+Service Event`. A future relationship to the independent issue fact or an
+operational-event projection
+requires explicit `SamplingEraKey` lineage at that fact's grain and validated
+projection grain, key uniqueness, historical-era semantics, and lineage; it
+must handle cross-era events without arbitrary assignment. Until then,
+operational KPI analysis must constrain compatible era/time scope or show a
+clear coverage/methodology warning. The future implementation contract is PBIP +
 TMDL + PBIR with Power BI Desktop binding and QA, but no Power BI artifact or
 Desktop execution is part of this stage.
 

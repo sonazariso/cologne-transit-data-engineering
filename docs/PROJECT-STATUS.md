@@ -343,9 +343,13 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - The [Stage 11 completion decision](stages/11-power-bi-model-completion-decision.md)
   records that no PBIP, TMDL, PBIR, PBIX, Power BI Desktop execution,
   datasource binding, refresh, render QA, PostgreSQL work, SQL execution, or
-  data load occurred. Sampling-era operational attribution remains deferred
-  pending validated Stage 9/10 lineage; until then, operational KPI pages must
-  constrain compatible era/time scope or show a coverage/methodology warning.
+  data load occurred. `Dim Sampling Era` currently filters only the `Fact
+  Matching Decision` population; Data Quality classifications carried by those
+  matching decisions inherit that context, while the independent `Fact Data
+  Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in
+  the base model. Sampling-era operational attribution remains deferred pending
+  validated Stage 9/10 lineage; until then, operational KPI pages must constrain
+  compatible era/time scope or show a coverage/methodology warning.
   The `powerbi/` directory contains the implementation boundary README only.
 - Stage 10 remains **NOT COMPLETE — IMPLEMENTATION CORRECTED;
   SOURCE/DATABASE VALIDATION BLOCKED**. Stage 12 — 50-Station Selection —

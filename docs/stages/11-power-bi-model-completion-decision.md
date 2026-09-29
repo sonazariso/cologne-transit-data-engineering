@@ -47,13 +47,19 @@ area. No Actual Physical Delay, cancellation, or causal Situation semantics
 were introduced.
 
 Sampling-era filtering is intentionally limited in the current contract:
-`Dim Sampling Era` can filter matching/Data Quality evidence where validated
-lineage exists, but it is not an operational KPI slicer and has no approved
-direct relationship to `Fact Operational Service Event`. A future governed
-operational-event projection/bridge requires validated grain, uniqueness, and
-lineage and must not assign a cross-era event arbitrarily. Until that exists,
-operational KPI analysis must use one compatible era/time period or show a
-clear coverage/methodology warning.
+`Dim Sampling Era` currently filters the `Fact Matching Decision` population
+only through the approved `SamplingEraKey` relationship. Data Quality
+classifications carried by those matching decisions inherit that context. The
+separate independent `Fact Data Quality Issue` is not Sampling-Era-filtered in
+the base model, and `Data Quality Issue Count` must not be described or
+implemented as Sampling-Era-filterable under that model. `Dim Sampling Era` is
+not an operational KPI slicer and has no approved relationship to `Fact
+Operational Service Event`. A future relationship to the independent issue
+fact or an operational-event projection requires explicit `SamplingEraKey`
+lineage at that fact's grain, with validated projection grain, key uniqueness,
+historical-era semantics, and lineage; a cross-era operational event must not
+be assigned arbitrarily. Until that exists, operational KPI analysis must use
+one compatible era/time period or show a clear coverage/methodology warning.
 
 Stage 12 — 50-Station Selection — was not started.
 

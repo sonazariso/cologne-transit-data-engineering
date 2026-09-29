@@ -12,9 +12,13 @@
   service-date-scoped matching coverage with separate missing-service-date
   evidence; estimated-delay threshold policy; bay/Situation terminology;
   sampling and executive/technical reporting boundaries; and a deferred
-  PBIP/TMDL/PBIR implementation contract. Sampling Era is not an operational
-  KPI slicer until validated operational-event lineage exists. No Power BI
-  runtime artifacts or Desktop execution were created; Stage 10 remains
+  PBIP/TMDL/PBIR implementation contract. `Dim Sampling Era` currently filters
+  only the `Fact Matching Decision` population; Data Quality classifications
+  carried by those decisions inherit that context, while the independent `Fact
+  Data Quality Issue` and `Data Quality Issue Count` are not filtered by
+  Sampling Era in the base model. Sampling Era is not an operational KPI slicer
+  until validated operational-event lineage exists. No Power BI runtime
+  artifacts or Desktop execution were created; Stage 10 remains
   runtime-blocked and Stage 12 was not started.
 - Stage 10 operational-fact correction: the derived
   `dw.fact_operational_service_event` uses the canonical
