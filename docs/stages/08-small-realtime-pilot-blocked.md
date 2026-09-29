@@ -1,10 +1,14 @@
-# Stage 8 — Small Realtime Pilot Authorization Diagnostic Blocker
+# Stage 8 — Small Realtime Pilot Completion and Historical Authorization Chronology
 
-**Status:** `BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED`
-**Date:** `2026-09-29`
-**Latest Stage 8 attempt:** `2026-09-28` — HTTP `401`
+**Current status:** `COMPLETE`
+**Current status date:** `2026-09-29`
+**Historical pre-success attempt:** `2026-09-28` — HTTP `401`
 
 **Stage 9 status:** `NOT STARTED / NEXT`
+
+This document retains the earlier blocked/preflight attempts as chronology. The
+current authoritative Stage 8 status is `COMPLETE`; the closeout evidence is
+recorded below.
 
 ## Scope and implementation
 
@@ -73,8 +77,9 @@ marker is therefore recorded only as a preflight non-observation:
 
 `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`
 
-This is not a provider-coverage conclusion. The actual one-hour pilot remains
-unexecuted and Stage 8 is not complete.
+This is not a provider-coverage conclusion. At the time of this preflight, the
+one-hour pilot remained unexecuted. This historical result is superseded by
+the successful pilot closeout below.
 
 ## Latest 2026-09-28 Stage 8 HTTP attempt
 
@@ -88,11 +93,82 @@ The response does not, by itself, prove whether the cause is the current
 credential value, provider/data-supplier entitlement, or another authorization
 condition.
 
-This is current Stage 8 failure evidence, not a replacement for the earlier
-successful historical MDD controls and not a conclusion that MDD or the
-future 50-station plan is unusable.
+This is preserved historical Stage 8 failure evidence, not a replacement for
+the earlier successful historical MDD controls and not a conclusion that MDD
+or the future 50-station plan is unusable.
 
-## S40 differential diagnostic and S41 handoff implementation
+## Authoritative successful Stage 8 execution — 2026-09-29
+
+The chronology continued after the missing-key preflight and the earlier
+invalid/local credential-configuration attempts. A macOS probe using a
+different credential had returned HTTP 401; the corrected Legacy-equivalent
+local credential configuration later returned HTTP 200 for the same Köln Hbf
+controlled request. The separate 2026-09-28 Stage 8 attempt returned the
+German supplier-access-looking HTTP 401 body recorded above.
+
+Under the corrected local credential configuration, the differential diagnostic
+ran exactly the required Hbf controls with one fixed diagnostic
+`DepArrTime` anchor and independent per-request `RequestTimestamp` values:
+
+| Control | Station / StopPointRef | NumberOfResults | Result |
+|---|---|---:|---|
+| A | Köln Hbf / `de:05315:11201` | `5` | HTTP `200`, parseable |
+| B | Köln Hbf / `de:05315:11201` | `20` | HTTP `200`, parseable |
+
+The diagnostic classification was
+`CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`. No request
+parameter change was required, and the approved Hbf/N20/V3 contract remained
+in force. The bounded evidence therefore supports only this conclusion: Köln
+Hbf works with both result counts under the corrected local credential
+configuration, so the earlier 401 does not demonstrate that `NumberOfResults=20`
+or the current Hbf Stage 8 request contract requires additional supplier
+authorization. No broader claim about every MDD data supplier is made.
+
+The full pilot then used Köln Hbf, `de:05315:11201`, `NumberOfResults=20`,
+and `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. It completed with:
+
+- actual elapsed time approximately `3606.801` seconds;
+- `1200` planned logical slots;
+- `343` attempted HTTP requests and `343` HTTP 200 responses;
+- `343` successful parser/reconciliation responses and reconciliation rate
+  `1.0` / `100%` over successful HTTP responses;
+- `6860` `StopEventResult` occurrences;
+- `0` parser failures, persistence failures, network/DNS failures, timeouts,
+  and MDD application errors; and
+- successful cleanup (`SUCCEEDED`).
+
+The pilot attempted `343` requests because `857` fixed slots overlapped the
+preceding sequential request/processing cycle and were skipped by design.
+The scheduler does not queue or catch up those slots. These are not collector
+failures; the observation is evidence for the later Stage 13
+sequential-versus-bounded-concurrency/readiness decision, which is not made in
+this document.
+
+The bounded RecordedAtTime result is exactly
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`. It does not establish
+provider-wide absence. Actual Physical Delay remains **NOT_APPROVED** and an
+`EstimatedTime`-based value is not renamed as actual physical delay.
+
+The sanitized live parser-gap evidence observed source fields that are not yet
+mapped by the current Stage 8 persistence model: `affectedVehicleJourney`,
+`datedVehicleJourneyRef`, `destinations`,
+`direction`, `operatingDaysDescription`, `origins`, `situations`,
+`vehicleJourneyRef`, and `vehicleJourneys`. These remain evidence for later
+matching/data-quality review; they are not added to the production schema in
+this task. Existing Situation parsing and persistence remains in force.
+
+The successful controls also exposed two metadata corrections now applied in
+the diagnostic: a parseable HTTP 200 control has
+`existing_stage_8_failure_classification = null`, while genuine parser,
+timeout, network/DNS, HTTP 401, and other failure cases retain their failure
+classification. Normal Situation/passenger-information text remains in the
+Situation evidence path and no longer populates
+`sanitized_provider_error_text`; genuine failed-response evidence, including
+the German HTTP 401 body, remains available for supplier-access detection.
+
+Offline validation of these corrections made no MDD request.
+
+## Historical S40 differential diagnostic and S41 handoff implementation
 
 The diagnostic uses only the following decision-tree requests, in order:
 
@@ -115,7 +191,7 @@ requests, disabled redirects, the existing 30-second timeout, and the shared
 TRIAS 1.2 request builder. The credential value is never printed, logged,
 hashed, fingerprinted, compared, or persisted.
 
-The repository/Codex execution process available for this update reported only
+The earlier repository/Codex execution process reported only
 `MDD_API_KEY: MISSING`. Therefore Controls A, B, and C were not executed, no
 diagnostic HTTP evidence was created, and the diagnostic result is
 `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`. The user's separate local Terminal
@@ -135,7 +211,7 @@ Heumarkt, `de:05315:11110`, N5, under
 does not start the pilot. The actual pilot creates its own fixed start-time
 `DepArrTime` anchor; diagnostic control timestamps are never reused.
 
-The conditional decision remains explicit: only A=`200`, B=`401` with the
+The historical conditional decision remains explicit: only A=`200`, B=`401` with the
 sanitized supplier-access message can supersede `NumberOfResults=20` with `5`
 for Stage 8, under a new versioned Stage 8 sampling/request policy. A=`401`,
 C=`200` would instead move the bounded pilot target to Heumarkt and use `5`;
@@ -155,10 +231,10 @@ temporary directory is cleaned as well.
 
 ## Closeout boundary
 
-Stage 8 must not be marked `COMPLETE` until the authorized host run completes
-the required differential diagnostic, applies only an evidence-supported
-versioned Stage 8 contract decision, executes the resulting bounded pilot,
-reconciles successful responses, produces the required measurements, and
-cleans up protected temporary artifacts. The fixed 50-station objective,
-250,000/month quota, and all other approved boundaries remain unchanged.
-Stage 9 and all later stages were not started or modified.
+The required closeout gate is now satisfied: the authorized host run completed
+the differential diagnostic, applied the evidence-supported unchanged Hbf/N20
+contract decision, completed the bounded pilot, reconciled successful
+responses, produced the required measurements, and cleaned up protected
+temporary artifacts. Stage 8 is therefore **COMPLETE**. The fixed 50-station
+objective, 250,000/month quota, and all other approved boundaries remain
+unchanged. Stage 9 and all later stages were not started or modified.

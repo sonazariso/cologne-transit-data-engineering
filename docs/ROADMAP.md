@@ -220,23 +220,57 @@ not guarantee every response completes within 3 seconds. Three-second sampling
 reduces but cannot mathematically guarantee capture of a transient
 `RecordedAtTime`. Actual Delay remains unapproved.
 
-## Stage 8 — Small Realtime Pilot — BLOCKED AT AUTHORIZATION DIAGNOSTIC GATE
+## Stage 8 — Small Realtime Pilot — COMPLETE
 
-Stage 8 owns host execution of the approved MDD-only pilot. The runtime and
-the separate bounded authorization/request-contract diagnostic are implemented.
-The latest 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
-German supplier-access message. The diagnostic run available for the current
-repository/Codex process reported only `MDD_API_KEY: MISSING`, so Controls
-A/B/C made zero requests and no evidence-supported request-contract change was
-made. The runtime is ready to hand a permitted live branch into the same pilot
-path with explicit effective station, stop identity, result count, and policy
-metadata; its approved Hbf/N20/V3 values remain the defaults. The pilot
-therefore remains incomplete: no successful response is available for raw →
-parser → diagnostic-persistence validation, reconciliation, field coverage,
-or `RecordedAtTime` measurement. The user's separate local Terminal had
-previously reported `MDD_API_KEY: PRESENT`; these are different process
-environments, not contradictory claims. See the [sanitized Stage 8 record](stages/08-small-realtime-pilot-blocked.md).
-Stage 9 remains not started and is not authorized by this blocker.
+Authoritative runtime status: `stage_8_status = COMPLETE`.
+
+Stage 8 owns host execution of the approved MDD-only pilot. The historical
+chronology remains in the [Stage 8 record](stages/08-small-realtime-pilot-blocked.md):
+an earlier missing-key preflight made zero requests; earlier invalid/local
+credential-configuration attempts included a different-credential macOS HTTP
+401 and a later corrected Legacy-equivalent configuration; and a later
+2026-09-28 attempt returned HTTP `401` with the observed German
+supplier-access message.
+
+Under the corrected local credential configuration, the bounded differential
+diagnostic then succeeded at Köln Hbf (`de:05315:11201`): Control A with
+`NumberOfResults=5` returned HTTP `200` and a parseable response, and Control B
+with `NumberOfResults=20` returned HTTP `200` and a parseable response using
+the same diagnostic `DepArrTime` anchor. The classification was
+`CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`. No request-contract
+reduction was required. The evidence supports the bounded conclusion that
+the earlier 401 does not show that Hbf/N20 requires additional supplier
+authorization; it is not a claim about every MDD data supplier.
+
+The full effective Hbf/N20/V3 pilot completed successfully with approximately
+`3606.801` seconds elapsed, `1200` planned logical slots, `343` attempted
+requests, `343` HTTP 200 responses, `343` successful parser/reconciliation
+responses, a `1.0` reconciliation rate, `6860` `StopEventResult` occurrences,
+zero parser/persistence/network-DNS/timeout/application failures, and
+`SUCCEEDED` cleanup. It skipped `857` overlapping fixed slots by design. The
+collector remained sequential and did not queue or catch up those slots; they
+are not collector failures. This is evidence for the later Stage 13
+sequential-versus-bounded-concurrency/readiness decision, which is not
+performed here.
+
+The bounded result is exactly
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`; no provider-wide absence
+claim is made. Actual Physical Delay remains **NOT_APPROVED**. The live
+parser-gap evidence includes the currently unmapped source fields
+`affectedVehicleJourney`, `datedVehicleJourneyRef`, `destinations`,
+`direction`, `operatingDaysDescription`, `origins`, `situations`,
+`vehicleJourneyRef`, and `vehicleJourneys`; these remain evidence for later
+matching/data-quality review and are not added to the production schema here.
+Situation parsing/persistence remains enabled.
+
+Successful-control metadata no longer receives a failure classification, and
+normal Situation/passenger-information text no longer populates
+`sanitized_provider_error_text`; genuine failed-response error evidence,
+including the observed German 401 body, remains available for supplier-access
+detection. Offline validation for these corrections used no MDD request.
+The future 50-station objective is unchanged, Stage 13 retains ownership of
+future Tiered50 production result-limit/cadence/concurrency decisions, and
+Stage 9 remains not started.
 
 ## Stage 9 — Matching & Data Quality
 Validate stop, route, service-date, trip/event identity, candidate richer

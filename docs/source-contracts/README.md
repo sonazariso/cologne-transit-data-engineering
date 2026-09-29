@@ -148,17 +148,18 @@ Current status facts:
 - Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**.
 - Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
 - Historical Stage 02 controlled MDD authorization: **Working for that audited
-  request**. Current Stage 8 authorization is **NOT PROVEN**: the latest
-  2026-09-28 Stage 8 attempt returned HTTP 401 with the observed German
-  supplier-access message, and the available S40/S41 diagnostic process
-  reported `MDD_API_KEY: MISSING` before Control A.
+  request**. The latest 2026-09-28 Stage 8 HTTP 401 with the observed German
+  supplier-access message is preserved as historical chronology. The later
+  corrected local credential configuration passed both Köln Hbf differential
+  controls at `NumberOfResults=5` and `NumberOfResults=20`, and the bounded
+  Hbf/N20/V3 pilot completed successfully. Stage 8 is **COMPLETE**; this does
+  not make a provider-wide authorization claim.
 - The S40 diagnostic is implemented at
   [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
-  Its available repository/Codex execution made zero diagnostic requests and
-  authorized no request-parameter change. The user's separate local Terminal
-  had previously reported `MDD_API_KEY: PRESENT`; these are different process
-  environments, not contradictory claims, and do not establish whether that
-  separate credential is correct or incorrect.
+  Its successful A/B result classified the current bounded Hbf request breadth
+  as `CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`; no request
+  parameter change was authorized. An earlier repository-process missing-key
+  result remains historical chronology, not the current Stage 8 status.
 - Host DNS result: `NORMAL_RESOLVER_WORKS`.
 - Stage 02 technical audit baseline: **Complete under S14**; current Stage 02
   status: **Approved** after the S17 approval synchronization.

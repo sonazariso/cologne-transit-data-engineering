@@ -37,7 +37,8 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-031 | 2026-09-28 | Stage 7 realtime pilot design: bounded MDD-only Köln Hbf pilot, fixed request/cadence/quota/raw-retention/persistence controls, and Stage 8 handoff; execution remains not started | Historical pilot design; cadence detail superseded by D-032 and later D-033 |
 | D-032 | 2026-09-28 | Stage 7 pilot-design correction: bounded 10-second fixed-anchor MDD handoff for `RecordedAtTime` visibility; D-031's 60-second cadence detail is superseded while its historical record is retained | Historical pilot-design correction; superseded by D-033 |
 | D-033 | 2026-09-28 | Stage 7 active correction: 3-second fixed start-to-start pilot slots, 1200-attempt maximum, and 83–84% operational MDD planning envelope with 16–17% unallocated headroom | Active pilot-design correction |
-| D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Current Stage 8 diagnostic gate; no pilot authorization change |
+| D-034 | 2026-09-29 | S40 Stage 8 authorization/request-contract diagnostic: preserve the 2026-09-28 HTTP 401 supplier-access evidence, execute only the bounded A/B/C differential tree, and make no contract change until a live result supports one | Historical Stage 8 diagnostic gate; superseded by D-035 |
+| D-035 | 2026-09-29 | Stage 8 successful Hbf differential and bounded pilot closeout: A=200 at N5, B=200 at N20, unchanged V3/N20 contract, successful 343-request pilot, and corrected diagnostic metadata semantics | Stage 8 complete; Stage 9+ not started |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -396,7 +397,7 @@ The approved decisions are:
 The full contract is in the [Stage 7 design](stages/07-realtime-pilot-design.md)
 and the [completion decision](stages/07-realtime-pilot-design-completion-decision.md).
 
-Stage 8 remains **NOT STARTED / NEXT**. D-031 authorizes no MDD request,
+At the time of D-031, Stage 8 remained **NOT STARTED / NEXT**. D-031 authorized no MDD request,
 GTFS-RT request, network access, SQL/database access, runtime pilot, or
 PostgreSQL implementation. Stage 6 remains **COMPLETE — APPROVED DESIGN;
 PHYSICAL IMPLEMENTATION DEFERRED** and Stage 5 remains **COMPLETE — APPROVED
@@ -413,7 +414,8 @@ decision context.
 D-032 superseded the 60-second cadence, moving `DepArrTime` detail, and V1
 policy identifier in
 D-031 while retaining D-031 as historical decision context. Stage 7 remains
-**COMPLETE — APPROVED PILOT DESIGN** and Stage 8 remains **NOT STARTED / NEXT**.
+**COMPLETE — APPROVED PILOT DESIGN**. At the time of D-032, Stage 8 remained
+**NOT STARTED / NEXT**; current Stage 8 status is recorded by D-035.
 
 The corrected handoff is:
 
@@ -476,7 +478,8 @@ not start Stage 8.
 D-033 is the active documentation-only correction to the bounded Stage 8
 handoff. It supersedes the V2 10-second fixed-anchor policy in D-032 while
 preserving D-031 and D-032 as historical records. Stage 7 remains
-**COMPLETE — APPROVED PILOT DESIGN** and Stage 8 remains **NOT STARTED / NEXT**.
+**COMPLETE — APPROVED PILOT DESIGN**. At the time of D-033, Stage 8 remained
+**NOT STARTED / NEXT**; its later completion is recorded by D-035.
 
 The active decision is:
 
@@ -533,8 +536,9 @@ The active decision is:
   `NumberOfResults=20` is not an HTTP request count. Actual consumption may be
   lower because overlapping slots are skipped.
 
-D-033 authorizes no MDD request, GTFS-RT request, other network request, SQL or
-database work, or runtime pilot code. It does not start Stage 8. Historical V1
+D-033 authorized no MDD request, GTFS-RT request, other network request, SQL or
+database work, or runtime pilot code at that design stage. It did not start
+Stage 8 at that time. Historical V1
 and V2 policy decisions remain unchanged in the decision log.
 
 ## D-034 — Stage 8 Authorization/Request-Contract Diagnostic Gate
@@ -544,7 +548,7 @@ German provider message:
 
 `Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
 
-This is preserved as current Stage 8 failure evidence and does not replace the
+This is preserved as historical Stage 8 failure evidence and does not replace the
 earlier successful historical MDD request or prove that the current credential
 value is invalid.
 
@@ -564,7 +568,7 @@ status, content type, elapsed time, response bytes, sanitized provider error
 text, and parser parseability. The API-key value is never printed, logged,
 hashed, fingerprinted, compared, or persisted.
 
-The available 2026-09-29 repository/Codex process preflight reported only
+The available 2026-09-29 repository/Codex process preflight at that time reported only
 `MDD_API_KEY: MISSING`, so no control request was executed. The resulting
 classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no Stage 8 request
 parameter changed and the full pilot was not started. The user's separate
@@ -588,3 +592,52 @@ uses `5`; A=`401`, C=`401` stops before the pilot. Previous/This/Onward call
 coverage, realtime data, parser fields, cadence, quota, cleanup, the future
 50-station objective, and Stage 13 ownership of the production result-limit
 decision remain unchanged. Stage 9 and later stages were not started.
+
+## D-035 — Stage 8 Successful Differential and Pilot Closeout
+
+The chronology in D-034 is preserved. It includes the earlier missing-key
+preflight, earlier invalid/local credential-configuration attempts, and the
+2026-09-28 HTTP 401 with the observed German supplier-access body. Under the
+corrected local credential configuration, the bounded differential then
+executed:
+
+- Control A: Köln Hbf, `de:05315:11201`, `NumberOfResults=5`, HTTP `200`,
+  parseable;
+- Control B: same Köln Hbf and diagnostic `DepArrTime` anchor,
+  `NumberOfResults=20`, HTTP `200`, parseable; and
+- classification: `CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`.
+
+No request-contract reduction was required. The bounded evidence supports the
+conclusion that Köln Hbf works with both result counts under the corrected
+local credential configuration; therefore the earlier 401 does not support a
+conclusion that Hbf/N20 or the current Hbf Stage 8 request contract requires
+additional supplier authorization. This is not a claim about every MDD data
+supplier.
+
+The full pilot used Köln Hbf, `de:05315:11201`, `NumberOfResults=20`, and
+`MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. It completed with approximately
+`3606.801` seconds elapsed, `1200` planned logical slots, `343` attempted
+HTTP requests, `343` HTTP 200 responses, `343` successful
+parser/reconciliation responses, reconciliation rate `1.0`, `6860`
+`StopEventResult` occurrences, `857` designed sequential overlap skips, zero
+parser/persistence/network-DNS/timeout/application failures, and successful
+cleanup. `857` skipped slots are not collector failures; they are evidence for
+the later Stage 13 sequential-versus-bounded-concurrency/readiness decision.
+
+The bounded result is
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`; Actual Physical Delay
+remains **NOT_APPROVED**. The observed parser gaps
+(`affectedVehicleJourney`, `datedVehicleJourneyRef`, `destinations`,
+`direction`, `operatingDaysDescription`, `origins`, `situations`,
+`vehicleJourneyRef`, and `vehicleJourneys`) remain evidence for later review
+and are not added to the production schema here. Stage 9+ remains not started.
+
+The diagnostic metadata contract is corrected: successful parseable HTTP 200
+controls have no failure classification (`null`), while genuine parser,
+timeout, network/DNS, authentication/authorization, and other failures retain
+their classifications. Normal Situation/passenger-information text does not
+populate `sanitized_provider_error_text`; genuine failed-response evidence,
+including the German HTTP 401 body, remains sanitized and supplier-access
+detection remains distinct from generic 401. Offline validation made no MDD
+request. The future 50-station objective and Stage 13 production ownership
+remain unchanged.

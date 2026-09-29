@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional, Tuple
 import stage_08_mdd_realtime_pilot as pilot
 
 
-SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.2"
+SCRIPT_VERSION = "stage-08-auth-request-contract-diagnostic-1.3"
 DIAGNOSTIC_POLICY = "MDD_STAGE_8_AUTH_REQUEST_CONTRACT_DIAGNOSTIC_V1"
 CONTROL_A_STATION = "Köln Hbf"
 CONTROL_A_STOP_POINT_REF = "de:05315:11201"
@@ -71,9 +71,17 @@ def provider_error_text(
     api_key: str,
     parsed: Optional[pilot.ParsedResponse],
 ) -> Optional[str]:
-    """Return only sanitized provider-error text, never a raw credential."""
+    """Return sanitized provider-error evidence, never normal Situation text.
 
-    if not result.body:
+    A successful, parseable TRIAS response may contain passenger-information
+    ``Situation`` summaries/descriptions.  Those belong to the existing
+    Situation evidence path, not to diagnostic provider-error metadata.  For a
+    successful response, only the parser's explicit response/result error
+    entries can contribute to this field.  Non-2xx responses remain on the
+    failed-response path so the observed supplier-access body is retained.
+    """
+
+    if result.http_status is None or not result.body:
         return None
 
     decoded = pilot.decode_response(result.body, result.content_type)
@@ -81,6 +89,26 @@ def provider_error_text(
         decoded_value = json.loads(decoded)
     except (TypeError, ValueError):
         decoded_value = None
+
+    if 200 <= result.http_status < 300:
+        if parsed is None or not pilot.application_error(parsed):
+            return None
+
+        candidates = []
+        for item in parsed.response_error_entries + parsed.result_error_entries:
+            if not item.get("populated"):
+                continue
+            if pilot.normalized_key(item.get("field_name")) not in {
+                "errormessage",
+                "errorcode",
+            }:
+                continue
+            text = scalar_error_text(item.get("value_excerpt"), api_key)
+            if text and text not in candidates:
+                candidates.append(text)
+            if len(candidates) >= 5:
+                break
+        return pilot.clean_error(" | ".join(candidates), api_key) if candidates else None
 
     candidates = []
     if decoded_value is not None:
@@ -102,6 +130,42 @@ def provider_error_text(
     if result.http_status is not None and not 200 <= result.http_status < 300:
         return pilot.clean_error(decoded, api_key)
     return None
+
+
+def control_failure_classification(
+    result: pilot.HTTPResult,
+    *,
+    response_parseable: Optional[bool],
+    parse_error: Optional[str],
+    parsed: Optional[pilot.ParsedResponse],
+) -> Optional[str]:
+    """Classify only genuine control failures.
+
+    ``pilot.classification_for_http`` intentionally has no parser result, so a
+    successful 2xx response falls through to ``PARSER_FAILURE`` there.  The
+    diagnostic has the parse result available and must not emit a failure
+    classification for a successful, parseable control.
+    """
+
+    if result.failure == "TIMEOUT":
+        return "TIMEOUT"
+    if result.failure == "NETWORK_OR_DNS_FAILURE":
+        return "NETWORK_OR_DNS_FAILURE"
+    if result.http_status in {401, 403}:
+        return "AUTHENTICATION_OR_AUTHORIZATION_FAILURE"
+    if result.http_status == 429:
+        return "RATE_LIMIT_RESPONSE"
+    if result.http_status is not None and not 200 <= result.http_status < 300:
+        return "HTTP_ERROR"
+    if result.failure:
+        return result.failure
+    if result.http_status is not None and 200 <= result.http_status < 300:
+        if response_parseable is True and parse_error is None:
+            if parsed is not None and pilot.application_error(parsed):
+                return "MDD_APPLICATION_ERROR"
+            return None
+        return "PARSER_FAILURE"
+    return "PARSER_FAILURE"
 
 
 def contains_supplier_access_message(text: Optional[str]) -> bool:
@@ -221,7 +285,12 @@ def run_control(
         "transport_failure_detail": pilot.clean_error(result.failure_detail, api_key)
         if result.failure_detail
         else None,
-        "existing_stage_8_failure_classification": pilot.classification_for_http(result),
+        "existing_stage_8_failure_classification": control_failure_classification(
+            result,
+            response_parseable=parseable,
+            parse_error=parse_error,
+            parsed=parsed,
+        ),
         "data_supplier_access_message": contains_supplier_access_message(sanitized_error),
         "raw_artifact_path": str(raw_artifact_path) if raw_artifact_path else None,
         "raw_artifact_error": raw_artifact_error,

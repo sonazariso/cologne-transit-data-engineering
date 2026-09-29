@@ -16,7 +16,7 @@
 | 5 | Database Architecture | COMPLETE — APPROVED ARCHITECTURE |
 | 6 | Static Warehouse & Analytics Design | COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED |
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
-| 8 | Small Realtime Pilot | BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED |
+| 8 | Small Realtime Pilot | COMPLETE |
 | 9 | Matching & Data Quality | Not started |
 | 10 | Operational Fact | Not started |
 | 11 | Power BI Model | Not started |
@@ -120,8 +120,8 @@ for the authoritative closeout record.
   data loading, network retrieval, realtime work, matching, operational facts,
   and Power BI work did not occur. The [Stage 6 completion decision](stages/06-static-warehouse-analytics-completion-decision.md)
   records the closeout. Stage 7 is now separately closed as **COMPLETE —
-  APPROVED PILOT DESIGN**; Stage 8 is currently blocked at its authorization
-  diagnostic gate.
+  APPROVED PILOT DESIGN**; Stage 8 is complete as the bounded pilot execution
+  described below.
 
 ### Stage 7 closeout
 
@@ -154,47 +154,102 @@ for the authoritative closeout record.
 - The [Stage 7 completion decision](stages/07-realtime-pilot-design-completion-decision.md)
   remains authoritative for the design closeout. That closeout itself
   performed no MDD or GTFS-RT request, SQL/database access, runtime pilot, or
-  PostgreSQL implementation; the later Stage 8 HTTP attempt and current
-  diagnostic gate are recorded below.
+  PostgreSQL implementation; the later Stage 8 HTTP attempt and Stage 8
+  closeout are recorded below.
 
-### Stage 8 authorization/request-contract diagnostic gate
+### Stage 8 closeout — COMPLETE
 
-- **Stage 8 — BLOCKED — DIFFERENTIAL AUTHORIZATION DIAGNOSTIC NOT COMPLETED.**
-  The Stage 8 runtime exists at
-  [scripts/stage_08_mdd_realtime_pilot.py](../scripts/stage_08_mdd_realtime_pilot.py),
-  and the separate bounded diagnostic exists at
-  [scripts/stage_08_authorization_request_contract_diagnostic.py](../scripts/stage_08_authorization_request_contract_diagnostic.py).
-- The historical 2026-09-28 Stage 8 HTTP attempt returned `401` with the
-  The observed response was the German supplier-access message beginning
-  `Sie haben keinen Zugriff auf Daten diesen Datenlieferanten`. This is
-  preserved as current Stage 8 failure evidence; it does not prove that the
-  credential itself is invalid or that MDD is unusable.
-- The diagnostic execution available for this update reported only
-  `MDD_API_KEY: MISSING`, so Controls A/B/C made zero HTTP requests. Its
-  classification is `DIAGNOSTIC_NOT_RUN_CREDENTIAL_MISSING`; no request
-  parameter change is evidence-supported and the full pilot was not started.
-  The runtime is now ready to automatically hand a permitted decision to the
-  same pilot path with an explicit effective station, `StopPointRef`,
-  `NumberOfResults`, and versioned sampling/request policy. Offline
-  validation covers Hbf/N20/V3, Hbf/N5, Heumarkt/N5, and the no-pilot branch.
-- The current diagnostic correction selects one fixed
-  `DiagnosticAnchorDepArrTime` across its executed A/B/C controls while
-  retaining each control's independent actual `RequestTimestamp`. Its process
-  result now reflects the returned full-pilot status: a permitted-but-blocked
-  or failed pilot is non-zero, and only `stage_8_status=COMPLETE` is zero.
-  Diagnostic temporary evidence is cleaned after a successful pilot only when
-  the pilot's extraction, reconciliation, and cleanup gates are complete;
-  blocked or failed evidence remains protected and pending under the existing
-  maximum-24-hour boundary.
-- The repository/Codex execution process did not inherit `MDD_API_KEY`. The
-  user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`;
-  these are different process environments, not contradictory claims. No
-  credential values were exposed or compared, and this does not establish
-  whether the separate Terminal credential is correct or incorrect.
-- The earlier missing-key preflight remains historical evidence in the
-  [Stage 8 record](stages/08-small-realtime-pilot-blocked.md), not the current
-  sole explanation for the later HTTP 401.
-- Stage 9 and all later stages remain not started and untouched.
+Authoritative runtime status: `stage_8_status = COMPLETE`.
+
+The Stage 8 runtime exists at
+[scripts/stage_08_mdd_realtime_pilot.py](../scripts/stage_08_mdd_realtime_pilot.py),
+and the separate authorization/request-contract diagnostic exists at
+[scripts/stage_08_authorization_request_contract_diagnostic.py](../scripts/stage_08_authorization_request_contract_diagnostic.py).
+The [Stage 8 record](stages/08-small-realtime-pilot-blocked.md) retains the
+full chronology while this section is the current authoritative status.
+
+The chronology is:
+
+1. An earlier missing-key preflight reported `MDD_API_KEY: MISSING` and made
+   zero requests.
+2. Earlier invalid/local credential-configuration attempts included a macOS
+   probe using a different credential that returned HTTP 401; the corrected
+   Legacy-equivalent local credential configuration later returned HTTP 200
+   for the same Köln Hbf controlled request.
+3. A later 2026-09-28 Stage 8 attempt returned HTTP 401 with the observed
+   German supplier-access message:
+   `Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
+4. Under the corrected local credential configuration, the differential
+   diagnostic succeeded: Control A used Köln Hbf,
+   `de:05315:11201`, `NumberOfResults=5`, and returned HTTP 200 with a
+   parseable response; Control B used the same station and diagnostic
+   `DepArrTime` anchor with `NumberOfResults=20` and returned HTTP 200 with a
+   parseable response.
+5. The evidence-supported classification was
+   `CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`. No request
+   parameter change or request-contract reduction was required. The earlier
+   401 therefore does not support a conclusion that `NumberOfResults=20` or
+   the current Köln Hbf Stage 8 request contract requires additional supplier
+   authorization. This conclusion is bounded to the tested Hbf controls and
+   does not claim that every MDD data supplier behaves identically.
+
+The full effective pilot configuration was Köln Hbf,
+`de:05315:11201`, `NumberOfResults=20`, under
+`MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. It started and completed successfully:
+
+| Measure | Result |
+|---|---:|
+| Actual elapsed time | approximately `3606.801` seconds |
+| Planned logical slots | `1200` |
+| Attempted HTTP requests | `343` |
+| HTTP 200 responses | `343` |
+| Successful parse/reconciliation responses | `343` |
+| Reconciliation rate over successful HTTP responses | `1.0` / `100%` |
+| Skipped overlap slots | `857` |
+| StopEventResult occurrences | `6860` |
+| Parser failures | `0` |
+| Persistence failures | `0` |
+| Network/DNS failures | `0` |
+| Timeouts | `0` |
+| MDD application errors | `0` |
+| Cleanup | `SUCCEEDED` |
+
+The `857` skipped slots are designed sequential overlap skips: the collector
+does not queue or catch up concurrent requests. They are not collector
+failures. This is evidence for the later Stage 13 sequential-versus-bounded-
+concurrency/readiness decision; Stage 13 analysis and implementation are not
+part of this closeout.
+
+The pilot result is exactly
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`. This is bounded to this
+one-hour pilot and is not a provider-wide absence claim. `Actual Physical
+Delay = NOT_APPROVED`; an `EstimatedTime`-based value is not renamed as actual
+physical delay.
+
+The live source exposed these parser-gap fields, observed in the live source
+but not yet mapped by the current Stage 8 persistence model:
+`affectedVehicleJourney`, `datedVehicleJourneyRef`, `destinations`,
+`direction`, `operatingDaysDescription`, `origins`, `situations`,
+`vehicleJourneyRef`, and `vehicleJourneys`. They are preserved as sanitized
+Stage 8 evidence for later matching/data-quality review and are not added to
+the production schema by this closeout. Existing Situation parsing and
+persistence, including `SituationFullRef`, `Source`, and `SourceType`, remain
+unchanged.
+
+The diagnostic metadata correction is also complete: successful HTTP 200,
+parseable controls no longer receive a failure classification, and ordinary
+Situation/passenger-information text no longer populates
+`sanitized_provider_error_text`. Genuine failed-response error evidence,
+including the observed German HTTP 401 supplier-access body, remains
+available to supplier-access detection. Offline validation covered successful
+controls, parser failure, timeout, network/DNS failure, HTTP 401, Situation
+text, the observed German 401 body, and a generic unrelated 401 without making
+an MDD request.
+
+The future 50-station objective is unchanged. Stage 13 retains ownership of
+future Tiered50 production `NumberOfResults`, cadence, concurrency, and
+readiness decisions. Stage 9 and all later stages remain not started and
+untouched.
 
 ## Post-Stage-02 validation
 
@@ -277,12 +332,15 @@ Current authoritative transport and authorization state:
   value matched the then-tested Windows/Legacy value; it does not prove that
   the current process has that value.
 - The historical Stage 02 controlled request returned HTTP 200. The later
-  2026-09-28 Stage 8 attempt returned HTTP 401 with the sanitized
-  supplier-access message. Current Stage 8 authorization is therefore **NOT
-  PROVEN** pending the S40 differential diagnostic.
-- The available 2026-09-29 process preflight reported `MDD_API_KEY: MISSING`.
+  2026-09-28 Stage 8 HTTP 401 with the sanitized supplier-access message is
+  preserved as historical failure evidence. The later corrected local
+  credential configuration passed both Hbf differential controls at
+  `NumberOfResults=5` and `NumberOfResults=20`; this is the current bounded
+  Stage 8 authorization/request-breadth evidence.
+- The earlier repository-process preflight reported `MDD_API_KEY: MISSING`.
   No credential value or credential-derived information was inspected or
-  exposed.
+  exposed; that result remains historical chronology, not the current Stage 8
+  status.
 - The S14 technical-closure package remains the approved Stage 02 baseline.
   Stage 02 received explicit user approval in S17 after S16 completed the
   deferred historical actual-time gate evidence.

@@ -3,7 +3,8 @@
 **Status:** `COMPLETE — APPROVED PILOT DESIGN`  
 **Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Date:** `2026-09-28`  
-**Next stage:** Stage 8 — `NOT STARTED / NEXT`
+**Stage 8 execution status:** `COMPLETE` — this document records the
+design-time handoff; current execution evidence is in the Stage 8 closeout.
 
 This document fixes the bounded, reproducible design and handoff for the
 future Stage 8 MDD pilot. Stage 7 is a design / contract stage. It does not
@@ -41,7 +42,9 @@ Stage 7 does not approve:
 Stage 5 remains `COMPLETE — APPROVED ARCHITECTURE`. Stage 6 remains
 `COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED`. PostgreSQL,
 database migration, and runtime implementation remain deferred until explicit
-later authorization. Stage 8 owns host execution, but Stage 8 has not started.
+later authorization. At the time of this design handoff, Stage 8 had not
+started; the current bounded Stage 8 execution is complete as recorded in the
+[Stage 8 closeout](08-small-realtime-pilot-blocked.md).
 
 ## 2. Authoritative inputs and compatibility
 
@@ -753,7 +756,7 @@ implementation handoff is:
 Stage 8 execution, host-network access, runtime code, and any future
 PostgreSQL implementation are not part of this Stage 7 closeout.
 
-## 19.1 S40/S41 authorization/request-contract diagnostic gate
+## 19.1 Historical S40/S41 authorization/request-contract diagnostic gate
 
 The separate Stage 8 diagnostic is implemented at
 [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py).
@@ -834,7 +837,7 @@ production `NumberOfResults` decision.
 | 22 | Representativeness limitations are explicit. | PASS — Section 18. |
 | 23 | GTFS-RT is explicitly excluded from the one-source pilot. | PASS — Section 3 and Section 18. |
 | 24 | Actual Delay remains unapproved. | PASS — Section 9. |
-| 25 | Stage 8 was not started. | PASS — this document is a design handoff only. |
+| 25 | Stage 8 was not started at the Stage 7 design closeout. | PASS — this document is a design handoff; current execution is recorded separately. |
 | 26 | No network, database, SQL, or runtime execution occurred. | PASS — documentation-only Stage 7 work. |
 | 27 | Documentation/status synchronization is required. | PASS — closeout files and status documents are updated with D-032; D-031's original cadence detail remains historical and superseded. |
 | 28 | `git diff --check` passes. | PASS — local validation completed successfully. |
@@ -846,6 +849,7 @@ validation recorded in the completion decision passed. Stage 7 is:
 
 **COMPLETE — APPROVED PILOT DESIGN**
 
-Stage 8 remains **NOT STARTED / NEXT**. No MDD request, GTFS-RT request,
-network access, SQL/database access, runtime implementation, or pilot
-execution is authorized or claimed by this closeout.
+At the time of this Stage 7 design closeout, Stage 8 was **NOT STARTED / NEXT**.
+The current Stage 8 status is **COMPLETE** under the bounded execution record
+in the Stage 8 closeout. This design document did not itself perform the
+execution, and Stage 9+ work remains outside its scope.

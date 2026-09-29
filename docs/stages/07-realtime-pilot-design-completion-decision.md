@@ -3,7 +3,8 @@
 **Date:** `2026-09-28`  
 **Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Final status:** `COMPLETE — APPROVED PILOT DESIGN`  
-**Stage 8 status:** `NOT STARTED / NEXT`
+**Current Stage 8 status:** `COMPLETE` — see the Stage 8 closeout in
+[`08-small-realtime-pilot-blocked.md`](08-small-realtime-pilot-blocked.md)
 
 The [Stage 7 realtime pilot design](07-realtime-pilot-design.md) is the
 authoritative detailed contract. This closeout separates previously observed
@@ -126,8 +127,8 @@ The following Stage 8 design is approved and fixed:
 
 ## DEFERRED IMPLEMENTATION DECISION
 
-The following work remains outside Stage 7 and requires later authorization or
-stage ownership:
+At the time of this Stage 7 design closeout, the following work remained
+outside Stage 7 and required later authorization or stage ownership:
 
 - Stage 8 host execution and all MDD requests;
 - any GTFS-RT request or collection loop in the pilot;
@@ -192,7 +193,7 @@ The Stage 7 design document covers all 28 requested acceptance criteria:
 22. representativeness limitations;
 23. GTFS-RT exclusion;
 24. Actual Delay remaining unapproved;
-25. Stage 8 remaining not started;
+25. Stage 8 remaining not started at the time of this design closeout;
 26. no network/database/SQL/runtime execution;
 27. synchronized documentation/status; and
 28. passing `git diff --check`.
@@ -205,13 +206,14 @@ database access, or runtime pilot execution occurred.
 
 **Stage 7 is COMPLETE as a pilot-design stage.**
 
-The approved handoff is the bounded MDD-only Stage 8 pilot described in the
-Stage 7 design document. **Stage 8 execution has NOT occurred and remains NOT
-STARTED / NEXT.** Stage 6 remains `COMPLETE — APPROVED DESIGN; PHYSICAL
-IMPLEMENTATION DEFERRED`, and Stage 5 remains `COMPLETE — APPROVED
+The approved handoff was the bounded MDD-only Stage 8 pilot described in the
+Stage 7 design document. At this historical Stage 7 closeout, Stage 8 had not
+yet started. The later Stage 8 execution is now **COMPLETE** as recorded in the
+current Stage 8 closeout. Stage 6 remains `COMPLETE — APPROVED DESIGN;
+PHYSICAL IMPLEMENTATION DEFERRED`, and Stage 5 remains `COMPLETE — APPROVED
 ARCHITECTURE`.
 
-## Current Stage 8 diagnostic addendum — 2026-09-29
+## Historical Stage 8 diagnostic addendum — 2026-09-29 (superseded by D-035)
 
 This addendum preserves the historical Stage 7 closeout above while recording
 the later Stage 8 authorization evidence. The 2026-09-28 Stage 8 attempt
@@ -220,17 +222,18 @@ was not enabled. The separate S40 diagnostic is implemented at
 [`scripts/stage_08_authorization_request_contract_diagnostic.py`](../../scripts/stage_08_authorization_request_contract_diagnostic.py)
 and uses only the required sequential A/B/C decision tree.
 
-The available repository-process preflight reported `MDD_API_KEY: MISSING`, so
+At the time of this historical addendum, the available repository-process
+preflight reported `MDD_API_KEY: MISSING`, so
 Control A and its conditional B/C branch were not executed. No Stage 8 request
 parameter changed, the one-hour pilot was not started, the future 50-station
 objective remains unchanged, and Stage 9+ work was not started. The historical
-Stage 02 HTTP 200 remains historical evidence; current Stage 8 authorization
-is not proven until the diagnostic can run with the restored known working
-Legacy-equivalent credential.
+Stage 02 HTTP 200 remains historical evidence; at that time current Stage 8
+authorization was not proven until the diagnostic could run with the restored
+known working Legacy-equivalent credential.
 
 ### Current Stage 8 implementation correction — S41
 
-The Stage 8 diagnostic now recognizes the observed German supplier-access
+The historical S41 implementation correction recognized the observed German supplier-access
 response using normalized stable phrases as well as the existing English
 supplier-access wording. It still requires supplier-access evidence in the
 message and does not classify a generic HTTP `401` as that condition. Offline
@@ -238,7 +241,7 @@ validation confirms that the exact observed German response sets
 `data_supplier_access_message=true` and selects
 `RESULT_SET_BREADTH_PROVIDER_ACCESS_INTERACTION` for A=`200`/B=`401`.
 
-The diagnostic now hands permitted decisions into the existing single
+The historical diagnostic implementation handed permitted decisions into the existing single
 `run_pilot` path with an explicit effective station, `StopPointRef`,
 `NumberOfResults`, and versioned sampling/request policy. The pilot creates a
 new fixed start-time `DepArrTime` anchor for itself; it never reuses a
@@ -247,3 +250,33 @@ the repository/Codex process for this correction. That process did not inherit
 `MDD_API_KEY`; the user's separate local Terminal had previously reported it
 present. Those process/environment reports are not contradictory and do not
 establish whether the separate Terminal credential is correct or incorrect.
+
+## Current Stage 8 completion addendum — 2026-09-29
+
+The historical diagnostic gate above was subsequently resolved under the
+corrected local credential configuration. Control A at Köln Hbf,
+`de:05315:11201`, with `NumberOfResults=5` returned HTTP `200` and a parseable
+response. Control B at the same station with `NumberOfResults=20`, the same
+diagnostic `DepArrTime` anchor, and an independent request timestamp returned
+HTTP `200` and a parseable response. The classification was
+`CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`; no request-contract
+reduction was required.
+
+The full Hbf/N20/V3 pilot completed successfully: approximately `3606.801`
+seconds elapsed; `1200` planned slots; `343` attempted requests and `343`
+HTTP 200 responses; `343` successful parser/reconciliation responses; rate
+`1.0`; `6860` `StopEventResult` occurrences; `857` designed overlap skips;
+zero parser, persistence, network/DNS, timeout, and MDD application failures;
+and successful cleanup. The overlap skips are sequential no-catch-up behavior,
+not collector failures, and are evidence for a later Stage 13 readiness
+decision. The bounded result is
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`; Actual Physical Delay
+remains **NOT_APPROVED**.
+
+The successful run also supplied sanitized parser-gap evidence for the
+currently unmapped fields `affectedVehicleJourney`,
+`datedVehicleJourneyRef`, `destinations`, `direction`,
+`operatingDaysDescription`, `origins`, `situations`, `vehicleJourneyRef`, and
+`vehicleJourneys`. These fields remain evidence for later review and are not
+added to the production schema here. The future 50-station objective and Stage
+13 production ownership remain unchanged; Stage 9+ was not started.

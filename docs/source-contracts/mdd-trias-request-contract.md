@@ -1,7 +1,7 @@
 # MDD/TRIAS Request Contract
 
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
-**Document state:** Approved Stage 02 source contract; Stage 7 pilot selection appended<br>
+**Document state:** Approved Stage 02 source contract; Stage 8 pilot closeout appended<br>
 **Version:** TRIAS 1.2<br>
 **Last updated:** 2026-09-29
 
@@ -121,26 +121,42 @@ not larger result-set breadth. At pilot start, select
 `DepArrTime` in every request; do not advance it with wall-clock time. A failed
 request is not retried in the same slot.
 
-The later 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
+The earlier 2026-09-28 Stage 8 attempt returned HTTP `401` with the observed
 German provider response:
 
 `Sie haben keinen Zugriff auf Daten diesen Datenlieferanten. Wenn Sie weitere Datenlieferanten freischalten möchten, kontaktieren Sie bitte den Betreiber der MDD.`
 
-It is preserved as current Stage 8 failure evidence rather than being
-rewritten as the earlier missing-key preflight. The separate
+It is preserved in the chronology rather than being rewritten as the earlier
+missing-key preflight. Earlier local credential-configuration attempts also
+included a different-credential macOS HTTP 401; the corrected
+Legacy-equivalent local credential configuration later returned HTTP 200 for
+the same Köln Hbf controlled request.
+
+The separate
 [Stage 8 authorization/request-contract diagnostic](../../scripts/stage_08_authorization_request_contract_diagnostic.py)
-must run the bounded A/B/C decision tree before this pilot setting is changed.
-The available 2026-09-29 process reported `MDD_API_KEY: MISSING` before
-Control A, so the documented Stage 8 setting remains 20 pending live
-differential evidence. If and only if A=`200` and B=`401` with the sanitized
-supplier-access message, Stage 8 may supersede 20 with 5 under a new versioned
-sampling/request policy; Stage 13 still owns the final production result-limit
-decision. The detector accepts normalized stable German supplier-access phrases
-as well as the existing English wording and does not classify a generic `401`
-as supplier access. The repository/Codex process did not inherit the key; the
-user's separate local Terminal had previously reported `MDD_API_KEY: PRESENT`.
-These are different process environments, not contradictory claims, and do not
-establish whether the separate Terminal credential is correct or incorrect.
+then executed the bounded A/B decision branch under the corrected local
+credential configuration. Control A at Köln Hbf with `NumberOfResults=5`
+returned HTTP `200` and a parseable response. Control B at the same Köln Hbf
+with `NumberOfResults=20`, the same diagnostic `DepArrTime` anchor, and an
+independent request timestamp also returned HTTP `200` and a parseable
+response. The classification was
+`CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`; no request
+parameter change was required, so the approved Stage 8 pilot setting remains
+`NumberOfResults=20` under `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. The earlier
+401 therefore does not support a conclusion that Hbf/N20 or the current Hbf
+Stage 8 request contract requires additional supplier authorization. This is
+a bounded Hbf conclusion, not a claim about every MDD data supplier. Stage 13
+still owns the final production result-limit decision.
+
+The diagnostic metadata contract is now explicit: a successful HTTP 200,
+parseable response with no transport or parser failure has
+`existing_stage_8_failure_classification = null`; genuine parser, timeout,
+network/DNS, authentication/authorization, and other failure classifications
+remain available. `sanitized_provider_error_text` is populated only from
+genuine error evidence. Normal TRIAS Situation summaries/descriptions remain
+in the Situation parsing/evidence path and do not populate that diagnostic
+field. The observed German HTTP 401 supplier-access body remains sanitized and
+supplier-access detection continues to distinguish it from a generic 401.
 
 For the differential itself, the diagnostic selects one fixed
 `DiagnosticAnchorDepArrTime` before Control A and reuses it for Control B or C
@@ -197,14 +213,13 @@ production polling schedule is approved by this document.
 
 ## Permission boundary
 
-The historical audited request returned HTTP 200. Current Stage 8
-authentication/access is **not proven**: the later Stage 8 HTTP 401 carried the
-sanitized supplier-access message described above, and the available
-differential diagnostic process had no visible credential to run Control A.
-MDD access is understood to depend on registration/activation, provider terms,
-and the agreed use purpose. A public dataset description that advertises TRIAS
-as an available NRW resource is not treated as an open-license or unrestricted
-redistribution grant.
+The current bounded Stage 8 Hbf authentication/request breadth is proven by
+the successful A/B differential described above. The earlier HTTP 401 remains
+historical failure evidence and does not establish a provider-wide
+authorization result. MDD access is understood to depend on
+registration/activation, provider terms, and the agreed use purpose. A public
+dataset description that advertises TRIAS as an available NRW resource is not
+treated as an open-license or unrestricted redistribution grant.
 
 The request contract therefore permits documenting and validating the source
 contract, but it does not authorize publication or redistribution of raw MDD
@@ -221,8 +236,13 @@ Stage 8 pilot selection. It does not:
 - establish provider-wide field coverage; or
 - convert the Legacy request builder into the future implementation.
 
-Stage 8 execution itself remains not started. The pilot settings authorize a
-future design handoff, not a request run in Stage 7.
+Stage 8 execution is complete for the bounded Köln Hbf pilot. The pilot used
+the approved V3/N20 request settings and completed with 343 attempted HTTP
+requests, 343 HTTP 200 responses, 343 successful parser/reconciliation
+responses, 6860 `StopEventResult` occurrences, 857 designed overlap skips, and
+successful cleanup. The bounded result was
+`RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT`; Actual Physical Delay
+remains **NOT_APPROVED**. Stage 9+ work was not started.
 
 The detailed response evidence and the four-layer comparison are in the
 [response contract](mdd-trias-response-contract.md) and the
