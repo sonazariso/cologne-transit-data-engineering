@@ -1,6 +1,6 @@
 # Cross-Source Reconciliation Contract
 
-**Status:** `APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED; PRODUCTION ACTIVATION DEFERRED`<br>
+**Status:** `APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE PASS; PRODUCTION ACTIVATION DEFERRED`<br>
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2
 **APPROVED**; Stage 3 **COMPLETE**
 
@@ -12,10 +12,10 @@ implements the bounded matching/data-quality foundation in
 and [`scripts/stage_09_matching_quality.py`](../../scripts/stage_09_matching_quality.py).
 The Stage 9 implementation does not activate collectors, select Tiered50,
 build the Stage 10 operational fact, create Power BI pages, or make causal
-claims. Its implementation regression passes, but the source-backed core
-acceptance gate remains blocked until a retained successful Stage 8 parser
-bundle can be replayed against a date-compatible MDD-to-VRS static event
-population. Supporting source evidence must not be presented as a completed
+claims. Its implementation regression and bounded source-backed core
+acceptance gate pass for the retained live MDD/VRS evidence population; the
+row-level JSONL decision artifact reconciles exactly to its summary. Supporting
+evidence must still not be presented as a production-wide or completed
 cross-source match population.
 
 ## 1. Purpose

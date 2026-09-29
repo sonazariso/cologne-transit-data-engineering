@@ -282,10 +282,12 @@ validates stop-event-first matching, explicit Stage 8 adapter projection,
 timezone/DST service-day alignment, mapping validity, ambiguity handling,
 scope handling, and lineage. The corrected bounded source-backed gate passed
 after three sequential HTTP 200 MDD responses: 60 parsed/adapted observations
-were retained, 54 service dates were independently established, and 51 core
-deterministic matches were produced. The current VRS hierarchy passed all 17
-Stage 4 revalidation checks; railway Köln Hbf remains unresolved and no
-adjacent KVB identity is substituted. The exact run is in
+were retained, 53 service dates were independently established, and 51 core
+deterministic matches were produced, with 51 `MEDIUM` and 9 `UNMATCHED`
+decisions. The durable row-level evidence passed exact JSONL-to-summary
+integrity reconciliation. The current VRS hierarchy passed all 17 Stage 4
+revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
+identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 and
 later stages remain **NOT STARTED**.

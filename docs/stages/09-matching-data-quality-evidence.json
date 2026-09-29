@@ -10,36 +10,138 @@
       "evidence_artifact": "docs/stages/09-source-backed-matching-evidence.jsonl",
       "historical_supporting_evidence_does_not_substitute": true,
       "metrics": {
-        "ambiguity_count": 3,
+        "ambiguity_count": 2,
         "confidence_counts": {
           "HIGH": 0,
           "LOW": 0,
           "MEDIUM": 51,
           "UNMATCHED": 9
         },
-        "data_quality_counts": "NOT_EVALUATED",
-        "direction": "NOT_EVALUATED",
-        "exact_scheduled_time_alignment_count": "NOT_EVALUATED",
-        "independently_established_service_date": {
-          "count": 54,
-          "status_counts": {
-            "ESTABLISHED": 54,
-            "UNRESOLVED": 6
-          },
-          "unresolved_count": 6
+        "data_quality_counts": {
+          "IDENTITY_CONFLICT": 0,
+          "OUT_OF_CORE_SCOPE": 0,
+          "STATIC_EVENT_NOT_FOUND": 0,
+          "STATIC_ROUTE_MISSING": 0,
+          "STATIC_SERVICE_DATE_NOT_ACTIVE": 0,
+          "STATIC_STOP_MISSING": 0
         },
-        "operating_day_ref": "NOT_EVALUATED",
-        "origin_destination": "NOT_EVALUATED",
-        "route_line_identity": "NOT_EVALUATED",
+        "direction": {
+          "agreement_count": 0,
+          "disagreement_count": 51,
+          "present_count": 60,
+          "status": "EVALUATED"
+        },
+        "exact_scheduled_time_alignment_count": 51,
+        "independently_established_service_date": {
+          "count": 53,
+          "status_counts": {
+            "ESTABLISHED": 53,
+            "UNRESOLVED": 7
+          },
+          "unresolved_count": 7
+        },
+        "operating_day_ref": {
+          "agreement_count": 53,
+          "agreement_rate_among_comparable": 1.0,
+          "disagreement_count": 0,
+          "disagreement_examples": [],
+          "input_format_counts": {
+            "ISO_OR_DATE_PREFIX": 60
+          },
+          "interpretation": "OperatingDayRef remains source evidence until independent GTFS service-date agreement is measured.",
+          "invalid_count": 0,
+          "invalid_examples": [],
+          "missing_examples": [],
+          "normalized_format": "YYYY-MM-DD",
+          "normalized_valid_count": 60,
+          "observation_count": 60,
+          "participates_in_matching": false,
+          "presence_rate": 1.0,
+          "present_count": 60,
+          "unresolved_count": 7,
+          "unresolved_examples": [
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:96X55:E:R:j26:23\", \"line_ref\": \"ddb:96X55:E:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:73\", \"stop_seq_number\": 8, \"timetabled_time\": \"2026-09-29T17:06:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X33:Q:H:j26:68\", \"line_ref\": \"ddb:98X33:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 19, \"timetabled_time\": \"2026-09-29T17:16:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X10:P:R:j26:381\", \"line_ref\": \"ddb:98X10:P:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 11, \"timetabled_time\": \"2026-09-29T17:36:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X79::R:j26:330\", \"line_ref\": \"ddb:98X79::R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:75\", \"stop_seq_number\": 3, \"timetabled_time\": \"2026-09-29T17:40:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:90E24::H:j26:57\", \"line_ref\": \"ddb:90E24::H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:8003\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 2, \"timetabled_time\": \"2026-09-29T17:43:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X42:W:H:j26:50\", \"line_ref\": \"ddb:98X42:W:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 12, \"timetabled_time\": \"2026-09-29T17:46:00Z[GMT]\"}"
+            },
+            {
+              "operating_day_ref": "2026-09-29",
+              "reason": "independent GTFS service date is missing or invalid",
+              "service_date": null,
+              "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X01:Q:H:j26:39\", \"line_ref\": \"ddb:98X01:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 6, \"timetabled_time\": \"2026-09-29T17:47:00Z[GMT]\"}"
+            }
+          ]
+        },
+        "origin_destination": {
+          "destination": {
+            "agreement_count": "NOT_EVALUATED",
+            "evaluated_count": "NOT_EVALUATED",
+            "status": "NOT_EVALUATED",
+            "unresolved_count": "NOT_EVALUATED"
+          },
+          "origin": {
+            "agreement_count": "NOT_EVALUATED",
+            "evaluated_count": "NOT_EVALUATED",
+            "status": "NOT_EVALUATED",
+            "unresolved_count": "NOT_EVALUATED"
+          }
+        },
+        "route_line_identity": {
+          "agreement_count": 0,
+          "conflict_count": 0,
+          "evaluated_count": 0,
+          "mapping_semantics": "MDD Operator/LineRef to VRS route_id is not assumed; no line bridge was activated by this probe.",
+          "static_route_context_count": 51,
+          "status": "EVALUATED",
+          "unresolved_count": 60
+        },
         "source_backed_observation_count": 60,
         "stop_point_and_hierarchy": {
           "exact_mdd_stoppointref_to_vrs_stop_count": 60,
-          "explicit_child_to_parent_hierarchy_count": 59,
+          "explicit_child_to_parent_hierarchy_count": 60,
           "parent_fallback_used": false,
           "suffix_stripping_used": false,
           "unresolved_stop_identity_count": 0
         },
-        "stop_sequence": "NOT_EVALUATED"
+        "stop_sequence": {
+          "disagreement_count": 6,
+          "exact_count": 45,
+          "present_count": 60,
+          "status": "EVALUATED",
+          "systematic_offset": 0
+        }
       },
       "observation_record_count": 60,
       "population_type": "BOUNDED_LIVE_MDD_AND_OFFICIAL_VRS_GTFS",
@@ -111,7 +213,7 @@
     "source_backed_evidence_origin": "LIVE_MDD_AND_OFFICIAL_GTFS",
     "source_backed_row_level_artifact": "docs/stages/09-source-backed-matching-evidence.jsonl"
   },
-  "generated_at_utc": "2026-09-29T17:03:49Z",
+  "generated_at_utc": "2026-09-29T17:38:50Z",
   "implementation_regression_status": "PASS",
   "mapping_versions_used": {
     "source_backed": [
@@ -122,25 +224,128 @@
     ]
   },
   "optional_dimension_metrics": {
-    "direction": "NOT_EVALUATED",
-    "origin_destination": "NOT_EVALUATED",
-    "route_line": "NOT_EVALUATED",
-    "stop_sequence": "NOT_EVALUATED"
+    "direction": {
+      "agreement_count": 0,
+      "disagreement_count": 51,
+      "present_count": 60,
+      "status": "EVALUATED"
+    },
+    "origin_destination": {
+      "destination": {
+        "agreement_count": "NOT_EVALUATED",
+        "evaluated_count": "NOT_EVALUATED",
+        "status": "NOT_EVALUATED",
+        "unresolved_count": "NOT_EVALUATED"
+      },
+      "origin": {
+        "agreement_count": "NOT_EVALUATED",
+        "evaluated_count": "NOT_EVALUATED",
+        "status": "NOT_EVALUATED",
+        "unresolved_count": "NOT_EVALUATED"
+      }
+    },
+    "route_line": {
+      "agreement_count": 0,
+      "conflict_count": 0,
+      "evaluated_count": 0,
+      "mapping_semantics": "MDD Operator/LineRef to VRS route_id is not assumed; no line bridge was activated by this probe.",
+      "static_route_context_count": 51,
+      "status": "EVALUATED",
+      "unresolved_count": 60
+    },
+    "stop_sequence": {
+      "disagreement_count": 6,
+      "exact_count": 45,
+      "present_count": 60,
+      "status": "EVALUATED",
+      "systematic_offset": 0
+    }
   },
   "record_type": "stage_09_matching_data_quality_evidence",
+  "row_level_evidence_integrity_status": "PASS",
   "service_date_operating_day_metrics": {
     "independent_gtfs_service_date": {
-      "count": 54,
+      "count": 53,
       "status_counts": {
-        "ESTABLISHED": 54,
-        "UNRESOLVED": 6
+        "ESTABLISHED": 53,
+        "UNRESOLVED": 7
       },
-      "unresolved_count": 6
+      "unresolved_count": 7
     },
-    "operating_day_ref": "NOT_EVALUATED"
+    "operating_day_ref": {
+      "agreement_count": 53,
+      "agreement_rate_among_comparable": 1.0,
+      "disagreement_count": 0,
+      "disagreement_examples": [],
+      "input_format_counts": {
+        "ISO_OR_DATE_PREFIX": 60
+      },
+      "interpretation": "OperatingDayRef remains source evidence until independent GTFS service-date agreement is measured.",
+      "invalid_count": 0,
+      "invalid_examples": [],
+      "missing_examples": [],
+      "normalized_format": "YYYY-MM-DD",
+      "normalized_valid_count": 60,
+      "observation_count": 60,
+      "participates_in_matching": false,
+      "presence_rate": 1.0,
+      "present_count": 60,
+      "unresolved_count": 7,
+      "unresolved_examples": [
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:96X55:E:R:j26:23\", \"line_ref\": \"ddb:96X55:E:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:73\", \"stop_seq_number\": 8, \"timetabled_time\": \"2026-09-29T17:06:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X33:Q:H:j26:68\", \"line_ref\": \"ddb:98X33:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 19, \"timetabled_time\": \"2026-09-29T17:16:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X10:P:R:j26:381\", \"line_ref\": \"ddb:98X10:P:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 11, \"timetabled_time\": \"2026-09-29T17:36:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X79::R:j26:330\", \"line_ref\": \"ddb:98X79::R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:75\", \"stop_seq_number\": 3, \"timetabled_time\": \"2026-09-29T17:40:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:90E24::H:j26:57\", \"line_ref\": \"ddb:90E24::H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:8003\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 2, \"timetabled_time\": \"2026-09-29T17:43:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X42:W:H:j26:50\", \"line_ref\": \"ddb:98X42:W:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 12, \"timetabled_time\": \"2026-09-29T17:46:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X01:Q:H:j26:39\", \"line_ref\": \"ddb:98X01:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 6, \"timetabled_time\": \"2026-09-29T17:47:00Z[GMT]\"}"
+        }
+      ]
+    }
   },
   "source_backed_acceptance_status": "PASS",
-  "source_backed_data_quality_counts": "NOT_EVALUATED",
+  "source_backed_data_quality_counts": {
+    "IDENTITY_CONFLICT": 0,
+    "OUT_OF_CORE_SCOPE": 0,
+    "STATIC_EVENT_NOT_FOUND": 0,
+    "STATIC_ROUTE_MISSING": 0,
+    "STATIC_SERVICE_DATE_NOT_ACTIVE": 0,
+    "STATIC_STOP_MISSING": 0
+  },
   "source_backed_decision_counts": {
     "HIGH": 0,
     "LOW": 0,
@@ -148,41 +353,221 @@
     "UNMATCHED": 9
   },
   "source_backed_metrics": {
-    "ambiguity_count": 3,
+    "ambiguity_count": 2,
     "confidence_counts": {
       "HIGH": 0,
       "LOW": 0,
       "MEDIUM": 51,
       "UNMATCHED": 9
     },
-    "data_quality_counts": "NOT_EVALUATED",
-    "direction": "NOT_EVALUATED",
-    "exact_scheduled_time_alignment_count": "NOT_EVALUATED",
-    "independently_established_service_date": {
-      "count": 54,
-      "status_counts": {
-        "ESTABLISHED": 54,
-        "UNRESOLVED": 6
-      },
-      "unresolved_count": 6
+    "data_quality_counts": {
+      "IDENTITY_CONFLICT": 0,
+      "OUT_OF_CORE_SCOPE": 0,
+      "STATIC_EVENT_NOT_FOUND": 0,
+      "STATIC_ROUTE_MISSING": 0,
+      "STATIC_SERVICE_DATE_NOT_ACTIVE": 0,
+      "STATIC_STOP_MISSING": 0
     },
-    "operating_day_ref": "NOT_EVALUATED",
-    "origin_destination": "NOT_EVALUATED",
-    "route_line_identity": "NOT_EVALUATED",
+    "direction": {
+      "agreement_count": 0,
+      "disagreement_count": 51,
+      "present_count": 60,
+      "status": "EVALUATED"
+    },
+    "exact_scheduled_time_alignment_count": 51,
+    "independently_established_service_date": {
+      "count": 53,
+      "status_counts": {
+        "ESTABLISHED": 53,
+        "UNRESOLVED": 7
+      },
+      "unresolved_count": 7
+    },
+    "operating_day_ref": {
+      "agreement_count": 53,
+      "agreement_rate_among_comparable": 1.0,
+      "disagreement_count": 0,
+      "disagreement_examples": [],
+      "input_format_counts": {
+        "ISO_OR_DATE_PREFIX": 60
+      },
+      "interpretation": "OperatingDayRef remains source evidence until independent GTFS service-date agreement is measured.",
+      "invalid_count": 0,
+      "invalid_examples": [],
+      "missing_examples": [],
+      "normalized_format": "YYYY-MM-DD",
+      "normalized_valid_count": 60,
+      "observation_count": 60,
+      "participates_in_matching": false,
+      "presence_rate": 1.0,
+      "present_count": 60,
+      "unresolved_count": 7,
+      "unresolved_examples": [
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:96X55:E:R:j26:23\", \"line_ref\": \"ddb:96X55:E:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:73\", \"stop_seq_number\": 8, \"timetabled_time\": \"2026-09-29T17:06:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X33:Q:H:j26:68\", \"line_ref\": \"ddb:98X33:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 19, \"timetabled_time\": \"2026-09-29T17:16:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X10:P:R:j26:381\", \"line_ref\": \"ddb:98X10:P:R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 11, \"timetabled_time\": \"2026-09-29T17:36:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"inward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X79::R:j26:330\", \"line_ref\": \"ddb:98X79::R\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:75\", \"stop_seq_number\": 3, \"timetabled_time\": \"2026-09-29T17:40:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:90E24::H:j26:57\", \"line_ref\": \"ddb:90E24::H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:8003\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 2, \"timetabled_time\": \"2026-09-29T17:43:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X42:W:H:j26:50\", \"line_ref\": \"ddb:98X42:W:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:76\", \"stop_seq_number\": 12, \"timetabled_time\": \"2026-09-29T17:46:00Z[GMT]\"}"
+        },
+        {
+          "operating_day_ref": "2026-09-29",
+          "reason": "independent GTFS service date is missing or invalid",
+          "service_date": null,
+          "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|MDD_EVENT|{\"direction_ref\": \"outward\", \"event_type\": \"ARRIVAL\", \"journey_ref\": \"ddb:98X01:Q:H:j26:39\", \"line_ref\": \"ddb:98X01:Q:H\", \"namespace\": \"MDD\", \"operating_day_ref\": \"2026-09-29\", \"operator_ref\": \"ddb:80\", \"stop_point_ref\": \"de:05315:11201:7:77\", \"stop_seq_number\": 6, \"timetabled_time\": \"2026-09-29T17:47:00Z[GMT]\"}"
+        }
+      ]
+    },
+    "origin_destination": {
+      "destination": {
+        "agreement_count": "NOT_EVALUATED",
+        "evaluated_count": "NOT_EVALUATED",
+        "status": "NOT_EVALUATED",
+        "unresolved_count": "NOT_EVALUATED"
+      },
+      "origin": {
+        "agreement_count": "NOT_EVALUATED",
+        "evaluated_count": "NOT_EVALUATED",
+        "status": "NOT_EVALUATED",
+        "unresolved_count": "NOT_EVALUATED"
+      }
+    },
+    "route_line_identity": {
+      "agreement_count": 0,
+      "conflict_count": 0,
+      "evaluated_count": 0,
+      "mapping_semantics": "MDD Operator/LineRef to VRS route_id is not assumed; no line bridge was activated by this probe.",
+      "static_route_context_count": 51,
+      "status": "EVALUATED",
+      "unresolved_count": 60
+    },
     "source_backed_observation_count": 60,
     "stop_point_and_hierarchy": {
       "exact_mdd_stoppointref_to_vrs_stop_count": 60,
-      "explicit_child_to_parent_hierarchy_count": 59,
+      "explicit_child_to_parent_hierarchy_count": 60,
       "parent_fallback_used": false,
       "suffix_stripping_used": false,
       "unresolved_stop_identity_count": 0
     },
-    "stop_sequence": "NOT_EVALUATED"
+    "stop_sequence": {
+      "disagreement_count": 6,
+      "exact_count": 45,
+      "present_count": 60,
+      "status": "EVALUATED",
+      "systematic_offset": 0
+    }
   },
   "source_backed_row_level_evidence": {
     "artifact": "docs/stages/09-source-backed-matching-evidence.jsonl",
     "record_count": 60,
-    "required_fields_present": true
+    "required_fields_present": true,
+    "row_level_evidence_integrity": {
+      "artifact_exists": true,
+      "error_count": 0,
+      "errors": [],
+      "reconciliation": {
+        "ambiguity_count": 2,
+        "confidence_counts": {
+          "HIGH": 0,
+          "LOW": 0,
+          "MEDIUM": 51,
+          "UNMATCHED": 9
+        },
+        "core_deterministic_match_count": 51,
+        "data_quality_classification_counts": {
+          "AMBIGUOUS_MULTIPLE_CANDIDATES": 2,
+          "MISSING_REQUIRED_IDENTITY": 7,
+          "SOURCE_LINE_IDENTITY_UNRESOLVED": 51
+        },
+        "independently_established_service_date_count": 53,
+        "row_count": 60,
+        "service_date_status_counts": {
+          "ESTABLISHED": 53,
+          "UNRESOLVED": 7
+        },
+        "summary_ambiguity_count": 2,
+        "summary_confidence_counts": {
+          "HIGH": 0,
+          "LOW": 0,
+          "MEDIUM": 51,
+          "UNMATCHED": 9
+        },
+        "summary_core_deterministic_match_count": 51,
+        "summary_independently_established_service_date_count": 53,
+        "summary_row_count": 60
+      },
+      "required_fields_checked": [
+        "candidate_count",
+        "candidate_ids",
+        "collector_run_id",
+        "confidence",
+        "data_quality_classification",
+        "decision_evidence",
+        "evidence_explicitly_not_used",
+        "evidence_used",
+        "identity_mapping_version",
+        "independent_gtfs_service_date",
+        "independent_service_date_evidence",
+        "independent_service_date_status",
+        "match_method",
+        "mdd_source_event_identity",
+        "mdd_source_observation_identity",
+        "observation_timestamp",
+        "operating_day_ref",
+        "response_id",
+        "scheduled_time_source_path",
+        "selected_candidate",
+        "selected_candidate_id",
+        "selected_score",
+        "selected_this_call_observation_id",
+        "selected_this_call_source_path",
+        "source_event_identity",
+        "source_namespace",
+        "source_observation_identity",
+        "source_system",
+        "stage8_selected_this_call_lineage",
+        "static_candidate_identities",
+        "static_feed_sha256",
+        "static_feed_version",
+        "stop_hierarchy",
+        "stop_hierarchy_evidence",
+        "stop_point_ref",
+        "stop_seq_number",
+        "timetabled_time"
+      ],
+      "row_count": 60,
+      "status": "PASS"
+    },
+    "row_level_evidence_integrity_status": "PASS"
   },
   "source_snapshots_and_versions": {
     "approved_stage4_snapshot": {
@@ -209,13 +594,13 @@
           "application_error": false,
           "bundle_stop_event_count": 20,
           "content_type": "application/json;charset=UTF-8",
-          "elapsed_ms": 851.768,
+          "elapsed_ms": 942.41,
           "http_status": 200,
           "parser_status": "PARSED",
           "raw_stop_events_with_this_call_count": 20,
-          "request_timestamp_utc": "2026-09-29T17:02:53Z",
+          "request_timestamp_utc": "2026-09-29T17:37:57Z",
           "requested_stop_point_ref": "de:05315:11201",
-          "response_id": "MDD_RESPONSE|c3cf708ed5ac602cccbbad3bd566c0d757adfb8d5bd3e0b2904619df2047cc0d",
+          "response_id": "MDD_RESPONSE|35d505a3d08b7e125ee55106f9368ff0f4c6a315ff2e8b7bf3693689191723ca",
           "station": "Köln Hbf",
           "target_index": 0,
           "transport_failure": null,
@@ -227,13 +612,13 @@
           "application_error": false,
           "bundle_stop_event_count": 20,
           "content_type": "application/json;charset=UTF-8",
-          "elapsed_ms": 750.236,
+          "elapsed_ms": 839.481,
           "http_status": 200,
           "parser_status": "PARSED",
           "raw_stop_events_with_this_call_count": 20,
-          "request_timestamp_utc": "2026-09-29T17:02:56Z",
+          "request_timestamp_utc": "2026-09-29T17:38:00Z",
           "requested_stop_point_ref": "de:05315:11110",
-          "response_id": "MDD_RESPONSE|99a7817b9f443be79e81d0c22c8aec55d0e8f3dd2a5c39ab2be0315e0f503808",
+          "response_id": "MDD_RESPONSE|442e7ceb4417808b8d8b3e9b06cda656d5cccd301c86f9765ae071ffa5b2ab06",
           "station": "Köln Heumarkt",
           "target_index": 1,
           "transport_failure": null,
@@ -245,13 +630,13 @@
           "application_error": false,
           "bundle_stop_event_count": 20,
           "content_type": "application/json;charset=UTF-8",
-          "elapsed_ms": 807.13,
+          "elapsed_ms": 550.525,
           "http_status": 200,
           "parser_status": "PARSED",
           "raw_stop_events_with_this_call_count": 20,
-          "request_timestamp_utc": "2026-09-29T17:02:59Z",
+          "request_timestamp_utc": "2026-09-29T17:38:02Z",
           "requested_stop_point_ref": "de:05315:11111",
-          "response_id": "MDD_RESPONSE|7d5e4f583b11c898bd00ba0e942c26c5ddda5263404b4b52152404824e49eac4",
+          "response_id": "MDD_RESPONSE|368116f8d66423155402324e60b5a0b8a07f7c8daad3da02dbe0c055a9e393ae",
           "station": "Köln Neumarkt",
           "target_index": 2,
           "transport_failure": null,
@@ -269,7 +654,7 @@
         "station_count_maximum": 3,
         "stop_event_type": "arrival"
       },
-      "run_id": "stage09-source-2c74ec88a73b4b6880d2384e8ec36880",
+      "run_id": "stage09-source-26f86cd472d44f19adb57ef574878832",
       "stage4_revalidation": {
         "acceptance_check_count": 17,
         "failed_acceptance_checks": [],
@@ -397,7 +782,7 @@
               "row_count": "<TRUNCATED_DEPTH>"
             }
           },
-          "retrieval_timestamp_utc": "2026-09-29T17:01:13Z",
+          "retrieval_timestamp_utc": "2026-09-29T17:36:36Z",
           "service_calendar": {
             "calendar": {
               "invalid_date_value_count": "<TRUNCATED_DEPTH>",
@@ -444,7 +829,7 @@
       "feed_publisher_url": "http://www.vrs.de",
       "feed_start_date": "20260902",
       "feed_version": "VERSION__20260929_0106",
-      "retrieval_timestamp_utc": "2026-09-29T17:01:13Z",
+      "retrieval_timestamp_utc": "2026-09-29T17:36:36Z",
       "same_as_approved_stage4_snapshot": false,
       "snapshot_comparison": "CHANGED_OFFICIAL_SNAPSHOT_REVALIDATED_WITH_STAGE4_CONTRACT",
       "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
@@ -459,10 +844,17 @@
     "tiered50_activation": false
   },
   "stage_9_status": "COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS",
-  "static_coverage_classifications": "NOT_EVALUATED",
+  "static_coverage_classifications": {
+    "IDENTITY_CONFLICT": 0,
+    "OUT_OF_CORE_SCOPE": 0,
+    "STATIC_EVENT_NOT_FOUND": 0,
+    "STATIC_ROUTE_MISSING": 0,
+    "STATIC_SERVICE_DATE_NOT_ACTIVE": 0,
+    "STATIC_STOP_MISSING": 0
+  },
   "stop_identity_and_hierarchy": {
     "exact_mdd_stoppointref_to_vrs_stop_count": 60,
-    "explicit_child_to_parent_hierarchy_count": 59,
+    "explicit_child_to_parent_hierarchy_count": 60,
     "parent_fallback_used": false,
     "suffix_stripping_used": false,
     "unresolved_stop_identity_count": 0

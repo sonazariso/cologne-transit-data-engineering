@@ -8,9 +8,10 @@ Stage 9 implements the matching and data-quality foundation handed off by the
 Stage 3C design. The implementation regression and one bounded source-backed
 acceptance execution pass. The live run made three sequential MDD requests,
 retained 60 parsed stop-event observations through the Stage 8 parser and
-Stage 9 adapter, independently established 54 GTFS service dates, and produced
-51 core deterministic matches. Synthetic fixtures remain regression evidence
-only. The implementation is designed for the eventual Tiered50 collector
+Stage 9 adapter, independently established 53 GTFS service dates, and produced
+51 core deterministic matches (51 `MEDIUM`, 9 `UNMATCHED`). The row-level JSONL
+integrity gate passed and reconciled exactly to the summary. Synthetic fixtures
+remain regression evidence only. The implementation is designed for the eventual Tiered50 collector
 without activating Tiered50, selecting the final 50 stations, building the
 operational fact, or changing the production cadence/result-limit decisions
 owned by later stages.
@@ -176,8 +177,10 @@ truth by alias or by `ObservedAt` derivation.
 Raw DirectionRef, StopSeqNumber, and origin/destination identity are
 supporting evidence until a source-population mapping is validated. Display
 text is never an identity key. The current source-backed evidence artifact
-therefore records direction and MDD-to-VRS line/sequence/endpoint relationships
-as `NOT_EVALUATED` rather than promoting synthetic equality to HIGH.
+evaluates the available route/line, direction, and stop-sequence relationships
+without promoting unvalidated equality to HIGH; origin/destination identity
+remains `NOT_EVALUATED` because no comparable validated endpoint bridge was
+available.
 
 | Outcome | Meaning |
 |---|---|
@@ -292,14 +295,19 @@ the bounded acceptance gate. The retained evidence shows:
 - 20 raw Stage 8 stop events with a THIS call in each request context, and 20
   adapted observations with a selected THIS call in each context;
 - a current VRS snapshot that passed all 17 Stage 4 revalidation checks;
-- 60 retained source-backed observations, 54 independently established GTFS
-  service dates, and 51 core deterministic matches; and
+- 60 retained source-backed observations, 53 independently established GTFS
+  service dates, 51 core deterministic matches, and 51 `MEDIUM` / 9
+  `UNMATCHED` confidence decisions; and
+- a lossless row-level JSONL artifact whose required audit fields are populated,
+  whose retained decisions reconcile exactly to the summary, and whose
+  `row_level_evidence_integrity_status` is `PASS`; and
 - the existing GTFS.de bridge evidence, with railway Köln Hbf still unresolved
   and adjacent KVB complexes not substituted.
 
 The latest probe result is recorded in
 [`09-source-backed-matching-summary.json`](09-source-backed-matching-summary.json):
-`source_backed_acceptance_status = PASS`, `stage_9_status = COMPLETE`, and
+`source_backed_acceptance_status = PASS`,
+`row_level_evidence_integrity_status = PASS`, `stage_9_status = COMPLETE`, and
 `mdd_http_attempts = 3`. The row-level JSONL was produced through the real
 Stage 8 parser → Stage 8 bundle builder → Stage 9 adapter → independent GTFS
 service-date establishment → final Stage 9 adaptation → matcher path. The

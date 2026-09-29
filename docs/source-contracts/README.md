@@ -119,7 +119,8 @@ are recorded in the [Stage 9 matching/data-quality record](../stages/09-matching
 ## Cross-source reconciliation and Cologne scope guardrail
 
 The [Cross-Source Reconciliation Contract](cross-source-reconciliation-contract.md)
-is **APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED**. It makes the
+is **APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE PASS**. The corrected
+row-level evidence gate passed with exact JSONL-to-summary reconciliation. It makes the
 GTFS-RT analytical scope Cologne-only even when the source feed is Germany-wide,
 requires validated canonical stop/line/service-event identity evidence, and
 prohibits direct equality between MDD `JourneyRef` and GTFS-RT `trip_id`.

@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Stage 9 row-level evidence-integrity correction: audit fields are now
+  serialized losslessly from the in-memory decisions, malformed/null/truncated
+  decision artifacts are blocked by an explicit JSONL integrity gate, and seven
+  offline regression tests cover the failure and reconciliation paths. The one
+  corrected bounded live run passed with 60 retained rows, 53 independently
+  established service dates, 51 core deterministic matches, 51 `MEDIUM` / 9
+  `UNMATCHED` decisions, and row-level integrity `PASS`; the current VRS
+  snapshot is `VERSION__20260929_0106` with SHA-256
+  `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0`.
 - Stage 9 source-backed acceptance correction: preliminary THIS-call selection
   now adapts raw Stage 8 stop-event records before inspecting the adapter's
   selected scope, with parser-versus-adapter diagnostics per MDD request. The

@@ -303,8 +303,11 @@ The synthetic offline acceptance population passed with zero network requests
 and zero database connections, and remains regression evidence only. The
 corrected bounded live run returned three HTTP 200 parseable responses with 20
 stop events each; all 60 raw records contained a THIS call and all 60 were
-retained after Stage 9 adaptation. It independently established 54 GTFS service
-dates and produced 51 core deterministic matches. The current VRS snapshot
+retained after Stage 9 adaptation. It independently established 53 GTFS service
+dates and produced 51 core deterministic matches, with 51 `MEDIUM` and 9
+`UNMATCHED` decisions. The retained JSONL row-level evidence passed the
+lossless audit-field integrity gate and reconciles exactly to the summary. The
+current VRS snapshot
 `VERSION__20260929_0106` / SHA-256
 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` passed all
 17 Stage 4 revalidation checks. The approved Stage 4 reference snapshot

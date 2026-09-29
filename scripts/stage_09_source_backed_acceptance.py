@@ -56,20 +56,84 @@ SOURCE_BACKED_REQUIRED_FIELDS = frozenset(
         "source_namespace",
         "mdd_source_event_identity",
         "mdd_source_observation_identity",
+        "source_event_identity",
+        "source_observation_identity",
+        "response_id",
+        "collector_run_id",
+        "observation_timestamp",
         "operating_day_ref",
         "stop_point_ref",
+        "stop_seq_number",
         "timetabled_time",
+        "selected_this_call_source_path",
+        "selected_this_call_observation_id",
+        "scheduled_time_source_path",
+        "stage8_selected_this_call_lineage",
         "static_feed_version",
         "static_feed_sha256",
         "independent_gtfs_service_date",
+        "independent_service_date_status",
+        "independent_service_date_evidence",
         "static_candidate_identities",
+        "selected_candidate",
         "selected_candidate_id",
+        "candidate_count",
+        "candidate_ids",
         "confidence",
         "match_method",
         "data_quality_classification",
+        "selected_score",
+        "decision_evidence",
+        "stop_hierarchy",
+        "stop_hierarchy_evidence",
         "identity_mapping_version",
         "evidence_used",
         "evidence_explicitly_not_used",
+    }
+)
+SOURCE_BACKED_NON_NULL_FIELDS = frozenset(
+    {
+        "source_system",
+        "source_namespace",
+        "mdd_source_event_identity",
+        "mdd_source_observation_identity",
+        "source_event_identity",
+        "source_observation_identity",
+        "response_id",
+        "collector_run_id",
+        "observation_timestamp",
+        "operating_day_ref",
+        "stop_point_ref",
+        "stop_seq_number",
+        "timetabled_time",
+        "selected_this_call_source_path",
+        "selected_this_call_observation_id",
+        "scheduled_time_source_path",
+        "static_feed_version",
+        "static_feed_sha256",
+        "independent_service_date_status",
+        "candidate_count",
+        "candidate_ids",
+        "confidence",
+        "match_method",
+        "data_quality_classification",
+        "decision_evidence",
+        "stop_hierarchy",
+        "stop_hierarchy_evidence",
+        "identity_mapping_version",
+        "evidence_used",
+        "evidence_explicitly_not_used",
+        "stage8_selected_this_call_lineage",
+    }
+)
+SOURCE_BACKED_CONFIDENCES = frozenset(
+    {stage9.MATCH_HIGH, stage9.MATCH_MEDIUM, stage9.MATCH_LOW, stage9.MATCH_UNMATCHED}
+)
+SOURCE_BACKED_CORE_QUALITIES = frozenset(
+    {
+        stage9.QUALITY_CONTEXTUAL_MATCH,
+        stage9.QUALITY_SOURCE_LINE_IDENTITY_UNRESOLVED,
+        stage9.QUALITY_VALIDATED_MATCH,
     }
 )
 
@@ -147,6 +211,53 @@ def _json_value(value: Any, *, depth: int = 0, max_depth: int = 4, max_items: in
             output.append("<TRUNCATED_ITEMS>")
         return output
     return _json_value(str(value), depth=depth + 1, max_depth=max_depth, max_items=max_items, max_chars=max_chars)
+
+
+def _lossless_json_value(value: Any) -> Any:
+    """Convert a value to JSON without bounding the Stage 9 audit contract."""
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _lossless_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_lossless_json_value(item) for item in value]
+    return str(value)
+
+
+def _present_json_value(value: Any) -> bool:
+    """Return true for populated JSON values while preserving false and zero."""
+
+    return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
+def _contains_truncation_marker(value: Any) -> bool:
+    """Detect serializer markers inside fields that must remain auditable."""
+
+    if isinstance(value, str):
+        return value.startswith("<TRUNCATED")
+    if isinstance(value, Mapping):
+        return any(
+            _contains_truncation_marker(key) or _contains_truncation_marker(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_truncation_marker(item) for item in value)
+    return False
+
+
+def _serialize_evidence_record(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """Bound diagnostics while preserving every required row-level audit field."""
+
+    serialized: Dict[str, Any] = {}
+    for key, value in record.items():
+        if key in SOURCE_BACKED_REQUIRED_FIELDS:
+            serialized[str(key)] = _lossless_json_value(value)
+        else:
+            serialized[str(key)] = _json_value(value, max_items=ARTIFACT_MAX_ITEMS)
+    return serialized
 
 
 def _iso_utc(value: datetime) -> str:
@@ -818,7 +929,9 @@ def _evidence_record(
         "observation_timestamp": observation.observed_at,
         "mdd_source_event_identity": observation.source_event_id,
         "mdd_source_observation_identity": observation.observation_id,
-        "operating_day_ref": _json_value(observation.operating_day_ref),
+        "source_event_identity": decision.source_event_identity,
+        "source_observation_identity": decision.source_observation_identity,
+        "operating_day_ref": observation.operating_day_ref,
         "stop_point_ref": observation.source_stop_id,
         "stop_seq_number": observation.stop_sequence,
         "line_ref": observation.source_line_id,
@@ -840,8 +953,8 @@ def _evidence_record(
         "static_feed_end_date": feed_metadata.get("feed_end_date"),
         "independent_gtfs_service_date": independent_date.get("established_service_date"),
         "independent_service_date_status": independent_date.get("status"),
-        "independent_service_date_evidence": _json_value(independent_date),
-        "stop_hierarchy": _json_value(hierarchy),
+        "independent_service_date_evidence": dict(independent_date),
+        "stop_hierarchy": dict(hierarchy),
         "static_candidate_identities": [_candidate_record(item) for item in candidate_events],
         "selected_candidate": _candidate_record(selected) if selected else None,
         "selected_candidate_id": decision.canonical_service_event_id,
@@ -851,8 +964,15 @@ def _evidence_record(
         "candidate_count": decision.candidate_count,
         "candidate_ids": list(decision.candidate_event_ids),
         "selected_score": decision.selected_score,
-        "decision_evidence": _json_value(decision.evidence),
+        "decision_evidence": dict(decision.evidence),
+        "stop_hierarchy_evidence": dict(hierarchy),
         "identity_mapping_version": {
+            "requested": feed_metadata.get("identity_mapping_version")
+            or (
+                f"{MAPPING_VERSION_PREFIX}|{feed_metadata.get('feed_version')}"
+                if feed_metadata.get("feed_version")
+                else None
+            ),
             "stop": decision.stop_mapping_version,
             "line": decision.line_mapping_version,
         },
@@ -873,6 +993,14 @@ def _evidence_record(
             "suffix stripping or string-prefix parent inference",
             "MDD JourneyRef equals VRS trip_id",
         ],
+        "stage8_selected_this_call_lineage": {
+            "selected_call_scope": observation.source_attributes.get("selected_call_scope"),
+            "selected_call_observation_id": observation.source_attributes.get("selected_call_observation_id"),
+            "selected_call_source_path": observation.source_attributes.get("selected_call_source_path"),
+            "scheduled_time_source_path": observation.source_attributes.get("scheduled_time_source_path")
+            or observation.source_paths.get("scheduled_time"),
+            "scheduled_time_selection_status": observation.source_attributes.get("scheduled_time_selection_status"),
+        },
         "response_context": _json_value(response_context),
     }
 
@@ -883,7 +1011,7 @@ def _write_jsonl(path: Path, records: Sequence[Mapping[str, Any]]) -> None:
         for record in records:
             stream.write(
                 json.dumps(
-                    _json_value(record, max_items=ARTIFACT_MAX_ITEMS),
+                    _serialize_evidence_record(record),
                     ensure_ascii=False,
                     sort_keys=True,
                 )
@@ -905,6 +1033,262 @@ def _write_summary(path: Path, summary: Mapping[str, Any]) -> None:
     )
 
 
+def _row_is_core_deterministic_match(row: Mapping[str, Any]) -> bool:
+    """Recalculate the Stage 9 core-match rule from retained row evidence."""
+
+    evidence = row.get("decision_evidence")
+    return bool(
+        _present_json_value(row.get("selected_candidate_id"))
+        and isinstance(evidence, Mapping)
+        and evidence.get("canonical_stop_match")
+        and evidence.get("service_date_match")
+        and evidence.get("event_type_match")
+        and evidence.get("scheduled_time_match")
+        and row.get("data_quality_classification") in SOURCE_BACKED_CORE_QUALITIES
+    )
+
+
+def validate_source_backed_evidence_artifact(
+    evidence_path: Path,
+    summary: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the durable JSONL artifact against its source-backed summary.
+
+    This validator deliberately operates on the written JSONL, not on the
+    in-memory matcher decisions.  A successful live match therefore cannot
+    complete Stage 9 if serialization dropped the decision evidence.
+    """
+
+    evidence_path = Path(evidence_path)
+    errors: List[str] = []
+    rows: List[Dict[str, Any]] = []
+    artifact_exists = evidence_path.is_file()
+    if not artifact_exists:
+        errors.append(f"JSONL artifact does not exist: {evidence_path}")
+    else:
+        try:
+            for line_number, line in enumerate(evidence_path.read_text(encoding="utf-8").splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except (TypeError, ValueError) as error:
+                    errors.append(f"line {line_number}: malformed JSON ({error})")
+                    continue
+                if not isinstance(value, dict):
+                    errors.append(f"line {line_number}: JSONL value is not an object")
+                    continue
+                rows.append(value)
+        except (OSError, UnicodeError) as error:
+            errors.append(f"could not read JSONL artifact: {error}")
+
+    for ordinal, row in enumerate(rows, 1):
+        missing = sorted(SOURCE_BACKED_REQUIRED_FIELDS.difference(row))
+        if missing:
+            errors.append(f"row {ordinal}: missing required fields: {', '.join(missing)}")
+            continue
+
+        null_fields = sorted(
+            field
+            for field in SOURCE_BACKED_NON_NULL_FIELDS
+            if not _present_json_value(row.get(field))
+        )
+        if null_fields:
+            errors.append(f"row {ordinal}: required audit fields are null/empty: {', '.join(null_fields)}")
+
+        truncated_fields = sorted(
+            field
+            for field in SOURCE_BACKED_REQUIRED_FIELDS
+            if _contains_truncation_marker(row.get(field))
+        )
+        if truncated_fields:
+            errors.append(f"row {ordinal}: required audit fields contain truncation markers: {', '.join(truncated_fields)}")
+
+        if not isinstance(row.get("static_candidate_identities"), list):
+            errors.append(f"row {ordinal}: static_candidate_identities must be a list")
+        if not isinstance(row.get("candidate_ids"), list):
+            errors.append(f"row {ordinal}: candidate_ids must be a list")
+        if not isinstance(row.get("selected_candidate"), (dict, type(None))):
+            errors.append(f"row {ordinal}: selected_candidate must be an object or null")
+        if not isinstance(row.get("independent_service_date_evidence"), Mapping):
+            errors.append(f"row {ordinal}: independent_service_date_evidence must be structured")
+        if not isinstance(row.get("stop_hierarchy"), Mapping):
+            errors.append(f"row {ordinal}: stop_hierarchy must be structured")
+        if not isinstance(row.get("stop_hierarchy_evidence"), Mapping):
+            errors.append(f"row {ordinal}: stop_hierarchy_evidence must be structured")
+        if not isinstance(row.get("decision_evidence"), Mapping) or not row.get("decision_evidence"):
+            errors.append(f"row {ordinal}: decision_evidence must be a populated structured value")
+        if not isinstance(row.get("identity_mapping_version"), Mapping) or not row.get("identity_mapping_version"):
+            errors.append(f"row {ordinal}: identity_mapping_version must be a populated structured value")
+        if not isinstance(row.get("evidence_used"), Mapping) or not row.get("evidence_used"):
+            errors.append(f"row {ordinal}: evidence_used must be a populated structured value")
+        if not isinstance(row.get("evidence_explicitly_not_used"), list) or not row.get("evidence_explicitly_not_used"):
+            errors.append(f"row {ordinal}: evidence_explicitly_not_used must be a populated list")
+
+        lineage = row.get("stage8_selected_this_call_lineage")
+        if not isinstance(lineage, Mapping):
+            errors.append(f"row {ordinal}: stage8_selected_this_call_lineage must be structured")
+        else:
+            if lineage.get("selected_call_scope") != "THIS":
+                errors.append(f"row {ordinal}: Stage 8 selected call scope is not THIS")
+            for field in ("selected_call_observation_id", "selected_call_source_path"):
+                if not _present_json_value(lineage.get(field)):
+                    errors.append(f"row {ordinal}: Stage 8 THIS-call lineage field is null/empty: {field}")
+
+        candidate_count = row.get("candidate_count")
+        candidate_ids = row.get("candidate_ids")
+        if not isinstance(candidate_count, int) or isinstance(candidate_count, bool) or candidate_count < 0:
+            errors.append(f"row {ordinal}: candidate_count must be a non-negative integer")
+        elif isinstance(candidate_ids, list) and candidate_count != len(candidate_ids):
+            errors.append(f"row {ordinal}: candidate_count does not equal candidate_ids length")
+
+        confidence = row.get("confidence")
+        if confidence not in SOURCE_BACKED_CONFIDENCES:
+            errors.append(f"row {ordinal}: invalid or missing confidence: {confidence!r}")
+
+        service_date_status = row.get("independent_service_date_status")
+        service_date = row.get("independent_gtfs_service_date")
+        if service_date_status not in {"ESTABLISHED", "UNRESOLVED", "AMBIGUOUS"}:
+            errors.append(f"row {ordinal}: invalid independent service-date status: {service_date_status!r}")
+        elif service_date_status == "ESTABLISHED":
+            if not isinstance(service_date, str) or not service_date.strip():
+                errors.append(f"row {ordinal}: established service-date row has no GTFS service date")
+            else:
+                try:
+                    date.fromisoformat(service_date)
+                except ValueError:
+                    errors.append(f"row {ordinal}: established service date is not ISO date: {service_date!r}")
+        elif service_date is not None:
+            errors.append(f"row {ordinal}: unresolved/ambiguous service-date row has an unexpected date")
+
+        selected_id = row.get("selected_candidate_id")
+        selected_candidate = row.get("selected_candidate")
+        if _present_json_value(selected_id):
+            if confidence == stage9.MATCH_UNMATCHED:
+                errors.append(f"row {ordinal}: unmatched row has a selected candidate")
+            if not isinstance(selected_candidate, Mapping):
+                errors.append(f"row {ordinal}: matched row has no selected candidate identity")
+            elif selected_candidate.get("canonical_service_event_id") != selected_id:
+                errors.append(f"row {ordinal}: selected candidate identity does not match selected_candidate_id")
+            if isinstance(candidate_ids, list) and selected_id not in candidate_ids:
+                errors.append(f"row {ordinal}: selected_candidate_id is absent from candidate_ids")
+            selected_score = row.get("selected_score")
+            if not isinstance(selected_score, int) or isinstance(selected_score, bool):
+                errors.append(f"row {ordinal}: matched row has no selected score")
+        else:
+            if selected_candidate is not None:
+                errors.append(f"row {ordinal}: unmatched row retains a selected candidate object")
+            if confidence != stage9.MATCH_UNMATCHED:
+                errors.append(f"row {ordinal}: non-UNMATCHED row has no selected candidate")
+
+    row_confidence_counts = Counter(row.get("confidence") for row in rows)
+    confidence_summary = summary.get("source_backed_confidence_counts")
+    expected_confidence_counts: Dict[str, int] = {}
+    if not isinstance(confidence_summary, Mapping):
+        errors.append("summary is missing source_backed_confidence_counts")
+    else:
+        for confidence_name in sorted(SOURCE_BACKED_CONFIDENCES):
+            value = confidence_summary.get(confidence_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"summary has invalid confidence count for {confidence_name}: {value!r}")
+            else:
+                expected_confidence_counts[confidence_name] = value
+        if expected_confidence_counts and any(
+            row_confidence_counts.get(name, 0) != expected_confidence_counts.get(name, 0)
+            for name in SOURCE_BACKED_CONFIDENCES
+        ):
+            errors.append(
+                "JSONL confidence counts do not reconcile with summary: "
+                f"rows={dict(sorted((name, row_confidence_counts.get(name, 0)) for name in SOURCE_BACKED_CONFIDENCES))} "
+                f"summary={dict(sorted(expected_confidence_counts.items()))}"
+            )
+
+    expected_row_count = summary.get("source_backed_observation_count")
+    if not isinstance(expected_row_count, int) or isinstance(expected_row_count, bool):
+        errors.append("summary is missing a valid source_backed_observation_count")
+    elif len(rows) != expected_row_count:
+        errors.append(f"JSONL row count {len(rows)} does not equal summary observation count {expected_row_count}")
+
+    ambiguity_count = sum(
+        1 for row in rows if row.get("data_quality_classification") == stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES
+    )
+    expected_ambiguity_count = summary.get("ambiguity_count")
+    if not isinstance(expected_ambiguity_count, int) or isinstance(expected_ambiguity_count, bool):
+        errors.append("summary is missing a valid ambiguity_count")
+    elif ambiguity_count != expected_ambiguity_count:
+        errors.append(f"JSONL ambiguity count {ambiguity_count} does not equal summary ambiguity_count {expected_ambiguity_count}")
+
+    established_count = sum(
+        1 for row in rows if row.get("independent_service_date_status") == "ESTABLISHED"
+    )
+    date_summary = summary.get("independently_established_service_date")
+    expected_established_count = date_summary.get("count") if isinstance(date_summary, Mapping) else None
+    if not isinstance(expected_established_count, int) or isinstance(expected_established_count, bool):
+        errors.append("summary is missing independently_established_service_date.count")
+    elif established_count != expected_established_count:
+        errors.append(
+            f"JSONL established service-date count {established_count} does not equal summary count {expected_established_count}"
+        )
+
+    core_deterministic_match_count = sum(1 for row in rows if _row_is_core_deterministic_match(row))
+    expected_core_count = summary.get("core_deterministic_match_count")
+    if not isinstance(expected_core_count, int) or isinstance(expected_core_count, bool):
+        errors.append("summary is missing a valid core_deterministic_match_count")
+    elif core_deterministic_match_count != expected_core_count:
+        errors.append(
+            "JSONL core deterministic match count "
+            f"{core_deterministic_match_count} does not equal summary count {expected_core_count}"
+        )
+
+    classification_counts = Counter(row.get("data_quality_classification") for row in rows)
+    summary_classifications = summary.get("decision_classification_counts")
+    if isinstance(summary_classifications, Mapping):
+        normalized_summary_classifications = {
+            str(key): value for key, value in summary_classifications.items()
+        }
+        normalized_row_classifications = dict(sorted((str(key), value) for key, value in classification_counts.items()))
+        if normalized_row_classifications != dict(sorted(normalized_summary_classifications.items())):
+            errors.append(
+                "JSONL data-quality classification counts do not reconcile with summary: "
+                f"rows={normalized_row_classifications} summary={normalized_summary_classifications}"
+            )
+
+    status_counts = Counter(row.get("independent_service_date_status") for row in rows)
+    summary_status_counts = date_summary.get("status_counts") if isinstance(date_summary, Mapping) else None
+    if isinstance(summary_status_counts, Mapping):
+        normalized_status_counts = dict(sorted((str(key), value) for key, value in status_counts.items()))
+        normalized_summary_status_counts = dict(sorted((str(key), value) for key, value in summary_status_counts.items()))
+        if normalized_status_counts != normalized_summary_status_counts:
+            errors.append(
+                "JSONL service-date status counts do not reconcile with summary: "
+                f"rows={normalized_status_counts} summary={normalized_summary_status_counts}"
+            )
+
+    reconciliation = {
+        "row_count": len(rows),
+        "summary_row_count": expected_row_count,
+        "confidence_counts": dict(sorted((name, row_confidence_counts.get(name, 0)) for name in SOURCE_BACKED_CONFIDENCES)),
+        "summary_confidence_counts": dict(sorted(expected_confidence_counts.items())),
+        "ambiguity_count": ambiguity_count,
+        "summary_ambiguity_count": expected_ambiguity_count,
+        "independently_established_service_date_count": established_count,
+        "summary_independently_established_service_date_count": expected_established_count,
+        "core_deterministic_match_count": core_deterministic_match_count,
+        "summary_core_deterministic_match_count": expected_core_count,
+        "data_quality_classification_counts": dict(sorted((str(key), value) for key, value in classification_counts.items())),
+        "service_date_status_counts": dict(sorted((str(key), value) for key, value in status_counts.items())),
+    }
+    return {
+        "status": "PASS" if not errors else "FAIL",
+        "artifact_exists": artifact_exists,
+        "row_count": len(rows),
+        "required_fields_checked": sorted(SOURCE_BACKED_REQUIRED_FIELDS),
+        "error_count": len(errors),
+        "errors": errors[:100],
+        "reconciliation": reconciliation,
+    }
+
+
 def source_backed_acceptance_status(
     *,
     evidence_origin: str,
@@ -914,6 +1298,7 @@ def source_backed_acceptance_status(
     core_deterministic_match_count: int,
     mdd_http_attempts: int,
     artifact_written: bool,
+    artifact_integrity_status: str = "FAIL",
 ) -> str:
     """Gate completion on live/source-backed provenance, never fixtures alone."""
 
@@ -925,6 +1310,7 @@ def source_backed_acceptance_status(
         and core_deterministic_match_count > 0
         and 0 < mdd_http_attempts <= MAX_MDD_HTTP_ATTEMPTS
         and artifact_written
+        and artifact_integrity_status == "PASS"
     ):
         return "PASS"
     return "BLOCKED"
@@ -966,6 +1352,12 @@ def _empty_blocked_summary(
         "evidence_origin": SOURCE_BACKED_EVIDENCE_ORIGIN,
         "implementation_regression_status": "PASS",
         "source_backed_acceptance_status": "BLOCKED",
+        "row_level_evidence_integrity_status": "FAIL",
+        "row_level_evidence_integrity": {
+            "status": "FAIL",
+            "artifact_exists": evidence_path.is_file(),
+            "errors": [blocker],
+        },
         "stage_9_status": "BLOCKED",
         "blocker": blocker,
         "credential_preflight_status": preflight_status,
@@ -1225,14 +1617,8 @@ def run_source_backed_acceptance(
             stage9.MATCH_LOW: confidences.get(stage9.MATCH_LOW, 0),
             stage9.MATCH_UNMATCHED: confidences.get(stage9.MATCH_UNMATCHED, 0),
         }
-        acceptance_status = source_backed_acceptance_status(
-            evidence_origin=SOURCE_BACKED_EVIDENCE_ORIGIN,
-            static_validation_status=static_validation["status"],
-            source_observation_count=len(observations),
-            independent_service_date_count=independent_service_date_count,
-            core_deterministic_match_count=len(core_matches),
-            mdd_http_attempts=mdd_attempts,
-            artifact_written=evidence_path.is_file(),
+        ambiguity_count = sum(
+            1 for item in decisions if item.data_quality_classification == stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES
         )
         summary: Dict[str, Any] = {
             "record_type": "stage_09_source_backed_acceptance_summary",
@@ -1242,10 +1628,9 @@ def run_source_backed_acceptance(
             "run_id": run_id,
             "evidence_origin": SOURCE_BACKED_EVIDENCE_ORIGIN,
             "implementation_regression_status": "PASS",
-            "source_backed_acceptance_status": acceptance_status,
-            "stage_9_status": "COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS"
-            if acceptance_status == "PASS"
-            else "BLOCKED",
+            "source_backed_acceptance_status": "BLOCKED",
+            "stage_9_status": "BLOCKED",
+            "blocker": None,
             "mdd_http_attempts": mdd_attempts,
             "mdd_request_contract": {
                 "station_count_maximum": MAX_STATIONS,
@@ -1263,9 +1648,7 @@ def run_source_backed_acceptance(
             "stage4_revalidation": static_validation,
             "source_backed_observation_count": len(observations),
             "source_backed_confidence_counts": confidence_summary,
-            "ambiguity_count": sum(
-                1 for item in decisions if item.data_quality_classification == stage9.QUALITY_AMBIGUOUS_MULTIPLE_CANDIDATES
-            ),
+            "ambiguity_count": ambiguity_count,
             "core_deterministic_match_count": len(core_matches),
             "stop_point_and_hierarchy": {
                 "exact_mdd_stoppointref_to_vrs_stop_count": sum(
@@ -1312,6 +1695,37 @@ def run_source_backed_acceptance(
             "tiered50_activated": False,
             "operational_fact_started": False,
         }
+        row_level_integrity = validate_source_backed_evidence_artifact(evidence_path, summary)
+        summary["row_level_evidence_integrity_status"] = row_level_integrity["status"]
+        summary["row_level_evidence_integrity"] = row_level_integrity
+        summary["row_level_evidence_serialization_status"] = (
+            "LOSSLESS_AUDIT_FIELDS_WITH_BOUNDED_DIAGNOSTICS"
+            if row_level_integrity["status"] == "PASS"
+            else "FAILED_ROW_LEVEL_INTEGRITY_VALIDATION"
+        )
+        acceptance_status = source_backed_acceptance_status(
+            evidence_origin=SOURCE_BACKED_EVIDENCE_ORIGIN,
+            static_validation_status=static_validation["status"],
+            source_observation_count=len(observations),
+            independent_service_date_count=independent_service_date_count,
+            core_deterministic_match_count=len(core_matches),
+            mdd_http_attempts=mdd_attempts,
+            artifact_written=evidence_path.is_file(),
+            artifact_integrity_status=row_level_integrity["status"],
+        )
+        summary["source_backed_acceptance_status"] = acceptance_status
+        summary["stage_9_status"] = (
+            "COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS"
+            if acceptance_status == "PASS"
+            else "BLOCKED"
+        )
+        if acceptance_status != "PASS":
+            summary["blocker"] = (
+                "row-level evidence integrity validation failed: "
+                + "; ".join(row_level_integrity.get("errors", [])[:5])
+                if row_level_integrity["status"] != "PASS"
+                else "source-backed acceptance prerequisites were not satisfied"
+            )
         _write_summary(summary_path, summary)
         try:
             stage9.write_stage9_evidence_artifact(STAGE9_DOC_EVIDENCE_PATH)

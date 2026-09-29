@@ -1,6 +1,6 @@
 # Future Source-Observation and Persistence Contract
 
-**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE BLOCKED`<br>
+**Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE PASS`<br>
 **Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED`,
 Stage 3B/3C design contracts are approved, and Stage 9 consumes this contract
 without activating source persistence

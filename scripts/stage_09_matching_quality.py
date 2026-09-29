@@ -2762,8 +2762,15 @@ def _source_backed_evidence_artifact(
             ]
         except (OSError, ValueError):
             observation_records = []
-    source_status = summary.get("source_backed_acceptance_status", "BLOCKED")
+    row_level_integrity_status = summary.get("row_level_evidence_integrity_status", "FAIL")
+    source_status = (
+        summary.get("source_backed_acceptance_status", "BLOCKED")
+        if row_level_integrity_status == "PASS"
+        else "BLOCKED"
+    )
     stage_status = summary.get("stage_9_status", "BLOCKED")
+    if source_status != "PASS" and str(stage_status).startswith("COMPLETE"):
+        stage_status = "BLOCKED"
     row_level_artifact = (
         str(evidence_path.relative_to(REPOSITORY_ROOT))
         if evidence_path.is_file()
@@ -2792,6 +2799,7 @@ def _source_backed_evidence_artifact(
         "stage_9_status": stage_status,
         "implementation_regression_status": summary.get("implementation_regression_status", "PASS"),
         "source_backed_acceptance_status": source_status,
+        "row_level_evidence_integrity_status": row_level_integrity_status,
         "evidence_status": {
             "source_backed_core_matching": "COMPLETE" if source_status == "PASS" else "BLOCKED",
             "source_backed_core_matching_blocker": summary.get("blocker"),
@@ -2849,25 +2857,9 @@ def _source_backed_evidence_artifact(
         "source_backed_row_level_evidence": {
             "artifact": row_level_artifact,
             "record_count": len(observation_records),
-            "required_fields_present": bool(observation_records)
-            and all(
-                all(field in row for field in (
-                    "source_system",
-                    "source_namespace",
-                    "mdd_source_event_identity",
-                    "operating_day_ref",
-                    "stop_point_ref",
-                    "timetabled_time",
-                    "static_feed_sha256",
-                    "independent_gtfs_service_date",
-                    "confidence",
-                    "match_method",
-                    "data_quality_classification",
-                    "evidence_used",
-                    "evidence_explicitly_not_used",
-                ))
-                for row in observation_records
-            ),
+            "required_fields_present": row_level_integrity_status == "PASS",
+            "row_level_evidence_integrity_status": row_level_integrity_status,
+            "row_level_evidence_integrity": summary.get("row_level_evidence_integrity", {}),
         },
         "stop_identity_and_hierarchy": summary.get("stop_point_and_hierarchy", not_evaluated),
         "service_date_operating_day_metrics": {

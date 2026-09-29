@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -781,6 +782,196 @@ class Stage9MatchingQualityTests(unittest.TestCase):
             "conflicting",
         ):
             self.assertIn(fragment, view_sql)
+
+    def _valid_source_backed_row(self) -> dict:
+        candidate = {
+            "canonical_service_event_id": "CSE|feed-v1|event-1",
+            "feed_snapshot_key": "feed-v1",
+            "service_date": "2026-09-29",
+            "event_type": "ARRIVAL",
+            "stop_id": "de:05315:11111",
+        }
+        return {
+            "source_system": stage9.SOURCE_MDD,
+            "source_namespace": "VRS_GLOBAL_ID",
+            "mdd_source_event_identity": "mdd-event-1",
+            "mdd_source_observation_identity": "mdd-observation-1",
+            "source_event_identity": "MDD_TRIAS|VRS_GLOBAL_ID|mdd-event-1",
+            "source_observation_identity": "mdd-observation-1",
+            "response_id": "response-1",
+            "collector_run_id": "run-1",
+            "observation_timestamp": "2026-09-29T10:00:00Z",
+            "operating_day_ref": "2026-09-29",
+            "stop_point_ref": "de:05315:11111",
+            "stop_seq_number": 7,
+            "timetabled_time": "2026-09-29T10:15:00Z",
+            "selected_this_call_source_path": "$.thisCall[0]",
+            "selected_this_call_observation_id": "call-1",
+            "scheduled_time_source_path": "$.thisCall[0].arrivalTiming[0].TimetabledTime",
+            "stage8_selected_this_call_lineage": {
+                "selected_call_scope": "THIS",
+                "selected_call_observation_id": "call-1",
+                "selected_call_source_path": "$.thisCall[0]",
+                "scheduled_time_source_path": "$.thisCall[0].arrivalTiming[0].TimetabledTime",
+            },
+            "static_feed_version": "feed-v1",
+            "static_feed_sha256": "feed-hash",
+            "independent_gtfs_service_date": "2026-09-29",
+            "independent_service_date_status": "ESTABLISHED",
+            "independent_service_date_evidence": {"status": "ESTABLISHED", "matching_candidate_event_ids": [candidate["canonical_service_event_id"]]},
+            "static_candidate_identities": [candidate],
+            "selected_candidate": candidate,
+            "selected_candidate_id": candidate["canonical_service_event_id"],
+            "candidate_count": 1,
+            "candidate_ids": [candidate["canonical_service_event_id"]],
+            "confidence": stage9.MATCH_MEDIUM,
+            "match_method": stage9.METHOD_STOP_TIME_CONTEXT_ONLY,
+            "data_quality_classification": stage9.QUALITY_CONTEXTUAL_MATCH,
+            "selected_score": 10,
+            "decision_evidence": {
+                "canonical_stop_match": True,
+                "service_date_match": True,
+                "event_type_match": True,
+                "scheduled_time_match": True,
+            },
+            "stop_hierarchy": {"static_stop_found": True, "explicit_parent_relationship": True},
+            "stop_hierarchy_evidence": {"static_stop_found": True, "explicit_parent_relationship": True},
+            "identity_mapping_version": {"requested": "VRS_GTFS|feed-v1", "stop": "VRS_GTFS|feed-v1", "line": None},
+            "evidence_used": {"exact_stop_identity": True, "independent_gtfs_service_date": True},
+            "evidence_explicitly_not_used": ["OperatingDayRef as the input GTFS service date"],
+        }
+
+    def _valid_source_backed_summary(self) -> dict:
+        return {
+            "source_backed_observation_count": 1,
+            "source_backed_confidence_counts": {"HIGH": 0, "MEDIUM": 1, "LOW": 0, "UNMATCHED": 0},
+            "ambiguity_count": 0,
+            "independently_established_service_date": {
+                "count": 1,
+                "unresolved_count": 0,
+                "status_counts": {"ESTABLISHED": 1},
+            },
+            "core_deterministic_match_count": 1,
+            "decision_classification_counts": {stage9.QUALITY_CONTEXTUAL_MATCH: 1},
+        }
+
+    def _validate_temp_source_artifact(self, row: dict, summary: dict | None = None) -> dict:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "evidence.jsonl"
+            evidence_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            return stage9_source.validate_source_backed_evidence_artifact(
+                evidence_path,
+                summary or self._valid_source_backed_summary(),
+            )
+
+    def test_required_source_fields_with_null_values_fail_integrity_gate(self) -> None:
+        row = self._valid_source_backed_row()
+        row["confidence"] = None
+        row["static_candidate_identities"] = None
+        row["evidence_used"] = None
+        report = self._validate_temp_source_artifact(row)
+        self.assertEqual(report["status"], "FAIL")
+        self.assertTrue(any("confidence" in error for error in report["errors"]))
+        self.assertTrue(any("static_candidate_identities" in error for error in report["errors"]))
+        self.assertTrue(any("evidence_used" in error for error in report["errors"]))
+
+    def test_malformed_jsonl_cannot_complete_source_backed_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "evidence.jsonl"
+            evidence_path.write_text('{"confidence":\n', encoding="utf-8")
+            report = stage9_source.validate_source_backed_evidence_artifact(
+                evidence_path,
+                self._valid_source_backed_summary(),
+            )
+        self.assertEqual(report["status"], "FAIL")
+        self.assertEqual(
+            stage9_source.source_backed_acceptance_status(
+                evidence_origin=stage9_source.SOURCE_BACKED_EVIDENCE_ORIGIN,
+                static_validation_status="PASS",
+                source_observation_count=1,
+                independent_service_date_count=1,
+                core_deterministic_match_count=1,
+                mdd_http_attempts=1,
+                artifact_written=True,
+                artifact_integrity_status=report["status"],
+            ),
+            "BLOCKED",
+        )
+
+    def test_summary_confidence_counts_must_reconcile_with_jsonl(self) -> None:
+        summary = self._valid_source_backed_summary()
+        summary["source_backed_confidence_counts"] = {"HIGH": 1, "MEDIUM": 0, "LOW": 0, "UNMATCHED": 0}
+        report = self._validate_temp_source_artifact(self._valid_source_backed_row(), summary)
+        self.assertEqual(report["status"], "FAIL")
+        self.assertTrue(any("confidence counts do not reconcile" in error for error in report["errors"]))
+
+    def test_established_service_date_rows_must_retain_their_gtfs_date(self) -> None:
+        row = self._valid_source_backed_row()
+        row["independent_gtfs_service_date"] = None
+        report = self._validate_temp_source_artifact(row)
+        self.assertEqual(report["status"], "FAIL")
+        self.assertTrue(any("established service-date row" in error for error in report["errors"]))
+
+    def test_matched_rows_must_retain_selected_candidate_identity(self) -> None:
+        row = self._valid_source_backed_row()
+        row["selected_candidate"] = None
+        row["selected_candidate_id"] = None
+        report = self._validate_temp_source_artifact(row)
+        self.assertEqual(report["status"], "FAIL")
+        self.assertTrue(any("non-UNMATCHED row has no selected candidate" in error for error in report["errors"]))
+
+    def test_valid_row_level_evidence_passes_integrity_gate(self) -> None:
+        row = self._valid_source_backed_row()
+        report = self._validate_temp_source_artifact(row)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(
+            stage9_source.source_backed_acceptance_status(
+                evidence_origin=stage9_source.SOURCE_BACKED_EVIDENCE_ORIGIN,
+                static_validation_status="PASS",
+                source_observation_count=1,
+                independent_service_date_count=1,
+                core_deterministic_match_count=1,
+                mdd_http_attempts=1,
+                artifact_written=True,
+                artifact_integrity_status=report["status"],
+            ),
+            "PASS",
+        )
+
+    def test_jsonl_serialization_retains_decision_fields_without_truncation(self) -> None:
+        observation = self.observations[0]
+        decision = stage9.match_source_event(
+            observation,
+            self.schedule,
+            self.bridge,
+            evidence_validation=self.synthetic_validation,
+        )
+        record = stage9_source._evidence_record(
+            observation,
+            decision,
+            {"status": "ESTABLISHED", "established_service_date": "2026-09-29"},
+            {"static_stop_found": True, "explicit_parent_relationship": True},
+            self.schedule,
+            {
+                "feed_version": "feed-v1",
+                "zip_sha256": "feed-hash",
+                "feed_start_date": "2026-09-01",
+                "feed_end_date": "2026-12-31",
+            },
+            {"response_id": "response-1", "target_index": 0},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "evidence.jsonl"
+            stage9_source._write_jsonl(evidence_path, [record])
+            written = json.loads(evidence_path.read_text(encoding="utf-8").strip())
+        self.assertEqual(written["confidence"], decision.match_confidence)
+        self.assertEqual(written["match_method"], decision.match_method)
+        self.assertEqual(written["data_quality_classification"], decision.data_quality_classification)
+        self.assertEqual(written["selected_candidate_id"], decision.canonical_service_event_id)
+        self.assertEqual(written["candidate_ids"], list(decision.candidate_event_ids))
+        self.assertIsInstance(written["static_candidate_identities"], list)
+        self.assertIsInstance(written["evidence_used"], dict)
+        self.assertFalse(stage9_source._contains_truncation_marker(written["decision_evidence"]))
 
     def test_source_backed_evidence_schema_contract_is_explicit(self) -> None:
         expected = {

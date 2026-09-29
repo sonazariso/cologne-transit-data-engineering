@@ -43,6 +43,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-037 | 2026-09-29 | Stage 9 review correction: synthetic fixtures are regression evidence only; source-backed acceptance requires a retained successful Stage 8 parser bundle and date-compatible MDD-to-VRS static event population | Historical gate definition; initial Stage 9 status BLOCKED pending source-backed core match population; Stage 10+ NOT STARTED |
 | D-038 | 2026-09-29 | Stage 9 ranking hardening and bounded acceptance probe | Historical initial probe BLOCKED at credential preflight; superseded by D-039 |
 | D-039 | 2026-09-29 | Stage 9 acceptance-probe correction: adapt raw Stage 8 stop-event records before inspecting adapter-selected THIS scope, retain parser-versus-adapter diagnostics, and preserve separate Stage 4 reference/current VRS snapshot lineage | Bounded source-backed acceptance PASS; 60 observations and 51 core deterministic matches; Stage 10+ remain NOT STARTED |
+| D-040 | 2026-09-29 | Stage 9 evidence-integrity correction: serialize the live in-memory match decisions losslessly in the row-level JSONL, require semantic JSONL-to-summary reconciliation before PASS, and retain the current VRS snapshot/version/hash | Bounded source-backed acceptance PASS after one corrected live run; 60 rows, 53 established service dates, 51 core matches, 51 MEDIUM / 9 UNMATCHED, row-level integrity PASS; Stage 10+ remain NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
