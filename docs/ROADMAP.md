@@ -290,14 +290,18 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 is now
-in progress under its own blocked validation gate; Stage 11 and later stages
-remain **NOT STARTED**.
+under its own blocked validation gate; Stage 11 and later stages remain **NOT
+STARTED**.
 
-## Stage 10 — Operational Fact — IN PROGRESS; VALIDATION BLOCKED
-The source-controlled PostgreSQL fact contract covers the approved grain,
-consolidation semantics, first/latest timing, NULL handling, platform evidence,
-situation evidence, and lineage. Completion is blocked until the physical
-database and approved Stage 9 `wrk.vwCologneRealtimeTripMatch` input exist.
+## Stage 10 — Operational Fact — IMPLEMENTATION CORRECTED; VALIDATION BLOCKED
+The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
+uses the canonical service-event identity, explicit Stage 9 run/version
+selection, HIGH-only eligibility, durable source operational evidence,
+first/latest timing, NULL handling, PlannedBay/EstimatedBay evidence,
+non-causal Situation linkage, and repeat-refresh validation. Completion remains
+blocked because this checkout has no usable PostgreSQL/source-observation
+population and the current Stage 9 source-backed artifact contains zero HIGH
+rows. Stage 11 and later stages remain **NOT STARTED**.
 
 ## Stage 11 — Power BI Model
 Build only after a stable semantic layer. Review relationships, DAX, thresholds, terminology, executive reporting, drill-down, and data-quality context.

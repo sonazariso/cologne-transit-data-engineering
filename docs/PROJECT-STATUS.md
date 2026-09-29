@@ -316,10 +316,12 @@ current VRS snapshot
 separate; Stage 4 semantics, rather than historical exact row counts, were
 revalidated for the changed official feed. Railway Hbf remains unresolved and
 adjacent KVB complexes are not substituted. No Power BI model, 50-station
-selection, or Tiered50 activation has been started. Stage 10 has a
-source-controlled operational-fact contract and semantic validator but remains
-**NOT COMPLETE** because this checkout has no physical database, loaded source
-observation history, or approved `wrk.vwCologneRealtimeTripMatch` input view.
+selection, or Tiered50 activation has been started. Stage 10 has a corrected
+source-controlled `dw.fact_operational_service_event` contract and semantic
+validator but remains **NOT COMPLETE** because this checkout has no usable
+PostgreSQL database or durable source-observation population. The current
+Stage 9 source-backed artifact also contains zero HIGH rows, so source-backed
+Stage 10 validation is blocked rather than promoted from MEDIUM context.
 The exact probe result is retained in
 `stages/09-source-backed-matching-summary.json` and the sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`.

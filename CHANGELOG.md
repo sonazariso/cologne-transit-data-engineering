@@ -3,13 +3,17 @@
 ## Unreleased
 
 ### Added
-- Stage 10 operational-fact contract and semantic validator: the derived fact
-  uses the approved `(DateKey, ScheduledStopEventKey)` grain, deterministic
+- Stage 10 operational-fact correction: the derived
+  `dw.fact_operational_service_event` uses the canonical
+  `(service_date, canonical_service_event_key)` grain, explicit
+  `matching_run_key`/`matching_version` selection, HIGH-only Stage 9
+  eligibility, separate durable-source operational evidence, deterministic
   first/latest observation ordering, latest-row NULL timing semantics,
-  conservative platform evidence, non-causal situation-link evidence, exact
-  Stage 9 reconciliation checks, and repeat-refresh repeatability checks. The
-  stage remains incomplete because the current checkout has no physical
-  database, loaded source history, or approved Stage 9 operational-input view.
+  PlannedBay/EstimatedBay evidence, non-causal Situation-link evidence, and
+  refresh #1/snapshot A/refresh #2/snapshot B repeatability validation. The
+  stage remains incomplete because the current checkout has no usable
+  PostgreSQL/source-observation population and the current Stage 9 evidence
+  contains zero HIGH rows.
 - Stage 9 row-level evidence-integrity correction: audit fields are now
   serialized losslessly from the in-memory decisions, malformed/null/truncated
   decision artifacts are blocked by an explicit JSONL integrity gate, and seven

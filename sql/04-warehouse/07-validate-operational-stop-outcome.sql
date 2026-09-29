@@ -1,233 +1,310 @@
--- Stage 10 — Operational Fact: semantic validation
+-- Stage 10 — Operational Fact: current-architecture semantic validation
 -- Target: PostgreSQL 18
 --
--- The validator returns one row per check.  It returns BLOCKED when the
--- current database does not contain the approved Stage 9 input view or the
--- Stage 10 fact.  It never turns an unavailable database/source into PASS.
+-- Validate an explicit Stage 9 execution:
 --
--- Run after 05-create-operational-stop-outcome.sql and
--- 06-refresh-operational-stop-outcome.sql:
---   SELECT * FROM dw.validate_fact_operational_stop_outcome();
+--   SELECT *
+--   FROM dw.validate_operational_service_event(<matching_run_key>, '<matching_version>');
+--
+-- NULL parameters are intentionally BLOCKED. The validator never chooses an
+-- implicit latest matching run and never treats unavailable source/database
+-- state as PASS.
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION dw.validate_fact_operational_stop_outcome()
+CREATE SCHEMA IF NOT EXISTS dw;
+
+CREATE OR REPLACE FUNCTION dw.validate_operational_service_event(
+    p_matching_run_key bigint DEFAULT NULL,
+    p_matching_version text DEFAULT NULL
+)
 RETURNS TABLE (
-    check_code       text,
-    outcome          text,
-    observed_count   bigint,
-    expected_count   bigint,
-    detail           text
+    check_code      text,
+    outcome         text,
+    observed_count  bigint,
+    expected_count  bigint,
+    detail          text
 )
 LANGUAGE plpgsql
 AS $function$
 DECLARE
-    input_relation                 regclass;
-    missing_column                 text;
-    duplicate_fact_grain_count     bigint;
-    usable_stage9_grain_count      bigint;
-    fact_grain_count               bigint;
-    missing_usable_grain_count     bigint;
-    stale_fact_grain_count         bigint;
-    non_approved_fact_count        bigint;
-    match_status_conflict_count    bigint;
-    duplicate_input_observation_count bigint;
-    first_lineage_violation_count  bigint;
-    latest_lineage_violation_count bigint;
-    observation_count_mismatch     bigint;
-    first_timing_mismatch_count    bigint;
-    latest_timing_mismatch_count   bigint;
-    earlier_estimate_latest_null_violation_count bigint;
-    timetable_inconsistency_count  bigint;
-    platform_mismatch_count        bigint;
-    situation_count_mismatch       bigint;
-    situation_flag_mismatch        bigint;
-    identity_consistency_count     bigint;
-    repeatability_difference_count bigint;
-    refresh_error                  text;
+    refresh_error                         text;
+    selected_high_observation_count       bigint;
+    selected_event_grain_count            bigint;
+    fact_grain_count                      bigint;
+    duplicate_fact_grain_count            bigint;
+    ineligible_fact_count                 bigint;
+    lineage_violation_count               bigint;
+    source_observation_duplication_count  bigint;
+    missing_event_grain_count             bigint;
+    stale_event_grain_count               bigint;
+    first_lineage_violation_count         bigint;
+    latest_lineage_violation_count        bigint;
+    observation_count_mismatch             bigint;
+    first_timing_mismatch_count           bigint;
+    latest_timing_mismatch_count          bigint;
+    latest_null_carry_forward_count       bigint;
+    bay_evidence_mismatch_count           bigint;
+    situation_evidence_mismatch_count     bigint;
+    situation_flag_mismatch_count         bigint;
+    canonical_identity_mismatch_count     bigint;
+    data_quality_lineage_mismatch_count   bigint;
+    repeatability_difference_count        bigint;
 BEGIN
-    input_relation := to_regclass('wrk.vwcolognerealtimetripmatch');
-    IF input_relation IS NULL THEN
-        input_relation := to_regclass('wrk."vwCologneRealtimeTripMatch"');
-    END IF;
-
-    IF to_regclass('dw.fact_operational_stop_outcome') IS NULL THEN
+    IF p_matching_run_key IS NULL
+       OR NULLIF(btrim(p_matching_version), '') IS NULL THEN
         RETURN QUERY
         SELECT
-            'STAGE10_PREREQUISITE_FACT'::text,
+            'STAGE10_EXPLICIT_RUN_SELECTION'::text,
             'BLOCKED'::text,
             0::bigint,
             NULL::bigint,
-            'dw.fact_operational_stop_outcome is absent; Stage 10 has not been physically installed.'::text;
+            'An explicit matching_run_key and matching_version are required; the validator does not infer a latest Stage 9 execution.'::text;
         RETURN;
     END IF;
 
-    IF input_relation IS NULL THEN
+    IF to_regclass('dw.fact_operational_service_event') IS NULL THEN
         RETURN QUERY
         SELECT
-            'STAGE9_INPUT_VIEW'::text,
+            'STAGE10_FACT_PREREQUISITE'::text,
             'BLOCKED'::text,
             0::bigint,
             NULL::bigint,
-            'Approved Stage 9 input view wrk.vwCologneRealtimeTripMatch is absent; exact reconciliation cannot be evaluated.'::text;
+            'dw.fact_operational_service_event is absent; install the Stage 10 physical contract before validation.'::text;
         RETURN;
     END IF;
 
-    FOREACH missing_column IN ARRAY ARRAY[
-        'date_key',
-        'scheduled_stop_event_key',
-        'match_status',
-        'observation_key',
-        'observed_at_utc',
-        'timetabled_arrival_utc',
-        'estimated_arrival_utc',
-        'planned_platform',
-        'estimated_platform',
-        'situation_link_count'
-    ] LOOP
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_attribute
-            WHERE attrelid = input_relation
-              AND attname = missing_column
-              AND attnum > 0
-              AND NOT attisdropped
-        ) THEN
-            RETURN QUERY
-            SELECT
-                'STAGE9_INPUT_VIEW_COLUMNS'::text,
-                'BLOCKED'::text,
-                0::bigint,
-                NULL::bigint,
-                format('Input view %s is missing required column %s.', input_relation, missing_column);
-            RETURN;
-        END IF;
-    END LOOP;
-
+    DROP TABLE IF EXISTS pg_temp.stage10_validation_snapshot_a;
+    DROP TABLE IF EXISTS pg_temp.stage10_validation_snapshot_b;
     DROP TABLE IF EXISTS pg_temp.stage10_validation_input;
-    DROP TABLE IF EXISTS pg_temp.stage10_validation_before;
-    DROP TABLE IF EXISTS pg_temp.stage10_validation_after;
 
+    -- The first refresh establishes the starting state for repeatability.
+    -- There is intentionally no snapshot of an arbitrary pre-refresh fact.
     BEGIN
-        EXECUTE format($sql$
-            CREATE TEMP TABLE stage10_validation_input ON COMMIT DROP AS
-            SELECT
-                date_key::date AS date_key,
-                scheduled_stop_event_key::bigint AS scheduled_stop_event_key,
-                NULLIF(btrim(match_status::text), '') AS match_status,
-                NULLIF(btrim(observation_key::text), '') AS observation_key,
-                observed_at_utc::timestamptz AS observed_at_utc,
-                timetabled_arrival_utc::timestamptz AS timetabled_arrival_utc,
-                estimated_arrival_utc::timestamptz AS estimated_arrival_utc,
-                NULLIF(btrim(planned_platform::text), '') AS planned_platform,
-                NULLIF(btrim(estimated_platform::text), '') AS estimated_platform,
-                situation_link_count::bigint AS situation_link_count
-            FROM %s
-        $sql$, input_relation);
+        CALL dw.refresh_operational_service_event(
+            p_matching_run_key,
+            p_matching_version
+        );
     EXCEPTION WHEN OTHERS THEN
-        RETURN QUERY
-        SELECT
-            'STAGE9_INPUT_VIEW_TYPES'::text,
-            'BLOCKED'::text,
-            0::bigint,
-            NULL::bigint,
-            format('Stage 9 input view could not be projected into the Stage 10 contract: %s', SQLERRM);
-        RETURN;
+        GET STACKED DIAGNOSTICS refresh_error = MESSAGE_TEXT;
     END;
 
-    CREATE INDEX stage10_validation_input_grain_ix
-        ON pg_temp.stage10_validation_input (date_key, scheduled_stop_event_key, observed_at_utc, observation_key);
+    IF refresh_error IS NOT NULL THEN
+        RETURN QUERY
+        SELECT
+            'STAGE10_SOURCE_DATABASE_PREREQUISITES'::text,
+            'BLOCKED'::text,
+            0::bigint,
+            NULL::bigint,
+            refresh_error;
+        RETURN;
+    END IF;
 
-    CREATE TEMP TABLE stage10_validation_before (
-        date_key                 date NOT NULL,
-        scheduled_stop_event_key bigint NOT NULL,
-        semantic_hash            text NOT NULL
-    ) ON COMMIT DROP;
+    CREATE TEMP TABLE stage10_validation_snapshot_a ON COMMIT DROP AS
+    SELECT
+        fact.service_date,
+        fact.canonical_service_event_key,
+        md5(jsonb_build_object(
+            'service_date', fact.service_date,
+            'canonical_service_event_key', fact.canonical_service_event_key,
+            'canonical_service_event_id', fact.canonical_service_event_id,
+            'matching_run_key', fact.matching_run_key,
+            'matching_version', fact.matching_version,
+            'canonical_stop_id', fact.canonical_stop_id,
+            'canonical_line_id', fact.canonical_line_id,
+            'event_type', fact.event_type,
+            'scheduled_time_seconds', fact.scheduled_time_seconds,
+            'canonical_scheduled_time_utc', fact.canonical_scheduled_time_utc,
+            'match_confidence', fact.match_confidence,
+            'match_method', fact.match_method,
+            'data_quality_classification', fact.data_quality_classification,
+            'source_observation_count', fact.source_observation_count,
+            'first_source_event_match_key', fact.first_source_event_match_key,
+            'latest_source_event_match_key', fact.latest_source_event_match_key,
+            'first_source_observation_identity', fact.first_source_observation_identity,
+            'latest_source_observation_identity', fact.latest_source_observation_identity,
+            'first_source_observed_at_utc', fact.first_source_observed_at_utc,
+            'latest_source_observed_at_utc', fact.latest_source_observed_at_utc,
+            'first_estimated_time_utc', fact.first_estimated_time_utc,
+            'latest_estimated_time_utc', fact.latest_estimated_time_utc,
+            'first_estimated_delay_minutes', fact.first_estimated_delay_minutes,
+            'latest_estimated_delay_minutes', fact.latest_estimated_delay_minutes,
+            'first_planned_bay', fact.first_planned_bay,
+            'latest_planned_bay', fact.latest_planned_bay,
+            'first_estimated_bay', fact.first_estimated_bay,
+            'latest_estimated_bay', fact.latest_estimated_bay,
+            'bay_evidence', fact.bay_evidence,
+            'comparable_bay_observation_count', fact.comparable_bay_observation_count,
+            'changed_bay_observation_count', fact.changed_bay_observation_count,
+            'situation_link_count', fact.situation_link_count,
+            'has_situation_evidence', fact.has_situation_evidence
+        )::text) AS semantic_hash
+    FROM dw.fact_operational_service_event AS fact;
+
+    -- The second refresh uses the same explicit run/version and unchanged
+    -- source/core input. A is compared with B below; refreshed_at_utc is not
+    -- included in either semantic hash.
+    BEGIN
+        CALL dw.refresh_operational_service_event(
+            p_matching_run_key,
+            p_matching_version
+        );
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS refresh_error = MESSAGE_TEXT;
+    END;
+
+    IF refresh_error IS NOT NULL THEN
+        RETURN QUERY
+        SELECT
+            'STAGE10_REPEAT_REFRESH_PREREQUISITE'::text,
+            'BLOCKED'::text,
+            0::bigint,
+            NULL::bigint,
+            'The second unchanged-input refresh could not run: ' || refresh_error;
+        RETURN;
+    END IF;
+
+    CREATE TEMP TABLE stage10_validation_snapshot_b ON COMMIT DROP AS
+    SELECT
+        fact.service_date,
+        fact.canonical_service_event_key,
+        md5(jsonb_build_object(
+            'service_date', fact.service_date,
+            'canonical_service_event_key', fact.canonical_service_event_key,
+            'canonical_service_event_id', fact.canonical_service_event_id,
+            'matching_run_key', fact.matching_run_key,
+            'matching_version', fact.matching_version,
+            'canonical_stop_id', fact.canonical_stop_id,
+            'canonical_line_id', fact.canonical_line_id,
+            'event_type', fact.event_type,
+            'scheduled_time_seconds', fact.scheduled_time_seconds,
+            'canonical_scheduled_time_utc', fact.canonical_scheduled_time_utc,
+            'match_confidence', fact.match_confidence,
+            'match_method', fact.match_method,
+            'data_quality_classification', fact.data_quality_classification,
+            'source_observation_count', fact.source_observation_count,
+            'first_source_event_match_key', fact.first_source_event_match_key,
+            'latest_source_event_match_key', fact.latest_source_event_match_key,
+            'first_source_observation_identity', fact.first_source_observation_identity,
+            'latest_source_observation_identity', fact.latest_source_observation_identity,
+            'first_source_observed_at_utc', fact.first_source_observed_at_utc,
+            'latest_source_observed_at_utc', fact.latest_source_observed_at_utc,
+            'first_estimated_time_utc', fact.first_estimated_time_utc,
+            'latest_estimated_time_utc', fact.latest_estimated_time_utc,
+            'first_estimated_delay_minutes', fact.first_estimated_delay_minutes,
+            'latest_estimated_delay_minutes', fact.latest_estimated_delay_minutes,
+            'first_planned_bay', fact.first_planned_bay,
+            'latest_planned_bay', fact.latest_planned_bay,
+            'first_estimated_bay', fact.first_estimated_bay,
+            'latest_estimated_bay', fact.latest_estimated_bay,
+            'bay_evidence', fact.bay_evidence,
+            'comparable_bay_observation_count', fact.comparable_bay_observation_count,
+            'changed_bay_observation_count', fact.changed_bay_observation_count,
+            'situation_link_count', fact.situation_link_count,
+            'has_situation_evidence', fact.has_situation_evidence
+        )::text) AS semantic_hash
+    FROM dw.fact_operational_service_event AS fact;
 
     SELECT count(*)
-    INTO duplicate_input_observation_count
+    INTO repeatability_difference_count
+    FROM pg_temp.stage10_validation_snapshot_a AS snapshot_a
+    FULL JOIN pg_temp.stage10_validation_snapshot_b AS snapshot_b
+      ON snapshot_b.service_date = snapshot_a.service_date
+     AND snapshot_b.canonical_service_event_key = snapshot_a.canonical_service_event_key
+    WHERE snapshot_a.semantic_hash IS DISTINCT FROM snapshot_b.semantic_hash;
+
+    -- The second refresh leaves the input projection available in the current
+    -- transaction. Copy it before running the semantic checks.
+    CREATE TEMP TABLE stage10_validation_input ON COMMIT DROP AS
+    SELECT * FROM pg_temp.stage10_refresh_input;
+
+    SELECT count(*)
+    INTO selected_high_observation_count
+    FROM pg_temp.stage10_validation_input;
+
+    SELECT count(*)
+    INTO selected_event_grain_count
     FROM (
-        SELECT observation_key
+        SELECT service_date, canonical_service_event_key
         FROM pg_temp.stage10_validation_input
-        WHERE observation_key IS NOT NULL
-        GROUP BY observation_key
-        HAVING count(*) > 1
-    ) AS duplicates;
+        GROUP BY service_date, canonical_service_event_key
+    ) AS selected_grains;
+
+    SELECT count(*)
+    INTO fact_grain_count
+    FROM dw.fact_operational_service_event;
 
     SELECT count(*)
     INTO duplicate_fact_grain_count
     FROM (
-        SELECT date_key, scheduled_stop_event_key
-        FROM dw.fact_operational_stop_outcome
-        GROUP BY date_key, scheduled_stop_event_key
+        SELECT service_date, canonical_service_event_key
+        FROM dw.fact_operational_service_event
+        GROUP BY service_date, canonical_service_event_key
         HAVING count(*) > 1
     ) AS duplicates;
 
     SELECT count(*)
-    INTO usable_stage9_grain_count
+    INTO ineligible_fact_count
+    FROM dw.fact_operational_service_event AS fact
+    WHERE fact.match_confidence IS DISTINCT FROM 'HIGH';
+
+    SELECT count(*)
+    INTO lineage_violation_count
+    FROM dw.fact_operational_service_event AS fact
+    WHERE fact.matching_run_key IS DISTINCT FROM p_matching_run_key
+       OR fact.matching_version IS DISTINCT FROM p_matching_version
+       OR fact.matching_run_key IS NULL
+       OR NULLIF(btrim(fact.matching_version), '') IS NULL;
+
+    -- A selected-run input row may not be repeated by a historical matching
+    -- run. The input query is scoped to one run, so this detects only duplicate
+    -- source observations entering the consolidation, not legitimate history
+    -- retained outside the fact.
+    SELECT count(*)
+    INTO source_observation_duplication_count
     FROM (
-        SELECT date_key, scheduled_stop_event_key
+        SELECT source_system, source_namespace, source_observation_identity
         FROM pg_temp.stage10_validation_input
-        WHERE match_status IN ('ExactStopMatch', 'ParentStationFallback')
-        GROUP BY date_key, scheduled_stop_event_key
-    ) AS usable;
+        GROUP BY source_system, source_namespace, source_observation_identity
+        HAVING count(*) > 1
+    ) AS duplicates;
 
     SELECT count(*)
-    INTO fact_grain_count
-    FROM dw.fact_operational_stop_outcome;
-
-    SELECT count(*)
-    INTO missing_usable_grain_count
+    INTO missing_event_grain_count
     FROM (
-        SELECT date_key, scheduled_stop_event_key
+        SELECT service_date, canonical_service_event_key
         FROM pg_temp.stage10_validation_input
-        WHERE match_status IN ('ExactStopMatch', 'ParentStationFallback')
-        GROUP BY date_key, scheduled_stop_event_key
-    ) AS usable
-    LEFT JOIN dw.fact_operational_stop_outcome AS fact
-      ON fact.date_key = usable.date_key
-     AND fact.scheduled_stop_event_key = usable.scheduled_stop_event_key
-    WHERE fact.operational_stop_outcome_key IS NULL;
+        GROUP BY service_date, canonical_service_event_key
+    ) AS selected_grains
+    LEFT JOIN dw.fact_operational_service_event AS fact
+      ON fact.service_date = selected_grains.service_date
+     AND fact.canonical_service_event_key = selected_grains.canonical_service_event_key
+    WHERE fact.operational_service_event_key IS NULL;
 
     SELECT count(*)
-    INTO stale_fact_grain_count
-    FROM dw.fact_operational_stop_outcome AS fact
+    INTO stale_event_grain_count
+    FROM dw.fact_operational_service_event AS fact
     LEFT JOIN (
-        SELECT date_key, scheduled_stop_event_key
+        SELECT service_date, canonical_service_event_key
         FROM pg_temp.stage10_validation_input
-        WHERE match_status IN ('ExactStopMatch', 'ParentStationFallback')
-        GROUP BY date_key, scheduled_stop_event_key
-    ) AS usable
-      ON usable.date_key = fact.date_key
-     AND usable.scheduled_stop_event_key = fact.scheduled_stop_event_key
-    WHERE usable.date_key IS NULL;
-
-    SELECT count(*)
-    INTO non_approved_fact_count
-    FROM dw.fact_operational_stop_outcome
-    WHERE match_status NOT IN ('ExactStopMatch', 'ParentStationFallback');
-
-    SELECT count(*)
-    INTO match_status_conflict_count
-    FROM (
-        SELECT date_key, scheduled_stop_event_key
-        FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
-        HAVING count(DISTINCT match_status) > 1
-            OR bool_or(match_status IS NULL)
-            OR bool_or(match_status NOT IN ('ExactStopMatch', 'ParentStationFallback'))
-    ) AS conflicts;
+        GROUP BY service_date, canonical_service_event_key
+    ) AS selected_grains
+      ON selected_grains.service_date = fact.service_date
+     AND selected_grains.canonical_service_event_key = fact.canonical_service_event_key
+    WHERE selected_grains.service_date IS NULL;
 
     WITH ranked AS (
         SELECT
             input.*,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc ASC, observation_key ASC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc ASC,
+                         input.source_observation_identity ASC
             ) AS first_row_number,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc DESC, observation_key DESC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc DESC,
+                         input.source_observation_identity DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -237,44 +314,48 @@ BEGIN
     )
     SELECT
         count(*) FILTER (
-            WHERE fact.first_observation_key IS DISTINCT FROM first_rows.observation_key
-               OR fact.first_observed_at_utc IS DISTINCT FROM first_rows.observed_at_utc
+            WHERE fact.first_source_event_match_key IS DISTINCT FROM first_rows.source_event_match_key
+               OR fact.first_source_observation_identity IS DISTINCT FROM first_rows.source_observation_identity
+               OR fact.first_source_observed_at_utc IS DISTINCT FROM first_rows.source_observed_at_utc
         ),
         count(*) FILTER (
-            WHERE fact.last_observation_key IS DISTINCT FROM latest_rows.observation_key
-               OR fact.last_observed_at_utc IS DISTINCT FROM latest_rows.observed_at_utc
+            WHERE fact.latest_source_event_match_key IS DISTINCT FROM latest_rows.source_event_match_key
+               OR fact.latest_source_observation_identity IS DISTINCT FROM latest_rows.source_observation_identity
+               OR fact.latest_source_observed_at_utc IS DISTINCT FROM latest_rows.source_observed_at_utc
         )
     INTO first_lineage_violation_count, latest_lineage_violation_count
-    FROM dw.fact_operational_stop_outcome AS fact
+    FROM dw.fact_operational_service_event AS fact
     JOIN first_rows
-      ON first_rows.date_key = fact.date_key
-     AND first_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key
+      ON first_rows.service_date = fact.service_date
+     AND first_rows.canonical_service_event_key = fact.canonical_service_event_key
     JOIN latest_rows
-      ON latest_rows.date_key = fact.date_key
-     AND latest_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key;
+      ON latest_rows.service_date = fact.service_date
+     AND latest_rows.canonical_service_event_key = fact.canonical_service_event_key;
 
     SELECT count(*)
     INTO observation_count_mismatch
     FROM (
-        SELECT date_key, scheduled_stop_event_key, count(*)::bigint AS source_count
+        SELECT service_date, canonical_service_event_key, count(*)::bigint AS source_count
         FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
+        GROUP BY service_date, canonical_service_event_key
     ) AS source_counts
-    FULL JOIN dw.fact_operational_stop_outcome AS fact
-      ON fact.date_key = source_counts.date_key
-     AND fact.scheduled_stop_event_key = source_counts.scheduled_stop_event_key
-    WHERE source_counts.source_count IS DISTINCT FROM fact.observation_count;
+    FULL JOIN dw.fact_operational_service_event AS fact
+      ON fact.service_date = source_counts.service_date
+     AND fact.canonical_service_event_key = source_counts.canonical_service_event_key
+    WHERE source_counts.source_count IS DISTINCT FROM fact.source_observation_count;
 
     WITH ranked AS (
         SELECT
             input.*,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc ASC, observation_key ASC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc ASC,
+                         input.source_observation_identity ASC
             ) AS first_row_number,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc DESC, observation_key DESC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc DESC,
+                         input.source_observation_identity DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -284,42 +365,50 @@ BEGIN
     )
     SELECT
         count(*) FILTER (
-            WHERE fact.first_observed_estimated_arrival_utc IS DISTINCT FROM first_rows.estimated_arrival_utc
-               OR fact.first_observed_estimated_delay_minutes IS DISTINCT FROM CASE
-                    WHEN first_rows.estimated_arrival_utc IS NULL THEN NULL
-                    ELSE round((extract(epoch FROM (
-                        first_rows.estimated_arrival_utc - fact.timetabled_arrival_utc
-                    )) / 60.0)::numeric, 3)
+            WHERE fact.first_estimated_time_utc IS DISTINCT FROM first_rows.estimated_time_utc
+               OR fact.first_estimated_delay_minutes IS DISTINCT FROM CASE
+                    WHEN first_rows.estimated_time_utc IS NULL THEN NULL
+                    ELSE round(
+                        (extract(epoch FROM (
+                            first_rows.estimated_time_utc - fact.canonical_scheduled_time_utc
+                        )) / 60.0)::numeric,
+                        3
+                    )
                 END
         ),
         count(*) FILTER (
-            WHERE fact.latest_observed_estimated_arrival_utc IS DISTINCT FROM latest_rows.estimated_arrival_utc
-               OR fact.final_observed_estimated_delay_minutes IS DISTINCT FROM CASE
-                    WHEN latest_rows.estimated_arrival_utc IS NULL THEN NULL
-                    ELSE round((extract(epoch FROM (
-                        latest_rows.estimated_arrival_utc - fact.timetabled_arrival_utc
-                    )) / 60.0)::numeric, 3)
+            WHERE fact.latest_estimated_time_utc IS DISTINCT FROM latest_rows.estimated_time_utc
+               OR fact.latest_estimated_delay_minutes IS DISTINCT FROM CASE
+                    WHEN latest_rows.estimated_time_utc IS NULL THEN NULL
+                    ELSE round(
+                        (extract(epoch FROM (
+                            latest_rows.estimated_time_utc - fact.canonical_scheduled_time_utc
+                        )) / 60.0)::numeric,
+                        3
+                    )
                 END
         )
     INTO first_timing_mismatch_count, latest_timing_mismatch_count
-    FROM dw.fact_operational_stop_outcome AS fact
+    FROM dw.fact_operational_service_event AS fact
     JOIN first_rows
-      ON first_rows.date_key = fact.date_key
-     AND first_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key
+      ON first_rows.service_date = fact.service_date
+     AND first_rows.canonical_service_event_key = fact.canonical_service_event_key
     JOIN latest_rows
-      ON latest_rows.date_key = fact.date_key
-     AND latest_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key;
+      ON latest_rows.service_date = fact.service_date
+     AND latest_rows.canonical_service_event_key = fact.canonical_service_event_key;
 
     WITH ranked AS (
         SELECT
             input.*,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc ASC, observation_key ASC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc ASC,
+                         input.source_observation_identity ASC
             ) AS first_row_number,
             row_number() OVER (
-                PARTITION BY date_key, scheduled_stop_event_key
-                ORDER BY observed_at_utc DESC, observation_key DESC
+                PARTITION BY input.service_date, input.canonical_service_event_key
+                ORDER BY input.source_observed_at_utc DESC,
+                         input.source_observation_identity DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -328,257 +417,267 @@ BEGIN
         SELECT * FROM ranked WHERE latest_row_number = 1
     )
     SELECT count(*)
-    INTO earlier_estimate_latest_null_violation_count
-    FROM dw.fact_operational_stop_outcome AS fact
+    INTO latest_null_carry_forward_count
+    FROM dw.fact_operational_service_event AS fact
     JOIN first_rows
-      ON first_rows.date_key = fact.date_key
-     AND first_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key
+      ON first_rows.service_date = fact.service_date
+     AND first_rows.canonical_service_event_key = fact.canonical_service_event_key
     JOIN latest_rows
-      ON latest_rows.date_key = fact.date_key
-     AND latest_rows.scheduled_stop_event_key = fact.scheduled_stop_event_key
-    WHERE first_rows.estimated_arrival_utc IS NOT NULL
-      AND latest_rows.estimated_arrival_utc IS NULL
+      ON latest_rows.service_date = fact.service_date
+     AND latest_rows.canonical_service_event_key = fact.canonical_service_event_key
+    WHERE first_rows.estimated_time_utc IS NOT NULL
+      AND latest_rows.estimated_time_utc IS NULL
       AND (
-          fact.latest_observed_estimated_arrival_utc IS NOT NULL
-          OR fact.final_observed_estimated_delay_minutes IS NOT NULL
+          fact.latest_estimated_time_utc IS NOT NULL
+          OR fact.latest_estimated_delay_minutes IS NOT NULL
       );
 
-    SELECT count(*)
-    INTO timetable_inconsistency_count
-    FROM (
-        SELECT date_key, scheduled_stop_event_key
-        FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
-        HAVING count(*) FILTER (WHERE timetabled_arrival_utc IS NULL) > 0
-            OR count(DISTINCT timetabled_arrival_utc) > 1
-    ) AS inconsistent;
-
-    SELECT count(*)
-    INTO identity_consistency_count
-    FROM dw.fact_operational_stop_outcome AS fact
-    LEFT JOIN (
+    WITH bay_source AS (
         SELECT
-            date_key,
-            scheduled_stop_event_key,
-            min(timetabled_arrival_utc) AS source_timetabled_arrival_utc
-        FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
-    ) AS source_identity
-      ON source_identity.date_key = fact.date_key
-     AND source_identity.scheduled_stop_event_key = fact.scheduled_stop_event_key
-    WHERE source_identity.date_key IS NULL
-       OR fact.timetabled_arrival_utc IS DISTINCT FROM source_identity.source_timetabled_arrival_utc;
-
-    WITH platform_source AS (
-        SELECT
-            date_key,
-            scheduled_stop_event_key,
+            service_date,
+            canonical_service_event_key,
             count(*) FILTER (
-                WHERE planned_platform IS NOT NULL
-                  AND estimated_platform IS NOT NULL
+                WHERE planned_bay IS NOT NULL
+                  AND estimated_bay IS NOT NULL
             )::bigint AS comparable_count,
             count(*) FILTER (
-                WHERE planned_platform IS NOT NULL
-                  AND estimated_platform IS NOT NULL
-                  AND planned_platform IS DISTINCT FROM estimated_platform
+                WHERE planned_bay IS NOT NULL
+                  AND estimated_bay IS NOT NULL
+                  AND planned_bay IS DISTINCT FROM estimated_bay
             )::bigint AS changed_count,
             CASE
                 WHEN count(*) FILTER (
-                    WHERE planned_platform IS NOT NULL
-                      AND estimated_platform IS NOT NULL
+                    WHERE planned_bay IS NOT NULL
+                      AND estimated_bay IS NOT NULL
                 ) = 0 THEN 'Unknown'
                 WHEN count(*) FILTER (
-                    WHERE planned_platform IS NOT NULL
-                      AND estimated_platform IS NOT NULL
-                      AND planned_platform IS DISTINCT FROM estimated_platform
+                    WHERE planned_bay IS NOT NULL
+                      AND estimated_bay IS NOT NULL
+                      AND planned_bay IS DISTINCT FROM estimated_bay
                 ) > 0 THEN 'Changed'
                 ELSE 'Unchanged'
             END AS evidence
         FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
+        GROUP BY service_date, canonical_service_event_key
     )
     SELECT count(*)
-    INTO platform_mismatch_count
-    FROM platform_source
-    FULL JOIN dw.fact_operational_stop_outcome AS fact
-      ON fact.date_key = platform_source.date_key
-     AND fact.scheduled_stop_event_key = platform_source.scheduled_stop_event_key
-    WHERE platform_source.evidence IS DISTINCT FROM fact.platform_change_evidence
-       OR platform_source.comparable_count IS DISTINCT FROM fact.comparable_platform_observation_count
-       OR platform_source.changed_count IS DISTINCT FROM fact.changed_platform_observation_count;
+    INTO bay_evidence_mismatch_count
+    FROM bay_source
+    FULL JOIN dw.fact_operational_service_event AS fact
+      ON fact.service_date = bay_source.service_date
+     AND fact.canonical_service_event_key = bay_source.canonical_service_event_key
+    WHERE bay_source.evidence IS DISTINCT FROM fact.bay_evidence
+       OR bay_source.comparable_count IS DISTINCT FROM fact.comparable_bay_observation_count
+       OR bay_source.changed_count IS DISTINCT FROM fact.changed_bay_observation_count;
 
     SELECT count(*)
-    INTO situation_count_mismatch
+    INTO situation_evidence_mismatch_count
     FROM (
-        SELECT date_key, scheduled_stop_event_key, sum(situation_link_count)::bigint AS source_count
+        SELECT service_date, canonical_service_event_key,
+               sum(situation_link_count)::bigint AS source_count
         FROM pg_temp.stage10_validation_input
-        GROUP BY date_key, scheduled_stop_event_key
+        GROUP BY service_date, canonical_service_event_key
     ) AS source_situations
-    FULL JOIN dw.fact_operational_stop_outcome AS fact
-      ON fact.date_key = source_situations.date_key
-     AND fact.scheduled_stop_event_key = source_situations.scheduled_stop_event_key
+    FULL JOIN dw.fact_operational_service_event AS fact
+      ON fact.service_date = source_situations.service_date
+     AND fact.canonical_service_event_key = source_situations.canonical_service_event_key
     WHERE source_situations.source_count IS DISTINCT FROM fact.situation_link_count;
 
     SELECT count(*)
-    INTO situation_flag_mismatch
-    FROM dw.fact_operational_stop_outcome AS fact
+    INTO situation_flag_mismatch_count
+    FROM dw.fact_operational_service_event AS fact
     WHERE fact.has_situation_evidence IS DISTINCT FROM (fact.situation_link_count > 0);
 
-    INSERT INTO pg_temp.stage10_validation_before
-    SELECT
-        date_key,
-        scheduled_stop_event_key,
-        md5(jsonb_build_object(
-            'date_key', date_key,
-            'scheduled_stop_event_key', scheduled_stop_event_key,
-            'match_status', match_status,
-            'timetabled_arrival_utc', timetabled_arrival_utc,
-            'first_observation_key', first_observation_key,
-            'last_observation_key', last_observation_key,
-            'first_observed_at_utc', first_observed_at_utc,
-            'last_observed_at_utc', last_observed_at_utc,
-            'observation_count', observation_count,
-            'first_observed_estimated_arrival_utc', first_observed_estimated_arrival_utc,
-            'latest_observed_estimated_arrival_utc', latest_observed_estimated_arrival_utc,
-            'first_observed_estimated_delay_minutes', first_observed_estimated_delay_minutes,
-            'final_observed_estimated_delay_minutes', final_observed_estimated_delay_minutes,
-            'first_observed_planned_platform', first_observed_planned_platform,
-            'latest_observed_planned_platform', latest_observed_planned_platform,
-            'first_observed_estimated_platform', first_observed_estimated_platform,
-            'latest_observed_estimated_platform', latest_observed_estimated_platform,
-            'platform_change_evidence', platform_change_evidence,
-            'comparable_platform_observation_count', comparable_platform_observation_count,
-            'changed_platform_observation_count', changed_platform_observation_count,
-            'situation_link_count', situation_link_count,
-            'has_situation_evidence', has_situation_evidence
-        )::text) AS semantic_hash
-    FROM dw.fact_operational_stop_outcome;
-
-    BEGIN
-        CALL dw."uspRefreshFactOperationalStopOutcome"();
-        CALL dw."uspRefreshFactOperationalStopOutcome"();
-    EXCEPTION WHEN OTHERS THEN
-        refresh_error := SQLERRM;
-    END;
-
-    IF refresh_error IS NULL THEN
-        CREATE TEMP TABLE stage10_validation_after ON COMMIT DROP AS
+    SELECT count(*)
+    INTO canonical_identity_mismatch_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN (
         SELECT
-            date_key,
-            scheduled_stop_event_key,
-            md5(jsonb_build_object(
-                'date_key', date_key,
-                'scheduled_stop_event_key', scheduled_stop_event_key,
-                'match_status', match_status,
-                'timetabled_arrival_utc', timetabled_arrival_utc,
-                'first_observation_key', first_observation_key,
-                'last_observation_key', last_observation_key,
-                'first_observed_at_utc', first_observed_at_utc,
-                'last_observed_at_utc', last_observed_at_utc,
-                'observation_count', observation_count,
-                'first_observed_estimated_arrival_utc', first_observed_estimated_arrival_utc,
-                'latest_observed_estimated_arrival_utc', latest_observed_estimated_arrival_utc,
-                'first_observed_estimated_delay_minutes', first_observed_estimated_delay_minutes,
-                'final_observed_estimated_delay_minutes', final_observed_estimated_delay_minutes,
-                'first_observed_planned_platform', first_observed_planned_platform,
-                'latest_observed_planned_platform', latest_observed_planned_platform,
-                'first_observed_estimated_platform', first_observed_estimated_platform,
-                'latest_observed_estimated_platform', latest_observed_estimated_platform,
-                'platform_change_evidence', platform_change_evidence,
-                'comparable_platform_observation_count', comparable_platform_observation_count,
-                'changed_platform_observation_count', changed_platform_observation_count,
-                'situation_link_count', situation_link_count,
-                'has_situation_evidence', has_situation_evidence
-            )::text) AS semantic_hash
-        FROM dw.fact_operational_stop_outcome;
+            service_date,
+            canonical_service_event_key,
+            min(canonical_service_event_id) AS canonical_service_event_id,
+            min(canonical_stop_id) AS canonical_stop_id,
+            min(canonical_line_id) AS canonical_line_id,
+            min(event_type) AS event_type,
+            min(scheduled_time_seconds) AS scheduled_time_seconds,
+            min(canonical_scheduled_time_utc) AS canonical_scheduled_time_utc
+        FROM pg_temp.stage10_validation_input
+        GROUP BY service_date, canonical_service_event_key
+    ) AS source_identity
+      ON source_identity.service_date = fact.service_date
+     AND source_identity.canonical_service_event_key = fact.canonical_service_event_key
+    WHERE source_identity.canonical_service_event_key IS NULL
+       OR fact.canonical_service_event_id IS DISTINCT FROM source_identity.canonical_service_event_id
+       OR fact.canonical_stop_id IS DISTINCT FROM source_identity.canonical_stop_id
+       OR fact.canonical_line_id IS DISTINCT FROM source_identity.canonical_line_id
+       OR fact.event_type IS DISTINCT FROM source_identity.event_type
+       OR fact.scheduled_time_seconds IS DISTINCT FROM source_identity.scheduled_time_seconds
+       OR fact.canonical_scheduled_time_utc IS DISTINCT FROM source_identity.canonical_scheduled_time_utc;
 
-        SELECT count(*)
-        INTO repeatability_difference_count
-        FROM pg_temp.stage10_validation_before AS before_refresh
-        FULL JOIN pg_temp.stage10_validation_after AS after_refresh
-          ON after_refresh.date_key = before_refresh.date_key
-         AND after_refresh.scheduled_stop_event_key = before_refresh.scheduled_stop_event_key
-        WHERE before_refresh.semantic_hash IS DISTINCT FROM after_refresh.semantic_hash;
-    ELSE
-        repeatability_difference_count := NULL;
-    END IF;
+    SELECT count(*)
+    INTO data_quality_lineage_mismatch_count
+    FROM dw.fact_operational_service_event AS fact
+    LEFT JOIN (
+        SELECT service_date, canonical_service_event_key,
+               min(data_quality_classification) AS data_quality_classification
+        FROM pg_temp.stage10_validation_input
+        GROUP BY service_date, canonical_service_event_key
+    ) AS source_quality
+      ON source_quality.service_date = fact.service_date
+     AND source_quality.canonical_service_event_key = fact.canonical_service_event_key
+    WHERE source_quality.canonical_service_event_key IS NULL
+       OR fact.data_quality_classification IS DISTINCT FROM source_quality.data_quality_classification;
 
     RETURN QUERY
-    SELECT 'duplicate_fact_grain', CASE WHEN duplicate_fact_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           duplicate_fact_grain_count, 0::bigint,
-           'Exactly one fact row per (date_key, scheduled_stop_event_key).';
+    SELECT
+        'stage9_high_eligible_population'::text,
+        CASE WHEN selected_high_observation_count > 0 THEN 'PASS' ELSE 'BLOCKED' END,
+        selected_high_observation_count,
+        NULL::bigint,
+        CASE
+            WHEN selected_high_observation_count > 0
+                THEN 'Selected Stage 9 execution contains HIGH source-event observations eligible for the operational fact.'
+            ELSE 'The selected current Stage 9 execution contains zero HIGH rows. MEDIUM remains contextual; no row is promoted to populate this fact.'
+        END;
+
     RETURN QUERY
-    SELECT 'usable_stage9_grain_count', 'PASS', usable_stage9_grain_count, usable_stage9_grain_count,
-           'Current approved Stage 9 usable grain population measured from the input view.';
+    SELECT 'duplicate_final_fact_grain',
+           CASE WHEN duplicate_fact_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           duplicate_fact_grain_count,
+           0::bigint,
+           'Exactly one row is allowed for (service_date, canonical_service_event_key).';
+
     RETURN QUERY
-    SELECT 'missing_usable_stage9_grains', CASE WHEN missing_usable_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           missing_usable_grain_count, 0::bigint, 'Usable Stage 9 grains absent from the fact.';
+    SELECT 'ineligible_stage9_confidence_in_fact',
+           CASE WHEN ineligible_fact_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           ineligible_fact_count,
+           0::bigint,
+           'Only Stage 9 match_confidence = HIGH may enter the fact; MEDIUM, LOW, and UNMATCHED do not.';
+
     RETURN QUERY
-    SELECT 'stale_fact_grains', CASE WHEN stale_fact_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           stale_fact_grain_count, 0::bigint, 'Fact grains absent from the current usable Stage 9 population.';
+    SELECT 'explicit_matching_run_version_lineage',
+           CASE WHEN lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           lineage_violation_count,
+           0::bigint,
+           format('Every fact row must carry the selected matching_run_key %s and matching_version %L.', p_matching_run_key, p_matching_version);
+
     RETURN QUERY
-    SELECT 'fact_grain_count', CASE WHEN fact_grain_count = usable_stage9_grain_count THEN 'PASS' ELSE 'FAIL' END,
-           fact_grain_count, usable_stage9_grain_count, 'Current fact grain count reconciles to Stage 9.';
+    SELECT 'source_observation_duplication_from_historical_runs',
+           CASE WHEN source_observation_duplication_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           source_observation_duplication_count,
+           0::bigint,
+           'The operational input is scoped to one selected matching run; historical matching runs are not unioned into the fact.';
+
     RETURN QUERY
-    SELECT 'fact_rows_with_non_approved_match_status', CASE WHEN non_approved_fact_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           non_approved_fact_count, 0::bigint, 'Only ExactStopMatch and ParentStationFallback may enter the fact.';
+    SELECT 'missing_selected_stage9_event_grains',
+           CASE WHEN missing_event_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           missing_event_grain_count,
+           0::bigint,
+           'Every eligible canonical service-event grain in the selected input must exist in the fact.';
+
     RETURN QUERY
-    SELECT 'inconsistent_stage9_match_status', CASE WHEN match_status_conflict_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           match_status_conflict_count, 0::bigint, 'MatchStatus must be deterministic within one final grain.';
+    SELECT 'stale_fact_event_grains',
+           CASE WHEN stale_event_grain_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           stale_event_grain_count,
+           0::bigint,
+           'No fact row may remain outside the selected current Stage 9 population.';
+
     RETURN QUERY
-    SELECT 'duplicate_input_observation_key', CASE WHEN duplicate_input_observation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           duplicate_input_observation_count, 0::bigint, 'The input view must expose each source observation once.';
+    SELECT 'final_fact_grain_count_reconciliation',
+           CASE WHEN fact_grain_count = selected_event_grain_count THEN 'PASS' ELSE 'FAIL' END,
+           fact_grain_count,
+           selected_event_grain_count,
+           'The current fact row count equals the selected HIGH canonical service-event grain count.';
+
     RETURN QUERY
-    SELECT 'first_observation_lineage', CASE WHEN first_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           first_lineage_violation_count, 0::bigint, 'First fields use ORDER BY observed_at_utc ASC, observation_key ASC.';
+    SELECT 'first_observation_lineage',
+           CASE WHEN first_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           first_lineage_violation_count,
+           0::bigint,
+           'First fields use source_observed_at_utc ASC, source_observation_identity ASC.';
+
     RETURN QUERY
-    SELECT 'latest_observation_lineage', CASE WHEN latest_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           latest_lineage_violation_count, 0::bigint, 'Latest fields use ORDER BY observed_at_utc DESC, observation_key DESC.';
+    SELECT 'latest_observation_lineage',
+           CASE WHEN latest_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           latest_lineage_violation_count,
+           0::bigint,
+           'Latest fields use source_observed_at_utc DESC, source_observation_identity DESC.';
+
     RETURN QUERY
-    SELECT 'observation_count_reconciliation', CASE WHEN observation_count_mismatch = 0 THEN 'PASS' ELSE 'FAIL' END,
-           observation_count_mismatch, 0::bigint, 'Fact observation_count equals source observation-row count.';
+    SELECT 'observation_count_reconciliation',
+           CASE WHEN observation_count_mismatch = 0 THEN 'PASS' ELSE 'FAIL' END,
+           observation_count_mismatch,
+           0::bigint,
+           'source_observation_count equals the selected durable source-observation row count.';
+
     RETURN QUERY
-    SELECT 'first_timing_null_safe', CASE WHEN first_timing_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           first_timing_mismatch_count, 0::bigint, 'First estimate and derived estimated delay match the first source row, including NULL.';
+    SELECT 'first_timing_semantics',
+           CASE WHEN first_timing_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           first_timing_mismatch_count,
+           0::bigint,
+           'First EstimatedTime and estimated delay come from the first source row, including NULL.';
+
     RETURN QUERY
-    SELECT 'latest_timing_null_safe', CASE WHEN latest_timing_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           latest_timing_mismatch_count, 0::bigint, 'Latest estimate and final estimated delay match the latest source row, including NULL.';
+    SELECT 'latest_timing_semantics',
+           CASE WHEN latest_timing_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           latest_timing_mismatch_count,
+           0::bigint,
+           'Latest EstimatedTime and estimated delay come from the latest source row, including NULL.';
+
     RETURN QUERY
-    SELECT 'earlier_estimate_latest_null_preserved', CASE WHEN earlier_estimate_latest_null_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           earlier_estimate_latest_null_violation_count, 0::bigint, 'An earlier estimate must not be carried into a latest NULL observation.';
+    SELECT 'latest_null_estimate_not_carried_forward',
+           CASE WHEN latest_null_carry_forward_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           latest_null_carry_forward_count,
+           0::bigint,
+           'An earlier estimate must not replace a chronologically latest NULL estimate.';
+
     RETURN QUERY
-    SELECT 'timetabled_arrival_consistency', CASE WHEN timetable_inconsistency_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           timetable_inconsistency_count, 0::bigint, 'All observations in a grain must carry the matched scheduled event timetable value.';
+    SELECT 'platform_bay_evidence_semantics',
+           CASE WHEN bay_evidence_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           bay_evidence_mismatch_count,
+           0::bigint,
+           'Changed/Unchanged/Unknown follows comparable PlannedBay versus EstimatedBay evidence; Unknown is not Unchanged.';
+
     RETURN QUERY
-    SELECT 'scheduled_identity_consistency', CASE WHEN identity_consistency_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           identity_consistency_count, 0::bigint, 'Date/event identity and timetabled arrival remain internally consistent.';
+    SELECT 'situation_evidence_reconciliation',
+           CASE WHEN situation_evidence_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           situation_evidence_mismatch_count,
+           0::bigint,
+           'SituationLinkCount counts persisted association rows, not distinct Situation identities.';
+
     RETURN QUERY
-    SELECT 'platform_evidence_semantics', CASE WHEN platform_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
-           platform_mismatch_count, 0::bigint, 'Changed/Unchanged/Unknown follows comparable planned-vs-estimated platform evidence.';
+    SELECT 'situation_evidence_flag',
+           CASE WHEN situation_flag_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           situation_flag_mismatch_count,
+           0::bigint,
+           'HasSituationEvidence is exactly (situation_link_count > 0) and makes no causal claim.';
+
     RETURN QUERY
-    SELECT 'situation_link_count_reconciliation', CASE WHEN situation_count_mismatch = 0 THEN 'PASS' ELSE 'FAIL' END,
-           situation_count_mismatch, 0::bigint, 'SituationLinkCount counts persisted observation-to-situation link rows.';
+    SELECT 'canonical_service_event_identity',
+           CASE WHEN canonical_identity_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           canonical_identity_mismatch_count,
+           0::bigint,
+           'Service date, canonical event identity, event type, scheduled seconds, and canonical timetable come from core.canonical_service_event.';
+
     RETURN QUERY
-    SELECT 'situation_evidence_flag', CASE WHEN situation_flag_mismatch = 0 THEN 'PASS' ELSE 'FAIL' END,
-           situation_flag_mismatch, 0::bigint, 'HasSituationEvidence is exactly (SituationLinkCount > 0), not a causal claim.';
+    SELECT 'data_quality_classification_lineage',
+           CASE WHEN data_quality_lineage_mismatch_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           data_quality_lineage_mismatch_count,
+           0::bigint,
+           'Stage 9 data_quality_classification is retained separately and is not translated into a legacy status.';
+
     RETURN QUERY
     SELECT 'repeat_refresh_semantic_difference',
-           CASE
-               WHEN refresh_error IS NOT NULL THEN 'BLOCKED'
-               WHEN repeatability_difference_count = 0 THEN 'PASS'
-               ELSE 'FAIL'
-           END,
-           COALESCE(repeatability_difference_count, 0), 0::bigint,
-           CASE
-               WHEN refresh_error IS NOT NULL THEN 'Refresh repeatability could not be evaluated: ' || refresh_error
-               ELSE 'Two refreshes against unchanged input have no semantic differences; refreshed_at_utc is ignored.'
-           END;
+           CASE WHEN repeatability_difference_count = 0 THEN 'PASS' ELSE 'FAIL' END,
+           repeatability_difference_count,
+           0::bigint,
+           'Refresh #1 was snapshotted as A, refresh #2 with unchanged input as B; only semantic differences are compared, excluding refreshed_at_utc.';
 END;
 $function$;
 
-COMMENT ON FUNCTION dw.validate_fact_operational_stop_outcome() IS
-    'Stage 10 semantic validation. Missing database/source prerequisites return BLOCKED, never PASS.';
+COMMENT ON FUNCTION dw.validate_operational_service_event(bigint, text) IS
+    'Stage 10 current-architecture validator. Requires an explicit COMPLETE matching run/version, blocks on missing database/source prerequisites, and proves repeat-refresh idempotency with refresh #1 -> snapshot A -> refresh #2 -> snapshot B.';
 
-SELECT * FROM dw.validate_fact_operational_stop_outcome();
+SELECT * FROM dw.validate_operational_service_event(NULL, NULL);
 
 COMMIT;

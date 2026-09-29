@@ -1,117 +1,115 @@
 -- Stage 10 — Operational Fact: physical contract
 -- Target: PostgreSQL 18 (latest supported minor at implementation time)
 --
--- This file creates only the derived operational outcome fact.  It does not
--- create or mutate source observation history, the collector, the Stage 9
--- matcher, the static scheduled-event load, or any downstream model.
+-- The canonical Stage 10 object is dw.fact_operational_service_event.
+-- This is a current, rebuildable analytical fact. It is not a second source
+-- observation store and it does not recreate any legacy SQL Server object.
 --
--- The canonical PostgreSQL name is snake_case.  The quoted compatibility view
--- at the end preserves the Stage 10 logical name used in the project brief:
--- dw.FactOperationalStopOutcome.
+-- The final grain is one consolidated operational outcome for one approved
+-- canonical service event on its canonical service_date, refreshed from one
+-- explicitly selected COMPLETE Stage 9 matching run/version. Source
+-- observation lineage and source operational evidence remain separate from
+-- the Stage 9 matching decision.
 
 BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS dw;
 
-CREATE TABLE IF NOT EXISTS dw.fact_operational_stop_outcome (
-    operational_stop_outcome_key                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    date_key                                    date NOT NULL,
-    scheduled_stop_event_key                    bigint NOT NULL,
-    match_status                                text NOT NULL CHECK (
-        match_status IN ('ExactStopMatch', 'ParentStationFallback')
+CREATE TABLE IF NOT EXISTS dw.fact_operational_service_event (
+    operational_service_event_key          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    -- Canonical scheduled-event identity and explicit Stage 9 execution lineage.
+    service_date                            date NOT NULL,
+    canonical_service_event_key             bigint NOT NULL,
+    canonical_service_event_id              text NOT NULL,
+    matching_run_key                        bigint NOT NULL,
+    matching_version                        text NOT NULL CHECK (length(btrim(matching_version)) > 0),
+    canonical_stop_id                       text NOT NULL CHECK (length(btrim(canonical_stop_id)) > 0),
+    canonical_line_id                       text,
+    event_type                              text NOT NULL CHECK (event_type IN ('ARRIVAL', 'DEPARTURE')),
+    scheduled_time_seconds                  integer NOT NULL CHECK (scheduled_time_seconds >= 0),
+    canonical_scheduled_time_utc            timestamptz NOT NULL,
+
+    -- Stage 9 decision and data-quality lineage. Only HIGH decisions are
+    -- eligible for this fact; the classification is retained separately.
+    match_confidence                        text NOT NULL CHECK (match_confidence = 'HIGH'),
+    match_method                            text NOT NULL CHECK (length(btrim(match_method)) > 0),
+    data_quality_classification             text NOT NULL CHECK (length(btrim(data_quality_classification)) > 0),
+
+    -- One row per durable source observation is consolidated below. The
+    -- observation identity and source-observed timestamp are the deterministic
+    -- first/latest lineage, never matching execution time.
+    source_observation_count               bigint NOT NULL CHECK (source_observation_count > 0),
+    first_source_event_match_key           bigint NOT NULL,
+    latest_source_event_match_key          bigint NOT NULL,
+    first_source_observation_identity      text NOT NULL,
+    latest_source_observation_identity     text NOT NULL,
+    first_source_observed_at_utc           timestamptz NOT NULL,
+    latest_source_observed_at_utc          timestamptz NOT NULL,
+
+    -- Source operational evidence. These are estimates, not actual times.
+    first_estimated_time_utc               timestamptz,
+    latest_estimated_time_utc              timestamptz,
+    first_estimated_delay_minutes          numeric(12, 3),
+    latest_estimated_delay_minutes         numeric(12, 3),
+
+    -- PlannedBay and EstimatedBay remain distinct source meanings.
+    first_planned_bay                       text,
+    latest_planned_bay                      text,
+    first_estimated_bay                     text,
+    latest_estimated_bay                    text,
+    bay_evidence                            text NOT NULL CHECK (
+        bay_evidence IN ('Changed', 'Unchanged', 'Unknown')
     ),
+    comparable_bay_observation_count        bigint NOT NULL CHECK (comparable_bay_observation_count >= 0),
+    changed_bay_observation_count           bigint NOT NULL CHECK (changed_bay_observation_count >= 0),
 
-    -- The matched scheduled event supplies one timetable value.  The refresh
-    -- procedure rejects a grain whose source rows disagree on that value.
-    timetabled_arrival_utc                      timestamptz NOT NULL,
+    -- Count of persisted observation-to-Situation association rows. This is
+    -- evidence only and is not a distinct-Situation count or causal claim.
+    situation_link_count                    bigint NOT NULL CHECK (situation_link_count >= 0),
+    has_situation_evidence                  boolean NOT NULL,
 
-    first_observation_key                        text NOT NULL,
-    last_observation_key                         text NOT NULL,
-    first_observed_at_utc                        timestamptz NOT NULL,
-    last_observed_at_utc                         timestamptz NOT NULL,
-    observation_count                            bigint NOT NULL CHECK (observation_count > 0),
+    refreshed_at_utc                        timestamptz NOT NULL DEFAULT clock_timestamp(),
 
-    first_observed_estimated_arrival_utc         timestamptz,
-    latest_observed_estimated_arrival_utc        timestamptz,
-    first_observed_estimated_delay_minutes      numeric(12, 3),
-    final_observed_estimated_delay_minutes      numeric(12, 3),
-
-    first_observed_planned_platform              text,
-    latest_observed_planned_platform             text,
-    first_observed_estimated_platform            text,
-    latest_observed_estimated_platform           text,
-    platform_change_evidence                     text NOT NULL CHECK (
-        platform_change_evidence IN ('Changed', 'Unchanged', 'Unknown')
-    ),
-    comparable_platform_observation_count        bigint NOT NULL CHECK (
-        comparable_platform_observation_count >= 0
-    ),
-    changed_platform_observation_count           bigint NOT NULL CHECK (
-        changed_platform_observation_count >= 0
-    ),
-
-    -- This is the count of persisted observation-to-situation link rows for
-    -- the consolidated observations.  It is not a count of distinct
-    -- situations and it is not causal evidence.
-    situation_link_count                         bigint NOT NULL CHECK (situation_link_count >= 0),
-    has_situation_evidence                       boolean NOT NULL,
-
-    refreshed_at_utc                             timestamptz NOT NULL DEFAULT clock_timestamp(),
-
-    CONSTRAINT uq_fact_operational_stop_outcome_grain
-        UNIQUE (date_key, scheduled_stop_event_key),
-    CONSTRAINT ck_fact_operational_stop_outcome_observation_order
-        CHECK (last_observed_at_utc >= first_observed_at_utc),
-    CONSTRAINT ck_fact_operational_stop_outcome_platform_counts
-        CHECK (changed_platform_observation_count <= comparable_platform_observation_count),
-    CONSTRAINT ck_fact_operational_stop_outcome_situation_evidence
+    -- The selected run/version is refresh lineage, not an additional business
+    -- grain. A current fact contains one row per service_date/event identity.
+    CONSTRAINT uq_fact_operational_service_event_grain
+        UNIQUE (service_date, canonical_service_event_key),
+    CONSTRAINT ck_fact_operational_service_event_observation_order
+        CHECK (latest_source_observed_at_utc >= first_source_observed_at_utc),
+    CONSTRAINT ck_fact_operational_service_event_bay_counts
+        CHECK (changed_bay_observation_count <= comparable_bay_observation_count),
+    CONSTRAINT ck_fact_operational_service_event_situation_evidence
         CHECK (has_situation_evidence = (situation_link_count > 0))
 );
 
-CREATE INDEX IF NOT EXISTS ix_fact_operational_stop_outcome_date
-    ON dw.fact_operational_stop_outcome (date_key, scheduled_stop_event_key);
+CREATE INDEX IF NOT EXISTS ix_fact_operational_service_event_lineage
+    ON dw.fact_operational_service_event
+       (matching_run_key, matching_version, service_date, canonical_service_event_key);
 
-CREATE OR REPLACE VIEW dw."FactOperationalStopOutcome" AS
-SELECT
-    operational_stop_outcome_key,
-    date_key,
-    scheduled_stop_event_key,
-    match_status,
-    timetabled_arrival_utc,
-    first_observation_key,
-    last_observation_key,
-    first_observed_at_utc,
-    last_observed_at_utc,
-    observation_count,
-    first_observed_estimated_arrival_utc,
-    latest_observed_estimated_arrival_utc,
-    first_observed_estimated_delay_minutes,
-    final_observed_estimated_delay_minutes,
-    first_observed_planned_platform,
-    latest_observed_planned_platform,
-    first_observed_estimated_platform,
-    latest_observed_estimated_platform,
-    platform_change_evidence,
-    comparable_platform_observation_count,
-    changed_platform_observation_count,
-    situation_link_count,
-    has_situation_evidence,
-    refreshed_at_utc
-FROM dw.fact_operational_stop_outcome;
+CREATE INDEX IF NOT EXISTS ix_fact_operational_service_event_date
+    ON dw.fact_operational_service_event
+       (service_date, canonical_stop_id, event_type, canonical_service_event_key);
 
-COMMENT ON TABLE dw.fact_operational_stop_outcome IS
-    'Stage 10 derived fact: exactly one consolidated operational outcome per approved usable matched scheduled stop event and service date.';
+COMMENT ON TABLE dw.fact_operational_service_event IS
+    'Stage 10 current derived fact: one consolidated operational outcome per approved HIGH-confidence canonical service event and canonical service_date for one explicitly selected Stage 9 matching run/version.';
 
-COMMENT ON COLUMN dw.fact_operational_stop_outcome.observation_count IS
-    'Count of source observation rows in wrk.vwCologneRealtimeTripMatch for this DateKey/ScheduledStopEventKey grain.';
+COMMENT ON COLUMN dw.fact_operational_service_event.service_date IS
+    'Authoritative business date from core.canonical_service_event.service_date; this is not a date surrogate key.';
 
-COMMENT ON COLUMN dw.fact_operational_stop_outcome.latest_observed_estimated_arrival_utc IS
-    'Estimated arrival from the chronologically latest observation, including NULL; never the latest non-NULL historical estimate.';
+COMMENT ON COLUMN dw.fact_operational_service_event.canonical_scheduled_time_utc IS
+    'Canonical timetable derived from service_date plus scheduled_time_seconds using the approved Europe/Berlin service-day interpretation; it is not source ObservedAt or ActualTime.';
 
-COMMENT ON COLUMN dw.fact_operational_stop_outcome.situation_link_count IS
-    'Count of persisted observation-to-situation link rows across the consolidated source observations; not distinct situations and not causal evidence.';
+COMMENT ON COLUMN dw.fact_operational_service_event.match_confidence IS
+    'Stage 9 eligibility is exact: only HIGH is admitted. MEDIUM remains contextual and is not promoted into this fact.';
 
-COMMENT ON COLUMN dw.fact_operational_stop_outcome.platform_change_evidence IS
-    'Changed when any comparable planned/estimated platform pair differs; Unchanged when comparable pairs exist and all are equal; Unknown when no comparable pair exists.';
+COMMENT ON COLUMN dw.fact_operational_service_event.latest_estimated_time_utc IS
+    'EstimatedTime from the chronologically latest source observation, including NULL; it is never the latest non-NULL estimate and is not ActualTime.';
+
+COMMENT ON COLUMN dw.fact_operational_service_event.bay_evidence IS
+    'Changed when a comparable PlannedBay/EstimatedBay pair differs; Unchanged when comparable pairs exist and all agree; Unknown when no comparable pair exists. This is not proof of the physical bay used.';
+
+COMMENT ON COLUMN dw.fact_operational_service_event.situation_link_count IS
+    'Count of persisted observation-to-Situation association rows across the consolidated source observations; not a distinct Situation count and not causal evidence.';
 
 COMMIT;
