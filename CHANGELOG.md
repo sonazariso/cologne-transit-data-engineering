@@ -11,9 +11,9 @@
   first/latest observation ordering, latest-row NULL timing semantics,
   PlannedBay/EstimatedBay evidence, non-causal Situation-link evidence, and
   refresh #1/snapshot A/refresh #2/snapshot B repeatability validation. The
-  stage remains incomplete because the current checkout has no usable
-  PostgreSQL/source-observation population and the current Stage 9 evidence
-  contains zero HIGH rows.
+  current Stage 10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED** because the current checkout has no
+  usable PostgreSQL/source-observation population and the current Stage 9
+  evidence contains zero HIGH rows.
 - Stage 9 row-level evidence-integrity correction: audit fields are now
   serialized losslessly from the in-memory decisions, malformed/null/truncated
   decision artifacts are blocked by an explicit JSONL integrity gate, and seven

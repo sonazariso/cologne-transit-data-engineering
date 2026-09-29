@@ -131,14 +131,29 @@ adapter relation or any required field is missing, refresh and validation return
 
 ## Consolidation semantics
 
-Repeated source observations for one canonical event are ordered by:
+Repeated source observations for one canonical event use this complete
+deterministic ordering contract. For the first observation:
 
 ```text
-source_observed_at_utc ASC, source_observation_identity ASC
+source_observed_at_utc ASC,
+source_system ASC,
+source_namespace ASC,
+source_observation_identity ASC,
+source_event_match_key ASC
 ```
 
-for the first row, and the exact reverse for the latest row. The fact retains
-the first/latest source match keys, source observation identities, source
+For the latest observation, every component uses the exact reverse:
+
+```text
+source_observed_at_utc DESC,
+source_system DESC,
+source_namespace DESC,
+source_observation_identity DESC,
+source_event_match_key DESC
+```
+
+`source_event_match_key` is the final stable tie-breaker. The fact retains the
+first/latest source match keys, source observation identities, source
 timestamps, observation count, and first/latest estimates.
 
 Stage 9 does not guarantee that repeated `HIGH` observations for one canonical

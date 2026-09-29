@@ -335,18 +335,27 @@ BEGIN
      AND selected_grains.canonical_service_event_key = fact.canonical_service_event_key
     WHERE selected_grains.service_date IS NULL;
 
+    -- Expected first/latest rows use the same complete deterministic
+    -- ordering contract as the refresh: observed timestamp, source system,
+    -- source namespace, observation identity, then source-event match key.
     WITH ranked AS (
         SELECT
             input.*,
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc ASC,
-                         input.source_observation_identity ASC
+                         input.source_system ASC,
+                         input.source_namespace ASC,
+                         input.source_observation_identity ASC,
+                         input.source_event_match_key ASC
             ) AS first_row_number,
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc DESC,
-                         input.source_observation_identity DESC
+                         input.source_system DESC,
+                         input.source_namespace DESC,
+                         input.source_observation_identity DESC,
+                         input.source_event_match_key DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -392,12 +401,18 @@ BEGIN
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc ASC,
-                         input.source_observation_identity ASC
+                         input.source_system ASC,
+                         input.source_namespace ASC,
+                         input.source_observation_identity ASC,
+                         input.source_event_match_key ASC
             ) AS first_row_number,
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc DESC,
-                         input.source_observation_identity DESC
+                         input.source_system DESC,
+                         input.source_namespace DESC,
+                         input.source_observation_identity DESC,
+                         input.source_event_match_key DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -445,12 +460,18 @@ BEGIN
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc ASC,
-                         input.source_observation_identity ASC
+                         input.source_system ASC,
+                         input.source_namespace ASC,
+                         input.source_observation_identity ASC,
+                         input.source_event_match_key ASC
             ) AS first_row_number,
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc DESC,
-                         input.source_observation_identity DESC
+                         input.source_system DESC,
+                         input.source_namespace DESC,
+                         input.source_observation_identity DESC,
+                         input.source_event_match_key DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), first_rows AS (
@@ -562,7 +583,10 @@ BEGIN
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc DESC,
-                         input.source_observation_identity DESC
+                         input.source_system DESC,
+                         input.source_namespace DESC,
+                         input.source_observation_identity DESC,
+                         input.source_event_match_key DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_validation_input AS input
     ), latest_metadata AS (
@@ -690,14 +714,14 @@ BEGIN
            CASE WHEN first_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
            first_lineage_violation_count,
            0::bigint,
-           'First fields use source_observed_at_utc ASC, source_observation_identity ASC.';
+           'First fields use source_observed_at_utc ASC, source_system ASC, source_namespace ASC, source_observation_identity ASC, source_event_match_key ASC.';
 
     RETURN QUERY
     SELECT 'latest_observation_lineage',
            CASE WHEN latest_lineage_violation_count = 0 THEN 'PASS' ELSE 'FAIL' END,
            latest_lineage_violation_count,
            0::bigint,
-           'Latest fields use source_observed_at_utc DESC, source_observation_identity DESC.';
+           'Latest fields use source_observed_at_utc DESC, source_system DESC, source_namespace DESC, source_observation_identity DESC, source_event_match_key DESC.';
 
     RETURN QUERY
     SELECT 'observation_count_reconciliation',

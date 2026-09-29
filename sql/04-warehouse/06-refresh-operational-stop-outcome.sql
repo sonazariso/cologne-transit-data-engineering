@@ -202,7 +202,15 @@ BEGIN
 
     CREATE INDEX stage10_refresh_input_event_ix
         ON pg_temp.stage10_refresh_input
-           (service_date, canonical_service_event_key, source_observed_at_utc, source_observation_identity);
+           (
+               service_date,
+               canonical_service_event_key,
+               source_observed_at_utc,
+               source_system,
+               source_namespace,
+               source_observation_identity,
+               source_event_match_key
+           );
 
     SELECT count(*)
     INTO expected_high_observation_count
@@ -293,6 +301,9 @@ BEGIN
             );
     END IF;
 
+    -- First/latest selection uses the complete source identity and the
+    -- source-event match key as the final stable tie-breaker. The validator
+    -- repeats this exact ordering contract.
     CREATE TEMP TABLE stage10_refresh_build ON COMMIT DROP AS
     WITH ranked AS (
         SELECT
@@ -300,12 +311,18 @@ BEGIN
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc ASC,
-                         input.source_observation_identity ASC
+                         input.source_system ASC,
+                         input.source_namespace ASC,
+                         input.source_observation_identity ASC,
+                         input.source_event_match_key ASC
             ) AS first_row_number,
             row_number() OVER (
                 PARTITION BY input.service_date, input.canonical_service_event_key
                 ORDER BY input.source_observed_at_utc DESC,
-                         input.source_observation_identity DESC
+                         input.source_system DESC,
+                         input.source_namespace DESC,
+                         input.source_observation_identity DESC,
+                         input.source_event_match_key DESC
             ) AS latest_row_number
         FROM pg_temp.stage10_refresh_input AS input
     ),

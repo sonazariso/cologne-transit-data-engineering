@@ -18,7 +18,7 @@
 | 7 | Realtime Pilot Design | COMPLETE — APPROVED PILOT DESIGN |
 | 8 | Small Realtime Pilot | COMPLETE |
 | 9 | Matching & Data Quality | COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS |
-| 10 | Operational Fact | NOT COMPLETE — contract added; database/source validation blocked |
+| 10 | Operational Fact | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED |
 | 11 | Power BI Model | Not started |
 | 12 | 50-Station Selection | Not started |
 | 13 | Tiered Collector Readiness | Not started |
@@ -318,7 +318,7 @@ revalidated for the changed official feed. Railway Hbf remains unresolved and
 adjacent KVB complexes are not substituted. No Power BI model, 50-station
 selection, or Tiered50 activation has been started. Stage 10 has a corrected
 source-controlled `dw.fact_operational_service_event` contract and semantic
-validator but remains **NOT COMPLETE** because this checkout has no usable
+validator. Its current status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED** because this checkout has no usable
 PostgreSQL database or durable source-observation population. The current
 Stage 9 source-backed artifact also contains zero HIGH rows, so source-backed
 Stage 10 validation is blocked rather than promoted from MEDIUM context.

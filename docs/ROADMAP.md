@@ -289,11 +289,10 @@ integrity reconciliation. The current VRS hierarchy passed all 17 Stage 4
 revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
-evidence in `stages/09-source-backed-matching-evidence.jsonl`. Stage 10 is now
-under its own blocked validation gate; Stage 11 and later stages remain **NOT
-STARTED**.
+evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 and later stages remain **NOT STARTED**.
 
-## Stage 10 — Operational Fact — IMPLEMENTATION CORRECTED; VALIDATION BLOCKED
+## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
 uses the canonical service-event identity, explicit Stage 9 run/version
 selection, HIGH-only eligibility, the derived
