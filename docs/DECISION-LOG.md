@@ -48,7 +48,8 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
 | D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
-| D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: approve exact-feed density tiers, 5/15/30-minute cadence, `NumberOfResults=30`, 240 logical requests/hour, zero automatic retries, cap-2 bounded concurrency, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 remains NOT STARTED |
+| D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: historical record of the exact-feed density tiers, 5/15/30-minute cadence option, `NumberOfResults=30` option, 240 logical requests/hour, zero automatic retries option, cap-2 bounded concurrency option, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL |
+| D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-request diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -886,10 +887,17 @@ reproducibility from durable exact-input replayability, and both are required
 for COMPLETE. No new MDD request was issued. Stage 13 production work and Stage
 14 remain NOT STARTED.
 
-## D-046 — Stage 13 Tiered Collector Readiness Design Closeout
+## D-046 — Stage 13 Tiered Collector Readiness Design Closeout (Historical; Superseded)
 
-Stage 13 completed the required readiness design for the approved fixed panel
-`TIERED50_PANEL_V1`. The exact VRS Global-ID feed is
+**Status:** `SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL`
+
+This section preserves the historical Stage 13 closeout evidence. The prior
+autonomous approval is no longer valid because the user required explicit
+approval of all material design choices. D-047 is the current Stage 13 state;
+no new final decision is recorded here.
+
+The historical D-046 record documented readiness evidence for the Stage
+12-approved fixed panel `TIERED50_PANEL_V1`. The exact VRS Global-ID feed is
 `VERSION__20260930_0053` with ZIP SHA-256
 `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
 Static scheduled-arrival density was expanded over the exact feed calendar and
@@ -897,8 +905,9 @@ Static scheduled-arrival density was expanded over the exact feed calendar and
 rolling windows. Tier membership is deterministic density evidence and does
 not use Stage 12 `SelectionRank` as a production tier.
 
-The approved tier plan is 10 Tier A stations at five-minute cadence, 20 Tier B
-stations at 15-minute cadence, and 20 Tier C stations at 30-minute cadence.
+The technically evaluated tier plan is 10 Tier A stations at five-minute
+cadence, 20 Tier B stations at 15-minute cadence, and 20 Tier C stations at
+30-minute cadence.
 It reconciles to 240 logical requests/hour, 5,760/day, 172,800 in a 30-day
 month, and 178,560 in a 31-day month. The six-heartbeat 30-minute distribution
 is `[21, 21, 19, 20, 20, 19]`, with 120 requests per super-cycle. The
@@ -911,7 +920,7 @@ high-, middle-, low-density, interchange, Legacy7, and urban bus/tram
 representatives. Sequential N5/N10/N20/N30 diagnostics made 24 valid HTTP 200
 requests; all tested limits saturated. A separate three-pair cap-2 diagnostic
 made six valid responses without a pressure signal or failure propagation.
-The approved design value is `NumberOfResults=30`, while
+The technically evaluated option is `NumberOfResults=30`, while
 `PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit because the provider's
 theoretical maximum was not established. The cap-2 result is a bounded design
 maximum, not a provider-wide rate-limit claim.
@@ -926,10 +935,68 @@ sensitivity only. Future execution identity remains the atomic
 each target records its own failure, and Legacy7 history and identities are
 preserved.
 
-**Final Stage 13 status:** `COMPLETE — APPROVED TIERED COLLECTOR READINESS
-DESIGN; PRODUCTION NOT STARTED`.
+**Historical Stage 13 status at the time of D-046:** `COMPLETE — APPROVED
+TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED`. This historical
+status is superseded and is not valid as final user approval.
 
 This closeout does not create a scheduler, database objects, Windows scheduled
 tasks, Power BI artifacts, or a collector activation, and it does not start
 Stage 14. The current shared-credential audit remains a prerequisite for any
 future activation decision.
+
+## D-047 — Stage 13 Reopened for Explicit User Design Approval
+
+The latest Stage 13 state is `IN PROGRESS — EVIDENCE READY; USER DESIGN
+APPROVAL REQUIRED`. D-046 remains historical evidence only and is superseded;
+its autonomous approval of cadence, result limit, concurrency, and retry policy
+must not be treated as a valid final user decision.
+
+The retained 24 sequential N5/N10/N20/N30 records and six cap-2 records remain
+usable for HTTP status, parser success, returned counts, saturation, source
+reference consistency, duration, and provider-pressure analysis. Their old
+`forward_temporal_span_seconds` values are explicitly
+`INVALID_FOR_FORWARD_COVERAGE_DECISION` because the algorithm mixed
+PreviousCall, ThisCall, OnwardCall, and departure timings. The corrected metric
+uses only ThisCall arrival values at or after the requested `DepArrTime` anchor.
+
+Raw MDD responses were not retained, so the corrected coverage comparison
+could not be reconstructed from the original sanitized aggregates. The user
+then explicitly approved the separate gate, and exactly 24 corrected
+sequential attempts were issued, increasing cumulative Stage 13 diagnostic
+attempts from 90 to 114. All 24 ended in sanitized `NETWORK_OR_DNS_FAILURE`
+before a valid HTTP response; the historical 100-attempt diagnostic ceiling is
+unchanged and no cap-2 rerun was performed.
+
+## D-048 — Corrected Stage 13 NumberOfResults Diagnostic Result
+
+The corrected implementation used only the requested StopEventResult's
+THIS-call arrival timing at or after the requested `DepArrTime` anchor. The
+user-approved run used six deterministic representative stations, N5/N10/N20/N30,
+sequential execution, `MaxAttempts=1`, zero diagnostic retries, one fixed
+comparable anchor (`2026-09-30T11:54:56Z`), no raw response persistence, and the
+401/403 stop rule.
+
+Exactly 24 additional attempts were consumed. Every attempt ended with
+`NETWORK_OR_DNS_FAILURE`; no HTTP response status, returned result count,
+saturation, THIS-call arrival, pre-anchor count, or forward-coverage value was
+available. The sanitized duration and error evidence is retained. The
+historical 24 sequential records remain separately preserved with
+`INVALID_FOR_FORWARD_COVERAGE_DECISION`, and the six historical cap-2 records
+were not rerun.
+
+The corrected comparison therefore leaves fixed N20, fixed N30, and the
+tier-specific A20/B30/C30 candidate undecided. Exact-feed static planning
+supports N30 for 50/50 cadence windows and A20/B30/C30 for 50/50, but static
+support does not establish realtime response coverage or a provider maximum.
+No NumberOfResults decision was finalized.
+
+The requested 10/20/20 versus 8/20/22 density-ranked comparison produces four
+tier changes, not two: Köln Friesenplatz and Köln Ebertplatz move A→B, while
+Köln Porz Markt and Köln Ubierring move B→C. Their canonical route refs,
+modes, child-stop counts, Legacy7 status, and density boundary rationale are
+retained in the machine-readable evidence.
+
+Current user recommendations remain unapproved: review `8/20/22 @ 5/15/30`,
+consider bounded concurrency 2 subject to Stage 14 dry-run validation, and
+consider `MaxAttempts=2` with one bounded retry for approved transient failures.
+Stage 13 remains `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`.

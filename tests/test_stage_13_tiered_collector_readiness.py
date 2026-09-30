@@ -91,7 +91,7 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(stage13.logical_due_bucket(1500), 5)
 
     def test_approved_stage12_panel_and_exact_50_station_density_evidence(self) -> None:
-        self.assertEqual(self.evidence["stage_13_status"], "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED")
+        self.assertEqual(self.evidence["stage_13_status"], "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED")
         gate = self.evidence["stage_12_gate"]
         self.assertTrue(gate["authoritative_completion_artifact_present"])
         self.assertEqual(gate["approved_panel_version"], "TIERED50_PANEL_V1")
@@ -112,23 +112,73 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
 
     def test_result_limit_provider_status_and_sanitized_live_evidence(self) -> None:
         result_limit = self.evidence["number_of_results"]
-        self.assertEqual(result_limit["production_number_of_results"], 30)
+        self.assertIsNone(result_limit["production_number_of_results"])
+        self.assertIsNone(result_limit["technically_evaluated_number_of_results"])
         self.assertEqual(result_limit["provider_maximum_status"], "PROVIDER_MAXIMUM_NOT_ESTABLISHED")
-        self.assertEqual(result_limit["decision"], "APPROVED_FIXED_30_FROM_BOUNDED_COVERAGE_EVIDENCE")
+        self.assertEqual(result_limit["decision"], "NOT_ESTABLISHED")
+        self.assertEqual(
+            result_limit["corrected_metric_status"],
+            "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+        )
         live = result_limit["bounded_live_diagnostic"]
-        self.assertEqual(live["http_attempts_consumed"], 90)
-        self.assertLessEqual(live["http_attempts_consumed"], live["max_http_attempts"])
+        self.assertEqual(live["http_attempts_consumed"], 114)
+        self.assertEqual(live["current_run_http_attempts_consumed"], 24)
+        self.assertEqual(live["prior_attempts_consumed"], 90)
+        gate = result_limit["additional_request_gate"]
+        self.assertTrue(gate["approved"])
+        self.assertEqual(gate["requested_additional_http_attempts"], 24)
+        self.assertEqual(gate["cumulative_attempts_if_approved"], 114)
+        self.assertEqual(gate["historical_diagnostic_hard_ceiling"], 100)
+        self.assertFalse(gate["historical_ceiling_changed"])
+        self.assertEqual(gate["additional_requests_issued"], 24)
+        self.assertTrue(gate["corrected_live_diagnostic_issued"])
         self.assertEqual(live["result_limit_probe"]["requested_result_limits"], [5, 10, 20, 30])
         for summary in live["result_limit_probe"]["summary_by_result_limit"].values():
             self.assertEqual(summary["request_count"], 6)
-            self.assertEqual(summary["http_status_distribution"], {"200": 6})
-            self.assertEqual(summary["parser_success_count"], 6)
-            self.assertEqual(summary["valid_trias_response_count"], 6)
+            self.assertEqual(summary["http_status_distribution"], {"None": 6})
+            self.assertEqual(summary["parser_success_count"], 0)
+            self.assertEqual(summary["valid_trias_response_count"], 0)
+            self.assertEqual(summary["legacy_forward_temporal_span_status"], "NOT_PRESENT")
+            self.assertEqual(summary["forward_coverage_statistics_seconds"]["count"], 0)
+        self.assertEqual(len(result_limit["historical_invalidated_sequential_records"]), 24)
+        self.assertTrue(
+            all(
+                row["forward_temporal_span_status"] == "INVALID_FOR_FORWARD_COVERAGE_DECISION"
+                for row in result_limit["historical_invalidated_sequential_records"]
+            )
+        )
+        self.assertEqual(len(live["result_limit_probe"]["sequential_records"]), 24)
+        self.assertTrue(
+            all(
+                row["transport_failure"] == "NETWORK_OR_DNS_FAILURE"
+                and row["raw_payload_persisted"] is False
+                for row in live["result_limit_probe"]["sequential_records"]
+            )
+        )
+
+    def test_corrected_comparison_remains_undecided_and_boundary_review_is_explicit(self) -> None:
+        comparison = self.evidence["number_of_results_comparison"]
+        for key in ("fixed_n20", "fixed_n30", "tier_specific_a20_b30_c30"):
+            self.assertEqual(comparison[key]["decision"], "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES")
+        self.assertEqual(comparison["fixed_n30"]["static_cadence_window_fit"]["station_p95_supported_count"], 50)
+        self.assertEqual(comparison["tier_specific_a20_b30_c30"]["static_cadence_window_fit"]["station_p95_supported_count"], 50)
+        boundary = self.evidence["cadence_boundary_review"]
+        self.assertEqual(boundary["requested_difference_count"], 2)
+        self.assertEqual(boundary["actual_density_ranked_assignment_difference_count"], 4)
+        self.assertEqual(
+            [row["source_parent_station_id"] for row in boundary["changed_stations"]],
+            ["de:05315:11710", "de:05315:11810", "de:05315:17311", "de:05315:11410"],
+        )
+        preferences = self.evidence["user_review_preferences"]
+        self.assertEqual(preferences["preferred_cadence_candidate"], "8/20/22 @ 5/15/30")
+        self.assertEqual(preferences["preferred_production_retry_policy"]["max_attempts"], 2)
+        self.assertFalse(preferences["stage_13_complete_allowed"])
 
     def test_concurrency_contract_and_heartbeat_feasibility(self) -> None:
         concurrency = self.evidence["sequential_vs_bounded_concurrency"]
-        self.assertEqual(concurrency["decision"], "APPROVED_MAXIMUM_CONCURRENCY_2")
-        self.assertEqual(concurrency["maximum_concurrency"], 2)
+        self.assertEqual(concurrency["decision"], "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL")
+        self.assertIsNone(concurrency["maximum_concurrency"])
+        self.assertEqual(concurrency["technically_evaluated_maximum_concurrency"], 2)
         probe = concurrency["bounded_live_diagnostic"]
         self.assertFalse(probe["provider_pressure_signal"])
         self.assertTrue(probe["failure_isolation_observed"])
@@ -143,6 +193,102 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertFalse(self.evidence["readiness_decision"]["stage_14_started"])
         self.assertFalse(self.evidence["readiness_decision"]["tiered50_activated"])
         self.assertFalse(self.evidence["historical_continuity"]["cutover_performed"])
+
+    def test_user_decision_gate_keeps_all_material_choices_unapproved(self) -> None:
+        gate = self.evidence["user_decision_gate"]
+        self.assertEqual(gate["status"], "USER_APPROVAL_REQUIRED")
+        self.assertFalse(gate["all_material_design_choices_user_approved"])
+        for field in (
+            "production_number_of_results_approved",
+            "production_concurrency_approved",
+            "production_cadence_approved",
+            "production_retry_policy_approved",
+        ):
+            self.assertFalse(gate[field])
+            self.assertFalse(self.evidence["readiness_decision"][field])
+
+    def test_corrected_forward_coverage_ignores_previous_onward_and_departure_timings(self) -> None:
+        anchor = "2026-09-30T10:40:00Z"
+        bundle = {
+            "stop_events": [
+                {
+                    "timetabled_time": "2026-09-30T10:42:00Z",
+                    "call_observations": [
+                        {
+                            "call_scope": "PREVIOUS",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T09:12:00Z"]}}],
+                            "departure_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T09:13:00Z"]}}],
+                        },
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T10:42:00Z"]}}],
+                            "departure_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T10:43:00Z"]}}],
+                        },
+                        {
+                            "call_scope": "ONWARD",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T12:45:00Z"]}}],
+                            "departure_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T12:46:00Z"]}}],
+                        },
+                    ],
+                },
+                {"timetabled_time": "2026-09-30T11:15:00Z", "call_observations": []},
+                {
+                    "timetabled_time": "2026-09-30T23:59:00Z",
+                    "call_observations": [
+                        {
+                            "call_scope": "PREVIOUS",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T09:00:00Z"]}}],
+                        }
+                    ],
+                },
+            ]
+        }
+        metrics = stage13._forward_coverage_metrics(bundle, anchor)
+        self.assertEqual(metrics["returned_thiscall_event_count"], 2)
+        self.assertEqual(metrics["events_before_anchor_count"], 0)
+        self.assertEqual(metrics["events_at_or_after_anchor_count"], 2)
+        self.assertEqual(metrics["earliest_thiscall_arrival"], "2026-09-30T10:42:00Z")
+        self.assertEqual(metrics["latest_thiscall_arrival"], "2026-09-30T11:15:00Z")
+        self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
+
+        previous_changed = json.loads(json.dumps(bundle))
+        previous_changed["stop_events"][0]["call_observations"][0]["arrival_timing"][0]["field_values"]["TimetabledTime"] = [
+            "2026-09-30T07:00:00Z"
+        ]
+        onward_changed = json.loads(json.dumps(bundle))
+        onward_changed["stop_events"][0]["call_observations"][2]["arrival_timing"][0]["field_values"]["TimetabledTime"] = [
+            "2026-09-30T18:00:00Z"
+        ]
+        departure_changed = json.loads(json.dumps(bundle))
+        departure_changed["stop_events"][0]["call_observations"][1]["departure_timing"][0]["field_values"]["TimetabledTime"] = [
+            "2026-09-30T19:00:00Z"
+        ]
+        self.assertEqual(stage13._forward_coverage_metrics(previous_changed, anchor), metrics)
+        self.assertEqual(stage13._forward_coverage_metrics(onward_changed, anchor), metrics)
+        self.assertEqual(stage13._forward_coverage_metrics(departure_changed, anchor), metrics)
+
+    def test_thiscall_arrival_before_anchor_is_separate_and_does_not_inflate_coverage(self) -> None:
+        bundle = {
+            "stop_events": [
+                {"timetabled_time": "2026-09-30T10:30:00Z"},
+                {"timetabled_time": "2026-09-30T10:42:00Z"},
+                {"timetabled_time": "2026-09-30T11:15:00Z"},
+            ]
+        }
+        metrics = stage13._forward_coverage_metrics(bundle, "2026-09-30T10:40:00Z")
+        self.assertEqual(metrics["returned_thiscall_event_count"], 3)
+        self.assertEqual(metrics["events_before_anchor_count"], 1)
+        self.assertEqual(metrics["events_at_or_after_anchor_count"], 2)
+        self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
+
+    def test_corrected_diagnostic_is_closed_without_explicit_additional_request_approval(self) -> None:
+        result = stage13._run_corrected_result_limit_diagnostic(
+            [],
+            prior_attempts=stage13.PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+            additional_requests_approved=False,
+        )
+        self.assertEqual(result["status"], "NOT_RUN_USER_APPROVAL_REQUIRED")
+        self.assertEqual(result["http_attempts_consumed"], 0)
 
     def test_no_secret_or_raw_payload_persistence(self) -> None:
         rendered = self.evidence_path.read_text(encoding="utf-8").lower()

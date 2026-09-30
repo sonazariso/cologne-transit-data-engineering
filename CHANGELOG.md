@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Added
+- Stage 13 approval-state correction: reopened the stage as
+  `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`, preserved and
+  superseded D-046 rather than treating it as final user approval, added the
+  machine-readable `user_decision_gate`, and kept the cadence, result-limit,
+  concurrency, and retry settings as technically evaluated options only.
+- Stage 13 forward-coverage correction: result-limit coverage now uses only
+  THIS-call arrival timings at or after the requested `DepArrTime` anchor;
+  historical mixed-call spans are explicitly invalid for that decision. Added
+  offline regression tests and an approval gate for exactly 24 additional MDD
+  requests (90 historical attempts would become 114; the old 100-attempt
+  ceiling is unchanged); no request was issued before explicit user approval.
+- Stage 13 corrected diagnostic result: after explicit user approval, exactly
+  24 sequential N5/N10/N20/N30 attempts were consumed, bringing cumulative
+  diagnostic accounting to 114 without changing the historical 100-attempt
+  ceiling. All 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a valid
+  HTTP response, so fixed N20, fixed N30, and A20/B30/C30 remain undecided.
+  Added the static comparison, the four actual density-ranked cadence boundary
+  changes between 10/20/20 and 8/20/22, and the user's unapproved preference
+  recommendations.
 - Stage 12 auditability correction: retained the complete sanitized 864-parent
   candidate universe for the exact approved feed snapshot and added offline
   replay verification through the authoritative selector. The approved panel
@@ -13,12 +32,13 @@
   selection evidence, current core-mode coverage, concentration review, a
   bounded 50-request MDD compatibility probe, reserve candidates, and an
   explicit fixed-membership/versioning contract.
-- Stage 13 Tiered Collector Readiness closeout and machine-readable evidence:
+- Historical Stage 13 Tiered Collector Readiness closeout and machine-readable
+  evidence (superseded by D-047; not final user approval):
   exact-feed 5/10/15/30-minute density windows; deterministic 10/20/20
   density tiers at 5/15/30-minute cadence; 240 logical requests/hour and
   30/31-day quota math; zero automatic retries; labeled historical retry
   sensitivity; conservative Legacy7 reserve; bounded N5/N10/N20/N30 result-
-  limit evidence with approved `NumberOfResults=30` and explicit
+  limit evidence with technically evaluated `NumberOfResults=30` and explicit
   `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; cap-2 concurrency and heartbeat
   feasibility; atomic target/bucket claim and no-replay contract; failure
   isolation; and Legacy7 continuity. Production activation and Stage 14 remain

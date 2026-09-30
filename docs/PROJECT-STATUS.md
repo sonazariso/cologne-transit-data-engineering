@@ -21,7 +21,7 @@
 | 10 | Operational Fact | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED |
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
-| 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
+| 13 | Tiered Collector Readiness | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED |
 | 14 | Controlled 50-Station Cutover | Not started |
 | 15 | Post-Cutover Validation | Not started |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
@@ -387,9 +387,9 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   a new version with effective date/time, reason, and predecessor; historical
   identities and sampling/panel eras remain interpretable.
 
-### Stage 13 readiness audit — complete design; production not started
+### Stage 13 readiness audit — evidence ready; user design approval required
 
-- **Stage 13 — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED.** The [readiness audit](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [machine-readable evidence](stages/13-tiered-collector-readiness-evidence.json) are authoritative.
+- **Stage 13 — IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED.** The [readiness audit](stages/13-tiered-collector-readiness.md), [reopened decision record](stages/13-tiered-collector-readiness-completion-decision.md), and [machine-readable evidence](stages/13-tiered-collector-readiness-evidence.json) are authoritative. D-046 is retained as historical evidence but is superseded and is not valid as final user approval.
 - The exact current feed is `VERSION__20260930_0053` with ZIP SHA-256
   `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
   Density uses scheduled child-stop arrivals expanded across the feed calendar
@@ -399,27 +399,45 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   are assigned deterministically from density evidence, not Stage 12
   `SelectionRank`: Tier A has 10 stations at 5 minutes, Tier B has 20 at 15
   minutes, and Tier C has 20 at 30 minutes.
-- The approved design uses `NumberOfResults=30`. Bounded live diagnostics
-  covered six deterministic high/middle/low-density and mode/interchange
-  representatives at N5/N10/N20/N30: 24 sequential HTTP 200/parser-valid
-  responses, plus three cap-2 pairs; all tested result limits saturated.
-  The provider theoretical maximum remains explicitly unknown.
-- The design reconciles `240` logical requests/hour, `5,760`/day,
-  `172,800` in a 30-day month, and `178,560` in a 31-day month. It uses zero
-  automatic retries, reserves the full documented Legacy7 cadence at `8,640`
-  / `8,928` requests per 30/31-day month, and reserves the Stage 13 diagnostic
-  budget of at most 100 attempts. Current shared-credential production usage
-  remains unavailable and is not represented as zero; the conservative reserve
-  is applied instead.
+- The retained historical diagnostic records technically evaluated
+  `NumberOfResults=30` across six deterministic high/middle/low-density and
+  mode/interchange representatives at N5/N10/N20/N30: 24 sequential attempts,
+  plus three cap-2 pairs. Their old mixed-call temporal-span fields are
+  explicitly invalid for forward-coverage decisions. The corrected diagnostic
+  was then explicitly approved and executed as exactly 24 additional sequential
+  attempts; all 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a valid
+  HTTP response, so no corrected live coverage or saturation evidence was
+  established. The provider theoretical maximum remains unknown.
+- The machine-readable `user_decision_gate` keeps
+  `production_number_of_results_approved`, `production_concurrency_approved`,
+  `production_cadence_approved`, and `production_retry_policy_approved` false.
+  The technically evaluated cadence option reconciles `240` logical
+  requests/hour, `5,760`/day, `172,800` in a 30-day month, and `178,560` in a
+  31-day month; it is not a final production decision. The zero-retry /
+  `MaxAttempts=1` policy and cap-2 value are likewise options only.
+- The corrected metric used only THIS-call arrivals at or after the requested
+  `DepArrTime` anchor, with separate pre-anchor counts and sanitized duration/
+  error fields. Exactly 24 additional attempts were authorized and consumed;
+  cumulative Stage 13 usage is 114 while the historical 100-attempt ceiling
+  remains unchanged as a historical budget. No raw response or API key was
+  persisted. Fixed N20, fixed N30, and A20/B30/C30 remain undecided because no
+  valid corrected live response was available.
+- Static planning evidence supports N30 for all 50 current cadence windows and
+  supports the simpler tier-specific A20/B30/C30 candidate, but this does not
+  replace corrected realtime evidence. The deterministic comparison of
+  10/20/20 versus 8/20/22 changes four tier assignments (two A→B and two
+  B→C), not two; the exact boundary stations are retained in the evidence
+  artifact. The user's preferred `8/20/22 @ 5/15/30` remains a recommendation,
+  not an approved cadence.
 - The six-heartbeat 30-minute super-cycle is `[21, 21, 19, 20, 20, 19]`
   targets, with cap-2 heartbeat feasibility established from the bounded
   diagnostic. Future claims remain atomic at
   `(SamplingTargetId, LogicalDueBucket)`; missed historical buckets cannot be
   replayed, one failed target cannot abort other due targets, and Legacy7
   history/identities remain preserved.
-- Stage 13 approves the readiness design only. No scheduler, database object,
-  Power BI artifact, Windows scheduled task, Stage 14 cutover, or Tiered50
-  activation was started.
+- Stage 13 remains in progress. No scheduler, database object, Power BI
+  artifact, Windows scheduled task, Stage 14 cutover, or Tiered50 activation
+  was started.
 
 ## Post-Stage-02 validation
 

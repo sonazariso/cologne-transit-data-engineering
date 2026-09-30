@@ -43,7 +43,18 @@ REQUESTOR_REF = "CologneTransitIntelligence"
 MDD_DIAGNOSTIC_POLICY = "STAGE13_TIERED_READINESS_DIAGNOSTIC_V1"
 MDD_HTTP_ATTEMPT_HARD_MAX = 100
 MDD_RESULT_LIMITS = (5, 10, 20, 30)
+# This remains a technically evaluated option.  It is not a user-approved
+# production setting until the Stage 13 decision gate is explicitly closed.
 MDD_CONCURRENCY_CAP = 2
+PRODUCTION_MAX_ATTEMPTS_CANDIDATE = 1
+ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS = 24
+PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS = 90
+ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST = (
+    "The corrected NumberOfResults coverage diagnostic requires 24 additional MDD requests, "
+    "increasing cumulative Stage 13 diagnostic attempts from 90 to 114. "
+    "Do you approve these 24 additional requests?"
+)
+CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE = "six deterministic representatives × N=5/N=10/N=20/N=30; sequential only"
 
 MONTHLY_CEILING = 250_000
 NORMAL_ENVELOPE_MIN = 207_500
@@ -57,6 +68,8 @@ LEGACY_ADDITIONAL_ATTEMPT_SHARE = LEGACY_ADDITIONAL_RETRY_ATTEMPTS / LEGACY_HTTP
 LEGACY7_RESERVED_MONTHLY_REQUESTS = {30: 8_640, 31: 8_928}
 DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS = MDD_HTTP_ATTEMPT_HARD_MAX
 FORWARD_WINDOWS_MINUTES = (5, 10, 15, 30)
+# This remains a technically evaluated option.  It must not be serialized as
+# an approved production decision before explicit user approval.
 PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE = 30
 
 # Retained only as the historical comparison candidate. It is never used as
@@ -67,8 +80,8 @@ TIERED50_CANDIDATE = (
     {"tier": "C", "station_count": 20, "interval_minutes": 30},
 )
 
-# The final design candidate is evaluated against measured density and quota
-# evidence before it is marked approved in the artifact.
+# The production design candidate is evaluated against measured density and
+# quota evidence, but remains an option until the user decision gate is closed.
 PRODUCTION_TIER_PLAN = (
     {"tier": "A", "station_count": 10, "interval_minutes": 5},
     {"tier": "B", "station_count": 20, "interval_minutes": 15},
@@ -243,7 +256,7 @@ def quota_projection_set(
     scenarios = [
         {
             "label": "normal_zero_retry_policy",
-            "kind": "approved_design_policy",
+            "kind": "technically_evaluated_policy",
             "additional_attempt_rate": 0.0,
         },
         {
@@ -308,7 +321,7 @@ def quota_projection_set(
             "NumberOfResults changes response cardinality, not HTTP request count.",
             "Duplicate claimed target/buckets must not issue another HTTP request.",
             "No catch-up burst may spend quota on missed historical buckets.",
-            "The normal Stage 13 design uses MaxAttempts=1 and zero automatic retries.",
+            "The normal Stage 13 retry policy option uses MaxAttempts=1 and zero automatic retries; user approval remains required.",
             "The full documented Legacy7 monthly cadence is reserved conservatively because current shared-account usage is unavailable.",
             "Repository diagnostics are inactive after closeout; the Stage 13 diagnostic hard budget is reserved for reconciliation only.",
         ],
@@ -1045,17 +1058,89 @@ def _safe_time_value(value: Any) -> tuple[datetime, str] | None:
     return parsed.astimezone(timezone.utc), text
 
 
-def _returned_event_times(bundle: Mapping[str, Any]) -> list[str]:
+def _returned_thiscall_arrivals(bundle: Mapping[str, Any]) -> list[str]:
+    """Return only the requested StopEventResult THIS-call arrival values.
+
+    ``stage_08_mdd_realtime_pilot.build_bundle`` promotes the first
+    ``ThisCall/CallAtStop/ServiceArrival`` TimetabledTime to the stop-event's
+    ``timetabled_time`` field.  PreviousCall, OnwardCall, and departure
+    timings remain available in ``call_observations`` for context, but they
+    are deliberately excluded from result-limit coverage.
+    """
+
     values: list[str] = []
     for event in bundle.get("stop_events", []):
-        if event.get("timetabled_time") is not None:
+        this_arrivals: list[str] = []
+        call_observations = event.get("call_observations", []) or []
+        for call in call_observations:
+            if str(call.get("call_scope", "")).upper() != "THIS":
+                continue
+            for context in call.get("arrival_timing", []) or []:
+                for item in context.get("field_values", {}).get("TimetabledTime", []) or []:
+                    this_arrivals.append(str(item))
+        if this_arrivals:
+            values.extend(this_arrivals)
+        elif not call_observations and event.get("timetabled_time") is not None:
+            # The Stage 8 bundle normally derives this field from the same
+            # THIS-call arrival.  Use it only as a normalized fallback when
+            # call observations were not retained in a test/adapter bundle;
+            # never infer THIS from an event that explicitly contains only
+            # PreviousCall, OnwardCall, or other non-THIS observations.
             values.append(str(event["timetabled_time"]))
-        for call in event.get("call_observations", []):
-            for context_name in ("arrival_timing", "departure_timing"):
-                for context in call.get(context_name, []) or []:
-                    for item in context.get("field_values", {}).get("TimetabledTime", []) or []:
-                        values.append(str(item))
     return values
+
+
+def _returned_event_times(bundle: Mapping[str, Any]) -> list[str]:
+    """Backward-compatible name for the corrected THIS-call-only helper."""
+
+    return _returned_thiscall_arrivals(bundle)
+
+
+def _forward_coverage_metrics(
+    bundle: Mapping[str, Any],
+    requested_dep_arr_time: str,
+) -> dict[str, Any]:
+    """Calculate result-limit forward coverage from THIS-call arrivals only.
+
+    The anchor is the requested ``DepArrTime``.  Returned THIS-call arrivals
+    before the anchor are retained as separately counted evidence and cannot
+    reduce or inflate the forward coverage.  A missing/invalid anchor or a
+    response with no valid THIS-call arrivals has no calculable coverage and
+    therefore returns ``None`` rather than a misleading zero.
+    """
+
+    anchor = _safe_time_value(requested_dep_arr_time)
+    arrivals = [
+        parsed
+        for value in _returned_thiscall_arrivals(bundle)
+        if (parsed := _safe_time_value(value)) is not None
+    ]
+    arrivals.sort(key=lambda item: item[0])
+    metrics: dict[str, Any] = {
+        "returned_thiscall_event_count": len(arrivals),
+        "events_before_anchor_count": 0,
+        "events_at_or_after_anchor_count": 0,
+        "earliest_thiscall_arrival": arrivals[0][1] if arrivals else None,
+        "latest_thiscall_arrival": arrivals[-1][1] if arrivals else None,
+        "forward_coverage_seconds": None,
+        "forward_coverage_status": "NOT_CALCULABLE",
+    }
+    if anchor is None:
+        metrics["forward_coverage_status"] = "INVALID_REQUEST_ANCHOR"
+        return metrics
+
+    at_or_after = [item for item in arrivals if item[0] >= anchor[0]]
+    metrics["events_before_anchor_count"] = len(arrivals) - len(at_or_after)
+    metrics["events_at_or_after_anchor_count"] = len(at_or_after)
+    if at_or_after:
+        metrics["forward_coverage_seconds"] = _round(
+            (at_or_after[-1][0] - anchor[0]).total_seconds(),
+            3,
+        )
+        metrics["forward_coverage_status"] = "VALID_THIS_CALL_ARRIVAL_ONLY"
+    else:
+        metrics["forward_coverage_status"] = "NO_THIS_CALL_ARRIVAL_AT_OR_AFTER_ANCHOR"
+    return metrics
 
 
 def _probe_record(
@@ -1079,10 +1164,18 @@ def _probe_record(
         "parser_success": False,
         "valid_trias_application_response": False,
         "returned_event_count": 0,
+        "returned_thiscall_event_count": 0,
+        "events_before_anchor_count": 0,
+        "events_at_or_after_anchor_count": 0,
         "saturation": False,
-        "earliest_returned_event": None,
-        "latest_returned_event": None,
+        "earliest_thiscall_arrival": None,
+        "latest_thiscall_arrival": None,
+        "forward_coverage_seconds": None,
+        "forward_coverage_status": "NOT_EVALUATED",
+        # Retained as a visibly retired compatibility field.  New records do
+        # not calculate a mixed-call temporal span.
         "forward_temporal_span_seconds": None,
+        "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
         "source_stop_point_ref_consistency": "NOT_EVALUATED",
         "duration_ms": _round(float(result.elapsed_ms), 3),
         "transport_failure": result.failure,
@@ -1142,14 +1235,7 @@ def _probe_record(
         else:
             record["source_stop_point_ref_consistency"] = "MISMATCH"
         record["related_previous_or_onward_call_ref_count"] = related_call_ref_count
-        time_values = [_safe_time_value(value) for value in _returned_event_times(bundle)]
-        parsed_times = [item for item in time_values if item is not None]
-        if parsed_times:
-            earliest = min(parsed_times, key=lambda item: item[0])
-            latest = max(parsed_times, key=lambda item: item[0])
-            record["earliest_returned_event"] = earliest[1]
-            record["latest_returned_event"] = latest[1]
-            record["forward_temporal_span_seconds"] = _round((latest[0] - earliest[0]).total_seconds(), 3)
+        record.update(_forward_coverage_metrics(bundle, dep_arr_time))
     except getattr(stage8, "CredentialContentError", ValueError):
         record["error_classification"] = "RESPONSE_SECRET_DETECTED_NOT_PERSISTED"
     except Exception as exc:  # parser failure is sanitized to its type only
@@ -1205,6 +1291,17 @@ def _select_diagnostic_representatives(station_rows: Sequence[Mapping[str, Any]]
 
 
 def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    corrected_coverage_values = [
+        float(row["forward_coverage_seconds"])
+        for row in records
+        if row.get("forward_coverage_seconds") is not None
+        and row.get("forward_coverage_status") == "VALID_THIS_CALL_ARRIVAL_ONLY"
+    ]
+    legacy_span_values = [
+        float(row["forward_temporal_span_seconds"])
+        for row in records
+        if row.get("forward_temporal_span_seconds") is not None
+    ]
     return {
         "request_count": len(records),
         "http_status_distribution": dict(sorted(Counter(str(row.get("http_status")) for row in records).items())),
@@ -1212,9 +1309,19 @@ def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         "valid_trias_response_count": sum(bool(row.get("valid_trias_application_response")) for row in records),
         "saturated_count": sum(bool(row.get("saturation")) for row in records),
         "returned_event_count_statistics": value_statistics([int(row.get("returned_event_count", 0)) for row in records]),
-        "forward_temporal_span_statistics_seconds": value_statistics(
-            [float(row["forward_temporal_span_seconds"]) for row in records if row.get("forward_temporal_span_seconds") is not None]
+        "returned_thiscall_event_count_statistics": value_statistics(
+            [int(row["returned_thiscall_event_count"]) for row in records if row.get("returned_thiscall_event_count") is not None]
         ),
+        "events_before_anchor_count_statistics": value_statistics(
+            [int(row["events_before_anchor_count"]) for row in records if row.get("events_before_anchor_count") is not None]
+        ),
+        "events_at_or_after_anchor_count_statistics": value_statistics(
+            [int(row["events_at_or_after_anchor_count"]) for row in records if row.get("events_at_or_after_anchor_count") is not None]
+        ),
+        "forward_coverage_statistics_seconds": value_statistics(corrected_coverage_values),
+        "forward_coverage_metric_basis": "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime",
+        "legacy_forward_temporal_span_statistics_seconds": value_statistics(legacy_span_values),
+        "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION" if legacy_span_values else "NOT_PRESENT",
         "duration_statistics_ms": duration_statistics(
             [float(row["duration_ms"]) for row in records if row.get("duration_ms") is not None]
         ),
@@ -1228,8 +1335,21 @@ def _run_live_diagnostics(
     station_rows: Sequence[Mapping[str, Any]],
     *,
     api_key: str | None = None,
+    include_concurrency_probe: bool = True,
+    attempt_budget: int | None = None,
 ) -> dict[str, Any]:
-    """Run sanitized sequential result-limit and cap-2 diagnostics."""
+    """Run a sanitized diagnostic without persisting raw response payloads.
+
+    The historical full diagnostic path includes the cap-2 sample.  The
+    corrected rerun passes ``include_concurrency_probe=False`` and a budget of
+    exactly 24 attempts so it cannot silently repeat the already-valid
+    concurrency evidence or consume the old 100-attempt budget again.
+    """
+
+    if attempt_budget is None:
+        attempt_budget = MDD_HTTP_ATTEMPT_HARD_MAX
+    if attempt_budget <= 0:
+        raise ValueError("attempt_budget must be positive")
 
     try:
         import stage_08_mdd_realtime_pilot as stage8
@@ -1239,6 +1359,7 @@ def _run_live_diagnostics(
             "credential_preflight": "NOT_EVALUATED",
             "http_attempts_consumed": 0,
             "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "current_run_attempt_budget": attempt_budget,
             "error_type": type(exc).__name__,
             "raw_payloads_persisted": False,
         }
@@ -1256,6 +1377,7 @@ def _run_live_diagnostics(
             "credential_preflight": preflight_label,
             "http_attempts_consumed": 0,
             "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "current_run_attempt_budget": attempt_budget,
             "stop_reason": "zero MDD requests issued because the inherited credential was not usable",
             "raw_payloads_persisted": False,
         }
@@ -1284,8 +1406,8 @@ def _run_live_diagnostics(
 
     def execute(candidate: Mapping[str, Any], number_of_results: int) -> Any | None:
         nonlocal attempts, stopped, stop_reason
-        if stopped or attempts >= MDD_HTTP_ATTEMPT_HARD_MAX:
-            stop_reason = stop_reason or "MDD_HTTP_ATTEMPT_HARD_BUDGET_REACHED"
+        if stopped or attempts >= attempt_budget:
+            stop_reason = stop_reason or "CURRENT_RUN_ATTEMPT_BUDGET_REACHED"
             return None
         runtime_config = stage8.Stage8RuntimeConfig(
             station=str(candidate["station_name"]),
@@ -1330,10 +1452,14 @@ def _run_live_diagnostics(
 
     concurrency_records: list[dict[str, Any]] = []
     pair_batch_durations: list[float] = []
-    pairs = [(candidates[index], candidates[index + 1]) for index in range(0, len(candidates) - 1, 2)]
+    pairs = (
+        [(candidates[index], candidates[index + 1]) for index in range(0, len(candidates) - 1, 2)]
+        if include_concurrency_probe
+        else []
+    )
     for pair_index, pair in enumerate(pairs, start=1):
-        if stopped or attempts + len(pair) > MDD_HTTP_ATTEMPT_HARD_MAX:
-            stop_reason = stop_reason or "MDD_HTTP_ATTEMPT_HARD_BUDGET_REACHED"
+        if stopped or attempts + len(pair) > attempt_budget:
+            stop_reason = stop_reason or "CURRENT_RUN_ATTEMPT_BUDGET_REACHED"
             break
         started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=MDD_CONCURRENCY_CAP) as executor:
@@ -1374,7 +1500,7 @@ def _run_live_diagnostics(
         or row.get("transport_failure") in {"TIMEOUT", "NETWORK_OR_DNS_FAILURE"}
         for row in pressure_rows
     )
-    cap2_complete = (
+    cap2_complete = include_concurrency_probe and (
         len(concurrency_records) == len(pairs) * 2
         and all(row.get("parser_success") and row.get("valid_trias_application_response") for row in concurrency_records)
         and not provider_pressure_signal
@@ -1392,8 +1518,12 @@ def _run_live_diagnostics(
         )
         and static_support["30"]["all_station_p95_supported"]
     )
-    number_limit_decision = "APPROVED_FIXED_30_FROM_BOUNDED_COVERAGE_EVIDENCE" if n30_supported else "NOT_ESTABLISHED"
-    diagnostic_status = "COMPLETE" if n30_supported and cap2_complete and not stopped else "CONDITIONALLY_BLOCKED"
+    number_limit_decision = "TECHNICALLY_EVALUATED_OPTION_N30_REQUIRES_USER_APPROVAL" if n30_supported else "NOT_ESTABLISHED"
+    diagnostic_status = (
+        "COMPLETE_TECHNICAL_RESULT_LIMIT_COMPARISON"
+        if n30_supported and (cap2_complete or not include_concurrency_probe) and not stopped
+        else "CONDITIONALLY_BLOCKED"
+    )
     return {
         "status": diagnostic_status,
         "credential_preflight": preflight_label,
@@ -1404,7 +1534,7 @@ def _run_live_diagnostics(
             "include_previous_calls": True,
             "include_onward_calls": True,
             "include_realtime_data": True,
-            "max_attempts": 1,
+            "max_attempts": PRODUCTION_MAX_ATTEMPTS_CANDIDATE,
             "retries": 0,
             "timeout_seconds": 30,
             "dep_arr_time_anchor_reused_for_all_result_limit_comparisons": True,
@@ -1419,9 +1549,11 @@ def _run_live_diagnostics(
             "static_cadence_window_support_by_result_limit": static_support,
             "production_selection": {
                 "decision": number_limit_decision,
-                "production_number_of_results": 30 if n30_supported else None,
+                "technically_evaluated_number_of_results": 30 if n30_supported else None,
+                "production_number_of_results": None,
+                "user_approved_design": False,
                 "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-                "reason": "N=30 is directly tested across deterministic high/middle/low-density and mode/interchange representatives; exact-feed static P95 cadence-window counts are at or below 30 for all final tier assignments. This is a bounded production-value decision, not a theoretical provider-maximum claim.",
+                "reason": "N=30 is a technically evaluated option from deterministic high/middle/low-density and mode/interchange representatives; exact-feed static P95 cadence-window counts are at or below 30 for all evaluated tier assignments. It is not a user-approved production decision or a theoretical provider-maximum claim.",
             },
         },
         "bounded_concurrency_probe": {
@@ -1433,7 +1565,14 @@ def _run_live_diagnostics(
             "provider_pressure_signal": provider_pressure_signal,
             "failure_isolation_observed": len(concurrency_records) == len(pairs) * 2,
             "no_retries": True,
-            "decision": "APPROVED_MAXIMUM_CONCURRENCY_2" if cap2_complete else "FALLBACK_SEQUENTIAL_REQUIRED",
+            "decision": (
+                "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2"
+                if cap2_complete
+                else "NOT_RUN_CORRECTED_RESULT_LIMIT_DIAGNOSTIC_ONLY"
+                if not include_concurrency_probe
+                else "FALLBACK_SEQUENTIAL_REQUIRED"
+            ),
+            "user_approved_design": False,
             "provider_scope_limit": "bounded sample only; no provider-wide rate-limit claim",
         },
         "sequential_duration_evidence": {
@@ -1445,12 +1584,73 @@ def _run_live_diagnostics(
         },
         "http_attempts_consumed": attempts,
         "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+        "current_run_attempt_budget": attempt_budget,
         "stopped_on_auth_failure": stopped and stop_reason == "HTTP_401_OR_403_STOPPED_ALL_FURTHER_STAGE13_PROBING",
         "stop_reason": stop_reason,
         "raw_payloads_persisted": False,
         "request_headers_persisted": False,
         "api_key_persisted": False,
     }
+
+
+def _run_corrected_result_limit_diagnostic(
+    station_rows: Sequence[Mapping[str, Any]],
+    *,
+    prior_attempts: int,
+    additional_requests_approved: bool,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Run only the corrected six-station × four-limit comparison.
+
+    This path is intentionally closed until the user approves the additional
+    requests.  It does not repeat the cap-2 diagnostic.  The historical
+    100-attempt ceiling remains unchanged; the explicit approval gate records
+    the separately authorized cumulative total of 90 + 24 = 114 attempts.
+    """
+
+    gate = {
+        "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
+        "required": True,
+        "approved": bool(additional_requests_approved),
+        "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
+        "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "prior_attempts_consumed": prior_attempts,
+        "cumulative_attempts_if_approved": prior_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
+        "historical_ceiling_changed": False,
+        "additional_requests_issued": 0,
+        "corrected_live_diagnostic_issued": False,
+        "raw_responses_persisted": False,
+    }
+    if not additional_requests_approved:
+        return {
+            "status": "NOT_RUN_USER_APPROVAL_REQUIRED",
+            "credential_preflight": "NOT_EVALUATED",
+            "http_attempts_consumed": 0,
+            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "current_run_attempt_budget": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "additional_request_gate": gate,
+            "stop_reason": "explicit approval is required before any corrected MDD request",
+            "raw_payloads_persisted": False,
+        }
+    if prior_attempts != PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS:
+        raise Stage13Blocked(
+            "corrected result-limit diagnostic requires prior_attempts=90 so cumulative usage is auditable"
+        )
+    live = _run_live_diagnostics(
+        station_rows,
+        api_key=api_key,
+        include_concurrency_probe=False,
+        attempt_budget=ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+    )
+    live["additional_request_gate"] = gate
+    gate["additional_requests_issued"] = int(live.get("http_attempts_consumed", 0))
+    gate["corrected_live_diagnostic_issued"] = gate["additional_requests_issued"] > 0
+    live["http_attempts_consumed_total"] = prior_attempts + int(live.get("http_attempts_consumed", 0))
+    live["historical_diagnostic_hard_ceiling"] = MDD_HTTP_ATTEMPT_HARD_MAX
+    live["historical_ceiling_changed"] = False
+    live["concurrency_rerun"] = False
+    return live
 
 
 def _cadence_static_fit(
@@ -1496,7 +1696,7 @@ def _cadence_alternatives(
                 {"tier": "C", "station_count": 20, "interval_minutes": 30},
             ),
         ),
-        ("10_20_20_at_5_15_30_selected", PRODUCTION_TIER_PLAN),
+        ("10_20_20_at_5_15_30_evaluated_option", PRODUCTION_TIER_PLAN),
         (
             "10_15_25_at_5_10_30",
             (
@@ -1540,10 +1740,199 @@ def _cadence_alternatives(
                 "monthly_logical_requests": cadence["monthly_logical_requests"],
                 "static_density_fit_at_n30": _cadence_static_fit(station_rows, tiers, 30) if station_rows else None,
                 "31_day_ten_percent_stress_with_legacy_and_diagnostics": stress["31_day"]["conservative_reserve_reconciliation"],
-                "selected": label == "10_20_20_at_5_15_30_selected",
+                "technically_evaluated_option": label == "10_20_20_at_5_15_30_evaluated_option",
+                "user_review_preference": label == "8_20_22_at_5_15_30",
+                "user_approved_design": False,
             }
         )
     return rows
+
+
+def _tier_specific_static_fit(
+    station_rows: Sequence[Mapping[str, Any]],
+    tiers: Sequence[Mapping[str, int]],
+    result_limits: Mapping[str, int],
+) -> dict[str, Any]:
+    """Summarize exact-feed P95 support for a small tier-specific limit set."""
+
+    ordered = sorted(station_rows, key=lambda row: int(row["density_rank"]))
+    cursor = 0
+    by_tier: dict[str, Any] = {}
+    for tier in tiers:
+        tier_name = str(tier["tier"])
+        station_count = int(tier["station_count"])
+        interval = str(tier["interval_minutes"])
+        limit = int(result_limits[tier_name])
+        rows = ordered[cursor : cursor + station_count]
+        p95_values = [row["window_event_count_statistics"][interval]["p95"] for row in rows]
+        supported = [value is not None and float(value) <= limit for value in p95_values]
+        by_tier[tier_name] = {
+            "result_limit": limit,
+            "interval_minutes": int(interval),
+            "station_count": len(rows),
+            "station_p95_supported_count": sum(supported),
+            "all_station_p95_supported": bool(rows) and all(supported),
+            "maximum_station_p95": max(p95_values) if p95_values else None,
+        }
+        cursor += station_count
+    return {
+        "by_tier": by_tier,
+        "station_count": sum(item["station_count"] for item in by_tier.values()),
+        "station_p95_supported_count": sum(item["station_p95_supported_count"] for item in by_tier.values()),
+        "all_station_p95_supported": all(item["all_station_p95_supported"] for item in by_tier.values()),
+    }
+
+
+def _corrected_diagnostic_metric_status(live_diagnostics: Mapping[str, Any]) -> str:
+    """Classify whether the corrected run produced usable coverage evidence."""
+
+    probe = live_diagnostics.get("result_limit_probe", {})
+    records = list(probe.get("sequential_records", [])) if isinstance(probe, Mapping) else []
+    if not records:
+        return "NOT_RECONSTRUCTABLE_FROM_SANITIZED_AGGREGATES"
+    if any(row.get("forward_coverage_status") == "VALID_THIS_CALL_ARRIVAL_ONLY" for row in records):
+        return "CORRECTED_ANCHOR_BASED_THIS_CALL_METRIC_AVAILABLE"
+    if all(row.get("transport_failure") == "NETWORK_OR_DNS_FAILURE" for row in records):
+        return "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE"
+    if all(row.get("http_status") in {401, 403} for row in records):
+        return "CORRECTED_DIAGNOSTIC_STOPPED_AUTHORIZATION_FAILURE"
+    return "CORRECTED_DIAGNOSTIC_COMPLETED_WITHOUT_USABLE_FORWARD_COVERAGE"
+
+
+def _result_limit_comparison(
+    station_rows: Sequence[Mapping[str, Any]],
+    live_diagnostics: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare requested result-limit policies without converting failure into coverage."""
+
+    probe = live_diagnostics.get("result_limit_probe", {})
+    summaries = probe.get("summary_by_result_limit", {}) if isinstance(probe, Mapping) else {}
+    corrected_status = _corrected_diagnostic_metric_status(live_diagnostics)
+
+    def comparison_for_limit(number: int) -> dict[str, Any]:
+        summary = dict(summaries.get(str(number), {}))
+        return {
+            "requested_result_limit": number,
+            "request_count": summary.get("request_count", 0),
+            "http_status_distribution": summary.get("http_status_distribution", {}),
+            "valid_trias_response_count": summary.get("valid_trias_response_count", 0),
+            "returned_event_count_statistics": summary.get("returned_event_count_statistics", {}),
+            "saturated_count": summary.get("saturated_count", 0),
+            "forward_coverage_statistics_seconds": summary.get("forward_coverage_statistics_seconds", {}),
+            "duration_statistics_ms": summary.get("duration_statistics_ms", {}),
+            "comparison_status": (
+                "CORRECTED_THIS_CALL_EVIDENCE_AVAILABLE"
+                if summary.get("forward_coverage_statistics_seconds", {}).get("count", 0) > 0
+                else corrected_status
+            ),
+        }
+
+    fixed_plan = PRODUCTION_TIER_PLAN
+    tier_specific_limits = {"A": 20, "B": 30, "C": 30}
+    fixed_n20 = _cadence_static_fit(station_rows, fixed_plan, 20) if station_rows else None
+    fixed_n30 = _cadence_static_fit(station_rows, fixed_plan, 30) if station_rows else None
+    tier_specific = (
+        _tier_specific_static_fit(station_rows, fixed_plan, tier_specific_limits)
+        if station_rows
+        else None
+    )
+    live_n20 = comparison_for_limit(20)
+    live_n30 = comparison_for_limit(30)
+    return {
+        "corrected_diagnostic_status": corrected_status,
+        "forward_coverage_metric_basis": "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime",
+        "fixed_n20": {
+            "static_cadence_window_fit": fixed_n20,
+            "corrected_live": live_n20,
+            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+        },
+        "fixed_n30": {
+            "static_cadence_window_fit": fixed_n30,
+            "corrected_live": live_n30,
+            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+        },
+        "tier_specific_a20_b30_c30": {
+            "static_cadence_window_fit": tier_specific,
+            "corrected_live": {
+                "source_result_limits": {"A": 20, "B": 30, "C": 30},
+                "available_result_limit_probes": {
+                    "N20": live_n20,
+                    "N30": live_n30,
+                },
+                "comparison_status": corrected_status,
+            },
+            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+        },
+        "simpler_alternative": {
+            "candidate": "A=20, B=30, C=30",
+            "static_cadence_window_fit": tier_specific,
+            "corrected_live_status": corrected_status,
+            "recommendation": "NO_SELECTION_UNTIL_VALID_CORRECTED_LIVE_RESPONSES_EXIST",
+        },
+        "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+        "number_of_results_finalized": False,
+    }
+
+
+def _cadence_boundary_review(
+    station_rows: Sequence[Mapping[str, Any]],
+    stage12_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Explain the station changes implied by the two requested tier-count plans."""
+
+    legacy_ids = {
+        "de:05315:11110",
+        "de:05315:11201",
+        "de:05315:12711",
+        "de:05315:14201",
+        "de:05315:16601",
+        "de:05315:17311",
+        "de:05315:19201",
+    }
+    ordered = sorted(station_rows, key=lambda row: int(row["density_rank"]))
+    panel_by_id = {row["source_parent_station_id"]: row for row in stage12_evidence.get("panel", [])}
+    changed: list[dict[str, Any]] = []
+    for rank, row in enumerate(ordered, start=1):
+        old_tier = "A" if rank <= 10 else "B" if rank <= 30 else "C"
+        new_tier = "A" if rank <= 8 else "B" if rank <= 28 else "C"
+        if old_tier == new_tier:
+            continue
+        panel_row = panel_by_id.get(row["source_parent_station_id"], {})
+        if old_tier == "A" and new_tier == "B":
+            boundary_reason = "rank 9/10 leaves the 10-station A tier when A shrinks to 8; it becomes a B-tier station"
+        else:
+            boundary_reason = "rank 29/30 enters the 22-station C tier when C grows from 20 to 22"
+        changed.append(
+            {
+                "density_rank": rank,
+                "source_parent_station_id": row["source_parent_station_id"],
+                "station_name": row["station_name"],
+                "tier_in_10_20_20": old_tier,
+                "tier_in_8_20_22": new_tier,
+                "window_event_count_p95": {
+                    str(window): row["window_event_count_statistics"][str(window)]["p95"]
+                    for window in FORWARD_WINDOWS_MINUTES
+                },
+                "daily_scheduled_arrival_count_p95": row["daily_scheduled_arrival_count_statistics"]["p95"],
+                "schedule_pattern_event_count": row.get("schedule_pattern_event_count"),
+                "routes": panel_row.get("route_ids", []),
+                "route_ids_by_mode": panel_row.get("route_ids_by_mode", {}),
+                "modes": row.get("transport_modes", []),
+                "child_stop_count": row.get("interchange_indicators", {}).get("static_child_stop_count"),
+                "legacy7": row["source_parent_station_id"] in legacy_ids,
+                "why_boundary_station": boundary_reason,
+            }
+        )
+    return {
+        "plan_a": "10/20/20 @ 5/15/30",
+        "plan_b": "8/20/22 @ 5/15/30",
+        "requested_difference_count": 2,
+        "actual_density_ranked_assignment_difference_count": len(changed),
+        "interpretation": "The stated cardinalities produce four changed tier assignments: two A→B and two B→C. The requested count of two is therefore not consistent with the deterministic density-ranked assignment.",
+        "a_to_b_boundary_stations": [item for item in changed if item["tier_in_10_20_20"] == "A"],
+        "b_to_c_boundary_stations": [item for item in changed if item["tier_in_10_20_20"] == "B"],
+        "changed_stations": changed,
+    }
 
 
 def _heartbeat_feasibility(
@@ -1565,7 +1954,11 @@ def _heartbeat_feasibility(
         "max_due_targets_in_one_heartbeat": max_due,
         "requests_per_super_cycle": phase.get("super_cycle_total_logical_requests"),
         "requests_per_hour": phase.get("hour_total_logical_requests"),
-        "approved_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2" else None,
+        "technically_evaluated_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2.get("decision") in {
+            "APPROVED_MAXIMUM_CONCURRENCY_2",
+            "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
+        } else None,
+        "user_approved_maximum_concurrency": False,
         "cap2_request_duration_statistics_ms": request_stats,
         "cap2_pair_batch_duration_statistics_ms": batch_stats,
         "max_due_batches_at_cap2": batch_count,
@@ -1573,7 +1966,7 @@ def _heartbeat_feasibility(
         "estimated_max_observed_heartbeat_execution_ms": _round(estimated_max, 3),
         "finish_within_five_minute_heartbeat_at_observed_p95": estimated_p95 is not None and estimated_p95 <= 300_000,
         "finish_within_five_minute_heartbeat_at_observed_max": estimated_max is not None and estimated_max <= 300_000,
-        "feasibility_decision": "FEASIBLE_WITH_APPROVED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
+        "feasibility_decision": "FEASIBLE_WITH_TECHNICALLY_EVALUATED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
     }
 
 
@@ -1593,15 +1986,95 @@ def _reuse_existing_live_diagnostics(
     old_probe = old_bounded.get("result_limit_probe")
     if not isinstance(old_probe, Mapping) or not old_probe.get("sequential_records"):
         return None
+    existing_gate = old_bounded.get("additional_request_gate", {})
+    corrected_records = list(old_probe.get("sequential_records", []))
+    if (
+        existing_gate.get("approved") is True
+        and existing_gate.get("additional_requests_issued") == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+        and len(corrected_records) == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+        and all(row.get("forward_temporal_span_seconds") is None for row in corrected_records)
+    ):
+        probe = dict(old_probe)
+        probe["representatives"] = _select_diagnostic_representatives(station_rows)
+        production_selection = dict(probe.get("production_selection", {}))
+        production_selection["technically_evaluated_number_of_results"] = production_selection.get(
+            "technically_evaluated_number_of_results"
+        )
+        production_selection["decision"] = (
+            "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
+            if production_selection["technically_evaluated_number_of_results"] == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
+            else "NOT_ESTABLISHED"
+        )
+        production_selection["production_number_of_results"] = None
+        production_selection["user_approved_design"] = False
+        probe["production_selection"] = production_selection
+        old_concurrency = dict(old_concurrency)
+        old_concurrency["records"] = [
+            _mark_legacy_forward_span_invalid(record)
+            for record in old_concurrency.get("records", [])
+        ]
+        if old_concurrency.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2":
+            old_concurrency["decision"] = "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2"
+        old_concurrency["user_approved_design"] = False
+        return {
+            "status": old_bounded.get("status", "CONDITIONALLY_BLOCKED"),
+            "credential_preflight": old_bounded.get("credential_preflight", "PRESENT"),
+            "diagnostic_anchor_dep_arr_time": old_bounded.get("diagnostic_anchor_dep_arr_time"),
+            "representatives": probe.get("representatives", []),
+            "result_limit_probe": probe,
+            "bounded_concurrency_probe": old_concurrency,
+            "sequential_duration_evidence": old_sequential,
+            "http_attempts_consumed": old_bounded.get("current_run_http_attempts_consumed", 0),
+            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "prior_attempts_consumed": old_bounded.get("prior_attempts_consumed", PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS),
+            "additional_request_gate": existing_gate,
+            "historical_invalidated_sequential_records": existing.get("number_of_results", {}).get(
+                "historical_invalidated_sequential_records", []
+            ),
+            "historical_invalidated_sequential_summary_by_result_limit": existing.get("number_of_results", {}).get(
+                "historical_invalidated_sequential_summary_by_result_limit", {}
+            ),
+            "stop_reason": old_bounded.get("stop_reason"),
+            "raw_payloads_persisted": False,
+            "request_headers_persisted": False,
+            "api_key_persisted": False,
+        }
     probe = dict(old_probe)
     probe["representatives"] = _select_diagnostic_representatives(station_rows)
+    probe["sequential_records"] = [
+        _mark_legacy_forward_span_invalid(record)
+        for record in probe.get("sequential_records", [])
+    ]
+    probe["summary_by_result_limit"] = {
+        str(number): _mark_legacy_summary_invalid(summary)
+        for number, summary in probe.get("summary_by_result_limit", {}).items()
+    }
+    production_selection = dict(probe.get("production_selection", {}))
+    production_selection["decision"] = "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
+    production_selection["technically_evaluated_number_of_results"] = production_selection.get(
+        "technically_evaluated_number_of_results",
+        production_selection.get("production_number_of_results", PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE),
+    )
+    production_selection["production_number_of_results"] = None
+    production_selection["user_approved_design"] = False
+    probe["production_selection"] = production_selection
+    old_concurrency = dict(old_concurrency)
+    old_concurrency["records"] = [
+        _mark_legacy_forward_span_invalid(record)
+        for record in old_concurrency.get("records", [])
+    ]
+    if old_concurrency.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2":
+        old_concurrency["decision"] = "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2"
+    old_concurrency["user_approved_design"] = False
     first_record = probe["sequential_records"][0]
     return {
-        "status": old_bounded.get("status", "COMPLETE"),
+        "status": "HISTORICAL_SANITIZED_EVIDENCE_RETAINED; FORWARD_COVERAGE_INVALIDATED",
         "credential_preflight": "PRESENT",
         "diagnostic_anchor_dep_arr_time": first_record.get("requested_dep_arr_time"),
         "representatives": probe["representatives"],
         "result_limit_probe": probe,
+        "historical_invalidated_sequential_records": probe.get("sequential_records", []),
+        "historical_invalidated_sequential_summary_by_result_limit": probe.get("summary_by_result_limit", {}),
         "bounded_concurrency_probe": old_concurrency,
         "sequential_duration_evidence": old_sequential,
         "http_attempts_consumed": 0,
@@ -1610,6 +2083,38 @@ def _reuse_existing_live_diagnostics(
         "request_headers_persisted": False,
         "api_key_persisted": False,
     }
+
+
+def _mark_legacy_forward_span_invalid(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain old sanitized records without treating their span as coverage."""
+
+    updated = dict(record)
+    updated["forward_temporal_span_status"] = "INVALID_FOR_FORWARD_COVERAGE_DECISION"
+    updated["forward_coverage_seconds"] = None
+    updated["forward_coverage_status"] = "NOT_RECONSTRUCTABLE_FROM_SANITIZED_AGGREGATE"
+    updated["returned_thiscall_event_count"] = None
+    updated["events_before_anchor_count"] = None
+    updated["events_at_or_after_anchor_count"] = None
+    updated["earliest_thiscall_arrival"] = None
+    updated["latest_thiscall_arrival"] = None
+    return updated
+
+
+def _mark_legacy_summary_invalid(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Add an explicit invalidation marker to an old result-limit summary."""
+
+    updated = dict(summary)
+    if "forward_temporal_span_statistics_seconds" in updated:
+        updated["legacy_forward_temporal_span_statistics_seconds"] = updated[
+            "forward_temporal_span_statistics_seconds"
+        ]
+    updated["forward_coverage_statistics_seconds"] = value_statistics([])
+    updated["forward_coverage_metric_basis"] = (
+        "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime"
+    )
+    updated["forward_temporal_span_statistics_status"] = "INVALID_FOR_FORWARD_COVERAGE_DECISION"
+    updated["legacy_forward_temporal_span_status"] = "INVALID_FOR_FORWARD_COVERAGE_DECISION"
+    return updated
 
 
 def build_evidence(
@@ -1621,6 +2126,7 @@ def build_evidence(
     live_diagnostics: Mapping[str, Any] | None = None,
     prior_live_attempts: int = 0,
     reuse_existing_live: bool = False,
+    additional_mdd_requests_approved: bool = False,
 ) -> dict[str, Any]:
     stage4_path = root / "docs" / "stages" / "04-cologne-scope-mode-evidence.json"
     stage4 = json.loads(stage4_path.read_text(encoding="utf-8")) if stage4_path.exists() else {}
@@ -1651,7 +2157,25 @@ def build_evidence(
     phase["phase_assignments"] = phase_assignments
     if live_diagnostics is None:
         if run_live_diagnostics and len(station_rows) == 50:
-            live = _run_live_diagnostics(station_rows)
+            if not additional_mdd_requests_approved:
+                raise Stage13Blocked(
+                    "corrected NumberOfResults diagnostic requires explicit approval for 24 additional MDD requests"
+                )
+            live = _run_corrected_result_limit_diagnostic(
+                station_rows,
+                prior_attempts=prior_live_attempts,
+                additional_requests_approved=True,
+            )
+            previous_live = _reuse_existing_live_diagnostics(root, station_rows)
+            if previous_live:
+                live["bounded_concurrency_probe"] = previous_live.get("bounded_concurrency_probe", {})
+                live["sequential_duration_evidence"] = previous_live.get("sequential_duration_evidence", {})
+                live["historical_invalidated_sequential_records"] = previous_live.get(
+                    "historical_invalidated_sequential_records", []
+                )
+                live["historical_invalidated_sequential_summary_by_result_limit"] = previous_live.get(
+                    "historical_invalidated_sequential_summary_by_result_limit", {}
+                )
         elif reuse_existing_live:
             live = _reuse_existing_live_diagnostics(root, station_rows) or {
                 "status": "NOT_RUN",
@@ -1676,10 +2200,17 @@ def build_evidence(
 
     number_limit_probe = live.get("result_limit_probe", {})
     production_selection = number_limit_probe.get("production_selection", {}) if isinstance(number_limit_probe, Mapping) else {}
-    selected_number_of_results = production_selection.get("production_number_of_results")
+    technically_evaluated_number_of_results = production_selection.get(
+        "technically_evaluated_number_of_results",
+        production_selection.get("production_number_of_results"),
+    )
+    selected_number_of_results = None
     cap2_probe = live.get("bounded_concurrency_probe", {})
-    cap2_approved = cap2_probe.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2"
-    cadence = candidate_cadence(PRODUCTION_TIER_PLAN, status="APPROVED_DESIGN_CANDIDATE")
+    cap2_evaluated = cap2_probe.get("decision") in {
+        "APPROVED_MAXIMUM_CONCURRENCY_2",
+        "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
+    }
+    cadence = candidate_cadence(PRODUCTION_TIER_PLAN, status="TECHNICALLY_EVALUATED_OPTION")
     alternatives = _cadence_alternatives(station_rows, legacy_reserved_requests=LEGACY7_RESERVED_MONTHLY_REQUESTS)
     quota = quota_projection_set(
         cadence["logical_requests_per_hour"],
@@ -1693,33 +2224,60 @@ def build_evidence(
         for item in quota["projections"]
     )
     heartbeat = _heartbeat_feasibility(phase, live)
+    corrected_metric_status = _corrected_diagnostic_metric_status(live)
+    number_of_results_comparison = _result_limit_comparison(station_rows, live)
+    cadence_boundary_review = _cadence_boundary_review(station_rows, stage12_evidence) if station_rows else {
+        "status": "NOT_ESTABLISHED_STATION_ROWS_UNAVAILABLE"
+    }
 
     blockers: list[str] = []
     if not stage12_approved:
         blockers.append("STAGE_12_PANEL_APPROVAL_REQUIRED")
     if density.get("status") != "COMPLETE":
         blockers.append("STATIC_EVENT_DENSITY_NOT_ESTABLISHED")
-    if selected_number_of_results != PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE:
+    if technically_evaluated_number_of_results != PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE:
         blockers.append("PRODUCTION_NUMBER_OF_RESULTS_EVIDENCE_NOT_ESTABLISHED")
-    if not cap2_approved:
+    if not cap2_evaluated:
         blockers.append("CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED")
     if not quota_safety_closed:
         blockers.append("QUOTA_HEADROOM_NOT_ESTABLISHED")
     if len(station_rows) == 50 and len(phase_assignments) != 50:
         blockers.append("PHASE_ASSIGNMENT_NOT_ESTABLISHED")
-    status = (
-        "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED"
-        if not blockers
-        else "CONDITIONALLY BLOCKED — " + "; ".join(blockers)
-    )
+    blockers.append("USER_DESIGN_APPROVAL_REQUIRED")
+    status = "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED"
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     result_limit_evidence = _historical_result_limit_evidence(root)
+    additional_request_gate = live.get(
+        "additional_request_gate",
+        {
+            "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
+            "required": True,
+            "approved": False,
+            "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
+            "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "prior_attempts_consumed": live.get("http_attempts_consumed_total", 0),
+            "cumulative_attempts_if_approved": int(live.get("http_attempts_consumed_total", 0))
+            + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "historical_ceiling_changed": False,
+            "additional_requests_issued": 0,
+            "corrected_live_diagnostic_issued": False,
+            "raw_responses_persisted": False,
+        },
+    )
     result_limit_evidence.update(
         {
-            "decision": production_selection.get("decision", "NOT_RUN"),
-            "production_number_of_results": selected_number_of_results,
+            "decision": (
+                "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
+                if technically_evaluated_number_of_results == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
+                else "NOT_ESTABLISHED"
+            ),
+            "technically_evaluated_number_of_results": technically_evaluated_number_of_results,
+            "production_number_of_results": None,
             "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+            "additional_request_gate": additional_request_gate,
+            "corrected_metric_status": corrected_metric_status,
             "bounded_live_diagnostic": {
                 "status": live.get("status"),
                 "http_attempts_consumed": live.get("http_attempts_consumed_total", 0),
@@ -1730,21 +2288,76 @@ def build_evidence(
                 "diagnostic_anchor_dep_arr_time": live.get("diagnostic_anchor_dep_arr_time"),
                 "representatives": live.get("representatives", []),
                 "result_limit_probe": number_limit_probe,
+                "additional_request_gate": additional_request_gate,
             },
-            "selection_limitation": "The provider theoretical maximum remains unknown; the selected N=30 is a directly supported production design value, not a provider-maximum claim.",
+            "selection_limitation": "N=30 remains undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses because all 24 attempts ended with NETWORK_OR_DNS_FAILURE.",
         }
     )
+    if live.get("historical_invalidated_sequential_records"):
+        result_limit_evidence["historical_invalidated_sequential_records"] = live[
+            "historical_invalidated_sequential_records"
+        ]
+        result_limit_evidence["historical_invalidated_sequential_summary_by_result_limit"] = live.get(
+            "historical_invalidated_sequential_summary_by_result_limit", {}
+        )
 
     remaining_limitations = [
         "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
         "CURRENT_SHARED_CREDENTIAL_USAGE_NOT_OBSERVED; FULL_DOCUMENTED_LEGACY7_CADENCE_RESERVED_CONSERVATIVELY",
         "STATIC_DENSITY_IS_PLANNING_EVIDENCE_ONLY_NOT_REALTIME_RESPONSE_COVERAGE",
+        "USER_DESIGN_APPROVAL_REQUIRED_FOR_NUMBER_OF_RESULTS_CADENCE_CONCURRENCY_AND_RETRY_POLICY",
+        corrected_metric_status,
     ]
+    user_decision_gate = {
+        "status": "USER_APPROVAL_REQUIRED",
+        "technical_evaluation_status": "TECHNICALLY_EVALUATED_OPTIONS_RECORDED",
+        "user_approval_received": False,
+        "all_material_design_choices_user_approved": False,
+        "stage_13_complete_allowed": False,
+        "production_number_of_results_approved": False,
+        "production_concurrency_approved": False,
+        "production_cadence_approved": False,
+        "production_retry_policy_approved": False,
+        "production_tier_membership_approved": False,
+        "material_decisions": {
+            "production_number_of_results": {
+                "technically_evaluated_option": technically_evaluated_number_of_results,
+                "user_approved_design": None,
+                "approved": False,
+            },
+            "production_concurrency": {
+                "technically_evaluated_option": MDD_CONCURRENCY_CAP if cap2_evaluated else None,
+                "user_approved_design": None,
+                "approved": False,
+            },
+            "production_cadence": {
+                "technically_evaluated_option": cadence,
+                "user_approved_design": None,
+                "approved": False,
+            },
+            "production_retry_policy": {
+                "technically_evaluated_option": {
+                    "max_attempts": PRODUCTION_MAX_ATTEMPTS_CANDIDATE,
+                    "automatic_retries": 0,
+                },
+                "user_approved_design": None,
+                "approved": False,
+            },
+        },
+        "approval_required_before": [
+            "recording a final Stage 13 production design",
+            "starting Stage 14",
+            "activating Tiered50",
+            "creating production database objects or Windows Scheduled Tasks",
+            "modifying Power BI",
+        ],
+    }
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-2.0",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-3.0",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
         "stage_13_status": status,
+        "user_decision_gate": user_decision_gate,
         "stage_12_gate": {
             "authoritative_completion_artifact_present": stage12_approved,
             "expected_artifact_paths": expected_stage12_paths,
@@ -1774,14 +2387,31 @@ def build_evidence(
         ],
         "candidate_cadence": {
             "historical_comparison": candidate_cadence(TIERED50_CANDIDATE),
-            "approved_design": cadence,
+            "technically_evaluated_option": cadence,
+            "user_approved_design": None,
             "cadence_selection_alternatives": alternatives,
-            "selection_reason": "The measured density supports the fixed 10/20/20 count split but not the old 5/10/30 cadence. Moving the middle tier to 15 minutes reduces recurring load to 240 requests/hour while N=30 remains above each tier's exact-feed P95 cadence-window density. The decision preserves useful high-density observation coverage and substantial shared-account headroom.",
+            "selection_reason": "The measured density technically supports the 10/20/20 count split with a 5/15/30-minute cadence option, while the old 5/10/30 comparison exceeds the normal planning envelope. This is an evaluated option pending explicit user approval.",
+        },
+        "cadence_boundary_review": cadence_boundary_review,
+        "number_of_results_comparison": number_of_results_comparison,
+        "user_review_preferences": {
+            "source": "explicit current user recommendation; not a final approval",
+            "preferred_cadence_candidate": "8/20/22 @ 5/15/30",
+            "preferred_bounded_production_concurrency": 2,
+            "preferred_concurrency_condition": "subject to Stage 14 end-to-end dry-run validation",
+            "preferred_production_retry_policy": {
+                "max_attempts": 2,
+                "bounded_retry_count": 1,
+                "approved_transient_failures_only": True,
+            },
+            "number_of_results": "UNDECIDED_PENDING_CORRECTED_DIAGNOSTIC",
+            "stage_13_complete_allowed": False,
         },
         "quota": {
             **quota,
-            "recommended_plan": {
+            "technically_evaluated_option": {
                 "normal_retry_policy": "MaxAttempts=1; zero automatic retries; failed targets are independently recorded and wait for the next current logical bucket",
+                "user_approved_design": None,
                 "evidence_supported_retry_allowance": 0,
                 "historical_legacy_retry_sensitivity": _round(LEGACY_ADDITIONAL_ATTEMPT_SHARE, 9),
                 "legacy_current_usage_observed": False,
@@ -1791,6 +2421,8 @@ def build_evidence(
                 "thirty_one_day_nominal_conservative_total": quota["projections"][0]["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
                 "thirty_one_day_ten_percent_stress_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
                 "quota_safety_gate_closed_without_fabricated_current_usage": quota_safety_closed,
+                "production_cadence_approved": False,
+                "production_retry_policy_approved": False,
             },
         },
         "credential_consumers": _credential_consumers(),
@@ -1848,9 +2480,11 @@ def build_evidence(
         "phase_staggering": phase,
         "heartbeat_feasibility": heartbeat,
         "sequential_vs_bounded_concurrency": {
-            "decision": "APPROVED_MAXIMUM_CONCURRENCY_2" if cap2_approved else "NOT_ESTABLISHED",
-            "approval_state": "APPROVED_FOR_STAGE14_DESIGN_ONLY" if cap2_approved else "NOT_APPROVED",
-            "maximum_concurrency": MDD_CONCURRENCY_CAP if cap2_approved else 1,
+            "decision": "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL" if cap2_evaluated else "NOT_ESTABLISHED",
+            "approval_state": "USER_APPROVAL_REQUIRED" if cap2_evaluated else "NOT_ESTABLISHED",
+            "technically_evaluated_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2_evaluated else None,
+            "maximum_concurrency": None,
+            "user_approved_design": False,
             "bounded_live_diagnostic": live.get("bounded_concurrency_probe", {}),
             "sequential_live_diagnostic": live.get("sequential_duration_evidence", {}),
             "historical_stage8_observed_average_wall_seconds_per_attempt": _round(3606.801 / 343, 6),
@@ -1880,7 +2514,7 @@ def build_evidence(
             "production_scheduler_implemented": False,
         },
         "failure_isolation": {
-            "decision": "APPROVED_REQUIREMENT",
+            "decision": "TECHNICALLY_EVALUATED_REQUIREMENT_PENDING_USER_APPROVAL",
             "one_failed_station_aborts_remaining_due_targets": False,
             "per_target_fields": [
                 "logical_due_bucket",
@@ -1904,10 +2538,11 @@ def build_evidence(
             "cutover_performed": False,
         },
         "readiness_decision": {
-            "production_cadence_approved": not any(item in {"STATIC_EVENT_DENSITY_NOT_ESTABLISHED", "QUOTA_HEADROOM_NOT_ESTABLISHED"} for item in blockers),
-            "production_tier_membership_approved": density.get("status") == "COMPLETE" and len(station_rows) == 50,
-            "production_number_of_results_approved": selected_number_of_results == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
-            "production_concurrency_approved": cap2_approved,
+            "production_cadence_approved": False,
+            "production_tier_membership_approved": False,
+            "production_number_of_results_approved": False,
+            "production_concurrency_approved": False,
+            "production_retry_policy_approved": False,
             "production_activation": "NOT_STARTED",
             "limitations": remaining_limitations,
             "blockers": blockers,
@@ -1927,10 +2562,14 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         "artifact_version",
         "record_type",
         "stage_13_status",
+        "user_decision_gate",
         "stage_12_gate",
         "candidate_cadence",
+        "cadence_boundary_review",
         "quota",
         "number_of_results",
+        "number_of_results_comparison",
+        "user_review_preferences",
         "static_event_density",
         "phase_staggering",
         "heartbeat_feasibility",
@@ -1955,6 +2594,42 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         raise ValueError("Stage 14 must remain not started")
     if evidence["readiness_decision"].get("tiered50_activated"):
         raise ValueError("Tiered50 must remain inactive")
+    gate = evidence["user_decision_gate"]
+    required_gate_flags = {
+        "production_number_of_results_approved",
+        "production_concurrency_approved",
+        "production_cadence_approved",
+        "production_retry_policy_approved",
+        "production_tier_membership_approved",
+    }
+    if any(gate.get(flag) is not False for flag in required_gate_flags):
+        raise ValueError("Stage 13 material design approval flags must remain false until explicit user approval")
+    if gate.get("all_material_design_choices_user_approved") is not False:
+        raise ValueError("Stage 13 cannot be complete without explicit user approval")
+    if evidence.get("stage_13_status") != "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED":
+        raise ValueError("Stage 13 must remain in the reopened user-approval state")
+    additional_gate = evidence["number_of_results"].get("additional_request_gate", {})
+    if additional_gate.get("approval_request") != ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST or {
+        "requested_additional_http_attempts": additional_gate.get("requested_additional_http_attempts"),
+        "prior_attempts_consumed": additional_gate.get("prior_attempts_consumed"),
+        "cumulative_attempts_if_approved": additional_gate.get("cumulative_attempts_if_approved"),
+        "historical_diagnostic_hard_ceiling": additional_gate.get("historical_diagnostic_hard_ceiling"),
+    } != {
+        "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "prior_attempts_consumed": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+        "cumulative_attempts_if_approved": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
+    }:
+        raise ValueError("corrected Stage 13 NumberOfResults request gate is not preserved")
+    issued = additional_gate.get("additional_requests_issued")
+    if not isinstance(issued, int) or not 0 <= issued <= ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
+        raise ValueError("corrected Stage 13 additional request count is outside the explicit gate")
+    if additional_gate.get("approved") is False and (issued != 0 or additional_gate.get("corrected_live_diagnostic_issued") is not False):
+        raise ValueError("corrected Stage 13 requests were issued without approval")
+    readiness = evidence["readiness_decision"]
+    for flag in required_gate_flags:
+        if readiness.get(flag) is not False:
+            raise ValueError(f"readiness decision {flag} must remain false")
 
 
 def main() -> int:
@@ -1973,7 +2648,12 @@ def main() -> int:
     parser.add_argument(
         "--run-live-diagnostics",
         action="store_true",
-        help="run the bounded sequential result-limit and cap-2 diagnostics",
+        help="run only the corrected 24-request result-limit diagnostic after explicit approval",
+    )
+    parser.add_argument(
+        "--approve-additional-mdd-requests",
+        action="store_true",
+        help="explicitly approve the separately gated 24 additional MDD requests",
     )
     parser.add_argument(
         "--prior-http-attempts",
@@ -1987,13 +2667,16 @@ def main() -> int:
         help="reuse the current sanitized live diagnostic without issuing new MDD requests",
     )
     args = parser.parse_args()
-    if args.prior_http_attempts < 0 or args.prior_http_attempts >= MDD_HTTP_ATTEMPT_HARD_MAX:
-        parser.error("--prior-http-attempts must be between 0 and 99")
+    if args.prior_http_attempts < 0:
+        parser.error("--prior-http-attempts must be non-negative")
+    if args.run_live_diagnostics and not args.approve_additional_mdd_requests:
+        parser.error("--run-live-diagnostics requires --approve-additional-mdd-requests")
     evidence = build_evidence(
         gtfs_zip=args.gtfs_zip,
         run_live_diagnostics=args.run_live_diagnostics,
         prior_live_attempts=args.prior_http_attempts,
         reuse_existing_live=args.reuse_existing_live_evidence,
+        additional_mdd_requests_approved=args.approve_additional_mdd_requests,
     )
     validate_evidence(evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)

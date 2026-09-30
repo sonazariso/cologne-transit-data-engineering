@@ -260,13 +260,15 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     provider-wide absence.
 94. This hardening change is prospective only. Stage 8 remains **COMPLETE**;
     the fixed `TIERED50_PANEL_V1` objective and the `250,000` monthly quota are
-    unchanged. Stage 13 now has an approved readiness design, but Stage 9+
-    physical implementation, scheduler work, and activation remain separately
-    gated.
+    unchanged. Stage 13 retains evidence-ready technically evaluated options,
+    but its material production choices require explicit user approval; Stage
+    9+ physical implementation, scheduler work, and activation remain
+    separately gated.
 95. The historical `10/20/20` Tiered50 plan at 5/10/30 minutes is comparison
-    evidence only. The approved Stage 13 design uses the fixed 10/20/20 panel
-    counts at 5/15/30 minutes, with station membership assigned from exact-feed
-    density evidence and never from Stage 12 `SelectionRank`.
+    evidence only. The technically evaluated Stage 13 option uses the fixed
+    10/20/20 panel counts at 5/15/30 minutes, with station membership assigned
+    from exact-feed density evidence and never from Stage 12 `SelectionRank`;
+    explicit user approval is required before it is final.
 96. The unique future realtime execution identity is
     `(SamplingTargetId, LogicalDueBucket)`. Claims must be atomic and durable;
     a duplicate claim must not issue another HTTP request.
@@ -279,23 +281,28 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 99. One failed station must not abort other due targets. Audit, HTTP status,
     attempts, duration, parser, persistence, and error metadata remain
     independently attributable to each target.
-100. Stage 13 approves `NumberOfResults=30` as a bounded production-design
-     value because exact-feed static P95 cadence-window density and the
-     bounded multi-representative N5/N10/N20/N30 diagnostic support it. The
-     provider theoretical maximum remains unknown; application validation
-     ranges are not provider evidence.
-101. Unbounded MDD concurrency is prohibited. Stage 13 approves a maximum of
-     two concurrent workers as a bounded design/Stage 14 validation input after
-     the cap-2 diagnostic showed no pressure signal and preserved failure
-     isolation. This is not a provider-wide rate-limit claim or activation.
+100. Stage 13 records `NumberOfResults=30` as a technically evaluated option
+     only. Exact-feed static P95 cadence-window density and the retained
+     bounded multi-representative N5/N10/N20/N30 evidence support evaluation,
+     but the historical mixed-call temporal-span fields are
+     `INVALID_FOR_FORWARD_COVERAGE_DECISION`. The corrected metric uses only
+     ThisCall arrival timing at or after the requested `DepArrTime` anchor; the
+     provider theoretical maximum remains unknown.
+101. Unbounded MDD concurrency is prohibited. Stage 13 records a maximum of
+     two concurrent workers as a technically evaluated bounded option after the
+     cap-2 diagnostic showed no pressure signal and preserved failure
+     isolation. Explicit user approval is required before it is treated as a
+     production decision; this is not a provider-wide rate-limit claim or
+     activation.
 102. Current shared-credential production usage must be auditable before
      activation. Missing current `ctl.MddCollectorRun` history must not be
      represented as zero usage, and completed/inactive diagnostics do not
      receive a standing quota reserve.
 103. Stage 13 readiness analysis does not authorize Stage 14, production
      scheduler implementation, database objects, Power BI work, Windows tasks,
-     or Tiered50 activation. The Stage 13 readiness design is complete, but
-     production remains not started.
+     or Tiered50 activation. Stage 13 is
+     `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`; production
+     remains not started.
 104. Stage 12 panel membership is fixed after approval. A dynamic station
      replacement is prohibited during collection; a membership change requires
      a new version with effective date/time, reason, and predecessor panel
@@ -323,7 +330,34 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      value. If it is missing, the diagnostic makes zero requests. The key,
      request headers, raw MDD payloads, and credential-bearing errors must not
      be persisted, printed, hashed, or committed; a 401/403 stops the run.
-111. The Stage 13 diagnostic budget is at most 100 new HTTP attempts, including
-     all result-limit and cap-2 checks. Reuse of already sanitized evidence does
-     not issue another request and must remain visibly distinguished from a new
-     live run.
+111. The historical Stage 13 diagnostic budget was at most 100 new HTTP
+     attempts, including the original result-limit and cap-2 checks. Reuse of
+     already sanitized evidence does not issue another request and must remain
+     visibly distinguished from a new live run. Any separately approved
+     extension must be recorded explicitly rather than silently changing the
+     historical ceiling.
+112. Stage 13 must distinguish `TECHNICALLY_EVALUATED_OPTION` from
+     `USER_APPROVED_DESIGN` in machine-readable evidence. Until explicit user
+     approval, `production_number_of_results_approved`,
+     `production_concurrency_approved`, `production_cadence_approved`, and
+     `production_retry_policy_approved` must all remain `false`, and Stage 13
+     must remain `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`.
+113. The historical Stage 13 `forward_temporal_span_seconds` values are not
+     valid result-limit forward-coverage evidence. Forward coverage must use
+     only the requested StopEventResult's THIS-call arrival timing at or after
+     the requested `DepArrTime` anchor; PreviousCall, OnwardCall, departure,
+     and route-context timings are contextual evidence only.
+114. Because raw MDD responses were not retained, the corrected Stage 13
+     NumberOfResults comparison required explicit approval for exactly 24
+     additional sequential MDD requests. That approval was granted and exactly
+     24 attempts were consumed, increasing cumulative diagnostic attempts from
+     90 to 114. The historical 100-attempt ceiling was not silently changed;
+     all 24 attempts ended in sanitized `NETWORK_OR_DNS_FAILURE`, and no
+     further diagnostic request is authorized by this result.
+115. The corrected Stage 13 run must report fixed N20, fixed N30, and
+     tier-specific A20/B30/C30 separately. If no valid THIS-call response
+     exists, NumberOfResults remains undecided; static P95 support does not
+     finalize a realtime result limit or establish a provider maximum. Current
+     user recommendations for `8/20/22 @ 5/15/30`, bounded concurrency 2, and
+     `MaxAttempts=2` with one bounded transient retry remain recommendations,
+     not approvals.
