@@ -363,6 +363,15 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   current feed has 864 valid Cologne parent-station candidates, all 864 with
   scheduled child-stop evidence, and 1,146,295 parent-level scheduled events.
   This is schedule/service evidence, not passenger demand.
+- The complete sanitized candidate universe is retained in
+  [the replay artifact](stages/12-50-station-candidate-evidence.json). It has
+  exactly 864 unique parent IDs and reproduces the approved panel offline via
+  the authoritative selector without the original ZIP, network, MDD, or an MDD
+  credential.
+- Stage 4 reference snapshot `VERSION__20260928_0042` and Stage 12 selection
+  snapshot `VERSION__20260930_0053` remain distinct. Count differences are
+  snapshot evolution; Stage 4 identity and classification semantics were
+  re-applied to Stage 12, and Stage 4 evidence was not overwritten.
 - All seven Legacy7 continuity anchors remain valid `location_type=1` parent
   identities with scheduled service and are preserved unchanged.
 - The selection uses continuity, current Stage 4 core-mode coverage, a fixed

@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Stage 12 auditability correction: retained the complete sanitized 864-parent
+  candidate universe for the exact approved feed snapshot and added offline
+  replay verification through the authoritative selector. The approved panel
+  and reserves are unchanged; no new MDD request was issued.
 - Stage 12 fixed 50-parent-station selection and versioning closeout:
   `TIERED50_PANEL_V1` with exactly 50 unique validated VRS parent stations,
   all seven Legacy7 continuity anchors, deterministic operational/geographic

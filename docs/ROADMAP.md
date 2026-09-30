@@ -332,7 +332,13 @@ Desktop execution is part of this stage.
 
 ## Stage 12 — 50-Station Selection — COMPLETE — APPROVED FIXED 50-STATION PANEL
 
-The [selection document](stages/12-50-station-selection.md), [completion decision](stages/12-50-station-selection-completion-decision.md), and [sanitized evidence](stages/12-50-station-selection-evidence.json) approve `TIERED50_PANEL_V1`: exactly 50 unique validated VRS parent stations, all seven Legacy7 continuity anchors, measured current core-mode representation, a fixed geographic-diversity review, and 50 successful bounded sequential MDD compatibility results. Membership is fixed after approval; later changes require a new version with effective time, reason, and predecessor.
+The [selection document](stages/12-50-station-selection.md), [completion decision](stages/12-50-station-selection-completion-decision.md), [sanitized evidence](stages/12-50-station-selection-evidence.json), and [complete candidate-universe replay artifact](stages/12-50-station-candidate-evidence.json) approve `TIERED50_PANEL_V1`: exactly 50 unique validated VRS parent stations, all seven Legacy7 continuity anchors, measured current core-mode representation, a fixed geographic-diversity review, and 50 successful bounded sequential MDD compatibility results. The candidate artifact reproduces the approved panel offline from the exact Stage 12 source metrics without network, the original ZIP, MDD, or credentials. Membership is fixed after approval; later changes require a new version with effective time, reason, and predecessor.
+
+Stage 4 semantics were approved against `VERSION__20260928_0042`; Stage 12
+selection used the later `VERSION__20260930_0053` snapshot. Parent, child-stop,
+and event-count differences are snapshot evolution, while Stage 4 identity and
+classification semantics were re-applied to Stage 12. Stage 13 production work
+and Stage 14 remain **NOT STARTED**.
 
 ## Stage 13 — Tiered Collector Readiness — CONDITIONALLY BLOCKED
 

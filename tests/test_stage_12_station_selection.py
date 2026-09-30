@@ -126,6 +126,88 @@ class Stage12StationSelectionTests(unittest.TestCase):
         self.assertNotIn("x-api-key:", rendered)
         self.assertNotIn("mdd-key.txt", rendered)
 
+    def test_candidate_universe_is_complete_unique_and_replayable(self) -> None:
+        artifact_path = REPOSITORY_ROOT / "docs/stages/12-50-station-candidate-evidence.json"
+        evidence_path = REPOSITORY_ROOT / "docs/stages/12-50-station-selection-evidence.json"
+        self.assertTrue(artifact_path.is_file())
+        candidate_artifact = stage12.load_candidate_universe_artifact(artifact_path)
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(candidate_artifact["candidate_count"], 864)
+        candidates = candidate_artifact["candidates"]
+        candidate_ids = [row["source_parent_station_id"] for row in candidates]
+        self.assertEqual(len(candidate_ids), len(set(candidate_ids)))
+        self.assertEqual(
+            candidate_artifact["candidate_fields"],
+            list(stage12.REPLAY_CANDIDATE_FIELDS),
+        )
+        for candidate in candidates:
+            self.assertEqual(
+                set(candidate_artifact["candidate_fields"]),
+                set(candidate),
+            )
+            self.assertTrue(candidate["source_identity_validated"])
+            self.assertTrue(candidate["source_hierarchy_validated"])
+            self.assertEqual(candidate["parent_location_type"], "1")
+
+        verification = stage12.replay_candidate_universe(
+            candidate_artifact,
+            expected_evidence=evidence,
+        )
+        self.assertTrue(verification["verified"])
+        self.assertEqual(verification["candidate_count"], 864)
+        self.assertTrue(verification["same_panel_ids_and_order"])
+        self.assertTrue(verification["same_panel_ranks"])
+        self.assertTrue(verification["same_selection_phases"])
+        self.assertTrue(verification["same_first_25_reserve_ids"])
+        self.assertTrue(verification["same_geographic_cell_count"])
+        self.assertTrue(verification["same_mode_coverage_outcome"])
+        self.assertTrue(verification["all_legacy7_anchors"])
+        self.assertFalse(verification["network_access_required"])
+        self.assertFalse(verification["mdd_credential_required"])
+
+    def test_candidate_universe_has_exact_approved_source_hash_and_no_raw_payloads(self) -> None:
+        artifact_path = REPOSITORY_ROOT / "docs/stages/12-50-station-candidate-evidence.json"
+        candidate_artifact = stage12.load_candidate_universe_artifact(artifact_path)
+        self.assertEqual(
+            candidate_artifact["feed_sha256"],
+            "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147",
+        )
+        self.assertEqual(candidate_artifact["feed_version"], "VERSION__20260930_0053")
+        self.assertEqual(
+            candidate_artifact["source_provenance"]["retrieval_timestamp_utc"],
+            "2026-09-30T10:42:58Z",
+        )
+        rendered = artifact_path.read_text(encoding="utf-8").lower()
+        for forbidden in (
+            "static_child_stop_ids",
+            "route_ids_by_mode",
+            "event_count_by_mode",
+            "x-api-key:",
+            "authorization:",
+            "mdd_api_key",
+        ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_stage12_replay_reference_and_stage_boundaries_are_preserved(self) -> None:
+        evidence_path = REPOSITORY_ROOT / "docs/stages/12-50-station-selection-evidence.json"
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        reference = evidence["candidate_universe_replay"]
+        self.assertTrue(reference["offline_replay_verified"])
+        self.assertFalse(reference["network_access_required"])
+        self.assertFalse(reference["mdd_credential_required"])
+        self.assertEqual(evidence["stage13_boundary"]["stage13_production_status"], "NOT STARTED")
+        self.assertFalse(evidence["stage13_boundary"]["stage14_cutover_started"])
+        gate_ids = {gate["id"] for gate in evidence["acceptance_gates"]}
+        self.assertIn("candidate_universe_replay_verified", gate_ids)
+        self.assertTrue(
+            next(
+                gate["passed"]
+                for gate in evidence["acceptance_gates"]
+                if gate["id"] == "candidate_universe_replay_verified"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

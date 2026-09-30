@@ -8,6 +8,8 @@
 
 **Evidence:** [12-50-station-selection-evidence.json](12-50-station-selection-evidence.json)
 
+**Candidate universe:** [12-50-station-candidate-evidence.json](12-50-station-candidate-evidence.json)
+
 ## Decision
 
 Approve the fixed 50-parent-station monitoring panel documented in [Stage 12 —
@@ -19,6 +21,11 @@ The panel is a monitored sample, not the whole Cologne network. Scheduled
 stop-event counts describe timetable/service richness only; they are not
 passenger demand. The selection rank is not a production collection tier.
 
+Stage 4 semantics were approved against reference snapshot
+`VERSION__20260928_0042`; Stage 12 selection used the later exact snapshot
+`VERSION__20260930_0053`. Count differences are snapshot evolution, while
+Stage 4 identity and classification semantics were re-applied to Stage 12.
+
 ## Acceptance gates
 
 All applicable gates passed in the machine-readable evidence:
@@ -28,7 +35,8 @@ All applicable gates passed in the machine-readable evidence:
 | Source provenance, current feed hash, size, version, date range, and row counts | PASS |
 | Validated Cologne parent-station population and source hierarchy | PASS |
 | Exactly 50 unique parent stations | PASS |
-| Deterministic, reproducible selection methodology | PASS |
+| Deterministic algorithm reproducibility and durable exact-input replayability | PASS |
+| Complete sanitized candidate-universe replay verification | PASS |
 | Selection evidence for every station | PASS |
 | Current core-mode representation measured | PASS |
 | Geographic concentration reviewed | PASS |
@@ -46,12 +54,20 @@ All applicable gates passed in the machine-readable evidence:
 - ZIP SHA-256: `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
 - Candidate population: 864 valid Cologne parent stations; all 864 have
   scheduled child-stop evidence.
+- Durable candidate universe: `docs/stages/12-50-station-candidate-evidence.json`,
+  exactly 864 unique candidates; exact-source hash and selection policy recorded.
+- Offline replay: the authoritative `select_panel` function reproduced the
+  same 50 IDs/ranks/phases, first 25 reserves, 25 geographic cells, all seven
+  Legacy7 anchors, and the same core-mode coverage outcome without network,
+  original ZIP, MDD, or an MDD credential.
 - Panel: 50 unique parent stations; 25 of 57 fixed geographic cells represented.
 - Legacy7: 7/7 verified and preserved.
 - MDD: 50 sequential HTTP attempts; 50 HTTP 200; 50 parse successes; 50 valid
   TRIAS application responses; 50 returned events; 50 source `StopPointRef`
   evidence matches; zero replacements; zero retries; zero raw responses
   persisted.
+
+The correction added no MDD request and did not alter the approved panel.
 
 ## Versioning approval
 

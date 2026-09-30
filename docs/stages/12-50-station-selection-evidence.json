@@ -16,8 +16,13 @@
       "passed": true
     },
     {
-      "detail": "Script version, fixed policy order, exposed lexicographic key, and geographic-cell parameters recorded.",
+      "detail": "Deterministic algorithm reproducibility is established by the authoritative select_panel function and recorded policy; durable exact-input replayability is established by candidate_universe_replay_verified.",
       "id": "selection_method_reproducible",
+      "passed": true
+    },
+    {
+      "detail": "Approved fixed panel reproduced offline from the sanitized complete Stage 12 candidate population; no network access, original ZIP, MDD, or MDD credential is required.",
+      "id": "candidate_universe_replay_verified",
       "passed": true
     },
     {
@@ -104,6 +109,37 @@
     "total_cologne_parent_station_candidates": 864,
     "valid_parent_location_type_required": "1",
     "validated_identity_rule": "stop_id starts with de:05315:"
+  },
+  "candidate_universe_replay": {
+    "artifact_path": "docs/stages/12-50-station-candidate-evidence.json",
+    "artifact_schema_version": "stage12-50-station-candidate-evidence-1.0",
+    "artifact_sha256": "a9426ac8a9cc7228f018e8fbb7f9b4d182be8b69960d9cae36cd0a61a93c10b7",
+    "candidate_count": 864,
+    "feed_version": "VERSION__20260930_0053",
+    "mdd_credential_required": false,
+    "network_access_required": false,
+    "offline_replay_verified": true,
+    "panel_version": "TIERED50_PANEL_V1",
+    "source_zip_sha256": "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147",
+    "stage12_schema_version": "stage12-50-station-selection-1.1",
+    "verification": {
+      "all_legacy7_anchors": true,
+      "artifact_expectations_match": true,
+      "candidate_count": 864,
+      "first_25_reserve_count": 25,
+      "mdd_credential_required": false,
+      "network_access_required": false,
+      "panel_count": 50,
+      "same_first_25_reserve_ids": true,
+      "same_geographic_cell_count": true,
+      "same_mode_coverage_outcome": true,
+      "same_panel_ids_and_order": true,
+      "same_panel_ranks": true,
+      "same_selection_phases": true,
+      "source_sha256": "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147",
+      "verified": true
+    },
+    "verified_at_utc": "2026-09-30T09:49:32.194051Z"
   },
   "fixed_panel_versioning_contract": {
     "future_stage14_preserves_existing_historical_sampling_identities": true,
@@ -37262,12 +37298,12 @@
       "valid_source_hierarchy": true
     }
   ],
-  "schema_version": "stage12-50-station-selection-1.0",
+  "schema_version": "stage12-50-station-selection-1.1",
   "script": {
     "name": "stage_12_50_station_selection",
     "raw_gtfs_committed": false,
     "source_zip_read_only": true,
-    "version": "stage-12-50-station-selection-1.0"
+    "version": "stage-12-50-station-selection-1.1"
   },
   "selection_methodology": {
     "geographic_cell_definition": {

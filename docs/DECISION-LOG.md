@@ -47,6 +47,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-041 | 2026-09-29 | Stage 10 operational-fact contract: derive one deterministic outcome per approved HIGH-confidence canonical service event and service date, preserve explicit Stage 9 run/version lineage, first/latest and NULL timing semantics, PlannedBay/EstimatedBay evidence, and non-causal Situation linkage | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED. The current checkout has no usable PostgreSQL/source-observation population and the current Stage 9 evidence contains zero HIGH rows |
 | D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
+| D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -865,3 +866,21 @@ This decision does not approve production cadence, tier membership,
 `NumberOfResults`, concurrency, retries, overlap claiming, a scheduler, Power
 BI, or Stage 14. Stage 13 production work remains NOT STARTED; the pre-existing
 Stage 13 readiness audit remains conditionally blocked.
+
+## D-045 — Stage 12 Durable Candidate-Universe Replay Correction
+
+The Stage 12 approval result and `TIERED50_PANEL_V1` membership remain
+unchanged. The exact approved Stage 12 source snapshot was available locally
+and matched feed version `VERSION__20260930_0053` and ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`. A
+sanitized repository artifact now retains all 864 eligible parent-station
+candidates and the exact selection-policy parameters, without raw GTFS or MDD
+payloads.
+
+The authoritative `select_panel` function replays that artifact offline and
+reproduces the approved 50 IDs, ranks, phases, first 25 reserves, all seven
+Legacy7 anchors, 25 selected geographic cells, and the same core-mode coverage
+outcome. The Stage 12 acceptance gates now distinguish deterministic algorithm
+reproducibility from durable exact-input replayability, and both are required
+for COMPLETE. No new MDD request was issued. Stage 13 production work and Stage
+14 remain NOT STARTED.

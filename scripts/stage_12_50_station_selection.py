@@ -56,7 +56,16 @@ from stage_04_cologne_scope_mode_audit import (  # noqa: E402
 )
 
 
-SCRIPT_VERSION = "stage-12-50-station-selection-1.0"
+SCRIPT_VERSION = "stage-12-50-station-selection-1.1"
+STAGE12_SCHEMA_VERSION = "stage12-50-station-selection-1.1"
+CANDIDATE_UNIVERSE_SCHEMA_VERSION = "stage12-50-station-candidate-evidence-1.0"
+CANDIDATE_UNIVERSE_ARTIFACT = Path(
+    "docs/stages/12-50-station-candidate-evidence.json"
+)
+STAGE12_FEED_VERSION = "VERSION__20260930_0053"
+STAGE12_ZIP_SHA256 = "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147"
+STAGE12_RETRIEVAL_TIMESTAMP_UTC = "2026-09-30T10:42:58Z"
+STAGE12_CANDIDATE_COUNT = 864
 PANEL_VERSION = "TIERED50_PANEL_V1"
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
 MDD_API_KEY_ENV = "MDD_API_KEY"
@@ -376,6 +385,15 @@ def _candidate_copy(candidate: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(candidate, ensure_ascii=False))
 
 
+def candidate_modes(candidate: Mapping[str, Any]) -> list[str]:
+    """Return the approved mode set used by the authoritative selector."""
+
+    modes = candidate.get("approved_mode_set")
+    if modes is None:
+        modes = candidate.get("observed_mode_set", [])
+    return sorted({str(mode) for mode in modes})
+
+
 def select_panel(
     candidates: Sequence[Mapping[str, Any]],
     *,
@@ -419,7 +437,7 @@ def select_panel(
         )
 
     represented_modes = {
-        mode for row in selected for mode in row.get("observed_mode_set", []) if mode in core_modes
+        mode for row in selected for mode in candidate_modes(row) if mode in core_modes
     }
     mode_additions: list[dict[str, str]] = []
     for mode in sorted(core_modes):
@@ -429,7 +447,7 @@ def select_panel(
             candidate
             for candidate in candidates
             if candidate["source_parent_station_id"] not in selected_ids
-            and mode in candidate.get("observed_mode_set", [])
+            and mode in candidate_modes(candidate)
         ]
         if not mode_candidates:
             continue
@@ -557,8 +575,8 @@ def geographic_review(
             distance = haversine_km(first, second)
             if distance is None or distance > NEARBY_REVIEW_RADIUS_KM:
                 continue
-            first_modes = set(first.get("observed_mode_set", []))
-            second_modes = set(second.get("observed_mode_set", []))
+            first_modes = set(candidate_modes(first))
+            second_modes = set(candidate_modes(second))
             nearby_pairs.append(
                 {
                     "distance_km": round(distance, 3),
@@ -984,6 +1002,486 @@ def derive_population(zip_path: Path, retrieved_at_utc: str) -> dict[str, Any]:
         }
 
 
+REPLAY_CANDIDATE_FIELDS = (
+    "source_parent_station_id",
+    "station_name",
+    "latitude",
+    "longitude",
+    "geographic_cell",
+    "parent_location_type",
+    "source_identity_validated",
+    "source_hierarchy_validated",
+    "static_child_stop_count",
+    "scheduled_event_count",
+    "distinct_route_count",
+    "approved_mode_set",
+    "distinct_approved_mode_count",
+    "active_child_stop_count",
+    "scheduled_service_day_count",
+    "continuity_anchor",
+)
+
+
+def sanitize_candidate_for_replay(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only the metrics needed by the authoritative selection policy."""
+
+    parent_id = str(candidate.get("source_parent_station_id", ""))
+    modes = candidate_modes(candidate)
+    return {
+        "source_parent_station_id": parent_id,
+        "station_name": str(candidate.get("station_name", "")),
+        "latitude": candidate.get("latitude"),
+        "longitude": candidate.get("longitude"),
+        "geographic_cell": candidate.get("geographic_cell"),
+        "parent_location_type": str(candidate.get("parent_location_type", "")),
+        "source_identity_validated": bool(candidate.get("source_identity_validated")),
+        "source_hierarchy_validated": bool(
+            candidate.get(
+                "source_hierarchy_validated",
+                candidate.get("valid_source_hierarchy", False),
+            )
+        ),
+        "static_child_stop_count": int(candidate.get("static_child_stop_count", 0)),
+        "scheduled_event_count": int(candidate.get("scheduled_event_count", 0)),
+        "distinct_route_count": int(candidate.get("distinct_route_count", 0)),
+        "approved_mode_set": modes,
+        "distinct_approved_mode_count": int(
+            candidate.get("distinct_approved_mode_count", len(set(modes) & set(CORE_MODES)))
+        ),
+        "active_child_stop_count": int(candidate.get("active_child_stop_count", 0)),
+        "scheduled_service_day_count": int(
+            candidate.get("scheduled_service_day_count", 0)
+        ),
+        "continuity_anchor": bool(
+            candidate.get("continuity_anchor", parent_id in LEGACY7_IDS)
+        ),
+    }
+
+
+def selection_policy_parameters() -> dict[str, Any]:
+    """Return the complete fixed policy contract used by ``select_panel``."""
+
+    return {
+        "policy_order": [
+            "Legacy7 continuity anchors",
+            "current Stage 4 core-mode coverage for any missing mode",
+            "one operationally strongest candidate per new fixed geographic cell",
+            "lexicographic operational-richness fill",
+        ],
+        "panel_size": 50,
+        "legacy7_ids": list(LEGACY7_IDS),
+        "core_modes": list(CORE_MODES),
+        "geographic_cell_definition": {
+            "latitude_cell_degrees": GEOGRAPHIC_CELL_LAT_DEGREES,
+            "longitude_cell_degrees": GEOGRAPHIC_CELL_LON_DEGREES,
+            "target_distinct_cells": GEOGRAPHIC_SPREAD_TARGET,
+            "coordinates_are_secondary_evidence_only": True,
+        },
+        "richness_key_order": [
+            "scheduled_event_count_descending",
+            "distinct_route_count_descending",
+            "distinct_approved_mode_count_descending",
+            "active_child_stop_count_descending",
+            "scheduled_service_day_count_descending",
+            "source_parent_station_id_ascending_tiebreaker",
+        ],
+    }
+
+
+def _mode_coverage_replay_outcome(
+    selected: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    represented = sorted(
+        {
+            mode
+            for candidate in selected
+            for mode in candidate_modes(candidate)
+            if mode in CORE_MODES
+        }
+    )
+    return {
+        "core_modes": list(CORE_MODES),
+        "represented_core_modes": represented,
+        "unrepresented_core_modes": sorted(set(CORE_MODES) - set(represented)),
+        "selected_station_count_by_mode": {
+            mode: sum(mode in candidate_modes(candidate) for candidate in selected)
+            for mode in CORE_MODES
+        },
+    }
+
+
+def _assert_exact_stage12_snapshot(source_provenance: Mapping[str, Any]) -> None:
+    if (
+        source_provenance.get("feed_version") != STAGE12_FEED_VERSION
+        or source_provenance.get("zip_sha256") != STAGE12_ZIP_SHA256
+    ):
+        raise Stage12Blocked("EXACT_STAGE12_SOURCE_SNAPSHOT_NOT_AVAILABLE")
+
+
+def validate_candidate_universe_artifact(artifact: Mapping[str, Any]) -> None:
+    """Validate the sanitized, exact-snapshot candidate-universe artifact."""
+
+    required_keys = {
+        "schema_version",
+        "stage12_schema_version",
+        "stage",
+        "panel_version",
+        "script",
+        "feed_version",
+        "feed_sha256",
+        "candidate_count",
+        "generated_at_utc",
+        "source_url",
+        "source_provenance",
+        "selection_policy",
+        "candidate_fields",
+        "candidates",
+        "replay_expectations",
+    }
+    missing = sorted(required_keys - set(artifact))
+    if missing:
+        raise Stage12Blocked(
+            "candidate universe artifact is missing required keys: " + ", ".join(missing)
+        )
+    if artifact["schema_version"] != CANDIDATE_UNIVERSE_SCHEMA_VERSION:
+        raise Stage12Blocked("unexpected candidate universe artifact schema version")
+    if artifact["stage12_schema_version"] != STAGE12_SCHEMA_VERSION:
+        raise Stage12Blocked("candidate universe artifact has an unexpected Stage 12 schema version")
+    if artifact["stage"] != 12 or artifact["panel_version"] != PANEL_VERSION:
+        raise Stage12Blocked("candidate universe artifact has an unexpected Stage 12 identity")
+    if artifact["script"].get("version") != SCRIPT_VERSION:
+        raise Stage12Blocked("candidate universe artifact has an unexpected script version")
+    if artifact["feed_version"] != STAGE12_FEED_VERSION:
+        raise Stage12Blocked("candidate universe artifact has an unexpected feed version")
+    if artifact["feed_sha256"] != STAGE12_ZIP_SHA256:
+        raise Stage12Blocked("EXACT_STAGE12_SOURCE_SNAPSHOT_NOT_AVAILABLE")
+    if artifact["source_url"] != OFFICIAL_SOURCE_URL:
+        raise Stage12Blocked("candidate universe artifact has an unexpected source URL")
+    source_provenance = artifact["source_provenance"]
+    if (
+        source_provenance.get("source_url") != OFFICIAL_SOURCE_URL
+        or source_provenance.get("feed_version") != STAGE12_FEED_VERSION
+        or source_provenance.get("zip_sha256") != STAGE12_ZIP_SHA256
+    ):
+        raise Stage12Blocked("candidate universe source provenance does not reconcile")
+    policy = artifact["selection_policy"]
+    fixed_policy = selection_policy_parameters()
+    if any(policy.get(key) != value for key, value in fixed_policy.items()):
+        raise Stage12Blocked("candidate universe selection policy does not reconcile")
+    if artifact["candidate_fields"] != list(REPLAY_CANDIDATE_FIELDS):
+        raise Stage12Blocked("candidate universe artifact replay field contract changed")
+
+    candidates = artifact["candidates"]
+    if not isinstance(candidates, list) or len(candidates) != STAGE12_CANDIDATE_COUNT:
+        raise Stage12Blocked("candidate universe artifact must contain exactly 864 candidates")
+    if artifact["candidate_count"] != len(candidates):
+        raise Stage12Blocked("candidate universe artifact candidate count does not reconcile")
+    candidate_ids = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            raise Stage12Blocked("candidate universe artifact contains a non-object candidate")
+        missing_fields = [
+            field for field in REPLAY_CANDIDATE_FIELDS if field not in candidate
+        ]
+        if missing_fields:
+            raise Stage12Blocked(
+                "candidate is missing replay fields: " + ", ".join(missing_fields)
+            )
+        parent_id = str(candidate["source_parent_station_id"])
+        candidate_ids.append(parent_id)
+        if not parent_id.startswith(COLOGNE_PREFIX):
+            raise Stage12Blocked("candidate universe contains a non-Cologne parent identity")
+        if candidate["parent_location_type"] != "1":
+            raise Stage12Blocked("candidate universe contains a non-parent station")
+        if not candidate["source_identity_validated"]:
+            raise Stage12Blocked("candidate universe contains an unvalidated source identity")
+        if not candidate["source_hierarchy_validated"]:
+            raise Stage12Blocked("candidate universe contains an unvalidated source hierarchy")
+        modes = candidate["approved_mode_set"]
+        if modes != sorted(set(modes)):
+            raise Stage12Blocked("candidate approved mode sets must be sorted and unique")
+        if candidate["distinct_approved_mode_count"] != len(
+            set(modes) & set(CORE_MODES)
+        ):
+            raise Stage12Blocked("candidate approved mode count does not reconcile")
+        if candidate["continuity_anchor"] != (parent_id in LEGACY7_IDS):
+            raise Stage12Blocked("candidate Legacy7 continuity flag does not reconcile")
+        if candidate["geographic_cell"] != geo_cell(
+            candidate["latitude"], candidate["longitude"]
+        ):
+            raise Stage12Blocked("candidate geographic cell does not reconcile to coordinates")
+        for field in (
+            "static_child_stop_count",
+            "scheduled_event_count",
+            "distinct_route_count",
+            "distinct_approved_mode_count",
+            "active_child_stop_count",
+            "scheduled_service_day_count",
+        ):
+            if not isinstance(candidate[field], int) or candidate[field] < 0:
+                raise Stage12Blocked(f"candidate metric is not a non-negative integer: {field}")
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise Stage12Blocked("candidate universe artifact contains duplicate parent identities")
+
+    expectations = artifact["replay_expectations"]
+    expectation_keys = {
+        "selection_rank_ordered_parent_ids",
+        "selection_phases",
+        "first_25_reserve_parent_ids",
+        "selected_geographic_cell_count",
+        "mode_coverage_outcome",
+    }
+    if not expectation_keys <= set(expectations):
+        raise Stage12Blocked("candidate universe artifact is missing replay expectations")
+    if len(expectations["selection_rank_ordered_parent_ids"]) != 50:
+        raise Stage12Blocked("candidate universe replay expectations must contain 50 panel IDs")
+    if len(expectations["selection_phases"]) != 50:
+        raise Stage12Blocked("candidate universe replay expectations must contain 50 phases")
+    if len(expectations["first_25_reserve_parent_ids"]) != 25:
+        raise Stage12Blocked("candidate universe replay expectations must contain 25 reserves")
+
+
+def build_candidate_universe_artifact(
+    population: Mapping[str, Any],
+    *,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Build the durable sanitized candidate universe for the approved snapshot."""
+
+    source_provenance = population["source_provenance"]
+    _assert_exact_stage12_snapshot(source_provenance)
+    candidates = [
+        sanitize_candidate_for_replay(candidate)
+        for candidate in population["candidates"]
+    ]
+    if len(candidates) != STAGE12_CANDIDATE_COUNT:
+        raise Stage12Blocked("EXACT_STAGE12_SOURCE_SNAPSHOT_NOT_AVAILABLE")
+    candidates = sorted(candidates, key=lambda row: row["source_parent_station_id"])
+    selected, reserves, selection_metadata = select_panel(candidates)
+    mode_outcome = _mode_coverage_replay_outcome(selected)
+    artifact = {
+        "schema_version": CANDIDATE_UNIVERSE_SCHEMA_VERSION,
+        "stage12_schema_version": STAGE12_SCHEMA_VERSION,
+        "stage": 12,
+        "panel_version": PANEL_VERSION,
+        "script": {
+            "name": "stage_12_50_station_selection",
+            "version": SCRIPT_VERSION,
+        },
+        "feed_version": source_provenance["feed_version"],
+        "feed_sha256": source_provenance["zip_sha256"],
+        "candidate_count": len(candidates),
+        "generated_at_utc": generated_at_utc
+        or dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source_url": OFFICIAL_SOURCE_URL,
+        "source_provenance": {
+            "source_url": OFFICIAL_SOURCE_URL,
+            "official_source_page_url": OFFICIAL_SOURCE_PAGE_URL,
+            "feed_version": source_provenance["feed_version"],
+            "zip_sha256": source_provenance["zip_sha256"],
+            "zip_bytes": source_provenance["zip_bytes"],
+            "retrieval_timestamp_utc": source_provenance["retrieval_timestamp_utc"],
+            "raw_gtfs_committed": False,
+            "raw_mdd_responses_committed": False,
+            "secrets_committed": False,
+        },
+        "selection_policy": {
+            **selection_policy_parameters(),
+            "source_population_occupied_candidate_cells": selection_metadata[
+                "geographic_cell_definition"
+            ]["occupied_candidate_cells"],
+        },
+        "candidate_fields": list(REPLAY_CANDIDATE_FIELDS),
+        "candidates": candidates,
+        "replay_expectations": {
+            "selection_rank_ordered_parent_ids": [
+                row["source_parent_station_id"] for row in selected
+            ],
+            "selection_phases": [row["selection_phase"] for row in selected],
+            "first_25_reserve_parent_ids": [
+                row["source_parent_station_id"] for row in reserves[:25]
+            ],
+            "selected_geographic_cell_count": selection_metadata[
+                "selected_geographic_cells"
+            ],
+            "mode_coverage_outcome": mode_outcome,
+        },
+    }
+    validate_candidate_universe_artifact(artifact)
+    return artifact
+
+
+def generate_candidate_universe_artifact(
+    gtfs_zip: Path,
+    *,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Derive candidate evidence only from the exact approved Stage 12 ZIP."""
+
+    zip_path = gtfs_zip.expanduser().resolve()
+    if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
+        raise Stage12Blocked("EXACT_STAGE12_SOURCE_SNAPSHOT_NOT_AVAILABLE")
+    if sha256_file(zip_path) != STAGE12_ZIP_SHA256:
+        raise Stage12Blocked("EXACT_STAGE12_SOURCE_SNAPSHOT_NOT_AVAILABLE")
+    population = derive_population(zip_path, STAGE12_RETRIEVAL_TIMESTAMP_UTC)
+    return build_candidate_universe_artifact(
+        population,
+        generated_at_utc=generated_at_utc,
+    )
+
+
+def write_candidate_universe_artifact(
+    artifact: Mapping[str, Any],
+    output_path: Path,
+) -> None:
+    output_path = output_path.expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_candidate_universe_artifact(path: Path) -> dict[str, Any]:
+    path = path.expanduser().resolve()
+    try:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Stage12Blocked(f"cannot read candidate universe artifact: {path}") from exc
+    if not isinstance(artifact, Mapping):
+        raise Stage12Blocked("candidate universe artifact must be a JSON object")
+    validate_candidate_universe_artifact(artifact)
+    return dict(artifact)
+
+
+def replay_candidate_universe(
+    artifact: Mapping[str, Any],
+    *,
+    expected_evidence: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replay the authoritative selector from sanitized candidates only."""
+
+    validate_candidate_universe_artifact(artifact)
+    selected, reserves, selection_metadata = select_panel(artifact["candidates"])
+    expectations = artifact["replay_expectations"]
+    actual_panel_ids = [row["source_parent_station_id"] for row in selected]
+    actual_phases = [row["selection_phase"] for row in selected]
+    actual_reserve_ids = [
+        row["source_parent_station_id"] for row in reserves[:25]
+    ]
+    actual_mode_outcome = _mode_coverage_replay_outcome(selected)
+
+    expected_panel_ids = expectations["selection_rank_ordered_parent_ids"]
+    expected_panel_ranks = list(range(1, 51))
+    expected_phases = expectations["selection_phases"]
+    expected_reserve_ids = expectations["first_25_reserve_parent_ids"]
+    expected_geo_count = expectations["selected_geographic_cell_count"]
+    expected_mode_outcome = expectations["mode_coverage_outcome"]
+    if expected_evidence is not None:
+        expected_panel = expected_evidence.get("panel", [])
+        expected_panel_ids = [
+            row.get("source_parent_station_id")
+            for row in expected_panel
+            if isinstance(row, Mapping)
+        ]
+        expected_panel_ranks = [
+            row.get("SelectionRank")
+            for row in expected_panel
+            if isinstance(row, Mapping)
+        ]
+        expected_phases = [
+            row.get("selection_phase")
+            for row in expected_panel
+            if isinstance(row, Mapping)
+        ]
+        expected_reserve_ids = [
+            row.get("source_parent_station_id")
+            for row in expected_evidence.get("reserve_candidates", [])[:25]
+            if isinstance(row, Mapping)
+        ]
+        expected_geo_count = expected_evidence.get("selection_methodology", {}).get(
+            "selected_geographic_cells"
+        )
+        expected_mode_rows = expected_evidence.get("mode_coverage", {}).get(
+            "core_mode_rows", []
+        )
+        expected_mode_outcome = {
+            "core_modes": list(CORE_MODES),
+            "represented_core_modes": sorted(
+                row["mode"]
+                for row in expected_mode_rows
+                if row.get("selected_station_count", 0) > 0
+            ),
+            "unrepresented_core_modes": sorted(
+                row["mode"]
+                for row in expected_mode_rows
+                if row.get("selected_station_count", 0) == 0
+            ),
+            "selected_station_count_by_mode": {
+                row["mode"]: row.get("selected_station_count", 0)
+                for row in expected_mode_rows
+            },
+        }
+
+    checks = {
+        "same_panel_ids_and_order": actual_panel_ids == expected_panel_ids,
+        "same_panel_ranks": [row["SelectionRank"] for row in selected]
+        == expected_panel_ranks,
+        "same_selection_phases": actual_phases == expected_phases,
+        "all_legacy7_anchors": set(LEGACY7_IDS) <= set(actual_panel_ids),
+        "same_first_25_reserve_ids": actual_reserve_ids == expected_reserve_ids,
+        "same_geographic_cell_count": selection_metadata["selected_geographic_cells"]
+        == expected_geo_count,
+        "same_mode_coverage_outcome": actual_mode_outcome == expected_mode_outcome,
+        "artifact_expectations_match": (
+            actual_panel_ids == expectations["selection_rank_ordered_parent_ids"]
+            and actual_phases == expectations["selection_phases"]
+            and actual_reserve_ids == expectations["first_25_reserve_parent_ids"]
+            and selection_metadata["selected_geographic_cells"]
+            == expectations["selected_geographic_cell_count"]
+            and actual_mode_outcome == expectations["mode_coverage_outcome"]
+        ),
+    }
+    return {
+        "verified": all(checks.values()),
+        "candidate_count": len(artifact["candidates"]),
+        "source_sha256": artifact["feed_sha256"],
+        "panel_count": len(selected),
+        "first_25_reserve_count": len(actual_reserve_ids),
+        "network_access_required": False,
+        "mdd_credential_required": False,
+        **checks,
+    }
+
+
+def candidate_universe_replay_reference(
+    artifact_path: Path,
+    artifact: Mapping[str, Any],
+    verification: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        relative_path = artifact_path.expanduser().resolve().relative_to(REPOSITORY_ROOT)
+    except ValueError as exc:
+        raise Stage12Blocked("candidate universe artifact must be inside the repository") from exc
+    return {
+        "artifact_path": relative_path.as_posix(),
+        "artifact_sha256": sha256_file(artifact_path),
+        "artifact_schema_version": artifact["schema_version"],
+        "stage12_schema_version": artifact["stage12_schema_version"],
+        "panel_version": artifact["panel_version"],
+        "feed_version": artifact["feed_version"],
+        "source_zip_sha256": artifact["feed_sha256"],
+        "candidate_count": artifact["candidate_count"],
+        "offline_replay_verified": bool(verification["verified"]),
+        "network_access_required": False,
+        "mdd_credential_required": False,
+        "verified_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "verification": dict(verification),
+    }
+
+
 def scalar_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -1257,7 +1755,7 @@ def mode_coverage(
     for mode in CORE_MODES:
         network_events = int(mode_metrics[mode]["cologne_scheduled_stop_events"])
         selected_events = sum(int(candidate.get("event_count_by_mode", {}).get(mode, 0)) for candidate in selected)
-        selected_stations = sum(mode in candidate.get("observed_mode_set", []) for candidate in selected)
+        selected_stations = sum(mode in candidate_modes(candidate) for candidate in selected)
         rows.append(
             {
                 "mode": mode,
@@ -1327,6 +1825,7 @@ def acceptance_gates(
     mode_rows: Sequence[Mapping[str, Any]],
     probe_summary: Mapping[str, Any],
     compatibility_requested: bool,
+    candidate_replay: Mapping[str, Any] | None,
     stage13_production_not_started: bool = True,
 ) -> list[dict[str, Any]]:
     candidate_validation = population["candidate_validation"]
@@ -1345,7 +1844,8 @@ def acceptance_gates(
         {"id": "source_provenance", "passed": bool(population["source_provenance"].get("zip_sha256")), "detail": "Official URL, retrieval timestamp, ZIP hash/size, feed version/date range, and relevant row counts recorded."},
         {"id": "cologne_parent_population_validated", "passed": candidate_validation["total_cologne_parent_station_candidates"] > 0 and not any(candidate_validation["duplicate_invalid_unresolved"].values()), "detail": "Validated location_type=1 direct-prefix parents with source hierarchy and resolved scheduled child events."},
         {"id": "exactly_50_unique_parent_stations", "passed": len(selected) == 50 and len({row["source_parent_station_id"] for row in selected}) == 50, "detail": "Final panel has exactly 50 unique parent-station IDs."},
-        {"id": "selection_method_reproducible", "passed": True, "detail": "Script version, fixed policy order, exposed lexicographic key, and geographic-cell parameters recorded."},
+        {"id": "selection_method_reproducible", "passed": bool(candidate_replay and candidate_replay.get("verified")), "detail": "Deterministic algorithm reproducibility is established by the authoritative select_panel function and recorded policy; durable exact-input replayability is established by candidate_universe_replay_verified."},
+        {"id": "candidate_universe_replay_verified", "passed": bool(candidate_replay and candidate_replay.get("verified")), "detail": "Approved fixed panel reproduced offline from the sanitized complete Stage 12 candidate population; no network access, original ZIP, MDD, or MDD credential is required."},
         {"id": "every_selected_station_has_evidence", "passed": all(row.get("scheduled_event_count", 0) > 0 and row.get("selection_reason") for row in selected), "detail": "Every selected row carries measured static evidence and a selection reason."},
         {"id": "current_core_mode_representation_measured", "passed": all(row["network_cologne_scheduled_stop_events"] > 0 and row["selected_station_count"] > 0 for row in mode_rows), "detail": "Every current core mode with evidence is represented and measured; zero-evidence modes are not invented."},
         {"id": "geographic_concentration_reviewed", "passed": True, "detail": "Fixed-cell coverage, concentration counts, nearby retained pairs, and central/Deutz/Mülheim diagnostics recorded."},
@@ -1402,17 +1902,57 @@ def build_evidence(
         row.setdefault("SelectionRank", len([item for item in selected if item["source_parent_station_id"] <= row["source_parent_station_id"]]))
         row["continuity_anchor"] = row["source_parent_station_id"] in LEGACY7_IDS
     mode_rows = mode_coverage(population, selected)
+    candidate_artifact_path = REPOSITORY_ROOT / CANDIDATE_UNIVERSE_ARTIFACT
+    candidate_replay: dict[str, Any]
+    candidate_replay_reference: dict[str, Any]
+    if candidate_artifact_path.is_file():
+        candidate_artifact = load_candidate_universe_artifact(candidate_artifact_path)
+        candidate_replay = replay_candidate_universe(
+            candidate_artifact,
+            expected_evidence={
+                "panel": selected,
+                "reserve_candidates": reserves[:25],
+                "selection_methodology": selection_metadata,
+                "mode_coverage": mode_rows,
+            },
+        )
+        candidate_replay_reference = candidate_universe_replay_reference(
+            candidate_artifact_path,
+            candidate_artifact,
+            candidate_replay,
+        )
+    else:
+        candidate_replay = {
+            "verified": False,
+            "candidate_count": 0,
+            "network_access_required": False,
+            "mdd_credential_required": False,
+        }
+        candidate_replay_reference = {
+            "artifact_path": CANDIDATE_UNIVERSE_ARTIFACT.as_posix(),
+            "artifact_schema_version": CANDIDATE_UNIVERSE_SCHEMA_VERSION,
+            "stage12_schema_version": STAGE12_SCHEMA_VERSION,
+            "panel_version": PANEL_VERSION,
+            "feed_version": population["source_provenance"].get("feed_version"),
+            "source_zip_sha256": population["source_provenance"].get("zip_sha256"),
+            "candidate_count": 0,
+            "offline_replay_verified": False,
+            "network_access_required": False,
+            "mdd_credential_required": False,
+            "verification": candidate_replay,
+        }
     gates = acceptance_gates(
         population=population,
         selected=selected,
         mode_rows=mode_rows["core_mode_rows"],
         probe_summary=probe_summary,
         compatibility_requested=probe_mdd,
+        candidate_replay=candidate_replay,
     )
     all_passed = all(gate["passed"] for gate in gates)
     status = "COMPLETE — APPROVED FIXED 50-STATION PANEL" if all_passed else "BLOCKED — STAGE 12 ACCEPTANCE GATE FAILED"
     return {
-        "schema_version": "stage12-50-station-selection-1.0",
+        "schema_version": STAGE12_SCHEMA_VERSION,
         "stage": 12,
         "status": status,
         "panel_version": PANEL_VERSION,
@@ -1433,6 +1973,7 @@ def build_evidence(
             "current_feed_reconciles_to_stage4_scope": True,
         },
         "candidate_population": population["candidate_validation"],
+        "candidate_universe_replay": candidate_replay_reference,
         "hierarchy_validation": population["hierarchy_validation"],
         "selection_methodology": selection_metadata,
         "legacy7_continuity": legacy_evidence(candidates_by_id, selected),
@@ -1483,6 +2024,7 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         "panel_version",
         "source_provenance",
         "candidate_population",
+        "candidate_universe_replay",
         "panel",
         "reserve_candidates",
         "mode_coverage",
@@ -1503,6 +2045,31 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         raise Stage12Blocked("evidence panel parent identities are not unique")
     if evidence["panel_version"] != PANEL_VERSION:
         raise Stage12Blocked("unexpected fixed panel version")
+    if evidence["schema_version"] != STAGE12_SCHEMA_VERSION:
+        raise Stage12Blocked("unexpected Stage 12 evidence schema version")
+    replay_reference = evidence["candidate_universe_replay"]
+    if replay_reference.get("artifact_path") != CANDIDATE_UNIVERSE_ARTIFACT.as_posix():
+        raise Stage12Blocked("unexpected candidate universe artifact path")
+    artifact_path = REPOSITORY_ROOT / replay_reference["artifact_path"]
+    if not artifact_path.is_file():
+        raise Stage12Blocked("durable candidate universe artifact is missing")
+    artifact = load_candidate_universe_artifact(artifact_path)
+    if replay_reference.get("artifact_sha256") != sha256_file(artifact_path):
+        raise Stage12Blocked("candidate universe artifact hash does not reconcile")
+    if replay_reference.get("source_zip_sha256") != STAGE12_ZIP_SHA256:
+        raise Stage12Blocked("candidate universe replay does not reference the approved Stage 12 source")
+    if evidence["source_provenance"].get("zip_sha256") != STAGE12_ZIP_SHA256:
+        raise Stage12Blocked("Stage 12 evidence source hash changed")
+    replay_verification = replay_candidate_universe(artifact, expected_evidence=evidence)
+    if not replay_reference.get("offline_replay_verified") or not replay_verification["verified"]:
+        raise Stage12Blocked("durable candidate universe offline replay is not verified")
+    gate_ids = {gate.get("id") for gate in evidence["acceptance_gates"]}
+    required_replay_gates = {
+        "selection_method_reproducible",
+        "candidate_universe_replay_verified",
+    }
+    if not required_replay_gates <= gate_ids:
+        raise Stage12Blocked("Stage 12 evidence is missing candidate-universe replay gates")
     if evidence["stage13_boundary"].get("production_cadence_approved"):
         raise Stage12Blocked("Stage 12 evidence cannot approve production cadence")
     if evidence["stage13_boundary"].get("production_tiers_approved"):
@@ -1517,13 +2084,96 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         raise Stage12Blocked("complete evidence contains a failed acceptance gate")
 
 
+def refresh_existing_evidence_replay_reference(
+    evidence_path: Path,
+    candidate_artifact_path: Path,
+) -> None:
+    """Add the offline replay reference without rerunning the MDD probe."""
+
+    evidence_path = evidence_path.expanduser().resolve()
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    if not isinstance(evidence, Mapping):
+        raise Stage12Blocked("existing Stage 12 evidence must be a JSON object")
+    artifact = load_candidate_universe_artifact(candidate_artifact_path)
+    verification = replay_candidate_universe(artifact, expected_evidence=evidence)
+    if not verification["verified"]:
+        raise Stage12Blocked(
+            "EXACT_STAGE12_CANDIDATE_REPLAY_MISMATCH: "
+            + json.dumps(verification, sort_keys=True)
+        )
+    reference = candidate_universe_replay_reference(
+        candidate_artifact_path,
+        artifact,
+        verification,
+    )
+    evidence = dict(evidence)
+    evidence["schema_version"] = STAGE12_SCHEMA_VERSION
+    script = dict(evidence.get("script", {}))
+    script["version"] = SCRIPT_VERSION
+    evidence["script"] = script
+    evidence["candidate_universe_replay"] = reference
+
+    updated_gates: list[dict[str, Any]] = []
+    replay_gate_added = False
+    for original_gate in evidence.get("acceptance_gates", []):
+        gate = dict(original_gate)
+        if gate.get("id") == "candidate_universe_replay_verified":
+            continue
+        if gate.get("id") == "selection_method_reproducible":
+            gate["passed"] = True
+            gate["detail"] = (
+                "Deterministic algorithm reproducibility is established by the "
+                "authoritative select_panel function and recorded policy; durable "
+                "exact-input replayability is established by "
+                "candidate_universe_replay_verified."
+            )
+        updated_gates.append(gate)
+        if gate.get("id") == "selection_method_reproducible" and not replay_gate_added:
+            updated_gates.append(
+                {
+                    "id": "candidate_universe_replay_verified",
+                    "passed": True,
+                    "detail": (
+                        "Approved fixed panel reproduced offline from the sanitized "
+                        "complete Stage 12 candidate population; no network access, "
+                        "original ZIP, MDD, or MDD credential is required."
+                    ),
+                }
+            )
+            replay_gate_added = True
+    if not replay_gate_added:
+        raise Stage12Blocked("existing Stage 12 evidence lacks selection_method_reproducible gate")
+
+    evidence["acceptance_gates"] = updated_gates
+    validate_evidence(evidence)
+    evidence_path.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gtfs-zip", required=True, type=Path)
+    parser.add_argument("--gtfs-zip", type=Path)
     parser.add_argument(
         "--output-json",
         type=Path,
         default=REPOSITORY_ROOT / "docs/stages/12-50-station-selection-evidence.json",
+    )
+    parser.add_argument(
+        "--candidate-universe-output",
+        type=Path,
+        default=REPOSITORY_ROOT / CANDIDATE_UNIVERSE_ARTIFACT,
+    )
+    parser.add_argument(
+        "--write-candidate-universe",
+        action="store_true",
+        help="write the sanitized candidate universe from the exact Stage 12 ZIP",
+    )
+    parser.add_argument(
+        "--refresh-existing-evidence-replay",
+        action="store_true",
+        help="add the offline candidate-universe replay reference without MDD",
     )
     parser.add_argument("--retrieved-at-utc")
     parser.add_argument("--probe-mdd", action="store_true")
@@ -1532,6 +2182,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.write_candidate_universe and args.refresh_existing_evidence_replay:
+        raise Stage12Blocked("candidate-universe write and evidence refresh are mutually exclusive")
+    if args.refresh_existing_evidence_replay:
+        if args.probe_mdd:
+            raise Stage12Blocked("evidence replay refresh never permits MDD requests")
+        refresh_existing_evidence_replay_reference(
+            args.output_json,
+            args.candidate_universe_output,
+        )
+        print(f"Stage 12 evidence replay reference refreshed: {args.output_json}")
+        return 0
+    if args.write_candidate_universe:
+        if args.gtfs_zip is None:
+            raise Stage12Blocked("--gtfs-zip is required when writing candidate evidence")
+        artifact = generate_candidate_universe_artifact(
+            args.gtfs_zip,
+            generated_at_utc=args.retrieved_at_utc,
+        )
+        write_candidate_universe_artifact(artifact, args.candidate_universe_output)
+        print(f"Stage 12 candidate universe written: {args.candidate_universe_output}")
+        print(f"Candidate count: {artifact['candidate_count']}")
+        print(f"Source ZIP SHA-256: {artifact['feed_sha256']}")
+        return 0
+    if args.gtfs_zip is None:
+        raise Stage12Blocked("--gtfs-zip is required for Stage 12 evidence generation")
     if args.probe_mdd:
         api_key = os.environ.get(MDD_API_KEY_ENV)
         print("MDD_API_KEY: PRESENT" if api_key else "MDD_API_KEY: MISSING", flush=True)

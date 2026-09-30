@@ -311,3 +311,8 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 108. Scheduled stop-event volume is timetable/service evidence, not passenger
      demand. Ridership must not be inferred or invented from static schedule
      density.
+109. A COMPLETE Stage 12 selection must retain a sanitized, exact-snapshot
+     candidate-universe artifact sufficient for offline replay through the
+     authoritative selector. The artifact must contain no raw GTFS ZIP, raw
+     MDD payload, or secret; deterministic algorithm reproducibility and exact
+     durable-input replayability are separate required gates.

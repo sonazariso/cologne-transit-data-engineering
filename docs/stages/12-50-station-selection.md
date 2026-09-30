@@ -5,6 +5,7 @@
 **Panel version:** `TIERED50_PANEL_V1`
 
 **Evidence:** [machine-readable Stage 12 evidence](12-50-station-selection-evidence.json)
+**Candidate universe:** [sanitized complete Stage 12 candidate evidence](12-50-station-candidate-evidence.json)
 **Completion decision:** [Stage 12 completion decision](12-50-station-selection-completion-decision.md)
 
 ## Scope and boundary
@@ -20,6 +21,14 @@ Membership is fixed after approval; a later membership change requires a new
 panel version. The historical Legacy7 identities remain in the panel.
 
 ## Current source provenance
+
+Stage 4 approved the reference semantics against snapshot
+`VERSION__20260928_0042` (ZIP SHA-256
+`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`). Stage 12
+selection used the later exact snapshot `VERSION__20260930_0053` recorded below.
+Differences in current parent, child-stop, and scheduled-event counts are feed
+snapshot evolution; the Stage 4 identity and classification semantics were
+re-applied to the Stage 12 snapshot. Stage 4 evidence was not overwritten.
 
 The approved Stage 4 VRS Global-ID source URL was retrieved once for this stage
 because the exact Stage 4 ZIP was not available locally. The raw ZIP was used
@@ -60,6 +69,13 @@ scheduled child-stop events. There are 2,276 validated child stop positions.
 The current scope contains 137 Cologne-serving route IDs. There are no
 duplicate, invalid, orphaned, or unresolved final candidate identities.
 
+The complete sanitized candidate population is retained in
+[12-50-station-candidate-evidence.json](12-50-station-candidate-evidence.json).
+It contains exactly 864 unique parent identities and only the identity,
+hierarchy, coordinate/cell, mode, and deterministic selection metrics needed
+for replay and audit. It contains no raw GTFS rows, raw GTFS ZIP, MDD payload,
+or credential.
+
 Scheduled stop-event volume is operational schedule evidence only. It is not
 passenger demand, and no passenger-volume or ridership source was used.
 
@@ -83,6 +99,14 @@ The current population occupies 57 fixed cells; the panel represents 25 cells
 (43.86%). The geographic pass is secondary and does not establish Cologne
 identity. The reserve list retains the next 25 candidates by the same exposed
 key; it is used only for an explicitly documented compatibility replacement.
+
+The repository test suite replays the selector directly from the sanitized
+candidate artifact by calling the same authoritative `select_panel` function.
+The replay is offline and verifies the exact panel IDs and ranks, selection
+phases, first 25 reserves, Legacy7 anchors, geographic-cell count, and
+core-mode coverage outcome. The `selection_method_reproducible` gate therefore
+separates deterministic algorithm reproducibility from durable exact-input
+replayability; both are required for COMPLETE.
 
 ## Approved fixed panel
 
@@ -242,6 +266,7 @@ concurrency, retry, claim, or cutover implementation was added.
 Created or updated for this closeout:
 
 - `docs/stages/12-50-station-selection.md`;
+- `docs/stages/12-50-station-candidate-evidence.json`;
 - `docs/stages/12-50-station-selection-evidence.json`;
 - `docs/stages/12-50-station-selection-completion-decision.md`;
 - `scripts/stage_12_50_station_selection.py`;
