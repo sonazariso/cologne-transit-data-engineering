@@ -55,9 +55,11 @@ diagnostics remain bounded acceptance evidence only.
 ## Quota and retry reserve
 
 The documented absolute provider ceiling remains 250,000 requests/month. The
-normal planning envelope remains 207,500–210,000. The approved nominal
-Tiered50 load, 10% retry reserve, Legacy7 reserve, and diagnostic reserve
-reconcile as follows:
+normal operational maximum is 210,000 requests/month, while 207,500 is the
+separate automatic-retry protection boundary. There is no minimum utilization
+requirement: the approved design may safely consume less than 207,500 and
+preserve additional quota headroom. The approved nominal Tiered50 load, 10%
+retry reserve, Legacy7 reserve, and diagnostic reserve reconcile as follows:
 
 | Month | Nominal Tiered50 | 10% retry reserve | Tiered50 with reserve | Legacy7 reserve | Diagnostic reserve | Conservative total |
 |---|---:|---:|---:|---:|---:|---:|
@@ -71,7 +73,8 @@ subject to the current heartbeat deadline and the explicit
 HTTP 401/403, deterministic request-contract failures, deterministic
 parser/schema failures, and deterministic TRIAS application errors are not
 retryable. A failed station is isolated from other due targets. MaxAttempts=2
-is bounded by the monthly 207,500 automatic-retry guardrail; it does not
+is bounded by the monthly 207,500 automatic-retry guardrail; a retry that would
+exceed that boundary is blocked, and the policy does not
 authorize unlimited retries.
 
 Current shared-credential usage remains unavailable through an established

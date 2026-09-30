@@ -140,14 +140,16 @@ for the authoritative closeout record.
   error, parser-lineage, gap, idempotency, and reconciliation requirements,
   including immediate append-only persistence of any observed source
   `RecordedAtTime` and protection from later NULL erasure. The conservative
-  monthly ceiling remains 250,000 requests; the operational planning envelope
-  is 207,500–210,000 requests/month (83–84%), with 40,000–42,500 requests
-  (16–17%) preserved as unallocated headroom. The 1200-attempt pilot maximum
-  is 0.48% of the full ceiling and approximately 0.57–0.58% of the planning
-  envelope. Stage 13 owns production cadence/readiness analysis and must size
-  normal production traffic inside that envelope. It uses protected temporary
-  raw responses only under the bounded 24-hour Stage 8 exception and a
-  diagnostic append-only JSONL harness because PostgreSQL remains deferred.
+  monthly ceiling remains 250,000 requests; the normal operational maximum is
+  210,000 requests/month and automatic retries are blocked above the separate
+  207,500 projected/current protection boundary. There is no minimum utilization
+  requirement; Stage 13's approved 182,980 / 189,076 conservative totals are
+  valid lower-load designs with additional quota headroom. The 1200-attempt
+  pilot maximum is 0.48% of the full ceiling. Stage 7's 83–84% / 207,500–
+  210,000 planning target is retained as historical context only. It uses
+  protected temporary raw responses only under the bounded 24-hour Stage 8
+  exception and a diagnostic append-only JSONL harness because PostgreSQL
+  remains deferred.
 - GTFS-RT is not part of the one-source pilot; Stage 9 owns cross-source
   matching. Actual Delay remains **NOT APPROVED**. One-station evidence is not
   Cologne-wide coverage.
@@ -392,7 +394,7 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - **Stage 13 — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED.** The [readiness design](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [machine-readable evidence](stages/13-tiered-collector-readiness-evidence.json) are authoritative. Explicit approval in `prompts/S68.md` finalized the material design choices; D-046 remains historical and D-047/D-048 remain chronology.
 - The fixed Stage 12 panel is `TIERED50_PANEL_V1` with exactly 50 stations and all seven Legacy7 continuity anchors. Stage 12 evidence was not changed. Stage 13 density ranks 1–8 / 9–28 / 29–50 produce Tier A/B/C counts 8 / 20 / 22 at 5 / 15 / 30-minute cadence.
 - The approved result limits are Tier A/B/C `NumberOfResults` 20 / 30 / 30. Retained Stage 13 station-level exact-feed evidence recalculates max station P95 / max observed static scheduled-arrival counts as A 19/20, B 23/23, and C 29/29, with 50/50 total P95 support. Static support is not realtime completeness evidence.
-- The approved load is 110 logical requests per 30-minute super-cycle and 220/hour. The approved 10% retry reserve and conservative accounting total 182,980 for 30 days and 189,076 for 31 days, including Legacy7 reserves and the historical diagnostic reserve. Automatic retries are blocked above the 207,500 projected/current monthly boundary.
+- The approved load is 110 logical requests per 30-minute super-cycle and 220/hour. The approved 10% retry reserve and conservative accounting total 182,980 for 30 days and 189,076 for 31 days, including Legacy7 reserves and the historical diagnostic reserve. These lower-load totals are valid safely below the 210,000 normal operational maximum and the 207,500 automatic-retry protection boundary; no minimum monthly utilization is required. Automatic retries are blocked when projected/current monthly consumption would exceed 207,500.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
 - The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; production phase indexes are not yet persisted and require `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.

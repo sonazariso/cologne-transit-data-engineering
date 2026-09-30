@@ -123,6 +123,13 @@ Stage 3B approves a **CADENCE POLICY**, not a fixed production timetable.
 11. GTFS-RT cadence is independent of MDD station cadence because one
     GTFS-RT request supplies the broad snapshot.
 
+Historical Stage 3 interpretation note: the `207,500–210,000` / 83–84%
+language above was the planning target approved at that stage. Stage 13's
+explicitly approved lower-load design supersedes any interpretation of
+`207,500` as a minimum utilization requirement. Stage 13 now uses `210,000` as
+the normal operational maximum, `207,500` as the automatic-retry protection
+boundary, and no minimum monthly utilization gate.
+
 The historical candidate of 10 stations every 5 minutes, 20 every 10 minutes,
 and 20 every 30 minutes is **not approved as production truth**. Its previously
 calculated load was 280 MDD logical requests/hour, approximately 201,600
@@ -136,9 +143,8 @@ initial attempts, bounded retries, diagnostics, manual investigations,
 calendar-month variation, overlap protection, and reserved headroom must be
 visible in the approval record. Stage 13 owns the final production station
 tiers, cadence, staggering, retry policy, overlap analysis, and full monthly
-projection; it must size normal production traffic inside the
-`207,500–210,000` operational envelope unless the user later changes this
-decision.
+projection. Its explicitly approved lower-load design supersedes the historical
+interpretation of the `207,500–210,000` band as a required operating range.
 
 ## Sampling-era and retention semantics
 

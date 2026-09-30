@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- Stage 13 quota-envelope and phase-contract cleanup: replaced the historical
+  range predicate with explicit provider-ceiling, normal-operational-maximum,
+  and automatic-retry-protection predicates; documented that the approved
+  182,980 / 189,076 lower-load totals are valid with no minimum utilization
+  requirement; removed the misleading StopPointRef-only phase helper; and
+  added offline regressions for quota semantics, all 50 phase assignments, and
+  chronological decision-log ordering. Stage 14 remains `NOT STARTED` and no
+  network or MDD activity was performed.
 - Final Stage 13 approval and closeout: explicitly approved the fixed
   `TIERED50_PANEL_V1` tiered readiness design with density ranks 1–8 / 9–28 /
   29–50, counts 8 / 20 / 22, cadence 5 / 15 / 30 minutes, 220 logical

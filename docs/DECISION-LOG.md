@@ -550,6 +550,12 @@ The active decision is:
   `NumberOfResults=20` is not an HTTP request count. Actual consumption may be
   lower because overlapping slots are skipped.
 
+D-033 is historical Stage 7 planning context. Stage 13's explicitly approved
+lower-load design supersedes any interpretation of `207,500` as a minimum
+utilization requirement; the current semantics are a `250,000` absolute
+provider ceiling, a `210,000` normal operational maximum, a `207,500`
+automatic-retry protection boundary, and no minimum utilization gate.
+
 D-033 authorized no MDD request, GTFS-RT request, other network request, SQL or
 database work, or runtime pilot code at that design stage. It did not start
 Stage 8 at that time. Historical V1
@@ -947,55 +953,6 @@ tasks, Power BI artifacts, or a collector activation, and it does not start
 Stage 14. The current shared-credential audit remains a prerequisite for any
 future activation decision.
 
-## D-050 — Stage 13 Contract-Hardening Correction
-
-**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
-NOT STARTED
-
-D-050 is a post-closeout correctness correction. D-046 through D-049 remain
-historical decision records and are not rewritten. The authoritative current
-Stage 13 evidence now separates `NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY` from
-`DEGRADED_MODE_HEARTBEAT_BUDGET`. Retained successful cap-2 timing supports
-normal observed feasibility (`9,585.91 ms` P95 estimate and `9,771.31 ms`
-observed-max estimate), but it is not a degraded-mode guarantee. The
-theoretical maximum normal batch has 19 due targets, concurrency 2, a
-30-second per-attempt timeout, and MaxAttempts 2: 38 timeout-heavy attempts
-produce 570 seconds of wall-time pressure at cap-2, exceeding the 300-second
-heartbeat if unconstrained.
-
-The bounded degraded-mode contract is explicit: a dispatcher owns only its
-current logical heartbeat; it must not extend work into later logical buckets;
-it must not start an initial attempt or retry without sufficient remaining
-budget; in-flight work obeys the heartbeat deadline/cancellation contract;
-budget exhaustion is recorded as `SKIPPED_HEARTBEAT_BUDGET` or
-`RETRY_SKIPPED_HEARTBEAT_BUDGET`; those outcomes do not trigger catch-up and
-are collection-quality outcomes rather than service-operational conclusions;
-and one target's exhausted budget does not abort unrelated targets. HTTP 429
-continues to respect `Retry-After` but cannot sleep or retry past the current
-deadline. Stage 14 must determine and validate a concrete nonzero
-persistence/cleanup safety margin with end-to-end dry-run measurements; Stage
-13 assigns no arbitrary duration.
-
-The authoritative phase-assignment identity is corrected to
-`source_parent_station_id / parent StopPointRef`, with hash
-`SHA-256(panel version + tier + source_parent_station_id)`. All 50 approved
-phase indexes reproduce exactly; future database-generated `SamplingTargetId`
-values cannot change them. The production overlap/claim identity remains
-`(SamplingTargetId, LogicalDueBucket)`. Phase assignment is finalized in Stage
-13, but `production_phase_index_persisted = false` and
-`phase_index_must_be_persisted_in_stage14 = true`; the status remains
-`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`.
-
-The offline regression suite restores independent coverage for THIS-call
-pre-anchor timing, post-DNS smoke-gate transport failure, degraded heartbeat
-budget/deadline behavior, and parent-StopPointRef phase identity, including
-the existing DNS-zero-request and 401/403 safeguards. No MDD request, DNS
-lookup, or live-network operation was issued for this correction. The approved
-`TIERED50_PANEL_V1`, 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits,
-MaximumConcurrency 2, MaxAttempts 2, one approved transient retry, 10% retry
-reserve, quota boundary, phase sequence, no-catch-up rule, and Legacy7
-continuity remain unchanged. Stage 14 remains `NOT STARTED`.
-
 ## D-047 — Stage 13 Reopened for Explicit User Design Approval
 
 The latest Stage 13 state is `IN PROGRESS — EVIDENCE READY; USER DESIGN
@@ -1087,8 +1044,11 @@ failures are not retryable. The normal retry reserve is 10% of nominal
 Tiered50 requests. The 30-day accounting is 158,400 nominal, 15,840 reserve,
 174,240 Tiered50 with reserve, 8,640 Legacy7 reserve, and 100 diagnostic
 reserve, totaling 182,980. The 31-day accounting is 163,680, 16,368,
-180,048, 8,928, and 100, totaling 189,076. Automatic retries are blocked
-above the 207,500 projected/current monthly boundary.
+180,048, 8,928, and 100, totaling 189,076. These approved lower-load totals
+are valid safely below the `210,000` normal operational maximum and the
+`207,500` automatic-retry protection boundary; no minimum monthly utilization
+is required. Automatic retries are blocked when projected/current monthly
+consumption would exceed the `207,500` boundary.
 
 The approved phase sequence is 19/18/18/18/19/18 with capacities A 8,
 B 7/7/6, and C 4/3/4/3/4/4. The execution identity remains
@@ -1102,3 +1062,60 @@ complete, production activation not started, and Stage 14 not started. No
 database object, scheduler, Windows task, target row, Power BI artifact, or
 Tiered50 activation was created. This closeout issued zero MDD requests and
 required no DNS/live-network operation.
+
+## D-050 — Stage 13 Contract-Hardening Correction
+
+**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
+NOT STARTED
+
+D-050 is a post-closeout correctness correction. D-046 through D-049 remain
+historical decision records and are not rewritten. The authoritative current
+Stage 13 evidence now separates `NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY` from
+`DEGRADED_MODE_HEARTBEAT_BUDGET`. Retained successful cap-2 timing supports
+normal observed feasibility (`9,585.91 ms` P95 estimate and `9,771.31 ms`
+observed-max estimate), but it is not a degraded-mode guarantee. The
+theoretical maximum normal batch has 19 due targets, concurrency 2, a
+30-second per-attempt timeout, and MaxAttempts 2: 38 timeout-heavy attempts
+produce 570 seconds of wall-time pressure at cap-2, exceeding the 300-second
+heartbeat if unconstrained.
+
+The bounded degraded-mode contract is explicit: a dispatcher owns only its
+current logical heartbeat; it must not extend work into later logical buckets;
+it must not start an initial attempt or retry without sufficient remaining
+budget; in-flight work obeys the heartbeat deadline/cancellation contract;
+budget exhaustion is recorded as `SKIPPED_HEARTBEAT_BUDGET` or
+`RETRY_SKIPPED_HEARTBEAT_BUDGET`; those outcomes do not trigger catch-up and
+are collection-quality outcomes rather than service-operational conclusions;
+and one target's exhausted budget does not abort unrelated targets. HTTP 429
+continues to respect `Retry-After` but cannot sleep or retry past the current
+deadline. Stage 14 must determine and validate a concrete nonzero
+persistence/cleanup safety margin with end-to-end dry-run measurements; Stage
+13 assigns no arbitrary duration.
+
+The authoritative phase-assignment identity is corrected to
+`source_parent_station_id / parent StopPointRef`, with hash
+`SHA-256(panel version + tier + source_parent_station_id)`. All 50 approved
+phase indexes reproduce exactly; future database-generated `SamplingTargetId`
+values cannot change them. The production overlap/claim identity remains
+`(SamplingTargetId, LogicalDueBucket)`. Phase assignment is finalized in Stage
+13, but `production_phase_index_persisted = false` and
+`phase_index_must_be_persisted_in_stage14 = true`; the status remains
+`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`.
+
+The offline regression suite restores independent coverage for THIS-call
+pre-anchor timing, post-DNS smoke-gate transport failure, degraded heartbeat
+budget/deadline behavior, and parent-StopPointRef phase identity, including
+the existing DNS-zero-request and 401/403 safeguards. No MDD request, DNS
+lookup, or live-network operation was issued for this correction. The approved
+`TIERED50_PANEL_V1`, 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits,
+MaximumConcurrency 2, MaxAttempts 2, one approved transient retry, 10% retry
+reserve, quota boundary, phase sequence, no-catch-up rule, and Legacy7
+continuity remain unchanged. Stage 14 remains `NOT STARTED`.
+
+The same post-closeout cleanup makes the quota semantics explicit: `250,000`
+is the absolute provider ceiling, `210,000` is the normal operational maximum,
+and `207,500` is the automatic-retry protection boundary. Stage 7's historical
+`207,500–210,000` / 83–84% planning target is retained as history, but the
+explicitly approved Stage 13 lower-load design supersedes any interpretation
+of `207,500` as a minimum utilization requirement. The approved `182,980` and
+`189,076` conservative totals are valid safely-below-boundary designs.

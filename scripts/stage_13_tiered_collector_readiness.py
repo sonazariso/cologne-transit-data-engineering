@@ -91,9 +91,8 @@ LIVE_RERUN_APPROVAL_REQUEST = (
     "diagnostic with at most 24 client-side MDD request invocations?"
 )
 
-MONTHLY_CEILING = 250_000
-NORMAL_ENVELOPE_MIN = 207_500
-NORMAL_ENVELOPE_MAX = 210_000
+ABSOLUTE_PROVIDER_CEILING = 250_000
+NORMAL_OPERATIONAL_MAXIMUM = 210_000
 HEARTBEAT_MINUTES = 5
 HEARTBEAT_SECONDS = HEARTBEAT_MINUTES * 60
 PRODUCTION_REQUEST_TIMEOUT_SECONDS = 30
@@ -284,14 +283,30 @@ def quota_projection(
         "additional_attempt_rate": _round(additional_attempt_rate, 9),
         "retry_reserve_requests": retry_reserve,
         "projected_http_requests": _round(projected, 6),
-        "percentage_of_250000_ceiling": _round(projected / MONTHLY_CEILING * 100, 6),
-        "percentage_of_normal_envelope_min": _round(projected / NORMAL_ENVELOPE_MIN * 100, 6),
-        "percentage_of_normal_envelope_max": _round(projected / NORMAL_ENVELOPE_MAX * 100, 6),
-        "headroom_to_250000_ceiling": _round(MONTHLY_CEILING - projected, 6),
-        "headroom_to_normal_envelope_min": _round(NORMAL_ENVELOPE_MIN - projected, 6),
-        "headroom_to_normal_envelope_max": _round(NORMAL_ENVELOPE_MAX - projected, 6),
-        "base_within_normal_envelope": NORMAL_ENVELOPE_MIN <= base <= NORMAL_ENVELOPE_MAX,
-        "projected_within_normal_envelope": NORMAL_ENVELOPE_MIN <= projected <= NORMAL_ENVELOPE_MAX,
+        "percentage_of_provider_ceiling": _round(projected / ABSOLUTE_PROVIDER_CEILING * 100, 6),
+        "percentage_of_normal_operational_maximum": _round(
+            projected / NORMAL_OPERATIONAL_MAXIMUM * 100,
+            6,
+        ),
+        "percentage_of_automatic_retry_protection_boundary": _round(
+            projected / AUTOMATIC_RETRY_PROTECTION_BOUNDARY * 100,
+            6,
+        ),
+        "headroom_to_provider_ceiling": _round(ABSOLUTE_PROVIDER_CEILING - projected, 6),
+        "headroom_to_normal_operational_maximum": _round(
+            NORMAL_OPERATIONAL_MAXIMUM - projected,
+            6,
+        ),
+        "headroom_to_automatic_retry_protection_boundary": _round(
+            AUTOMATIC_RETRY_PROTECTION_BOUNDARY - projected,
+            6,
+        ),
+        "within_provider_ceiling": projected <= ABSOLUTE_PROVIDER_CEILING,
+        "within_normal_operational_maximum": projected <= NORMAL_OPERATIONAL_MAXIMUM,
+        "within_automatic_retry_protection_boundary": projected <= AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+        "base_within_provider_ceiling": base <= ABSOLUTE_PROVIDER_CEILING,
+        "base_within_normal_operational_maximum": base <= NORMAL_OPERATIONAL_MAXIMUM,
+        "base_within_automatic_retry_protection_boundary": base <= AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
     }
 
 
@@ -308,11 +323,12 @@ def _conservative_quota_total(
         "legacy_reserved_requests": legacy_reserved_requests,
         "diagnostic_reserved_requests": diagnostic_reserved_requests,
         "conservative_total_http_requests": total,
-        "headroom_to_250000_ceiling": MONTHLY_CEILING - total,
-        "headroom_to_normal_envelope_min": NORMAL_ENVELOPE_MIN - total,
-        "headroom_to_normal_envelope_max": NORMAL_ENVELOPE_MAX - total,
-        "within_monthly_ceiling": total <= MONTHLY_CEILING,
-        "within_normal_envelope_max": total <= NORMAL_ENVELOPE_MAX,
+        "headroom_to_provider_ceiling": ABSOLUTE_PROVIDER_CEILING - total,
+        "headroom_to_normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM - total,
+        "headroom_to_automatic_retry_protection_boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY - total,
+        "within_provider_ceiling": total <= ABSOLUTE_PROVIDER_CEILING,
+        "within_normal_operational_maximum": total <= NORMAL_OPERATIONAL_MAXIMUM,
+        "within_automatic_retry_protection_boundary": total <= AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
     }
 
 
@@ -374,11 +390,19 @@ def quota_projection_set(
         )
         projections.append(row)
     return {
-        "monthly_ceiling": MONTHLY_CEILING,
-        "normal_operational_planning_envelope": {
-            "minimum": NORMAL_ENVELOPE_MIN,
-            "maximum": NORMAL_ENVELOPE_MAX,
-            "percentage_of_ceiling": {"minimum": 83.0, "maximum": 84.0},
+        "absolute_provider_ceiling": ABSOLUTE_PROVIDER_CEILING,
+        "normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM,
+        "automatic_retry_protection_boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+        "no_minimum_utilization_requirement": True,
+        "historical_stage7_planning_target_band": {
+            "minimum": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+            "maximum": NORMAL_OPERATIONAL_MAXIMUM,
+            "percentage_of_provider_ceiling": {"minimum": 83.0, "maximum": 84.0},
+            "interpretation": (
+                "Historical Stage 7 planning target only; Stage 13 explicitly supersedes its "
+                "interpretation of the lower endpoint as a minimum utilization requirement."
+            ),
+            "readiness_gate": False,
         },
         "legacy_reserved_monthly_requests": {
             "30_day": int(reserved.get(30, 0)),
@@ -394,6 +418,7 @@ def quota_projection_set(
             "The approved production retry policy uses MaxAttempts=2, meaning one initial attempt plus at most one automatic retry for approved transient failures.",
             "The normal planning reserve is 10% of nominal Tiered50 logical requests; it is a quota-planning reserve, not an observed Tiered50 retry rate.",
             "Automatic retries must be blocked when projected/current monthly consumption would exceed the 207500 conservative protection boundary.",
+            "The approved design has no minimum monthly utilization requirement; consumption below 207500 is valid and preserves quota headroom.",
             "The full documented Legacy7 monthly cadence is reserved conservatively because current shared-account usage is unavailable.",
             "Repository diagnostics are inactive after closeout; the Stage 13 diagnostic hard budget is reserved for reconciliation only.",
         ],
@@ -553,6 +578,9 @@ def automatic_retry_guardrail(
         "projected_automatic_retry_requests": projected,
         "projected_monthly_consumption": projected_total,
         "automatic_retry_protection_boundary": int(protection_boundary),
+        "within_provider_ceiling": projected_total <= ABSOLUTE_PROVIDER_CEILING,
+        "within_normal_operational_maximum": projected_total <= NORMAL_OPERATIONAL_MAXIMUM,
+        "within_automatic_retry_protection_boundary": projected_total <= int(protection_boundary),
         "automatic_retries_allowed": projected_total <= int(protection_boundary),
         "over_boundary_action": "BLOCK_AUTOMATIC_RETRY" if projected_total > int(protection_boundary) else "ALLOW_WITHIN_BOUNDARY",
         "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
@@ -652,17 +680,6 @@ def heartbeat_phase_distribution(
             "stage14_must_materialize_without_recomputing_from_database_ids": True,
         },
     }
-
-
-def deterministic_phase_index(source_parent_station_id: str, phase_count: int) -> int:
-    """Return a stable candidate phase index from a parent StopPointRef."""
-
-    if not source_parent_station_id:
-        raise ValueError("source_parent_station_id must not be empty")
-    if phase_count <= 0:
-        raise ValueError("phase_count must be positive")
-    digest = hashlib.sha256(source_parent_station_id.encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big") % phase_count
 
 
 def phase_assignments_for_tier_rows(
@@ -3233,8 +3250,12 @@ def build_evidence(
     )
     ten_percent_projection = next(item for item in quota["projections"] if item["label"] == "approved_normal_retry_reserve")
     quota_safety_closed = all(
-        item["31_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
-        and item["30_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
+        item["31_day"]["conservative_reserve_reconciliation"]["within_provider_ceiling"]
+        and item["30_day"]["conservative_reserve_reconciliation"]["within_provider_ceiling"]
+        and item["31_day"]["conservative_reserve_reconciliation"]["within_normal_operational_maximum"]
+        and item["30_day"]["conservative_reserve_reconciliation"]["within_normal_operational_maximum"]
+        and item["31_day"]["conservative_reserve_reconciliation"]["within_automatic_retry_protection_boundary"]
+        and item["30_day"]["conservative_reserve_reconciliation"]["within_automatic_retry_protection_boundary"]
         for item in quota["projections"]
     )
     heartbeat = _heartbeat_feasibility(phase, live)
@@ -3420,7 +3441,7 @@ def build_evidence(
         ],
     }
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.1",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.2",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
         "stage_13_status": status,
@@ -3503,6 +3524,9 @@ def build_evidence(
                 "corrected_diagnostic_provider_quota_consumption_status": live.get(
                     "provider_quota_consumption_status"
                 ),
+                "absolute_provider_ceiling": ABSOLUTE_PROVIDER_CEILING,
+                "normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM,
+                "no_minimum_utilization_requirement": True,
                 "thirty_day_nominal_requests": quota["projections"][0]["30_day"]["base_logical_requests"],
                 "thirty_one_day_nominal_requests": quota["projections"][0]["31_day"]["base_logical_requests"],
                 "thirty_day_retry_reserve_requests": ten_percent_projection["30_day"]["retry_reserve_requests"],
@@ -3794,7 +3818,37 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
         raise ValueError("approved transient HTTP retry statuses changed")
     if retry.get("do_not_retry_http_statuses") != [401, 403]:
         raise ValueError("401/403 retry prohibition changed")
-    if evidence["quota"]["approved_production_design"].get("automatic_retry_protection_boundary") != 207500:
+    quota_evidence = evidence["quota"]
+    if quota_evidence.get("absolute_provider_ceiling") != ABSOLUTE_PROVIDER_CEILING:
+        raise ValueError("absolute provider ceiling changed")
+    if quota_evidence.get("normal_operational_maximum") != NORMAL_OPERATIONAL_MAXIMUM:
+        raise ValueError("normal operational maximum changed")
+    if quota_evidence.get("automatic_retry_protection_boundary") != AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
+        raise ValueError("automatic-retry quota protection boundary changed")
+    if quota_evidence.get("no_minimum_utilization_requirement") is not True:
+        raise ValueError("the approved quota design must not require minimum utilization")
+    if "normal_operational_planning_envelope" in quota_evidence:
+        raise ValueError("ambiguous normal operational envelope terminology remains")
+    legacy_quota_fields = {
+        "base_within_normal_envelope",
+        "projected_within_normal_envelope",
+        "within_normal_envelope_max",
+        "percentage_of_normal_envelope_min",
+        "percentage_of_normal_envelope_max",
+        "headroom_to_normal_envelope_min",
+        "headroom_to_normal_envelope_max",
+    }
+    if any(
+        key in legacy_quota_fields
+        for projection in quota_evidence.get("projections", [])
+        for day in ("30_day", "31_day")
+        for key in (
+            set(projection.get(day, {}))
+            | set(projection.get(day, {}).get("conservative_reserve_reconciliation", {}))
+        )
+    ):
+        raise ValueError("ambiguous historical-target-band quota predicates remain in projections")
+    if quota_evidence["approved_production_design"].get("automatic_retry_protection_boundary") != AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
         raise ValueError("automatic-retry quota protection boundary changed")
 
     approved_projection = next(
@@ -3814,6 +3868,15 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
             raise ValueError(f"{day} Tiered50 retry-reserve projection does not reconcile")
         if reconciliation.get("conservative_total_http_requests") != total:
             raise ValueError(f"{day} conservative planning total does not reconcile")
+        if not all(
+            reconciliation.get(predicate) is True
+            for predicate in (
+                "within_provider_ceiling",
+                "within_normal_operational_maximum",
+                "within_automatic_retry_protection_boundary",
+            )
+        ):
+            raise ValueError(f"{day} approved lower-load design was treated as unsafe")
 
     phase = evidence["phase_staggering"]
     if phase.get("total_due_targets_by_heartbeat") != [19, 18, 18, 18, 19, 18]:

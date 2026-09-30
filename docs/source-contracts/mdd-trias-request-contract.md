@@ -195,13 +195,15 @@ Stage 7 approves the bounded pilot timeout, zero-retry behavior, and active V3
 policy `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3` in [the Stage 7 design](../stages/07-realtime-pilot-design.md):
 fixed start-to-start 3-second slots for at most 60 minutes, at most 1200
 scheduled logical slots and 1200 normal HTTP attempts, approximately 0.48% of
-the conservative monthly ceiling and approximately 0.57–0.58% of the
-operational planning envelope. The conservative ceiling remains `250,000`
-requests/month; normal operational planning must use the `83–84%` envelope of
-`207,500–210,000` requests/month and preserve `40,000–42,500` requests/month
-(`16–17%`) as unallocated headroom. This remains a bounded diagnostic cadence,
-not a production approval; Stage 13 owns production cadence/readiness analysis
-and must size production inside the operational planning envelope.
+the conservative monthly ceiling. The absolute provider ceiling remains
+`250,000` requests/month; Stage 13's approved normal operational maximum is
+`210,000`, and automatic retries must be blocked when projected/current
+consumption would exceed the separate `207,500` protection boundary. There is
+no minimum monthly utilization requirement. The historical `207,500–210,000` /
+83–84% target is retained for chronology, but Stage 13's approved lower-load
+design supersedes any interpretation of `207,500` as a minimum. This remains a
+bounded diagnostic cadence, not a production approval; Stage 13 owns
+production cadence/readiness analysis.
 Requests remain sequential and non-concurrent. An overlapping slot is skipped
 as `SCHEDULED_SLOT_SKIPPED_OVERLAP`; it is not queued or caught up. Do not
 wait three seconds after response completion, and do not shift the fixed slot

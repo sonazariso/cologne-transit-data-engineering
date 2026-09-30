@@ -206,12 +206,13 @@ minutes and at most 1200 scheduled logical slots and 1200 normal HTTP attempts,
 with a 30-second timeout, zero retries, sequential/non-concurrent execution,
 no catch-up bursts, explicit overlap skips, quota accounting, and early-stop
 rules. The 1200-attempt ceiling is 0.48% of the conservative 250,000-request
-monthly ceiling and approximately 0.57–0.58% of the 207,500–210,000-request
-operational planning envelope (83–84%). Preserve 40,000–42,500 requests/month
-(16–17%) as unallocated headroom; normal production planning must not use the
-full ceiling. This remains a bounded diagnostic cadence, not production
-approval, and Stage 13 owns production station tiers, cadence, staggering,
-retry policy, overlap analysis, and full monthly projection. A bounded 24-hour
+monthly ceiling. Stage 7 historically described 207,500–210,000 requests/month
+(83–84%) as a planning target; Stage 13 now governs the approved lower-load
+design with a 210,000 normal operational maximum, a 207,500 automatic-retry
+protection boundary, and no minimum utilization requirement. This remains a
+bounded diagnostic cadence, not production approval, and Stage 13 owns
+production station tiers, cadence, staggering, retry policy, overlap analysis,
+and full monthly projection. A bounded 24-hour
 temporary raw-response exception and a protected append-only JSONL diagnostic
 persistence harness are approved; PostgreSQL remains deferred. Retained MDD
 lifecycle/probe evidence shows response elapsed times predominantly below 3

@@ -29,7 +29,10 @@ history.
 | NumberOfResults | Tier A `20`; Tier B `30`; Tier C `30` |
 | MaximumConcurrency | `2` bounded workers |
 | Retry policy | `MaxAttempts = 2`: one initial attempt plus at most one approved transient retry |
-| Automatic-retry protection | Block automatic retries at projected/current monthly consumption above `207,500` |
+| Absolute provider ceiling | `250,000` requests/month |
+| Normal operational maximum | `210,000` requests/month; normal planned operation should not intentionally exceed it without a new decision |
+| Automatic-retry protection | Block automatic retries when projected/current monthly consumption would exceed `207,500` |
+| Minimum utilization | None; lower consumption is valid and preserves quota headroom |
 
 All final station IDs, density ranks, tier assignments, phase assignments, and
 calculated support values are finalized in the machine-readable design
@@ -93,9 +96,11 @@ two-value configuration. It is not a provider-maximum claim.
 ## Quota planning and retry reserve
 
 The absolute provider ceiling remains `250,000` requests/month. The normal
-planning envelope remains `207,500–210,000`; operation is not intentionally
-planned against the full ceiling. The generator calculates a normal planning
-retry reserve of 10% of nominal Tiered50 logical requests:
+operational maximum is `210,000`, and automatic retries are protected by a
+separate `207,500` projected/current monthly boundary. There is no requirement
+to consume at least `207,500` requests; the approved lower-load design is
+valid and retains additional quota headroom. The generator calculates a normal
+planning retry reserve of 10% of nominal Tiered50 logical requests:
 
 | Month | Nominal Tiered50 | 10% retry reserve | Tiered50 with retry reserve | Legacy7 reserve | Diagnostic reserve | Conservative planning total |
 |---|---:|---:|---:|---:|---:|---:|
@@ -104,10 +109,15 @@ retry reserve of 10% of nominal Tiered50 logical requests:
 
 `MaxAttempts=2` does not authorize unlimited monthly retries. Stage 14 must
 enforce the automatic-retry guardrail so current/projected monthly consumption
-does not cross `207,500`; a retry beyond that boundary is blocked. The
-Legacy7 reserve remains conservative because current shared-account usage is not
-available through an established read-only audit. The 100 diagnostic reserve is
-historical reconciliation, not a recurring production workload.
+does not exceed `207,500`; a retry that would cross that boundary is blocked.
+The Legacy7 reserve remains conservative because current shared-account usage is
+not available through an established read-only audit. The 100 diagnostic reserve
+is historical reconciliation, not a recurring production workload.
+
+Stage 7 and earlier planning records historically described `207,500–210,000`
+as an 83–84% planning target. That historical context is retained, but Stage
+13's explicitly approved lower-load design supersedes the interpretation of
+`207,500` as a minimum utilization target or readiness gate.
 
 ## Phase staggering and heartbeat feasibility
 

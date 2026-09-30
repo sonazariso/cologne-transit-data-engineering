@@ -387,16 +387,19 @@ interval, from sub-second observations to approximately 2 seconds. This
 supports the bounded diagnostic interval but does not guarantee completion
 within 3 seconds or prevent skipped slots.
 
-The conservative monthly ceiling remains `250,000` MDD HTTP requests. Normal
-operational planning must use the approved `83–84%` envelope of
-`207,500–210,000` requests/month and preserve `40,000–42,500` requests/month
-(`16–17%`) as unallocated headroom; it must not silently plan against the full
-ceiling. The theoretical 1200-attempt pilot maximum is `0.48%` of the full
-ceiling and approximately `0.57–0.58%` of the operational planning envelope.
-`NumberOfResults=20` is a per-response result limit, not an HTTP request count.
+The absolute provider ceiling remains `250,000` MDD HTTP requests/month. The
+normal operational maximum is `210,000`; automatic retries must be blocked when
+projected/current shared-credential consumption would exceed the separate
+`207,500` protection boundary. There is no minimum utilization requirement, so
+the approved Stage 13 lower-load design is valid and preserves additional quota
+headroom. The theoretical 1200-attempt pilot maximum is `0.48%` of the full
+ceiling. Stage 7's historical `207,500–210,000` / 83–84% planning target is
+retained as historical context only. `NumberOfResults=20` is a per-response
+result limit, not an HTTP request count.
 The pilot is a bounded diagnostic budget, not a production cadence approval;
-Stage 13 owns production cadence/readiness analysis and must size production
-inside the operational envelope. Every successful 3-second response is a
+Stage 13 owns production cadence/readiness analysis and applies the explicit
+210,000 normal operational maximum and 207,500 automatic-retry protection
+boundary. Every successful 3-second response is a
 distinct observation, even when values are unchanged. Three-second polling
 reduces but cannot mathematically guarantee capture of a transient
 `RecordedAtTime`; `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT` means

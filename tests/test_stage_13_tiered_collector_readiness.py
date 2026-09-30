@@ -127,10 +127,35 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
             ),
             (163680, 16368, 180048.0, 189076),
         )
+        self.assertEqual(quota["absolute_provider_ceiling"], 250000)
+        self.assertEqual(quota["normal_operational_maximum"], 210000)
+        self.assertEqual(quota["automatic_retry_protection_boundary"], 207500)
+        self.assertTrue(quota["no_minimum_utilization_requirement"])
+        self.assertEqual(
+            quota["historical_stage7_planning_target_band"]["interpretation"],
+            "Historical Stage 7 planning target only; Stage 13 explicitly supersedes its interpretation of the lower endpoint as a minimum utilization requirement.",
+        )
+        for day, expected_total in (("30_day", 182980), ("31_day", 189076)):
+            reconciliation = approved[day]["conservative_reserve_reconciliation"]
+            self.assertEqual(reconciliation["conservative_total_http_requests"], expected_total)
+            self.assertTrue(reconciliation["within_provider_ceiling"])
+            self.assertTrue(reconciliation["within_normal_operational_maximum"])
+            self.assertTrue(reconciliation["within_automatic_retry_protection_boundary"])
+        self.assertNotIn("base_within_normal_envelope", repr(quota))
+        self.assertNotIn("projected_within_normal_envelope", repr(quota))
+        zero_load = stage13.quota_projection(0, 30)
+        self.assertTrue(zero_load["within_provider_ceiling"])
+        self.assertTrue(zero_load["within_normal_operational_maximum"])
+        self.assertTrue(zero_load["within_automatic_retry_protection_boundary"])
         self.assertEqual(
             self.evidence["quota"]["approved_production_design"]["automatic_retry_protection_boundary"],
             207500,
         )
+        self.assertEqual(self.evidence["quota"]["approved_production_design"]["absolute_provider_ceiling"], 250000)
+        self.assertEqual(self.evidence["quota"]["approved_production_design"]["normal_operational_maximum"], 210000)
+        self.assertTrue(self.evidence["quota"]["approved_production_design"]["no_minimum_utilization_requirement"])
+        self.assertTrue(stage13.automatic_retry_guardrail(0, 189076)["automatic_retries_allowed"])
+        self.assertTrue(stage13.automatic_retry_guardrail(0, 189076)["within_automatic_retry_protection_boundary"])
         self.assertFalse(stage13.automatic_retry_guardrail(207500, 1)["automatic_retries_allowed"])
         self.assertTrue(stage13.automatic_retry_guardrail(207499, 1)["automatic_retries_allowed"])
 
@@ -170,6 +195,7 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertTrue(all("phase_capacity" in row for row in assignments))
 
     def test_phase_identity_is_parent_stoppointref_and_ignores_future_database_ids(self) -> None:
+        self.assertFalse(hasattr(stage13, "deterministic_phase_index"))
         contract = stage13.heartbeat_phase_distribution()["phase_assignment_contract"]
         self.assertEqual(contract["assignment_key"], "source_parent_station_id / parent StopPointRef")
         self.assertEqual(
@@ -191,6 +217,11 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
                 for row in baseline
             )
         )
+
+    def test_detailed_decision_log_remains_chronological(self) -> None:
+        decision_log = (REPOSITORY_ROOT / "docs/DECISION-LOG.md").read_text(encoding="utf-8")
+        positions = [decision_log.index(f"## {decision}") for decision in ("D-046", "D-047", "D-048", "D-049", "D-050")]
+        self.assertEqual(positions, sorted(positions))
 
     def test_existing_50_phase_indexes_reproduce_and_stage14_must_materialize_them(self) -> None:
         phase = self.evidence["phase_staggering"]

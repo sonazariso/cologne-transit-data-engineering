@@ -229,13 +229,17 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     observed sampling window, not provider-wide absence; a shorter validation
     requires separate approval and no shorter production cadence is
     pre-approved.
-87. The conservative monthly MDD ceiling remains exactly `250,000` requests.
-    Normal MDD planning must not consume the full ceiling; the planned monthly
-    operating envelope is `207,500–210,000` requests, or `83–84%`.
-88. Preserve `40,000–42,500` requests/month, approximately `16–17%`, as
-    unallocated headroom. Stage 13 must size normal production collection
-    inside the `207,500–210,000` envelope unless the user changes this
-    decision.
+87. The absolute provider MDD ceiling remains exactly `250,000` requests/month.
+    Normal planned operation must not intentionally exceed the separate
+    `210,000` normal operational maximum without a new explicit decision.
+88. The `207,500` value is the conservative automatic-retry protection
+    boundary: automatic retries must be blocked when projected/current shared-
+    credential monthly consumption would exceed it. There is no requirement to
+    consume at least `207,500`; lower utilization is valid and preserves quota
+    headroom. Stage 13's approved 30/31-day conservative totals are `182,980`
+    and `189,076`, safely below both operational thresholds.
+    Stage 7's historical `207,500–210,000` / 83–84% planning target remains
+    historical context only and is not a current minimum-utilization gate.
 89. An HTTP `429` stops the Stage 8 pilot immediately, is classified as
     rate-limit/provider evidence, and is never retried.
 90. Credential preflight must validate the API-key header format before any
