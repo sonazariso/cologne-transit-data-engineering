@@ -49,7 +49,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
 | D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
 | D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: historical record of the exact-feed density tiers, 5/15/30-minute cadence option, `NumberOfResults=30` option, 240 logical requests/hour, zero automatic retries option, cap-2 bounded concurrency option, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL |
-| D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-request diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
+| D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-invocation diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -962,10 +962,12 @@ uses only ThisCall arrival values at or after the requested `DepArrTime` anchor.
 Raw MDD responses were not retained, so the corrected coverage comparison
 could not be reconstructed from the original sanitized aggregates. The user
 then explicitly approved the separate gate, and exactly 24 corrected
-sequential attempts were issued, increasing cumulative Stage 13 diagnostic
-attempts from 90 to 114. All 24 ended in sanitized `NETWORK_OR_DNS_FAILURE`
-before a valid HTTP response; the historical 100-attempt diagnostic ceiling is
-unchanged and no cap-2 rerun was performed.
+sequential client-side request invocations were issued, increasing cumulative
+client request invocations from 90 to 114. All 24 ended in sanitized
+`NETWORK_OR_DNS_FAILURE` before an HTTP response; 0 HTTP responses were
+received; 0 provider HTTP attempts were confirmed from response evidence; and
+provider quota consumption is unknown/not confirmed. The historical 100-attempt
+diagnostic ceiling is unchanged and no cap-2 rerun was performed.
 
 ## D-048 — Corrected Stage 13 NumberOfResults Diagnostic Result
 
@@ -976,8 +978,11 @@ sequential execution, `MaxAttempts=1`, zero diagnostic retries, one fixed
 comparable anchor (`2026-09-30T11:54:56Z`), no raw response persistence, and the
 401/403 stop rule.
 
-Exactly 24 additional attempts were consumed. Every attempt ended with
-`NETWORK_OR_DNS_FAILURE`; no HTTP response status, returned result count,
+Exactly 24 additional client-side request invocations were issued. Every
+invocation ended with `NETWORK_OR_DNS_FAILURE`; 0 HTTP responses were received;
+0 provider HTTP attempts were confirmed from response evidence; provider quota
+consumption is unknown/not confirmed; and 24 is retained separately as
+`conservative_quota_accounting_attempts`. No returned result count,
 saturation, THIS-call arrival, pre-anchor count, or forward-coverage value was
 available. The sanitized duration and error evidence is retained. The
 historical 24 sequential records remain separately preserved with

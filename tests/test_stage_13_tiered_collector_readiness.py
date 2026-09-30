@@ -189,6 +189,126 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
             )
         )
 
+    def test_historical_sequential_and_cap2_accounting_reconciles_from_retained_rows(self) -> None:
+        result_limit = self.evidence["number_of_results"]
+        historical_records = result_limit["historical_invalidated_sequential_records"]
+        self.assertEqual(len(historical_records), 24)
+        historical_aggregate = self.evidence["sequential_vs_bounded_concurrency"]["sequential_live_diagnostic"]
+        self.assertEqual(
+            {
+                key: historical_aggregate[key]
+                for key in (
+                    "client_request_attempts_issued",
+                    "http_responses_received",
+                    "confirmed_provider_http_attempts",
+                )
+            },
+            {
+                "client_request_attempts_issued": 24,
+                "http_responses_received": 24,
+                "confirmed_provider_http_attempts": 24,
+            },
+        )
+        for number in (5, 10, 20, 30):
+            with self.subTest(number=number):
+                rows = [row for row in historical_records if row["requested_result_limit"] == number]
+                summary = result_limit["historical_invalidated_sequential_summary_by_result_limit"][str(number)]
+                self.assertEqual(len(rows), 6)
+                self.assertNotIn("request_count", summary)
+                self.assertEqual(summary["client_request_attempts_issued"], 6)
+                self.assertEqual(summary["http_responses_received"], 6)
+                self.assertEqual(summary["confirmed_provider_http_attempts"], 6)
+                self.assertTrue(
+                    all(
+                        row["http_status"] == 200
+                        and row["forward_temporal_span_status"] == "INVALID_FOR_FORWARD_COVERAGE_DECISION"
+                        for row in rows
+                    )
+                )
+
+        cap2 = self.evidence["sequential_vs_bounded_concurrency"]["bounded_live_diagnostic"]
+        self.assertEqual(len(cap2["records"]), 6)
+        self.assertEqual(
+            {
+                key: cap2[key]
+                for key in (
+                    "client_request_attempts_issued",
+                    "http_responses_received",
+                    "confirmed_provider_http_attempts",
+                )
+            },
+            {
+                "client_request_attempts_issued": 6,
+                "http_responses_received": 6,
+                "confirmed_provider_http_attempts": 6,
+            },
+        )
+        self.assertTrue(all(row["http_status"] == 200 for row in cap2["records"]))
+
+    def test_failed_diagnostic_documentation_and_boundaries_remain_conservative_and_offline(self) -> None:
+        audit = self.evidence["number_of_results"]["failed_corrected_diagnostic_audit"]
+        self.assertEqual(
+            {
+                key: audit[key]
+                for key in (
+                    "client_request_attempts_issued",
+                    "http_responses_received",
+                    "confirmed_provider_http_attempts",
+                    "conservative_quota_accounting_attempts",
+                )
+            },
+            {
+                "client_request_attempts_issued": 24,
+                "http_responses_received": 0,
+                "confirmed_provider_http_attempts": 0,
+                "conservative_quota_accounting_attempts": 24,
+            },
+        )
+        self.assertEqual(
+            audit["provider_quota_consumption_status"],
+            stage13.PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        )
+
+        documentation_paths = (
+            "README.md",
+            "CHANGELOG.md",
+            "docs/GUARDRAILS.md",
+            "docs/DECISION-LOG.md",
+            "docs/PROJECT-STATUS.md",
+            "docs/ROADMAP.md",
+            "docs/stages/13-tiered-collector-readiness.md",
+            "docs/stages/13-tiered-collector-readiness-completion-decision.md",
+        )
+        documentation = "\n".join(
+            (REPOSITORY_ROOT / path).read_text(encoding="utf-8") for path in documentation_paths
+        ).lower()
+        for ambiguous_phrase in (
+            "24 attempts were consumed",
+            "exactly 24 additional attempts were consumed",
+            "consumed exactly 24 additional sequential attempts",
+            "exactly 24 additional attempts were authorized and consumed",
+            "24 additional sequential mdd requests",
+        ):
+            self.assertNotIn(ambiguous_phrase, documentation)
+        self.assertNotRegex(
+            documentation,
+            r"24[^\n.]{0,100}(provider (?:http )?requests|quota units)[^\n.]{0,40}(consumed|used)",
+        )
+
+        gate = self.evidence["number_of_results"]["additional_request_gate"]
+        self.assertEqual(gate["historical_initial_diagnostic_budget"], 100)
+        self.assertEqual(gate["explicit_additional_user_authorization"], 24)
+        self.assertEqual(gate["authorized_cumulative_client_attempt_ceiling"], 114)
+        self.assertEqual(
+            self.evidence["stage_13_status"],
+            "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED",
+        )
+        self.assertFalse(self.evidence["readiness_decision"]["stage_14_started"])
+        self.assertIsNone(self.evidence["number_of_results"]["production_number_of_results"])
+
+        with patch.object(stage13.socket, "getaddrinfo", side_effect=AssertionError("network access in offline validation")):
+            stage13.validate_evidence(self.evidence)
+
     def test_corrected_comparison_remains_undecided_and_boundary_review_is_explicit(self) -> None:
         comparison = self.evidence["number_of_results_comparison"]
         for key in ("fixed_n20", "fixed_n30", "tier_specific_a20_b30_c30"):

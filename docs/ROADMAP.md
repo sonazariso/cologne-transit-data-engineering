@@ -347,13 +347,18 @@ The [readiness audit](stages/13-tiered-collector-readiness.md), [reopened decisi
 
 The retained bounded evidence technically evaluates `NumberOfResults=30`
 using 24 historical sequential N5/N10/N20/N30 records across six deterministic
-representatives, plus three cap-2 pairs. The old mixed-call temporal-span
-fields are invalid for forward-coverage decisions. The explicitly approved
-corrected comparison consumed exactly 24 additional sequential attempts; all
-24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a valid HTTP response.
-The historical 100-attempt diagnostic ceiling remains unchanged as a historical
-budget, cumulative Stage 13 usage is 114, and the provider theoretical maximum
-remains unknown.
+representatives, plus three cap-2 pairs. The historical sequential population
+reconciles to 24 client request invocations, 24 HTTP responses, and 24
+confirmed provider HTTP attempts. The old mixed-call temporal-span fields are
+invalid for forward-coverage decisions. The explicitly approved corrected
+comparison issued exactly 24 additional sequential client-side request
+invocations; all 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before an HTTP
+response, with 0 HTTP responses and 0 confirmed provider HTTP attempts.
+Provider quota consumption is unknown/not confirmed, while 24 is retained
+separately for conservative quota accounting. The historical 100-attempt
+diagnostic ceiling remains unchanged as a historical budget, cumulative client
+request invocations are 114, and the provider theoretical maximum remains
+unknown.
 
 The machine-readable `user_decision_gate` keeps production result limit,
 concurrency, cadence, and retry approval flags false. Fixed N20, fixed N30, and

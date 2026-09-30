@@ -1460,10 +1460,13 @@ def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         for row in records
         if row.get("forward_temporal_span_seconds") is not None
     ]
+    accounting = _request_accounting(
+        len(records),
+        sum(row.get("http_status") is not None for row in records),
+        conservative_quota_accounting_attempts=len(records),
+    )
     return {
-        "client_request_attempts_issued": len(records),
-        "http_responses_received": sum(row.get("http_status") is not None for row in records),
-        "confirmed_provider_http_attempts": sum(row.get("http_status") is not None for row in records),
+        **accounting,
         "http_status_distribution": dict(sorted(Counter(str(row.get("http_status")) for row in records).items())),
         "parser_success_count": sum(bool(row.get("parser_success")) for row in records),
         "valid_trias_response_count": sum(bool(row.get("valid_trias_application_response")) for row in records),
@@ -1804,6 +1807,16 @@ def _run_live_diagnostics(
     http_responses_received = sum(
         row.get("http_status") is not None for row in sequential_records + concurrency_records
     )
+    sequential_accounting = _request_accounting(
+        len(sequential_records),
+        sum(row.get("http_status") is not None for row in sequential_records),
+        conservative_quota_accounting_attempts=len(sequential_records),
+    )
+    concurrency_accounting = _request_accounting(
+        len(concurrency_records),
+        sum(row.get("http_status") is not None for row in concurrency_records),
+        conservative_quota_accounting_attempts=len(concurrency_records),
+    )
     accounting = _request_accounting(
         attempts,
         http_responses_received,
@@ -1847,6 +1860,7 @@ def _run_live_diagnostics(
         "bounded_concurrency_probe": {
             "requested_max_concurrency": MDD_CONCURRENCY_CAP,
             "pair_count": len(pairs),
+            **concurrency_accounting,
             "records": concurrency_records,
             "request_duration_statistics_ms": duration_statistics(cap2_request_durations),
             "pair_batch_duration_statistics_ms": duration_statistics(pair_batch_durations),
@@ -1864,11 +1878,10 @@ def _run_live_diagnostics(
             "provider_scope_limit": "bounded sample only; no provider-wide rate-limit claim",
         },
         "sequential_duration_evidence": {
+            **sequential_accounting,
             "request_duration_statistics_ms": duration_statistics(
                 [float(row["duration_ms"]) for row in sequential_records if row.get("duration_ms") is not None]
             ),
-            "client_request_attempts_issued": len(sequential_records),
-            "http_responses_received": sum(row.get("http_status") is not None for row in sequential_records),
             "retries": 0,
         },
         **accounting,
@@ -2303,10 +2316,40 @@ def _reuse_existing_live_diagnostics(
         return None
     existing = json.loads(path.read_text(encoding="utf-8"))
     old_bounded = existing.get("number_of_results", {}).get("bounded_live_diagnostic", {})
-    old_concurrency = existing.get("sequential_vs_bounded_concurrency", {}).get("bounded_live_diagnostic", {})
-    old_sequential = _normalize_duration_evidence(
-        existing.get("sequential_vs_bounded_concurrency", {}).get("sequential_live_diagnostic", {})
+    raw_old_concurrency = existing.get("sequential_vs_bounded_concurrency", {}).get(
+        "bounded_live_diagnostic", {}
     )
+    old_concurrency_records = (
+        list(raw_old_concurrency.get("records", []))
+        if isinstance(raw_old_concurrency, Mapping)
+        else []
+    )
+    old_concurrency = _normalize_duration_evidence(raw_old_concurrency, records=old_concurrency_records)
+    historical_records = list(
+        existing.get("number_of_results", {}).get("historical_invalidated_sequential_records", [])
+    )
+    historical_summaries = existing.get("number_of_results", {}).get(
+        "historical_invalidated_sequential_summary_by_result_limit", {}
+    )
+    old_sequential = _normalize_duration_evidence(
+        existing.get("sequential_vs_bounded_concurrency", {}).get("sequential_live_diagnostic", {}),
+        records=historical_records,
+    )
+    normalized_historical_summaries = {
+        str(number): _normalize_duration_evidence(
+            historical_summaries.get(str(number), {}),
+            records=[
+                row
+                for row in historical_records
+                if row.get("requested_result_limit") == number
+            ],
+        )
+        for number in MDD_RESULT_LIMITS
+        if historical_records
+        and any(row.get("requested_result_limit") == number for row in historical_records)
+    }
+    if not normalized_historical_summaries:
+        normalized_historical_summaries = dict(historical_summaries)
     old_probe = old_bounded.get("result_limit_probe")
     if not isinstance(old_probe, Mapping) or not old_probe.get("sequential_records"):
         return None
@@ -2413,9 +2456,7 @@ def _reuse_existing_live_diagnostics(
             "historical_invalidated_sequential_records": existing.get("number_of_results", {}).get(
                 "historical_invalidated_sequential_records", []
             ),
-            "historical_invalidated_sequential_summary_by_result_limit": existing.get("number_of_results", {}).get(
-                "historical_invalidated_sequential_summary_by_result_limit", {}
-            ),
+            "historical_invalidated_sequential_summary_by_result_limit": normalized_historical_summaries,
             "stop_reason": old_bounded.get("stop_reason") or "HISTORICAL_RUN_COMPLETED_WITHOUT_VALID_HTTP_RESPONSES",
             "diagnostic_validity": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
             "raw_payloads_persisted": False,
@@ -2477,7 +2518,8 @@ def _reuse_existing_live_diagnostics(
         "representatives": probe["representatives"],
         "result_limit_probe": probe,
         "historical_invalidated_sequential_records": probe.get("sequential_records", []),
-        "historical_invalidated_sequential_summary_by_result_limit": probe.get("summary_by_result_limit", {}),
+        "historical_invalidated_sequential_summary_by_result_limit": normalized_historical_summaries
+        or probe.get("summary_by_result_limit", {}),
         "bounded_concurrency_probe": old_concurrency,
         "sequential_duration_evidence": old_sequential,
         **accounting,
@@ -2573,14 +2615,33 @@ def _normalize_additional_request_gate(
     }
 
 
-def _normalize_duration_evidence(value: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Remove the old ambiguous request-count label from retained evidence."""
+def _normalize_duration_evidence(
+    value: Mapping[str, Any] | None,
+    *,
+    records: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Normalize retained aggregate accounting from its row-level evidence."""
 
     normalized = dict(value or {})
     if "request_count" in normalized:
         normalized["client_request_attempts_issued"] = normalized.pop("request_count")
-    if "http_responses_received" not in normalized:
-        normalized["http_responses_received"] = None
+    if records is not None:
+        rows = list(records)
+        normalized.update(
+            _request_accounting(
+                len(rows),
+                sum(row.get("http_status") is not None for row in rows),
+                conservative_quota_accounting_attempts=len(rows),
+            )
+        )
+    else:
+        if "http_responses_received" not in normalized:
+            normalized["http_responses_received"] = None
+        if normalized.get("http_responses_received") is not None:
+            normalized.setdefault(
+                "confirmed_provider_http_attempts",
+                normalized["http_responses_received"],
+            )
     return normalized
 
 
@@ -3247,6 +3308,56 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
             raise ValueError("failed corrected diagnostic provider quota status is not conservative/unknown")
         if audit.get("conservative_quota_accounting_attempts") != ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
             raise ValueError("conservative quota accounting must be separately labeled as 24 attempts")
+
+    def require_population_accounting(
+        label: str,
+        aggregate: Mapping[str, Any],
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        expected = _request_accounting(
+            len(records),
+            sum(row.get("http_status") is not None for row in records),
+            conservative_quota_accounting_attempts=len(records),
+        )
+        for field in (
+            "client_request_attempts_issued",
+            "http_responses_received",
+            "confirmed_provider_http_attempts",
+            "provider_quota_consumption_status",
+            "conservative_quota_accounting_attempts",
+        ):
+            if aggregate.get(field) != expected[field]:
+                raise ValueError(f"{label} accounting does not reconcile from retained records")
+
+    historical_records = evidence["number_of_results"].get(
+        "historical_invalidated_sequential_records", []
+    )
+    historical_summaries = evidence["number_of_results"].get(
+        "historical_invalidated_sequential_summary_by_result_limit", {}
+    )
+    if len(historical_records) != 24:
+        raise ValueError("historical Stage 13 sequential population must retain 24 records")
+    require_population_accounting(
+        "historical sequential diagnostic",
+        evidence["sequential_vs_bounded_concurrency"].get("sequential_live_diagnostic", {}),
+        historical_records,
+    )
+    for number in MDD_RESULT_LIMITS:
+        rows = [row for row in historical_records if row.get("requested_result_limit") == number]
+        summary = historical_summaries.get(str(number), {})
+        if len(rows) != 6 or "request_count" in summary:
+            raise ValueError("historical Stage 13 per-limit accounting is not normalized")
+        require_population_accounting(f"historical N={number} diagnostic", summary, rows)
+        if any(row.get("forward_temporal_span_status") != "INVALID_FOR_FORWARD_COVERAGE_DECISION" for row in rows):
+            raise ValueError("historical Stage 13 forward-span invalidation was changed")
+
+    cap2 = evidence["sequential_vs_bounded_concurrency"].get("bounded_live_diagnostic", {})
+    cap2_records = cap2.get("records", [])
+    if len(cap2_records) != 6:
+        raise ValueError("retained Stage 13 cap-2 population must retain six records")
+    require_population_accounting("cap-2 diagnostic", cap2, cap2_records)
+    if any(row.get("http_status") != 200 for row in cap2_records):
+        raise ValueError("retained Stage 13 cap-2 population must contain six HTTP 200 responses")
     readiness = evidence["readiness_decision"]
     for flag in required_gate_flags:
         if readiness.get(flag) is not False:

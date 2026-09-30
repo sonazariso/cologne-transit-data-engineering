@@ -330,10 +330,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      value. If it is missing, the diagnostic makes zero requests. The key,
      request headers, raw MDD payloads, and credential-bearing errors must not
      be persisted, printed, hashed, or committed; a 401/403 stops the run.
-111. The historical Stage 13 diagnostic budget was at most 100 new HTTP
-     attempts, including the original result-limit and cap-2 checks. Reuse of
-     already sanitized evidence does not issue another request and must remain
-     visibly distinguished from a new live run. Any separately approved
+111. The historical Stage 13 diagnostic budget was at most 100 new client-side
+     diagnostic invocations, including the original result-limit and cap-2
+     checks. Confirmed provider HTTP attempts must be derived from retained
+     response evidence rather than assumed from that invocation budget. Reuse
+     of already sanitized evidence does not issue another request and must
+     remain visibly distinguished from a new live run. Any separately approved
      extension must be recorded explicitly rather than silently changing the
      historical ceiling.
 112. Stage 13 must distinguish `TECHNICALLY_EVALUATED_OPTION` from
@@ -349,11 +351,17 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      and route-context timings are contextual evidence only.
 114. Because raw MDD responses were not retained, the corrected Stage 13
      NumberOfResults comparison required explicit approval for exactly 24
-     additional sequential MDD requests. That approval was granted and exactly
-     24 attempts were consumed, increasing cumulative diagnostic attempts from
-     90 to 114. The historical 100-attempt ceiling was not silently changed;
-     all 24 attempts ended in sanitized `NETWORK_OR_DNS_FAILURE`, and no
-     further diagnostic request is authorized by this result.
+     additional client-side MDD request invocations. That approval was granted
+     and exactly 24 client-side request invocations were issued; 0 HTTP
+     responses were received; 0 provider HTTP attempts were confirmed from
+     response evidence; and provider quota consumption is unknown/not
+     confirmed. The 24 invocations may be retained separately as
+     `conservative_quota_accounting_attempts`. Cumulative client request
+     invocations increased from 90 to 114; this is not a claim that 114
+     provider requests or quota units were consumed. The historical 100-attempt
+     ceiling was not silently changed; all 24 invocations ended in sanitized
+     `NETWORK_OR_DNS_FAILURE`, and no further diagnostic request is authorized
+     by this result.
 115. The corrected Stage 13 run must report fixed N20, fixed N30, and
      tier-specific A20/B30/C30 separately. If no valid THIS-call response
      exists, NumberOfResults remains undecided; static P95 support does not

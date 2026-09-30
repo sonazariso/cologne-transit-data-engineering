@@ -401,13 +401,16 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   minutes, and Tier C has 20 at 30 minutes.
 - The retained historical diagnostic records technically evaluated
   `NumberOfResults=30` across six deterministic high/middle/low-density and
-  mode/interchange representatives at N5/N10/N20/N30: 24 sequential attempts,
-  plus three cap-2 pairs. Their old mixed-call temporal-span fields are
+  mode/interchange representatives at N5/N10/N20/N30: 24 sequential client
+  request invocations, 24 HTTP responses, and 24 confirmed provider HTTP
+  attempts, plus three cap-2 pairs. Their old mixed-call temporal-span fields are
   explicitly invalid for forward-coverage decisions. The corrected diagnostic
   was then explicitly approved and executed as exactly 24 additional sequential
-  attempts; all 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a valid
-  HTTP response, so no corrected live coverage or saturation evidence was
-  established. The provider theoretical maximum remains unknown.
+  client-side request invocations; all 24 ended in sanitized
+  `NETWORK_OR_DNS_FAILURE` before an HTTP response. It received 0 HTTP
+  responses and confirmed 0 provider HTTP attempts; provider quota consumption
+  is unknown/not confirmed, so no corrected live coverage or saturation
+  evidence was established. The provider theoretical maximum remains unknown.
 - The machine-readable `user_decision_gate` keeps
   `production_number_of_results_approved`, `production_concurrency_approved`,
   `production_cadence_approved`, and `production_retry_policy_approved` false.
@@ -417,11 +420,14 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   `MaxAttempts=1` policy and cap-2 value are likewise options only.
 - The corrected metric used only THIS-call arrivals at or after the requested
   `DepArrTime` anchor, with separate pre-anchor counts and sanitized duration/
-  error fields. Exactly 24 additional attempts were authorized and consumed;
-  cumulative Stage 13 usage is 114 while the historical 100-attempt ceiling
-  remains unchanged as a historical budget. No raw response or API key was
-  persisted. Fixed N20, fixed N30, and A20/B30/C30 remain undecided because no
-  valid corrected live response was available.
+  error fields. Exactly 24 additional client-side request invocations were
+  authorized and issued; 0 HTTP responses were received; 0 provider HTTP
+  attempts were confirmed; and provider quota consumption is unknown/not
+  confirmed. Cumulative client request invocations are 114 while the
+  historical 100-attempt ceiling remains unchanged as a historical budget; 24
+  is retained separately for conservative quota accounting. No raw response or
+  API key was persisted. Fixed N20, fixed N30, and A20/B30/C30 remain undecided
+  because no valid corrected live response was available.
 - Static planning evidence supports N30 for all 50 current cadence windows and
   supports the simpler tier-specific A20/B30/C30 candidate, but this does not
   replace corrected realtime evidence. The deterministic comparison of

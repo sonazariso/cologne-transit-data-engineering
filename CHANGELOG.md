@@ -12,8 +12,9 @@
   THIS-call arrival timings at or after the requested `DepArrTime` anchor;
   historical mixed-call spans are explicitly invalid for that decision. Added
   offline regression tests and an approval gate for exactly 24 additional
-  client-side MDD request invocations (90 historical client attempts would
-  become 114; the historical 100-attempt budget is unchanged); no request was
+  client-side MDD request invocations (90 historical client invocations would
+  bring cumulative client invocations to 114; the historical 100-attempt
+  budget is unchanged); no request was
   issued before explicit user approval.
 - Stage 13 corrected diagnostic accounting and transport hardening: the
   retained run is recorded as 24 client-side invocations, 0 HTTP responses, 0

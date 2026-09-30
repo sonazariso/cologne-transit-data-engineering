@@ -226,15 +226,17 @@ evidence. Their old temporal-span values are retained for audit history but are
 marked `INVALID_FOR_FORWARD_COVERAGE_DECISION` because they mixed
 PreviousCall, ThisCall, OnwardCall, and departure timings.
 
-| Historical requested N | Requests | Saturated | HTTP 200 / valid | Historical span status | Duration P50 / P95 ms |
+| Historical requested N | Client invocations / HTTP responses / confirmed provider HTTP attempts | Saturated | HTTP 200 / valid | Historical span status | Duration P50 / P95 ms |
 |---:|---:|---:|---:|---|---:|
-| 5 | 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 446.397 / 502.147 |
-| 10 | 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 509.750 / 1,084.616 |
-| 20 | 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 537.159 / 581.138 |
-| **30** | **6** | **6** | **6 / 6** | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | **682.994 / 722.676** |
+| 5 | 6 / 6 / 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 446.397 / 502.147 |
+| 10 | 6 / 6 / 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 509.750 / 1,084.616 |
+| 20 | 6 / 6 / 6 | 6 | 6 / 6 | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | 537.159 / 581.138 |
+| **30** | **6 / 6 / 6** | **6** | **6 / 6** | `INVALID_FOR_FORWARD_COVERAGE_DECISION` | **682.994 / 722.676** |
 
 All historical tested limits saturated in that bounded sample; saturation is
 retained honestly and is not treated as a provider-maximum discovery. The
+historical sequential aggregate therefore reconciles to 24 client request
+invocations, 24 HTTP responses, and 24 confirmed provider HTTP attempts. The
 corrected diagnostic was explicitly approved and then executed as exactly 24
 additional sequential client-side request invocations across the same six
 representatives and four limits. Every corrected invocation ended before an
@@ -336,8 +338,10 @@ is exhausted; another run needs a new explicit user approval.
 
 ## 5. Bounded concurrency and heartbeat feasibility
 
-The cap-2 diagnostic executed three pairs, six requests total, with no retry.
-All six retained requests were valid HTTP 200/parseable responses. There was
+The cap-2 diagnostic executed three pairs, six client request invocations total,
+with no retry. Its aggregate reconciles to 6 client invocations, 6 HTTP
+responses, and 6 confirmed provider HTTP attempts. All six retained requests
+were valid HTTP 200/parseable responses. There was
 no 429, 5xx, timeout, or transport-pressure signal, and completion of one pair
 member was not dependent on the other. This remains a technically evaluated
 option pending user approval, not a provider-wide rate-limit claim.

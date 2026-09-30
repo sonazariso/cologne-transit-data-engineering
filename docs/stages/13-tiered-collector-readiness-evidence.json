@@ -3593,7 +3593,10 @@
         "summary_by_result_limit": {
           "10": {
             "client_request_attempts_issued": 6,
+            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+            "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 33.535,
@@ -3675,7 +3678,10 @@
           },
           "20": {
             "client_request_attempts_issued": 6,
+            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+            "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 21.776,
@@ -3757,7 +3763,10 @@
           },
           "30": {
             "client_request_attempts_issued": 6,
+            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+            "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 11.355,
@@ -3839,7 +3848,10 @@
           },
           "5": {
             "client_request_attempts_issued": 6,
+            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+            "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 26.87,
@@ -4837,7 +4849,11 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "request_count": 6,
+        "client_request_attempts_issued": 6,
+        "http_responses_received": 6,
+        "confirmed_provider_http_attempts": 6,
+        "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 10,
@@ -4897,7 +4913,11 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "request_count": 6,
+        "client_request_attempts_issued": 6,
+        "http_responses_received": 6,
+        "confirmed_provider_http_attempts": 6,
+        "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 20,
@@ -4957,7 +4977,11 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "request_count": 6,
+        "client_request_attempts_issued": 6,
+        "http_responses_received": 6,
+        "confirmed_provider_http_attempts": 6,
+        "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 30,
@@ -5017,7 +5041,11 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "request_count": 6,
+        "client_request_attempts_issued": 6,
+        "http_responses_received": 6,
+        "confirmed_provider_http_attempts": 6,
+        "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 5,
@@ -6310,6 +6338,11 @@
     "approval_state": "USER_APPROVAL_REQUIRED",
     "bounded_live_diagnostic": {
       "decision": "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
+      "client_request_attempts_issued": 6,
+      "http_responses_received": 6,
+      "confirmed_provider_http_attempts": 6,
+      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+      "conservative_quota_accounting_attempts": 6,
       "failure_isolation_observed": true,
       "forward_coverage_metric_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
       "no_retries": true,
@@ -6543,7 +6576,10 @@
     "provider_scope_limit": "cap-2 result is a bounded sample decision, not a provider-wide rate-limit claim",
     "sequential_live_diagnostic": {
       "client_request_attempts_issued": 24,
-      "http_responses_received": null,
+      "http_responses_received": 24,
+      "confirmed_provider_http_attempts": 24,
+      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
+      "conservative_quota_accounting_attempts": 24,
       "request_duration_statistics_ms": {
         "count": 24,
         "max_ms": 1251.639,

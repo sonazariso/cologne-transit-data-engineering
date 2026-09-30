@@ -25,9 +25,9 @@ evidence, superseded, and not valid as final user approval.
 | Current shared credential usage | **LIMITATION, NOT FALSE ZERO** | current Legacy audit unavailable; full documented Legacy7 reserve of 8,640/8,928 is applied |
 | Production `NumberOfResults` | **UNDECIDED — USER APPROVAL REQUIRED** | static P95 comparison retains 36/50 for N20 and 50/50 for N30 and A20/B30/C30; the corrected live run produced no valid response |
 | Provider maximum | **LIMITATION** | `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; no provider-maximum claim is needed or made while NumberOfResults remains undecided |
-| Sequential duration evidence | **PASS — HISTORICAL EVIDENCE RETAINED** | six representatives × four result limits, 24 sequential client invocations; temporal-span fields invalid for forward coverage |
+| Sequential duration evidence | **PASS — HISTORICAL EVIDENCE RETAINED** | six representatives × four result limits; 24 client invocations, 24 HTTP responses, and 24 confirmed provider HTTP attempts; temporal-span fields invalid for forward coverage |
 | Corrected result-limit diagnostic | **EXECUTED — NO VALID LIVE RESPONSES** | exactly 24 approved client-side invocations; 0 HTTP responses; retained safe category `OTHER_NETWORK_FAILURE`; provider quota consumption is unknown/not confirmed; NumberOfResults remains undecided |
-| Bounded concurrency | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | three cap-2 pairs; six valid HTTP 200/parseable responses; no 429/5xx/timeout/transport pressure |
+| Bounded concurrency | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | three cap-2 pairs; 6 client invocations, 6 HTTP responses, and 6 confirmed provider HTTP attempts; all valid HTTP 200/parseable responses; no 429/5xx/timeout/transport pressure |
 | Heartbeat feasibility | **PASS** | due sequence `21/21/19/20/20/19`; max 21; cap-2 P95 estimate 10,544.501 ms |
 | Phase assignment | **PASS — DESIGN CONTRACT** | stable identity-hash assignment; exact 50 assignments recorded; no production rows created |
 | Claim/overlap contract | **PASS — DESIGN CONTRACT** | unique `(SamplingTargetId, LogicalDueBucket)` atomic claim; duplicate invocation does not issue HTTP |
