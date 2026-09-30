@@ -59,7 +59,46 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
             [("A", 8, 5), ("B", 20, 15), ("C", 22, 30)],
         )
         historical = stage13.candidate_cadence(stage13.HISTORICAL_TIERED50_PLAN, status="HISTORICAL_COMPARISON")
-        self.assertEqual(historical["logical_requests_per_hour"], 280)
+        self.assertEqual(historical["logical_requests_per_hour"], 240)
+        self.assertEqual(historical["logical_requests_per_day"], 5760)
+        self.assertEqual(historical["monthly_logical_requests"], {"30_day": 172800, "31_day": 178560})
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in historical["tiers"]],
+            [("A", 10, 5), ("B", 20, 15), ("C", 20, 30)],
+        )
+
+    def test_5_15_30_historical_and_approved_alternatives_are_distinct(self) -> None:
+        alternatives = {
+            row["label"]: row
+            for row in self.evidence["candidate_cadence"]["cadence_selection_alternatives"]
+        }
+        historical = alternatives["10_20_20_at_5_15_30_evaluated_option"]
+        approved = alternatives["8_20_22_at_5_15_30"]
+
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in historical["tiers"]],
+            [("A", 10, 5), ("B", 20, 15), ("C", 20, 30)],
+        )
+        self.assertEqual(historical["logical_requests_per_hour"], 240)
+        self.assertFalse(historical["user_approved_design"])
+        self.assertTrue(historical["technically_evaluated_option"])
+        self.assertEqual(
+            historical["31_day_approved_retry_reserve_with_legacy_and_diagnostics"][
+                "conservative_total_http_requests"
+            ],
+            205444,
+        )
+        self.assertEqual(historical["static_density_fit_at_n30"]["station_count"], 50)
+        self.assertEqual(historical["static_density_fit_at_n30"]["station_p95_supported_count"], 50)
+
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in approved["tiers"]],
+            [("A", 8, 5), ("B", 20, 15), ("C", 22, 30)],
+        )
+        self.assertEqual(approved["logical_requests_per_hour"], 220)
+        self.assertTrue(approved["user_approved_design"])
+        self.assertNotEqual(historical["tiers"], approved["tiers"])
+        self.assertNotEqual(historical["logical_requests_per_hour"], approved["logical_requests_per_hour"])
 
     def test_static_support_is_recalculated_from_retained_evidence(self) -> None:
         support = self.evidence["static_event_density"]["final_approved_static_support"]
@@ -135,9 +174,16 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
             quota["historical_stage7_planning_target_band"]["interpretation"],
             "Historical Stage 7 planning target only; Stage 13 explicitly supersedes its interpretation of the lower endpoint as a minimum utilization requirement.",
         )
-        for day, expected_total in (("30_day", 182980), ("31_day", 189076)):
+        for day, expected_total, expected_headroom in (
+            ("30_day", 182980, 24520),
+            ("31_day", 189076, 18424),
+        ):
             reconciliation = approved[day]["conservative_reserve_reconciliation"]
             self.assertEqual(reconciliation["conservative_total_http_requests"], expected_total)
+            self.assertEqual(
+                reconciliation["headroom_to_automatic_retry_protection_boundary"],
+                expected_headroom,
+            )
             self.assertTrue(reconciliation["within_provider_ceiling"])
             self.assertTrue(reconciliation["within_normal_operational_maximum"])
             self.assertTrue(reconciliation["within_automatic_retry_protection_boundary"])
@@ -154,10 +200,59 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(self.evidence["quota"]["approved_production_design"]["absolute_provider_ceiling"], 250000)
         self.assertEqual(self.evidence["quota"]["approved_production_design"]["normal_operational_maximum"], 210000)
         self.assertTrue(self.evidence["quota"]["approved_production_design"]["no_minimum_utilization_requirement"])
-        self.assertTrue(stage13.automatic_retry_guardrail(0, 189076)["automatic_retries_allowed"])
-        self.assertTrue(stage13.automatic_retry_guardrail(0, 189076)["within_automatic_retry_protection_boundary"])
+        guardrail = stage13.automatic_retry_guardrail(0, 189076)
+        self.assertEqual(
+            (
+                guardrail["current_shared_credential_month_requests"],
+                guardrail["projected_additional_shared_credential_requests"],
+                guardrail["projected_shared_credential_monthly_consumption"],
+            ),
+            (0, 189076, 189076),
+        )
+        self.assertEqual(guardrail["headroom_to_automatic_retry_protection_boundary"], 18424)
+        self.assertEqual(guardrail["headroom_to_normal_operational_maximum"], 20924)
+        self.assertEqual(guardrail["headroom_to_provider_ceiling"], 60924)
+        self.assertTrue(guardrail["automatic_retries_allowed"])
+        self.assertTrue(guardrail["within_automatic_retry_protection_boundary"])
+        legacy_retry_only_field = "_".join(("projected", "automatic", "retry", "requests"))
+        self.assertNotIn(legacy_retry_only_field, repr(guardrail))
+        self.assertNotIn("_".join(("projected", "monthly", "consumption")), repr(guardrail))
         self.assertFalse(stage13.automatic_retry_guardrail(207500, 1)["automatic_retries_allowed"])
         self.assertTrue(stage13.automatic_retry_guardrail(207499, 1)["automatic_retries_allowed"])
+
+        approved_guardrail = self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail"]
+        self.assertEqual(approved_guardrail["projected_shared_credential_monthly_consumption"], 189076)
+        self.assertEqual(approved_guardrail["headroom_to_automatic_retry_protection_boundary"], 18424)
+        self.assertTrue(approved_guardrail["within_automatic_retry_protection_boundary"])
+        self.assertTrue(approved_guardrail["within_normal_operational_maximum"])
+        self.assertTrue(approved_guardrail["within_provider_ceiling"])
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["thirty_one_day_tiered50_component_with_retry_reserve"],
+            180048.0,
+        )
+
+    def test_runtime_guardrail_contract_covers_shared_credential_consumers(self) -> None:
+        contract = stage13.shared_credential_retry_guardrail_contract()
+        self.assertEqual(contract["scope"], "all_known_shared_credential_consumers")
+        self.assertTrue(contract["current_legacy7_usage_must_not_be_fabricated"])
+        self.assertTrue(contract["tiered50_is_not_the_only_credential_consumer"])
+        self.assertEqual(
+            {item["name"] for item in contract["runtime_inputs"]},
+            {
+                "actual_audited_shared_credential_attempts_current_month",
+                "projected_remaining_unavoidable_non_retry_consumption",
+                "candidate_automatic_retry_attempt",
+                "approved_reserved_shared_credential_consumption",
+            },
+        )
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail_scope"],
+            "all_known_shared_credential_consumers",
+        )
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail_current_usage_status"],
+            "NOT_OBSERVED_OFFLINE_PLANNING_BASELINE; ZERO_IS_NOT_A_CURRENT_USAGE_CLAIM",
+        )
 
     def test_retry_policy_max_attempts_statuses_and_station_isolation(self) -> None:
         policy = stage13.retry_policy_contract()

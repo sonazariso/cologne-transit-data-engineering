@@ -303,7 +303,13 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      activation. Missing current `ctl.MddCollectorRun` history must not be
      represented as zero usage. The approved normal retry reserve is 10% of
      nominal Tiered50 requests, and automatic retries must be blocked when
-     projected/current monthly consumption would exceed 207,500.
+     projected/current shared-credential monthly consumption would exceed
+     207,500 across all known credential consumers. The Stage 14 runtime
+     decision must account for actual audited current-month shared-credential
+     attempts, projected remaining unavoidable/non-retry consumption for known
+     enabled consumers, the candidate retry, and any approved reserved
+     shared-account consumption. Current Legacy7 usage must not be fabricated;
+     until the audit path exists, retain the conservative Legacy7 reservation.
 103. Stage 13 readiness analysis does not authorize Stage 14, production
      scheduler implementation, database objects, Power BI work, Windows tasks,
      or Tiered50 activation. Stage 13 is

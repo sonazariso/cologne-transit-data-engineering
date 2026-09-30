@@ -138,11 +138,13 @@ FINAL_PHASE_CAPACITIES = {
     "C": (4, 3, 4, 3, 4, 4),
 }
 
-# Retained only as the historical comparison candidate. It is never used for
-# the approved tier assignment or runtime phase materialization.
+# Retained only as the historical/evaluated comparison candidate. This is a
+# separate literal plan, intentionally not derived from PRODUCTION_TIER_PLAN;
+# it is never used for the approved tier assignment or runtime phase
+# materialization.
 HISTORICAL_TIERED50_PLAN = (
     {"tier": "A", "station_count": 10, "interval_minutes": 5},
-    {"tier": "B", "station_count": 20, "interval_minutes": 10},
+    {"tier": "B", "station_count": 20, "interval_minutes": 15},
     {"tier": "C", "station_count": 20, "interval_minutes": 30},
 )
 
@@ -458,6 +460,7 @@ def retry_policy_contract() -> dict[str, Any]:
         "do_not_retry_deterministic_parser_schema_errors": True,
         "do_not_retry_deterministic_trias_application_errors": True,
         "one_failed_station_does_not_abort_other_due_targets": True,
+        "automatic_retry_guardrail_contract": shared_credential_retry_guardrail_contract(),
         "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
     }
 
@@ -560,29 +563,75 @@ def dispatcher_heartbeat_budget_decision(
     }
 
 
+def shared_credential_retry_guardrail_contract() -> dict[str, Any]:
+    """Describe the Stage 14 runtime inputs for the shared-credential guardrail."""
+
+    return {
+        "scope": "all_known_shared_credential_consumers",
+        "runtime_inputs": [
+            {
+                "name": "actual_audited_shared_credential_attempts_current_month",
+                "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+            },
+            {
+                "name": "projected_remaining_unavoidable_non_retry_consumption",
+                "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+            },
+            {
+                "name": "candidate_automatic_retry_attempt",
+                "meaning": "the one candidate automatic retry attempt being considered",
+            },
+            {
+                "name": "approved_reserved_shared_credential_consumption",
+                "meaning": "approved shared-account consumption that must remain protected",
+            },
+        ],
+        "decision_rule": (
+            "do not start the candidate automatic retry when the resulting projected/current "
+            "shared-credential monthly total would exceed 207500"
+        ),
+        "current_legacy7_usage_must_not_be_fabricated": True,
+        "until_stage14_shared_credential_audit": (
+            "retain the conservative Legacy7 reservation because current shared-credential usage "
+            "is not established"
+        ),
+        "tiered50_is_not_the_only_credential_consumer": True,
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+    }
+
+
 def automatic_retry_guardrail(
-    current_month_requests: int,
-    projected_automatic_retry_requests: int,
+    current_shared_credential_month_requests: int,
+    projected_additional_shared_credential_requests: int,
     *,
     protection_boundary: int = AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
 ) -> dict[str, Any]:
-    """Evaluate the Stage 14 automatic-retry quota protection boundary."""
+    """Evaluate shared-credential consumption before a retry may start.
 
-    current = int(current_month_requests)
-    projected = int(projected_automatic_retry_requests)
-    if current < 0 or projected < 0:
+    The second argument is the complete additional shared-credential
+    consumption projected after the current month usage, not a retry-only
+    count. Stage 14 must construct it from all known credential consumers.
+    """
+
+    current = int(current_shared_credential_month_requests)
+    projected_additional = int(projected_additional_shared_credential_requests)
+    if current < 0 or projected_additional < 0:
         raise ValueError("monthly request counts must be non-negative")
-    projected_total = current + projected
+    projected_total = current + projected_additional
+    boundary = int(protection_boundary)
     return {
-        "current_month_requests": current,
-        "projected_automatic_retry_requests": projected,
-        "projected_monthly_consumption": projected_total,
-        "automatic_retry_protection_boundary": int(protection_boundary),
+        "current_shared_credential_month_requests": current,
+        "projected_additional_shared_credential_requests": projected_additional,
+        "projected_shared_credential_monthly_consumption": projected_total,
+        "automatic_retry_protection_boundary": boundary,
+        "headroom_to_provider_ceiling": ABSOLUTE_PROVIDER_CEILING - projected_total,
+        "headroom_to_normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM - projected_total,
+        "headroom_to_automatic_retry_protection_boundary": boundary - projected_total,
         "within_provider_ceiling": projected_total <= ABSOLUTE_PROVIDER_CEILING,
         "within_normal_operational_maximum": projected_total <= NORMAL_OPERATIONAL_MAXIMUM,
-        "within_automatic_retry_protection_boundary": projected_total <= int(protection_boundary),
-        "automatic_retries_allowed": projected_total <= int(protection_boundary),
-        "over_boundary_action": "BLOCK_AUTOMATIC_RETRY" if projected_total > int(protection_boundary) else "ALLOW_WITHIN_BOUNDARY",
+        "within_automatic_retry_protection_boundary": projected_total <= boundary,
+        "automatic_retries_allowed": projected_total <= boundary,
+        "over_boundary_action": "BLOCK_AUTOMATIC_RETRY" if projected_total > boundary else "ALLOW_WITHIN_BOUNDARY",
         "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
     }
 
@@ -2358,7 +2407,10 @@ def _cadence_alternatives(
                 {"tier": "C", "station_count": 20, "interval_minutes": 30},
             ),
         ),
-        ("10_20_20_at_5_15_30_evaluated_option", PRODUCTION_TIER_PLAN),
+        # Keep this historical/evaluated plan distinct from the mutable/current
+        # production-plan constant.  The label and tier rows must describe the
+        # same 10/20/20 @ 5/15/30 candidate.
+        ("10_20_20_at_5_15_30_evaluated_option", HISTORICAL_TIERED50_PLAN),
         (
             "10_15_25_at_5_10_30",
             (
@@ -3249,6 +3301,12 @@ def build_evidence(
         diagnostic_reserved_requests=DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
     )
     ten_percent_projection = next(item for item in quota["projections"] if item["label"] == "approved_normal_retry_reserve")
+    conservative_shared_credential_30_day = ten_percent_projection["30_day"][
+        "conservative_reserve_reconciliation"
+    ]
+    conservative_shared_credential_31_day = ten_percent_projection["31_day"][
+        "conservative_reserve_reconciliation"
+    ]
     quota_safety_closed = all(
         item["31_day"]["conservative_reserve_reconciliation"]["within_provider_ceiling"]
         and item["30_day"]["conservative_reserve_reconciliation"]["within_provider_ceiling"]
@@ -3531,15 +3589,27 @@ def build_evidence(
                 "thirty_one_day_nominal_requests": quota["projections"][0]["31_day"]["base_logical_requests"],
                 "thirty_day_retry_reserve_requests": ten_percent_projection["30_day"]["retry_reserve_requests"],
                 "thirty_one_day_retry_reserve_requests": ten_percent_projection["31_day"]["retry_reserve_requests"],
-                "thirty_day_tiered50_with_retry_reserve": ten_percent_projection["30_day"]["projected_http_requests"],
-                "thirty_one_day_tiered50_with_retry_reserve": ten_percent_projection["31_day"]["projected_http_requests"],
-                "thirty_day_conservative_planning_total": ten_percent_projection["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
-                "thirty_one_day_conservative_planning_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "thirty_day_tiered50_component_with_retry_reserve": ten_percent_projection["30_day"]["projected_http_requests"],
+                "thirty_one_day_tiered50_component_with_retry_reserve": ten_percent_projection["31_day"]["projected_http_requests"],
+                "thirty_day_conservative_planning_total": conservative_shared_credential_30_day["conservative_total_http_requests"],
+                "thirty_one_day_conservative_planning_total": conservative_shared_credential_31_day["conservative_total_http_requests"],
+                "thirty_day_conservative_shared_credential_total": conservative_shared_credential_30_day["conservative_total_http_requests"],
+                "thirty_one_day_conservative_shared_credential_total": conservative_shared_credential_31_day["conservative_total_http_requests"],
                 "automatic_retry_protection_boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
                 "automatic_retry_guardrail": automatic_retry_guardrail(
                     0,
-                    ten_percent_projection["31_day"]["projected_http_requests"],
+                    conservative_shared_credential_31_day["conservative_total_http_requests"],
                 ),
+                "automatic_retry_guardrail_scope": "all_known_shared_credential_consumers",
+                "automatic_retry_guardrail_planning_basis": (
+                    "31-day conservative shared-credential planning total: Tiered50 component plus "
+                    "the conservative Legacy7 reservation and diagnostic reserve"
+                ),
+                "automatic_retry_guardrail_current_usage_status": (
+                    "NOT_OBSERVED_OFFLINE_PLANNING_BASELINE; ZERO_IS_NOT_A_CURRENT_USAGE_CLAIM"
+                ),
+                "tiered50_component_projection_is_not_guardrail_total": True,
+                "runtime_guardrail_contract": shared_credential_retry_guardrail_contract(),
                 "quota_safety_gate_closed_without_fabricated_current_usage": quota_safety_closed,
                 "production_cadence_approved": True,
                 "production_retry_policy_approved": True,
@@ -3553,7 +3623,9 @@ def build_evidence(
             "approved_production_retry_policy": retry_policy_contract(),
             "automatic_retry_quota_guardrail": {
                 "boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
-                "rule": "block automatic retries when projected/current monthly consumption would exceed 207500",
+                "rule": "block automatic retries when projected/current shared-credential monthly consumption would exceed 207500",
+                "scope": "all_known_shared_credential_consumers",
+                "runtime_contract": shared_credential_retry_guardrail_contract(),
                 "stage14_required": True,
             },
             "source_controlled_bounded_populations": [
@@ -3766,6 +3838,65 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
         ):
             raise ValueError("approved cadence/tier plan is not 8/20/22 @ 5/15/30")
 
+    historical_plan = evidence["candidate_cadence"].get("historical_comparison", {})
+    if (
+        historical_plan.get("logical_requests_per_hour"),
+        historical_plan.get("logical_requests_per_day"),
+        historical_plan.get("monthly_logical_requests"),
+    ) != (240, 5760, {"30_day": 172800, "31_day": 178560}):
+        raise ValueError("historical 10/20/20 @ 5/15/30 arithmetic does not reconcile")
+    if [
+        (row.get("tier"), int(row.get("station_count", -1)), int(row.get("interval_minutes", -1)))
+        for row in historical_plan.get("tiers", [])
+    ] != [("A", 10, 5), ("B", 20, 15), ("C", 20, 30)]:
+        raise ValueError("historical comparison plan is not the explicit 10/20/20 @ 5/15/30 plan")
+
+    alternatives_by_label = {
+        str(row.get("label")): row
+        for row in evidence["candidate_cadence"].get("cadence_selection_alternatives", [])
+    }
+    historical_option = alternatives_by_label.get("10_20_20_at_5_15_30_evaluated_option")
+    approved_option = alternatives_by_label.get("8_20_22_at_5_15_30")
+    if historical_option is None or approved_option is None:
+        raise ValueError("the two final 5/15/30 cadence alternatives are missing")
+    if (
+        historical_option.get("logical_requests_per_hour"),
+        historical_option.get("tiers"),
+        historical_option.get("user_approved_design"),
+    ) != (
+        240,
+        historical_plan.get("tiers"),
+        False,
+    ):
+        raise ValueError("historical evaluated cadence alternative is bound to the wrong plan")
+    if (
+        approved_option.get("logical_requests_per_hour"),
+        approved_option.get("tiers"),
+        approved_option.get("user_approved_design"),
+    ) != (
+        220,
+        plan.get("tiers"),
+        True,
+    ):
+        raise ValueError("approved cadence alternative is bound to the wrong plan")
+    if historical_option.get("tiers") == approved_option.get("tiers"):
+        raise ValueError("historical and approved 5/15/30 alternatives became duplicates")
+    if (
+        historical_option["31_day_approved_retry_reserve_with_legacy_and_diagnostics"].get(
+            "conservative_total_http_requests"
+        )
+        != 205444
+    ):
+        raise ValueError("historical 31-day 10% comparison does not reconcile to 205444")
+    historical_static_fit = historical_option.get("static_density_fit_at_n30")
+    if (
+        historical_static_fit is None
+        or historical_static_fit.get("station_count") != 50
+        or historical_static_fit.get("station_p95_supported_count") != 50
+        or historical_static_fit.get("all_station_p95_supported") is not True
+    ):
+        raise ValueError("historical N30 static-density support was not recalculated from retained evidence")
+
     static_support = density.get("final_approved_static_support", {})
     if static_support.get("station_p95_supported_count") != 50 or not static_support.get("all_station_p95_supported"):
         raise ValueError("final static P95 support is not 50/50")
@@ -3850,6 +3981,54 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
         raise ValueError("ambiguous historical-target-band quota predicates remain in projections")
     if quota_evidence["approved_production_design"].get("automatic_retry_protection_boundary") != AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
         raise ValueError("automatic-retry quota protection boundary changed")
+    legacy_retry_only_field = "_".join(("projected", "automatic", "retry", "requests"))
+    if legacy_retry_only_field in repr(quota_evidence):
+        raise ValueError("automatic-retry terminology still labels shared totals as retry-only requests")
+    guardrail = quota_evidence["approved_production_design"].get("automatic_retry_guardrail", {})
+    if (
+        guardrail.get("current_shared_credential_month_requests"),
+        guardrail.get("projected_additional_shared_credential_requests"),
+        guardrail.get("projected_shared_credential_monthly_consumption"),
+    ) != (0, 189076, 189076):
+        raise ValueError("automatic-retry guardrail does not evaluate the conservative shared-credential total")
+    if (
+        guardrail.get("headroom_to_automatic_retry_protection_boundary"),
+        guardrail.get("headroom_to_normal_operational_maximum"),
+        guardrail.get("headroom_to_provider_ceiling"),
+    ) != (18424, 20924, 60924):
+        raise ValueError("31-day shared-credential guardrail headroom does not reconcile")
+    if not all(
+        guardrail.get(predicate) is True
+        for predicate in (
+            "within_automatic_retry_protection_boundary",
+            "within_normal_operational_maximum",
+            "within_provider_ceiling",
+        )
+    ):
+        raise ValueError("31-day shared-credential guardrail is not within all approved thresholds")
+    runtime_contract = quota_evidence["approved_production_design"].get(
+        "runtime_guardrail_contract", {}
+    )
+    runtime_input_names = {
+        str(item.get("name")) for item in runtime_contract.get("runtime_inputs", [])
+    }
+    if not {
+        "actual_audited_shared_credential_attempts_current_month",
+        "projected_remaining_unavoidable_non_retry_consumption",
+        "candidate_automatic_retry_attempt",
+        "approved_reserved_shared_credential_consumption",
+    }.issubset(runtime_input_names):
+        raise ValueError("shared-credential runtime guardrail inputs are incomplete")
+    if (
+        runtime_contract.get("scope") != "all_known_shared_credential_consumers"
+        or runtime_contract.get("current_legacy7_usage_must_not_be_fabricated") is not True
+        or runtime_contract.get("tiered50_is_not_the_only_credential_consumer") is not True
+    ):
+        raise ValueError("runtime guardrail contract does not cover all shared-credential consumers")
+    if quota_evidence["approved_production_design"].get(
+        "automatic_retry_guardrail_current_usage_status"
+    ) != "NOT_OBSERVED_OFFLINE_PLANNING_BASELINE; ZERO_IS_NOT_A_CURRENT_USAGE_CLAIM":
+        raise ValueError("offline guardrail baseline must not fabricate current shared-credential usage")
 
     approved_projection = next(
         item for item in evidence["quota"]["projections"]
@@ -3877,6 +4056,13 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
             )
         ):
             raise ValueError(f"{day} approved lower-load design was treated as unsafe")
+
+    if quota_evidence["approved_production_design"].get(
+        "thirty_day_tiered50_component_with_retry_reserve"
+    ) != 174240 or quota_evidence["approved_production_design"].get(
+        "thirty_one_day_tiered50_component_with_retry_reserve"
+    ) != 180048:
+        raise ValueError("Tiered50-only retry-reserve components changed")
 
     phase = evidence["phase_staggering"]
     if phase.get("total_due_targets_by_heartbeat") != [19, 18, 18, 18, 19, 18]:

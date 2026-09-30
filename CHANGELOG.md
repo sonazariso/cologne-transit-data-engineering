@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- Stage 13 final offline contract-consistency correction: restored the explicit
+  historical/evaluated 10/20/20 @ 5/15/30 plan (240/hour and 205,444 for the
+  31-day 10% comparison), kept it distinct from the approved 8/20/22 plan,
+  recalculated retained exact-feed N30 support, and changed the main retry
+  guardrail example to the all-consumer shared-credential total of 189,076
+  with 18,424 headroom to 207,500. Tiered50's 180,048 remains component
+  evidence; Stage 14 remains `NOT STARTED` and no network/MDD activity was
+  performed.
 - Stage 13 quota-envelope and phase-contract cleanup: replaced the historical
   range predicate with explicit provider-ceiling, normal-operational-maximum,
   and automatic-retry-protection predicates; documented that the approved

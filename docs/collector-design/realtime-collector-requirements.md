@@ -415,10 +415,13 @@ The Stage 13 audit is recorded in
 [`13-tiered-collector-readiness.md`](../stages/13-tiered-collector-readiness.md)
 and its [machine-readable evidence](../stages/13-tiered-collector-readiness-evidence.json).
 Stage 12 now approves fixed panel version `TIERED50_PANEL_V1`. The historical
-`10/20/20` Tiered50 candidate remains provisional as count-level quota/phase
-arithmetic only; it is not a production tier assignment. Its arithmetic is
-`280` logical requests/hour, `201,600` in a 30-day month, and `208,320` in a
-31-day month; these values do not activate production collection.
+`10/20/20` Tiered50 candidate is a separate historical/evaluated comparison at
+5/15/30 minutes, not a production tier assignment. Its arithmetic is `240`
+logical requests/hour, `5,760`/day, `172,800` in a 30-day month, and `178,560`
+in a 31-day month; its 31-day 10% retry reserve plus conservative Legacy7 and
+diagnostic reserves reconciles to `205,444`. It remains technically evaluated
+and not user approved. The separately approved production plan is 8/20/22 at
+5/15/30 minutes and 220 logical requests/hour.
 
 The readiness handoff adds the following future collector requirements:
 
@@ -437,15 +440,21 @@ The readiness handoff adds the following future collector requirements:
 - one failed target does not abort other due targets, and per-target audit,
   status, attempts, duration, parser, persistence, and error metadata remain
   independent; and
-- unbounded concurrency is prohibited.
+- unbounded concurrency is prohibited; and
+- the Stage 14 automatic-retry guardrail must evaluate all known shared-
+  credential consumers using actual audited current-month attempts, projected
+  remaining unavoidable/non-retry consumption, the candidate retry, and any
+  approved reserved shared-account consumption. A retry must be blocked if the
+  resulting projected/current shared-credential monthly total would exceed
+  `207,500`; current Legacy7 usage must not be fabricated, and the conservative
+  Legacy7 reservation remains until that audit path exists.
 
-Stage 13 did not establish a production `NumberOfResults`: the bounded N5 and
-N20 samples reached their configured limits, so
-`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit. It also did not establish
-station/tier static event density because the approved Stage 4 evidence is
-aggregate-only in the pre-Stage-12 readiness snapshot; the fixed Stage 12 panel
-now exists, but the Stage 13 audit has not assigned production tiers or
-reconciled forward-horizon coverage.
+Stage 13 approves the production `NumberOfResults` policy A20/B30/C30 and
+retains `PROVIDER_MAXIMUM_NOT_ESTABLISHED`: bounded historical N20/N30
+acceptance is not a provider-wide maximum or realtime completeness guarantee.
+Retained exact-feed station-level evidence supports the approved density tiers
+at 50/50 P95 support, but static schedule density remains planning evidence and
+does not establish realtime response coverage.
 
 The conditional design direction is small bounded concurrency with a maximum
 of two workers, subject to a separately approved provider-safe validation. This

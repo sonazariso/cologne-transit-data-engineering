@@ -30,7 +30,7 @@ approval without rewriting those earlier entries.
 | Corrected live coverage | LIMITATION RETAINED — CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT |
 | Concurrency | APPROVED DESIGN — maximum concurrency 2; Stage 14 must validate the full persistence path |
 | Retry policy | APPROVED DESIGN — MaxAttempts=2, one automatic retry only for approved transient HTTP/transport conditions |
-| Retry guardrail | APPROVED — block automatic retries when projected/current monthly consumption would exceed 207,500 |
+| Retry guardrail | APPROVED — block automatic retries when projected/current shared-credential monthly consumption would exceed 207,500 across all known consumers |
 | Claims and overlap | APPROVED DESIGN — atomic (SamplingTargetId, LogicalDueBucket) identity; no duplicate HTTP request; no catch-up replay |
 | Production state | NOT STARTED — no scheduler, database objects, target rows, Windows task, Power BI change, or Tiered50 activation |
 | Stage 14 | NOT STARTED |
@@ -52,6 +52,14 @@ completeness, a provider-wide result maximum, guaranteed 20/30-event
 availability, or complete forward coverage. Historical valid N20/N30
 diagnostics remain bounded acceptance evidence only.
 
+The separate historical/evaluated 10/20/20 @ 5/15/30 comparison remains
+technically evaluated and not user approved. It reconciles to 240 logical
+requests/hour, 5,760/day, 172,800 in a 30-day month, 178,560 in a 31-day
+month, and 205,444 for the 31-day 10% retry-reserve comparison with the
+conservative Legacy7 and diagnostic reserves. Its retained exact-feed N30
+static-density support is 50/50. It is not the approved 8/20/22 production
+design.
+
 ## Quota and retry reserve
 
 The documented absolute provider ceiling remains 250,000 requests/month. The
@@ -61,7 +69,7 @@ requirement: the approved design may safely consume less than 207,500 and
 preserve additional quota headroom. The approved nominal Tiered50 load, 10%
 retry reserve, Legacy7 reserve, and diagnostic reserve reconcile as follows:
 
-| Month | Nominal Tiered50 | 10% retry reserve | Tiered50 with reserve | Legacy7 reserve | Diagnostic reserve | Conservative total |
+| Month | Nominal Tiered50 | 10% retry reserve | Tiered50 component with reserve | Legacy7 reserve | Diagnostic reserve | Conservative shared-credential total |
 |---|---:|---:|---:|---:|---:|---:|
 | 30 days | 158,400 | 15,840 | 174,240 | 8,640 | 100 | **182,980** |
 | 31 days | 163,680 | 16,368 | 180,048 | 8,928 | 100 | **189,076** |
@@ -73,13 +81,22 @@ subject to the current heartbeat deadline and the explicit
 HTTP 401/403, deterministic request-contract failures, deterministic
 parser/schema failures, and deterministic TRIAS application errors are not
 retryable. A failed station is isolated from other due targets. MaxAttempts=2
-is bounded by the monthly 207,500 automatic-retry guardrail; a retry that would
-exceed that boundary is blocked, and the policy does not
-authorize unlimited retries.
+is bounded by the monthly 207,500 automatic-retry guardrail across all known
+shared-credential consumers; a retry that would exceed that boundary is blocked,
+and the policy does not authorize unlimited retries. The 31-day shared-
+credential total is 189,076, with 18,424 headroom to 207,500, 20,924 to
+210,000, and 60,924 to 250,000. The 30-day total is 182,980, with 24,520,
+27,020, and 67,020 headroom respectively. The Tiered50-only 180,048 value is
+a component, not the shared-credential guardrail projection.
 
 Current shared-credential usage remains unavailable through an established
 read-only audit path, so the documented Legacy7 reserve is retained
-conservatively and is not treated as zero.
+conservatively and is not treated as zero. Stage 14 must evaluate a candidate
+retry using actual audited current-month shared-credential attempts, projected
+remaining unavoidable/non-retry consumption for all known enabled consumers,
+the candidate retry, and any approved reserved shared-account consumption. It
+must not fabricate current Legacy7 usage or treat Tiered50 as the only
+credential consumer.
 
 ## Phase, overlap, and continuity contract
 

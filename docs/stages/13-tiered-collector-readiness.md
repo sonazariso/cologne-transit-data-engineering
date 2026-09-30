@@ -31,7 +31,7 @@ history.
 | Retry policy | `MaxAttempts = 2`: one initial attempt plus at most one approved transient retry |
 | Absolute provider ceiling | `250,000` requests/month |
 | Normal operational maximum | `210,000` requests/month; normal planned operation should not intentionally exceed it without a new decision |
-| Automatic-retry protection | Block automatic retries when projected/current monthly consumption would exceed `207,500` |
+| Automatic-retry protection | Block automatic retries when projected/current shared-credential monthly consumption would exceed `207,500` |
 | Minimum utilization | None; lower consumption is valid and preserves quota headroom |
 
 All final station IDs, density ranks, tier assignments, phase assignments, and
@@ -93,6 +93,18 @@ choice supported by exact-feed static density, bounded historical N20/N30
 acceptance, lower unnecessary response volume for Tier A, and a simple
 two-value configuration. It is not a provider-maximum claim.
 
+The historical/evaluated comparison is a separate immutable plan, not an alias
+of the approved production plan:
+
+| Plan | Counts | Cadence | Logical requests/hour | Logical requests/day | 30-day nominal | 31-day nominal | 31-day 10% reserve plus conservative reserves | User approved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Historical/evaluated | 10 / 20 / 20 | 5 / 15 / 30 minutes | 240 | 5,760 | 172,800 | 178,560 | **205,444** | No |
+| Final approved | 8 / 20 / 22 | 5 / 15 / 30 minutes | 220 | 5,280 | 158,400 | 163,680 | 189,076 | Yes |
+
+The historical option's N30 static-density support is recalculated from the
+retained exact-feed evidence and is 50/50. It remains technically evaluated
+comparison evidence, not the production design.
+
 ## Quota planning and retry reserve
 
 The absolute provider ceiling remains `250,000` requests/month. The normal
@@ -102,14 +114,30 @@ to consume at least `207,500` requests; the approved lower-load design is
 valid and retains additional quota headroom. The generator calculates a normal
 planning retry reserve of 10% of nominal Tiered50 logical requests:
 
-| Month | Nominal Tiered50 | 10% retry reserve | Tiered50 with retry reserve | Legacy7 reserve | Diagnostic reserve | Conservative planning total |
+| Month | Nominal Tiered50 | 10% retry reserve | Tiered50 component with retry reserve | Legacy7 reserve | Diagnostic reserve | Conservative shared-credential planning total |
 |---|---:|---:|---:|---:|---:|---:|
 | 30 days | 158,400 | 15,840 | 174,240 | 8,640 | 100 | **182,980** |
 | 31 days | 163,680 | 16,368 | 180,048 | 8,928 | 100 | **189,076** |
 
 `MaxAttempts=2` does not authorize unlimited monthly retries. Stage 14 must
-enforce the automatic-retry guardrail so current/projected monthly consumption
-does not exceed `207,500`; a retry that would cross that boundary is blocked.
+enforce the automatic-retry guardrail across all known consumers of the shared
+credential so projected/current shared-credential monthly consumption does not
+exceed `207,500`; a retry that would cross that boundary is blocked. The
+31-day main guardrail example is `189,076`, with headroom of `18,424` to the
+automatic-retry boundary, `20,924` to the normal operational maximum, and
+`60,924` to the provider ceiling. For 30 days the conservative total is
+`182,980`, with headroom of `24,520`, `27,020`, and `67,020` respectively.
+The Tiered50-only 31-day component `180,048` remains valid component evidence;
+it is not the shared-credential guardrail total.
+
+The Stage 14 runtime guardrail must use these conceptual inputs: actual
+audited shared-credential attempts already consumed in the current month;
+projected remaining unavoidable/non-retry consumption for known enabled
+consumers; the candidate automatic retry attempt; and any approved reserved
+shared-account consumption that must still be protected. It must not fabricate
+current Legacy7 usage. Until the live shared-credential audit path exists, the
+conservative Legacy7 reservation remains in the planning evidence, and
+Tiered50 must not be treated as the only credential consumer.
 The Legacy7 reserve remains conservative because current shared-account usage is
 not available through an established read-only audit. The 100 diagnostic reserve
 is historical reconciliation, not a recurring production workload.

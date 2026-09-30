@@ -429,23 +429,23 @@
       },
       {
         "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
-          "conservative_total_http_requests": 189076,
+          "conservative_total_http_requests": 205444,
           "diagnostic_reserved_requests": 100,
-          "headroom_to_automatic_retry_protection_boundary": 18424,
-          "headroom_to_normal_operational_maximum": 20924,
-          "headroom_to_provider_ceiling": 60924,
+          "headroom_to_automatic_retry_protection_boundary": 2056,
+          "headroom_to_normal_operational_maximum": 4556,
+          "headroom_to_provider_ceiling": 44556,
           "legacy_reserved_requests": 8928,
-          "projected_http_requests_rounded_up": 180048,
+          "projected_http_requests_rounded_up": 196416,
           "within_automatic_retry_protection_boundary": true,
           "within_normal_operational_maximum": true,
           "within_provider_ceiling": true
         },
         "label": "10_20_20_at_5_15_30_evaluated_option",
-        "logical_requests_per_day": 5280,
-        "logical_requests_per_hour": 220,
+        "logical_requests_per_day": 5760,
+        "logical_requests_per_hour": 240,
         "monthly_logical_requests": {
-          "30_day": 158400,
-          "31_day": 163680
+          "30_day": 172800,
+          "31_day": 178560
         },
         "static_density_fit_at_n30": {
           "all_station_p95_supported": true,
@@ -456,9 +456,9 @@
         "tiers": [
           {
             "interval_minutes": 5,
-            "logical_requests_per_day": 2304,
-            "logical_requests_per_hour": 96,
-            "station_count": 8,
+            "logical_requests_per_day": 2880,
+            "logical_requests_per_hour": 120,
+            "station_count": 10,
             "tier": "A"
           },
           {
@@ -470,9 +470,9 @@
           },
           {
             "interval_minutes": 30,
-            "logical_requests_per_day": 1056,
-            "logical_requests_per_hour": 44,
-            "station_count": 22,
+            "logical_requests_per_day": 960,
+            "logical_requests_per_hour": 40,
+            "station_count": 20,
             "tier": "C"
           }
         ],
@@ -638,15 +638,15 @@
     ],
     "historical_comparison": {
       "candidate_status": "HISTORICAL_COMPARISON",
-      "logical_requests_per_day": 6720,
-      "logical_requests_per_hour": 280,
+      "logical_requests_per_day": 5760,
+      "logical_requests_per_hour": 240,
       "monthly_logical_requests": {
-        "30_day": 201600,
-        "31_day": 208320
+        "30_day": 172800,
+        "31_day": 178560
       },
       "reconciliation": {
-        "requests_per_30_minutes": 140,
-        "requests_per_hour_from_30_minute_super_cycle": 280
+        "requests_per_30_minutes": 120,
+        "requests_per_hour_from_30_minute_super_cycle": 240
       },
       "station_count": 50,
       "tiers": [
@@ -658,9 +658,9 @@
           "tier": "A"
         },
         {
-          "interval_minutes": 10,
-          "logical_requests_per_day": 2880,
-          "logical_requests_per_hour": 120,
+          "interval_minutes": 15,
+          "logical_requests_per_day": 1920,
+          "logical_requests_per_hour": 80,
           "station_count": 20,
           "tier": "B"
         },
@@ -972,7 +972,7 @@
     "provider_quota_consumption_for_rerun": "UNKNOWN_UNTIL_HTTP_RESPONSES_ARE_RECEIVED; DO NOT INFER FROM CLIENT INVOCATIONS",
     "smoke_request_required_before_remaining_matrix": true
   },
-  "generated_at_utc": "2026-09-30T15:38:36Z",
+  "generated_at_utc": "2026-09-30T16:09:46Z",
   "heartbeat_feasibility": {
     "DEGRADED_MODE_HEARTBEAT_BUDGET": {
       "automatic_retry_count_max": 1,
@@ -4145,7 +4145,7 @@
       },
       "status": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
       "timestamp_basis": "retained artifact generated_at_utc; per-request timestamps were not retained",
-      "timestamp_utc": "2026-09-30T15:35:11Z",
+      "timestamp_utc": "2026-09-30T16:05:16Z",
       "transport_failure_category_distribution": {
         "OTHER_NETWORK_FAILURE": 24
       }
@@ -6382,15 +6382,21 @@
       "automatic_retry_guardrail": {
         "automatic_retries_allowed": true,
         "automatic_retry_protection_boundary": 207500,
-        "current_month_requests": 0,
+        "current_shared_credential_month_requests": 0,
+        "headroom_to_automatic_retry_protection_boundary": 18424,
+        "headroom_to_normal_operational_maximum": 20924,
+        "headroom_to_provider_ceiling": 60924,
         "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
         "over_boundary_action": "ALLOW_WITHIN_BOUNDARY",
-        "projected_automatic_retry_requests": 180048,
-        "projected_monthly_consumption": 180048,
+        "projected_additional_shared_credential_requests": 189076,
+        "projected_shared_credential_monthly_consumption": 189076,
         "within_automatic_retry_protection_boundary": true,
         "within_normal_operational_maximum": true,
         "within_provider_ceiling": true
       },
+      "automatic_retry_guardrail_current_usage_status": "NOT_OBSERVED_OFFLINE_PLANNING_BASELINE; ZERO_IS_NOT_A_CURRENT_USAGE_CLAIM",
+      "automatic_retry_guardrail_planning_basis": "31-day conservative shared-credential planning total: Tiered50 component plus the conservative Legacy7 reservation and diagnostic reserve",
+      "automatic_retry_guardrail_scope": "all_known_shared_credential_consumers",
       "automatic_retry_protection_boundary": 207500,
       "corrected_diagnostic_conservative_quota_accounting_attempts": 24,
       "corrected_diagnostic_provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
@@ -6421,6 +6427,32 @@
           "TLS_FAILURE"
         ],
         "automatic_retry_count_max": 1,
+        "automatic_retry_guardrail_contract": {
+          "current_legacy7_usage_must_not_be_fabricated": true,
+          "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+          "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+          "runtime_inputs": [
+            {
+              "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+              "name": "actual_audited_shared_credential_attempts_current_month"
+            },
+            {
+              "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+              "name": "projected_remaining_unavoidable_non_retry_consumption"
+            },
+            {
+              "meaning": "the one candidate automatic retry attempt being considered",
+              "name": "candidate_automatic_retry_attempt"
+            },
+            {
+              "meaning": "approved shared-account consumption that must remain protected",
+              "name": "approved_reserved_shared_credential_consumption"
+            }
+          ],
+          "scope": "all_known_shared_credential_consumers",
+          "tiered50_is_not_the_only_credential_consumer": true,
+          "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+        },
         "do_not_retry_deterministic_parser_schema_errors": true,
         "do_not_retry_deterministic_request_contract_errors": true,
         "do_not_retry_deterministic_trias_application_errors": true,
@@ -6440,14 +6472,43 @@
       "production_cadence_approved": true,
       "production_retry_policy_approved": true,
       "quota_safety_gate_closed_without_fabricated_current_usage": true,
+      "runtime_guardrail_contract": {
+        "current_legacy7_usage_must_not_be_fabricated": true,
+        "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+        "runtime_inputs": [
+          {
+            "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+            "name": "actual_audited_shared_credential_attempts_current_month"
+          },
+          {
+            "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+            "name": "projected_remaining_unavoidable_non_retry_consumption"
+          },
+          {
+            "meaning": "the one candidate automatic retry attempt being considered",
+            "name": "candidate_automatic_retry_attempt"
+          },
+          {
+            "meaning": "approved shared-account consumption that must remain protected",
+            "name": "approved_reserved_shared_credential_consumption"
+          }
+        ],
+        "scope": "all_known_shared_credential_consumers",
+        "tiered50_is_not_the_only_credential_consumer": true,
+        "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+      },
       "thirty_day_conservative_planning_total": 182980,
+      "thirty_day_conservative_shared_credential_total": 182980,
       "thirty_day_nominal_requests": 158400,
       "thirty_day_retry_reserve_requests": 15840,
-      "thirty_day_tiered50_with_retry_reserve": 174240.0,
+      "thirty_day_tiered50_component_with_retry_reserve": 174240.0,
       "thirty_one_day_conservative_planning_total": 189076,
+      "thirty_one_day_conservative_shared_credential_total": 189076,
       "thirty_one_day_nominal_requests": 163680,
       "thirty_one_day_retry_reserve_requests": 16368,
-      "thirty_one_day_tiered50_with_retry_reserve": 180048.0,
+      "thirty_one_day_tiered50_component_with_retry_reserve": 180048.0,
+      "tiered50_component_projection_is_not_guardrail_total": true,
       "user_approved_design": true
     },
     "automatic_retry_protection_boundary": 207500,
@@ -6786,6 +6847,32 @@
         "TLS_FAILURE"
       ],
       "automatic_retry_count_max": 1,
+      "automatic_retry_guardrail_contract": {
+        "current_legacy7_usage_must_not_be_fabricated": true,
+        "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+        "runtime_inputs": [
+          {
+            "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+            "name": "actual_audited_shared_credential_attempts_current_month"
+          },
+          {
+            "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+            "name": "projected_remaining_unavoidable_non_retry_consumption"
+          },
+          {
+            "meaning": "the one candidate automatic retry attempt being considered",
+            "name": "candidate_automatic_retry_attempt"
+          },
+          {
+            "meaning": "approved shared-account consumption that must remain protected",
+            "name": "approved_reserved_shared_credential_consumption"
+          }
+        ],
+        "scope": "all_known_shared_credential_consumers",
+        "tiered50_is_not_the_only_credential_consumer": true,
+        "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+      },
       "do_not_retry_deterministic_parser_schema_errors": true,
       "do_not_retry_deterministic_request_contract_errors": true,
       "do_not_retry_deterministic_trias_application_errors": true,
@@ -6803,7 +6890,34 @@
     },
     "automatic_retry_quota_guardrail": {
       "boundary": 207500,
-      "rule": "block automatic retries when projected/current monthly consumption would exceed 207500",
+      "rule": "block automatic retries when projected/current shared-credential monthly consumption would exceed 207500",
+      "runtime_contract": {
+        "current_legacy7_usage_must_not_be_fabricated": true,
+        "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+        "runtime_inputs": [
+          {
+            "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+            "name": "actual_audited_shared_credential_attempts_current_month"
+          },
+          {
+            "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+            "name": "projected_remaining_unavoidable_non_retry_consumption"
+          },
+          {
+            "meaning": "the one candidate automatic retry attempt being considered",
+            "name": "candidate_automatic_retry_attempt"
+          },
+          {
+            "meaning": "approved shared-account consumption that must remain protected",
+            "name": "approved_reserved_shared_credential_consumption"
+          }
+        ],
+        "scope": "all_known_shared_credential_consumers",
+        "tiered50_is_not_the_only_credential_consumer": true,
+        "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+      },
+      "scope": "all_known_shared_credential_consumers",
       "stage14_required": true
     },
     "current_production_audit": {
@@ -6885,6 +6999,32 @@
       "TLS_FAILURE"
     ],
     "automatic_retry_count_max": 1,
+    "automatic_retry_guardrail_contract": {
+      "current_legacy7_usage_must_not_be_fabricated": true,
+      "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+      "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+      "runtime_inputs": [
+        {
+          "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+          "name": "actual_audited_shared_credential_attempts_current_month"
+        },
+        {
+          "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+          "name": "projected_remaining_unavoidable_non_retry_consumption"
+        },
+        {
+          "meaning": "the one candidate automatic retry attempt being considered",
+          "name": "candidate_automatic_retry_attempt"
+        },
+        {
+          "meaning": "approved shared-account consumption that must remain protected",
+          "name": "approved_reserved_shared_credential_consumption"
+        }
+      ],
+      "scope": "all_known_shared_credential_consumers",
+      "tiered50_is_not_the_only_credential_consumer": true,
+      "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+    },
     "do_not_retry_deterministic_parser_schema_errors": true,
     "do_not_retry_deterministic_request_contract_errors": true,
     "do_not_retry_deterministic_trias_application_errors": true,
@@ -12605,6 +12745,32 @@
             "TLS_FAILURE"
           ],
           "automatic_retry_count_max": 1,
+          "automatic_retry_guardrail_contract": {
+            "current_legacy7_usage_must_not_be_fabricated": true,
+            "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+            "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+            "runtime_inputs": [
+              {
+                "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+                "name": "actual_audited_shared_credential_attempts_current_month"
+              },
+              {
+                "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+                "name": "projected_remaining_unavoidable_non_retry_consumption"
+              },
+              {
+                "meaning": "the one candidate automatic retry attempt being considered",
+                "name": "candidate_automatic_retry_attempt"
+              },
+              {
+                "meaning": "approved shared-account consumption that must remain protected",
+                "name": "approved_reserved_shared_credential_consumption"
+              }
+            ],
+            "scope": "all_known_shared_credential_consumers",
+            "tiered50_is_not_the_only_credential_consumer": true,
+            "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+          },
           "do_not_retry_deterministic_parser_schema_errors": true,
           "do_not_retry_deterministic_request_contract_errors": true,
           "do_not_retry_deterministic_trias_application_errors": true,
@@ -12671,6 +12837,32 @@
         "TLS_FAILURE"
       ],
       "automatic_retry_count_max": 1,
+      "automatic_retry_guardrail_contract": {
+        "current_legacy7_usage_must_not_be_fabricated": true,
+        "decision_rule": "do not start the candidate automatic retry when the resulting projected/current shared-credential monthly total would exceed 207500",
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+        "runtime_inputs": [
+          {
+            "meaning": "actual shared-credential HTTP attempts already consumed in the current month",
+            "name": "actual_audited_shared_credential_attempts_current_month"
+          },
+          {
+            "meaning": "remaining non-retry consumption for all known enabled shared-credential consumers",
+            "name": "projected_remaining_unavoidable_non_retry_consumption"
+          },
+          {
+            "meaning": "the one candidate automatic retry attempt being considered",
+            "name": "candidate_automatic_retry_attempt"
+          },
+          {
+            "meaning": "approved shared-account consumption that must remain protected",
+            "name": "approved_reserved_shared_credential_consumption"
+          }
+        ],
+        "scope": "all_known_shared_credential_consumers",
+        "tiered50_is_not_the_only_credential_consumer": true,
+        "until_stage14_shared_credential_audit": "retain the conservative Legacy7 reservation because current shared-credential usage is not established"
+      },
       "do_not_retry_deterministic_parser_schema_errors": true,
       "do_not_retry_deterministic_request_contract_errors": true,
       "do_not_retry_deterministic_trias_application_errors": true,
