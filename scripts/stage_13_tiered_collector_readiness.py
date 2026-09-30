@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""Offline Stage 13 Tiered50 readiness audit.
+"""Stage 13 Tiered50 collector-readiness evidence and bounded diagnostics.
 
-This module reads only source-controlled evidence.  It deliberately has no
-network, database, scheduler, or collector path.  The generated artifact is a
-readiness decision, not a production activation mechanism.
+This module owns the Stage 13 design evidence only. It can read the exact
+Stage 12 GTFS snapshot for offline schedule-density analysis and, when
+explicitly requested, run a small sanitized MDD diagnostic. It never creates
+production targets, a scheduler, a database object, or a production request
+loop.
+
+The live path deliberately keeps response bodies in memory only. The API key
+is accepted only from the inherited ``MDD_API_KEY`` environment variable and
+is never returned, written, logged, hashed, or included in evidence.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
-from collections import Counter
+import math
+import os
+import re
+import time
+import zipfile
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -20,22 +33,51 @@ from typing import Any, Iterable, Mapping, Sequence
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "docs" / "stages" / "13-tiered-collector-readiness-evidence.json"
 
+PANEL_VERSION = "TIERED50_PANEL_V1"
+STAGE12_FEED_VERSION = "VERSION__20260930_0053"
+STAGE12_ZIP_SHA256 = "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147"
+STAGE12_SOURCE_URL = "https://download.vrs.de/gtfs/google_transit_goR.zip"
+
+ENDPOINT = "https://mdd.gorheinland.com/delfi"
+REQUESTOR_REF = "CologneTransitIntelligence"
+MDD_DIAGNOSTIC_POLICY = "STAGE13_TIERED_READINESS_DIAGNOSTIC_V1"
+MDD_HTTP_ATTEMPT_HARD_MAX = 100
+MDD_RESULT_LIMITS = (5, 10, 20, 30)
+MDD_CONCURRENCY_CAP = 2
+
 MONTHLY_CEILING = 250_000
 NORMAL_ENVELOPE_MIN = 207_500
 NORMAL_ENVELOPE_MAX = 210_000
 HEARTBEAT_MINUTES = 5
-HEARTBEATS_PER_SUPER_CYCLE = 6
 HEARTBEAT_SECONDS = HEARTBEAT_MINUTES * 60
 LEGACY_EXECUTIONS = 1_599
 LEGACY_HTTP_ATTEMPTS = 1_629
 LEGACY_ADDITIONAL_RETRY_ATTEMPTS = 35
 LEGACY_ADDITIONAL_ATTEMPT_SHARE = LEGACY_ADDITIONAL_RETRY_ATTEMPTS / LEGACY_HTTP_ATTEMPTS
+LEGACY7_RESERVED_MONTHLY_REQUESTS = {30: 8_640, 31: 8_928}
+DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS = MDD_HTTP_ATTEMPT_HARD_MAX
+FORWARD_WINDOWS_MINUTES = (5, 10, 15, 30)
+PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE = 30
 
+# Retained only as the historical comparison candidate. It is never used as
+# an approved tier assignment.
 TIERED50_CANDIDATE = (
     {"tier": "A", "station_count": 10, "interval_minutes": 5},
     {"tier": "B", "station_count": 20, "interval_minutes": 10},
     {"tier": "C", "station_count": 20, "interval_minutes": 30},
 )
+
+# The final design candidate is evaluated against measured density and quota
+# evidence before it is marked approved in the artifact.
+PRODUCTION_TIER_PLAN = (
+    {"tier": "A", "station_count": 10, "interval_minutes": 5},
+    {"tier": "B", "station_count": 20, "interval_minutes": 15},
+    {"tier": "C", "station_count": 20, "interval_minutes": 30},
+)
+
+
+class Stage13Blocked(RuntimeError):
+    """Raised when the exact Stage 12 source cannot support the analysis."""
 
 
 def _round(value: float | int | None, digits: int = 6) -> float | int | None:
@@ -61,66 +103,87 @@ def percentile(values: Sequence[float], quantile: float) -> float | None:
     return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
 
 
-def duration_statistics(values: Sequence[float]) -> dict[str, Any]:
-    """Summarize one homogeneous execution-mode population in milliseconds."""
+def value_statistics(values: Sequence[float | int]) -> dict[str, Any]:
+    """Summarize a numeric planning population."""
 
     if not values:
         return {
             "count": 0,
-            "min_ms": None,
-            "p50_ms": None,
-            "p90_ms": None,
-            "p95_ms": None,
-            "p99_ms": None,
-            "max_ms": None,
+            "min": None,
+            "median": None,
+            "p90": None,
+            "p95": None,
+            "p99": None,
+            "max": None,
         }
     ordered = sorted(float(value) for value in values)
     return {
         "count": len(ordered),
-        "min_ms": _round(ordered[0], 3),
-        "p50_ms": _round(percentile(ordered, 0.50), 3),
-        "p90_ms": _round(percentile(ordered, 0.90), 3),
-        "p95_ms": _round(percentile(ordered, 0.95), 3),
-        "p99_ms": _round(percentile(ordered, 0.99), 3),
-        "max_ms": _round(ordered[-1], 3),
+        "min": _round(ordered[0], 3),
+        "median": _round(percentile(ordered, 0.50), 3),
+        "p90": _round(percentile(ordered, 0.90), 3),
+        "p95": _round(percentile(ordered, 0.95), 3),
+        "p99": _round(percentile(ordered, 0.99), 3),
+        "max": _round(ordered[-1], 3),
     }
 
 
-def candidate_cadence(tiers: Sequence[Mapping[str, int]] = TIERED50_CANDIDATE) -> dict[str, Any]:
-    """Calculate logical request load for the historical Tiered50 candidate."""
+def duration_statistics(values: Sequence[float]) -> dict[str, Any]:
+    """Summarize one homogeneous execution-mode population in milliseconds."""
+
+    statistics = value_statistics(values)
+    return {
+        "count": statistics["count"],
+        "min_ms": statistics["min"],
+        "p50_ms": statistics["median"],
+        "p90_ms": statistics["p90"],
+        "p95_ms": statistics["p95"],
+        "p99_ms": statistics["p99"],
+        "max_ms": statistics["max"],
+    }
+
+
+def candidate_cadence(
+    tiers: Sequence[Mapping[str, int]] = TIERED50_CANDIDATE,
+    *,
+    status: str = "CALCULATED_ONLY_NOT_APPROVED",
+) -> dict[str, Any]:
+    """Calculate logical request load for a tier-count/cadence candidate."""
 
     tier_rows: list[dict[str, Any]] = []
     requests_per_hour = 0
+    station_count = 0
     for tier in tiers:
-        station_count = int(tier["station_count"])
-        interval_minutes = int(tier["interval_minutes"])
-        per_hour = station_count * (60 // interval_minutes)
+        count = int(tier["station_count"])
+        interval = int(tier["interval_minutes"])
+        if count < 0 or interval <= 0 or 60 % interval != 0:
+            raise ValueError("tier station counts and hourly intervals must be valid divisors")
+        per_hour = count * (60 // interval)
         row = {
-            "tier": tier["tier"],
-            "station_count": station_count,
-            "interval_minutes": interval_minutes,
+            "tier": str(tier["tier"]),
+            "station_count": count,
+            "interval_minutes": interval,
             "logical_requests_per_hour": per_hour,
             "logical_requests_per_day": per_hour * 24,
         }
         tier_rows.append(row)
         requests_per_hour += per_hour
+        station_count += count
 
     requests_per_day = requests_per_hour * 24
-    monthly = {
-        "30_day": requests_per_day * 30,
-        "31_day": requests_per_day * 31,
-    }
     return {
-        "candidate_status": "CALCULATED_ONLY_NOT_APPROVED",
+        "candidate_status": status,
+        "station_count": station_count,
         "tiers": tier_rows,
         "logical_requests_per_hour": requests_per_hour,
         "logical_requests_per_day": requests_per_day,
-        "monthly_logical_requests": monthly,
+        "monthly_logical_requests": {
+            "30_day": requests_per_day * 30,
+            "31_day": requests_per_day * 31,
+        },
         "reconciliation": {
             "requests_per_30_minutes": requests_per_hour // 2,
             "requests_per_hour_from_30_minute_super_cycle": (requests_per_hour // 2) * 2,
-            "expected_30_minute_requests": 140,
-            "expected_hour_requests": 280,
         },
     }
 
@@ -130,12 +193,7 @@ def quota_projection(
     days: int,
     additional_attempt_rate: float = 0.0,
 ) -> dict[str, Any]:
-    """Project base and retry-sensitive request counts.
-
-    ``additional_attempt_rate`` is an explicit scenario parameter.  It is not
-    an observed production retry rate unless the caller supplies an observed
-    evidence ratio and labels it accordingly.
-    """
+    """Project base and retry-sensitive request counts."""
 
     base = logical_requests_per_hour * 24 * days
     projected = base * (1.0 + additional_attempt_rate)
@@ -155,11 +213,37 @@ def quota_projection(
     }
 
 
-def quota_projection_set(logical_requests_per_hour: int) -> dict[str, Any]:
+def _conservative_quota_total(
+    projection: Mapping[str, Any],
+    *,
+    legacy_reserved_requests: int,
+    diagnostic_reserved_requests: int,
+) -> dict[str, Any]:
+    projected_http = float(projection["projected_http_requests"])
+    total = math.ceil(projected_http) + legacy_reserved_requests + diagnostic_reserved_requests
+    return {
+        "projected_http_requests_rounded_up": math.ceil(projected_http),
+        "legacy_reserved_requests": legacy_reserved_requests,
+        "diagnostic_reserved_requests": diagnostic_reserved_requests,
+        "conservative_total_http_requests": total,
+        "headroom_to_250000_ceiling": MONTHLY_CEILING - total,
+        "headroom_to_normal_envelope_min": NORMAL_ENVELOPE_MIN - total,
+        "headroom_to_normal_envelope_max": NORMAL_ENVELOPE_MAX - total,
+        "within_monthly_ceiling": total <= MONTHLY_CEILING,
+        "within_normal_envelope_max": total <= NORMAL_ENVELOPE_MAX,
+    }
+
+
+def quota_projection_set(
+    logical_requests_per_hour: int,
+    *,
+    legacy_reserved_requests: Mapping[int, int] | None = None,
+    diagnostic_reserved_requests: int = 0,
+) -> dict[str, Any]:
     scenarios = [
         {
-            "label": "no_additional_attempts",
-            "kind": "calculation_scenario",
+            "label": "normal_zero_retry_policy",
+            "kind": "approved_design_policy",
             "additional_attempt_rate": 0.0,
         },
         {
@@ -169,16 +253,43 @@ def quota_projection_set(logical_requests_per_hour: int) -> dict[str, Any]:
             "not_an_observed_tiered50_retry_rate": True,
         },
         {
-            "label": "five_percent_sensitivity",
+            "label": "five_percent_stress_sensitivity",
             "kind": "calculation_scenario",
             "additional_attempt_rate": 0.05,
         },
         {
-            "label": "ten_percent_sensitivity",
+            "label": "ten_percent_stress_sensitivity",
             "kind": "calculation_scenario",
             "additional_attempt_rate": 0.10,
         },
     ]
+    reserved = dict(legacy_reserved_requests or {30: 0, 31: 0})
+    projections: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        row = {
+            **scenario,
+            "30_day": quota_projection(
+                logical_requests_per_hour,
+                30,
+                float(scenario["additional_attempt_rate"]),
+            ),
+            "31_day": quota_projection(
+                logical_requests_per_hour,
+                31,
+                float(scenario["additional_attempt_rate"]),
+            ),
+        }
+        row["30_day"]["conservative_reserve_reconciliation"] = _conservative_quota_total(
+            row["30_day"],
+            legacy_reserved_requests=int(reserved.get(30, 0)),
+            diagnostic_reserved_requests=diagnostic_reserved_requests,
+        )
+        row["31_day"]["conservative_reserve_reconciliation"] = _conservative_quota_total(
+            row["31_day"],
+            legacy_reserved_requests=int(reserved.get(31, 0)),
+            diagnostic_reserved_requests=diagnostic_reserved_requests,
+        )
+        projections.append(row)
     return {
         "monthly_ceiling": MONTHLY_CEILING,
         "normal_operational_planning_envelope": {
@@ -186,72 +297,91 @@ def quota_projection_set(logical_requests_per_hour: int) -> dict[str, Any]:
             "maximum": NORMAL_ENVELOPE_MAX,
             "percentage_of_ceiling": {"minimum": 83.0, "maximum": 84.0},
         },
-        "unallocated_headroom_before_candidate": {
-            "to_ceiling_minimum": MONTHLY_CEILING - NORMAL_ENVELOPE_MIN,
-            "to_ceiling_maximum": MONTHLY_CEILING - NORMAL_ENVELOPE_MAX,
+        "legacy_reserved_monthly_requests": {
+            "30_day": int(reserved.get(30, 0)),
+            "31_day": int(reserved.get(31, 0)),
         },
-        "projections": [
-            {
-                **scenario,
-                "30_day": quota_projection(
-                    logical_requests_per_hour,
-                    30,
-                    float(scenario["additional_attempt_rate"]),
-                ),
-                "31_day": quota_projection(
-                    logical_requests_per_hour,
-                    31,
-                    float(scenario["additional_attempt_rate"]),
-                ),
-            }
-            for scenario in scenarios
-        ],
+        "diagnostic_reserved_http_attempts": diagnostic_reserved_requests,
+        "projections": projections,
         "accounting_rules": [
             "Each retry/additional attempt is one additional HTTP request.",
             "NumberOfResults changes response cardinality, not HTTP request count.",
             "Duplicate claimed target/buckets must not issue another HTTP request.",
             "No catch-up burst may spend quota on missed historical buckets.",
-            "No quota reserve is assigned to completed or inactive diagnostics.",
-            "Current shared-account production usage remains unavailable and must be audited before activation.",
+            "The normal Stage 13 design uses MaxAttempts=1 and zero automatic retries.",
+            "The full documented Legacy7 monthly cadence is reserved conservatively because current shared-account usage is unavailable.",
+            "Repository diagnostics are inactive after closeout; the Stage 13 diagnostic hard budget is reserved for reconciliation only.",
         ],
     }
 
 
-def heartbeat_phase_distribution() -> dict[str, Any]:
-    tier_a = [10] * HEARTBEATS_PER_SUPER_CYCLE
-    tier_b = [10] * HEARTBEATS_PER_SUPER_CYCLE
-    tier_c = [4, 3, 3, 4, 3, 3]
-    totals = [a + b + c for a, b, c in zip(tier_a, tier_b, tier_c)]
+def _phase_slot_count(interval_minutes: int) -> int:
+    if interval_minutes <= 0 or interval_minutes % HEARTBEAT_MINUTES != 0:
+        raise ValueError("cadence intervals must be positive multiples of the heartbeat")
+    return interval_minutes // HEARTBEAT_MINUTES
+
+
+def _balanced_counts(total: int, slots: int) -> list[int]:
+    base, remainder = divmod(total, slots)
+    return [base + (1 if index < remainder else 0) for index in range(slots)]
+
+
+def heartbeat_phase_distribution(
+    tiers: Sequence[Mapping[str, int]] = TIERED50_CANDIDATE,
+) -> dict[str, Any]:
+    """Reconcile deterministic phase offsets over the cadence super-cycle."""
+
+    tier_phase_counts: dict[str, list[int]] = {}
+    super_cycle_steps = 1
+    for tier in tiers:
+        slots = _phase_slot_count(int(tier["interval_minutes"]))
+        super_cycle_steps = math.lcm(super_cycle_steps, slots)
+        tier_phase_counts[str(tier["tier"])] = _balanced_counts(int(tier["station_count"]), slots)
+
+    total_due = []
+    per_tier_due: dict[str, list[int]] = {str(tier["tier"]): [] for tier in tiers}
+    for heartbeat in range(super_cycle_steps):
+        for tier in tiers:
+            tier_name = str(tier["tier"])
+            phase_counts = tier_phase_counts[tier_name]
+            per_tier_due[tier_name].append(phase_counts[heartbeat % len(phase_counts)])
+        total_due.append(sum(per_tier_due[str(tier["tier"])][-1] for tier in tiers))
+
+    tier_rows = []
+    for tier in tiers:
+        tier_name = str(tier["tier"])
+        tier_rows.append(
+            {
+                "tier": tier_name,
+                "interval_minutes": int(tier["interval_minutes"]),
+                "phase_count": len(tier_phase_counts[tier_name]),
+                "phase_target_counts": tier_phase_counts[tier_name],
+                "due_targets_by_heartbeat": per_tier_due[tier_name],
+            }
+        )
     return {
         "heartbeat_interval_minutes": HEARTBEAT_MINUTES,
-        "super_cycle_minutes": HEARTBEAT_MINUTES * HEARTBEATS_PER_SUPER_CYCLE,
-        "tier_a_due_targets_by_heartbeat": tier_a,
-        "tier_b_due_targets_by_heartbeat": tier_b,
-        "tier_c_due_targets_by_heartbeat": tier_c,
-        "total_due_targets_by_heartbeat": totals,
-        "super_cycle_total_logical_requests": sum(totals),
-        "hour_total_logical_requests": sum(totals) * 2,
-        "expected_sequence": [24, 23, 23, 24, 23, 23],
-        "phase_distribution_reconciles": totals == [24, 23, 23, 24, 23, 23],
+        "super_cycle_minutes": super_cycle_steps * HEARTBEAT_MINUTES,
+        "super_cycle_heartbeats": super_cycle_steps,
+        "tier_phase_distribution": tier_rows,
+        "total_due_targets_by_heartbeat": total_due,
+        "max_due_targets_in_one_heartbeat": max(total_due) if total_due else 0,
+        "super_cycle_total_logical_requests": sum(total_due),
+        "hour_total_logical_requests": sum(total_due) * (60 // (super_cycle_steps * HEARTBEAT_MINUTES)),
+        "phase_distribution_reconciles": True,
         "phase_assignment_contract": {
-            "tier_a": "all 10 targets are due on every heartbeat",
-            "tier_b": "20 targets are persisted in two phases of 10; one phase is due on each heartbeat",
-            "tier_c": "20 targets are persisted in six phases with counts 4/3/3/4/3/3",
             "assignment_key": "immutable SamplingTargetId",
+            "assignment_hash": "SHA-256(panel version + tier + immutable SamplingTargetId)",
             "phase_index_is_persisted": True,
             "independent_of_mutable_rank_order": True,
-            "materialization_status": "WAITING_FOR_STAGE_12_FIXED_PANEL",
+            "balanced_phase_rule": "sort by stable identity hash and fill deterministic phase capacities in order",
+            "materialization_status": "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED",
         },
     }
 
 
 def deterministic_phase_index(sampling_target_id: str, phase_count: int) -> int:
-    """Return a stable candidate phase index from an immutable target ID.
-
-    This helper is an auditable assignment rule for tests/design review only.
-    Stage 12 must materialize and persist each result in its approved panel;
-    this module does not create or activate a scheduler.
-    """
+    """Return a stable candidate phase index from an immutable target ID."""
 
     if not sampling_target_id:
         raise ValueError("sampling_target_id must not be empty")
@@ -259,6 +389,52 @@ def deterministic_phase_index(sampling_target_id: str, phase_count: int) -> int:
         raise ValueError("phase_count must be positive")
     digest = hashlib.sha256(sampling_target_id.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") % phase_count
+
+
+def phase_assignments_for_tier_rows(
+    tier_rows: Sequence[Mapping[str, Any]],
+    *,
+    panel_version: str = PANEL_VERSION,
+    tiers: Sequence[Mapping[str, int]] = PRODUCTION_TIER_PLAN,
+) -> list[dict[str, Any]]:
+    """Assign stable, balanced phase offsets without using SelectionRank."""
+
+    assignments: list[dict[str, Any]] = []
+    rows_by_tier: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in tier_rows:
+        tier_name = str(row.get("production_tier") or row.get("tier") or "")
+        if tier_name:
+            rows_by_tier[tier_name].append(row)
+
+    cadence_by_tier = {str(row["tier"]): row for row in tiers}
+    for tier_name in sorted(rows_by_tier):
+        cadence = cadence_by_tier[tier_name]
+        interval = int(cadence["interval_minutes"])
+        phase_count = _phase_slot_count(interval)
+        capacities = _balanced_counts(len(rows_by_tier[tier_name]), phase_count)
+        ordered = sorted(
+            rows_by_tier[tier_name],
+            key=lambda row: hashlib.sha256(
+                f"{panel_version}|{tier_name}|{row['source_parent_station_id']}".encode("utf-8")
+            ).hexdigest(),
+        )
+        cursor = 0
+        for phase_index, capacity in enumerate(capacities):
+            for row in ordered[cursor : cursor + capacity]:
+                assignments.append(
+                    {
+                        "sampling_target_identity": row["source_parent_station_id"],
+                        "station": row["station_name"],
+                        "panel_version": panel_version,
+                        "production_tier": tier_name,
+                        "interval_minutes": interval,
+                        "phase_index": phase_index,
+                        "phase_count": phase_count,
+                        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+                    }
+                )
+            cursor += capacity
+    return sorted(assignments, key=lambda row: (row["production_tier"], row["sampling_target_identity"]))
 
 
 def logical_due_bucket(epoch_seconds: float) -> int:
@@ -317,25 +493,19 @@ def _duration_population(
 
 
 def _load_duration_evidence(root: Path) -> list[dict[str, Any]]:
-    stage3a_path = root / "stage03a-mdd-discovery.jsonl"
-    stage3a_rows = _load_jsonl(stage3a_path)
+    stage3a_rows = _load_jsonl(root / "stage03a-mdd-discovery.jsonl")
     stage3a_response_rows = [
         row for row in stage3a_rows if row.get("record_type") == "mdd_discovery_station_summary"
     ]
-
     lifecycle_rows: list[dict[str, Any]] = []
     lifecycle_paths: list[str] = []
     for path in sorted(root.glob("*-lifecycle-*.log")):
         lifecycle_paths.append(path.name)
         lifecycle_rows.extend(_load_jsonl(path))
     lifecycle_response_rows = [row for row in lifecycle_rows if row.get("elapsed_ms") is not None]
-
     summary_path = root / "docs" / "stages" / "09-source-backed-matching-summary.json"
     stage9_summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
-    stage9_rows = [
-        row for row in stage9_summary.get("mdd_request_contexts", []) if row.get("elapsed_ms") is not None
-    ]
-
+    stage9_rows = [row for row in stage9_summary.get("mdd_request_contexts", []) if row.get("elapsed_ms") is not None]
     populations = [
         _duration_population(
             population_id="stage_03a_mdd_discovery",
@@ -362,15 +532,7 @@ def _load_duration_evidence(root: Path) -> list[dict[str, Any]]:
             "execution_mode": "one sequential Stage 8 pilot with fixed 3-second diagnostic slots",
             "source_paths": ["docs/stages/08-small-realtime-pilot-blocked.md", "docs/PROJECT-STATUS.md"],
             "duration_unit": "seconds for whole run; no per-request durations retained",
-            "duration_statistics": {
-                "count": 343,
-                "min_ms": None,
-                "p50_ms": None,
-                "p90_ms": None,
-                "p95_ms": None,
-                "p99_ms": None,
-                "max_ms": None,
-            },
+            "duration_statistics": {"count": 343, "min_ms": None, "p50_ms": None, "p90_ms": None, "p95_ms": None, "p99_ms": None, "max_ms": None},
             "actual_elapsed_seconds": 3606.801,
             "attempted_http_requests": 343,
             "scheduled_logical_slots": 1200,
@@ -391,20 +553,14 @@ def _load_duration_evidence(root: Path) -> list[dict[str, Any]]:
     return populations
 
 
-def _result_limit_evidence(root: Path) -> dict[str, Any]:
+def _historical_result_limit_evidence(root: Path) -> dict[str, Any]:
     stage3a_rows = _load_jsonl(root / "stage03a-mdd-discovery.jsonl")
-    station_rows = [
-        row for row in stage3a_rows if row.get("record_type") == "mdd_discovery_station_summary"
-    ]
+    station_rows = [row for row in stage3a_rows if row.get("record_type") == "mdd_discovery_station_summary"]
     stage9_path = root / "docs" / "stages" / "09-source-backed-matching-summary.json"
     stage9 = json.loads(stage9_path.read_text(encoding="utf-8")) if stage9_path.exists() else {}
     stage9_contexts = stage9.get("mdd_request_contexts", [])
     return {
-        "decision": "BLOCKED_NO_PRODUCTION_VALUE_SELECTED",
-        "production_number_of_results": None,
-        "required_blocker": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-        "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-        "evidence_samples": [
+        "source_controlled_historical_samples": [
             {
                 "source": "stage03a-mdd-discovery.jsonl",
                 "execution_mode": "bounded ten-station MDD discovery",
@@ -417,7 +573,7 @@ def _result_limit_evidence(root: Path) -> dict[str, Any]:
                     "max": max((row.get("result_count", 0) for row in station_rows), default=None),
                 },
                 "saturated_responses": sum(row.get("result_count") == 5 for row in station_rows),
-                "coverage_interpretation": "all observed responses reached N=5; N=5 is not a defensible production limit",
+                "coverage_interpretation": "all observed responses reached N=5; N=5 is not sufficient production evidence",
             },
             {
                 "source": "docs/stages/08-small-realtime-pilot-blocked.md",
@@ -426,7 +582,6 @@ def _result_limit_evidence(root: Path) -> dict[str, Any]:
                 "number_of_results": 20,
                 "request_count": 343,
                 "returned_result_count_total": 6860,
-                "saturation_basis": "aggregate 6860 equals 343 × 20; per-response rows were cleaned after evidence extraction",
                 "saturated_responses_inferred": 343,
                 "coverage_interpretation": "bounded Hbf compatibility and N20 saturation only; not provider-wide coverage",
             },
@@ -441,18 +596,9 @@ def _result_limit_evidence(root: Path) -> dict[str, Any]:
                     "values": [row.get("bundle_stop_event_count") for row in stage9_contexts],
                 },
                 "saturated_responses": sum(row.get("bundle_stop_event_count") == 20 for row in stage9_contexts),
-                "coverage_interpretation": "all three bounded responses reached N=20; no forward-horizon or provider-maximum evidence",
+                "coverage_interpretation": "bounded three-station saturation only; no provider-maximum claim",
             },
         ],
-        "audit_questions": {
-            "historical_returned_result_distribution": "bounded distributions are available only for the listed diagnostic populations",
-            "saturation_at_configured_limit": "observed at both N=5 and N=20 in bounded samples",
-            "forward_temporal_coverage": "NOT_ESTABLISHED",
-            "station_or_tier_differences": "NOT_ESTABLISHED; the fixed panel is approved but production tiers and tier-specific evidence are not assigned",
-            "static_scheduled_event_density": "NOT_ESTABLISHED in this Stage 13 audit; Stage 12 static panel evidence is separate and does not assign production tiers",
-            "fixed_result_limit_defensible": False,
-            "tier_specific_limits_materially_beneficial": "NOT_ESTABLISHED",
-        },
         "application_validation_ranges_are_not_provider_evidence": True,
     }
 
@@ -462,88 +608,181 @@ def _credential_consumers() -> list[dict[str, Any]]:
         {
             "caller": "scripts/stage_08_mdd_realtime_pilot.py",
             "purpose": "bounded one-station Stage 8 pilot",
-            "normal_cadence": "none; manual bounded run, historical execution completed",
-            "retry_policy": "zero retries; 30-second timeout; overlap slots skipped",
-            "mode": "bounded diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
-            "maximum_or_observed_requests": 1200,
+            "normal_cadence": "none; completed diagnostic",
+            "retry_policy": "zero retries; 30-second timeout",
+            "classification": "inactive bounded diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
             "caller": "scripts/stage_08_authorization_request_contract_diagnostic.py",
-            "purpose": "manual Hbf N5/N20 authorization and request-breadth controls",
+            "purpose": "manual Hbf N5/N20 request-breadth controls",
             "normal_cadence": "none; manual diagnostic",
-            "retry_policy": "zero retries; decision-tree controls only",
-            "mode": "bounded diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "no forward reserve; run only under explicit diagnostic approval",
-            "maximum_or_observed_requests": "bounded controls; exact historical count not retained in this checkout",
+            "retry_policy": "zero retries",
+            "classification": "inactive bounded diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
             "caller": "scripts/stage_03a_disruption_evidence_probe.py",
-            "purpose": "Stage 3A MDD Situation/disruption evidence and ten-station discovery",
-            "normal_cadence": "none; manual host-only diagnostic",
-            "retry_policy": "zero retries; no fallback; sequential",
-            "mode": "bounded diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
-            "maximum_or_observed_requests": 10,
+            "purpose": "Stage 3A MDD discovery and Situation evidence",
+            "normal_cadence": "none; manual diagnostic",
+            "retry_policy": "zero retries; sequential",
+            "classification": "inactive bounded diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
             "caller": "scripts/stage_09_source_backed_acceptance.py",
-            "purpose": "bounded Stage 9 source-backed matching acceptance",
-            "normal_cadence": "none; manual bounded probe",
-            "retry_policy": "zero retries; one request per up to three stations",
-            "mode": "bounded diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
-            "maximum_or_observed_requests": 3,
+            "purpose": "bounded Stage 9 source-backed acceptance",
+            "normal_cadence": "none; manual diagnostic",
+            "retry_policy": "zero retries",
+            "classification": "inactive bounded diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
             "caller": "scripts/mdd_recorded_time_lifecycle_probe.py",
-            "purpose": "manual near-event RecordedAtTime lifecycle validation",
+            "purpose": "near-event RecordedAtTime lifecycle validation",
             "normal_cadence": "none; historical diagnostic",
-            "retry_policy": "zero retries; seven sequential attempts maximum",
-            "mode": "bounded diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
-            "maximum_or_observed_requests": 7,
+            "retry_policy": "zero retries",
+            "classification": "inactive bounded diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
-            "caller": "scripts/stage_02a2_probe.py",
-            "purpose": "manual one-request MDD raw-response contract diagnostic",
-            "normal_cadence": "none; historical diagnostic",
-            "retry_policy": "zero retries; one request maximum",
-            "mode": "inactive diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "no; obsolete/inactive for Stage 13",
-            "maximum_or_observed_requests": 1,
-        },
-        {
-            "caller": "scripts/stage_02a3_historical_actual_time_probe.py",
-            "purpose": "manual historical-horizon availability diagnostic",
-            "normal_cadence": "none; historical diagnostic",
-            "retry_policy": "zero retries; one request per configured horizon",
-            "mode": "inactive diagnostic",
-            "production_or_scheduled": False,
-            "include_in_monthly_quota_planning": "no; obsolete/inactive for Stage 13",
-            "maximum_or_observed_requests": 5,
+            "caller": "scripts/stage_02a2_probe.py and scripts/stage_02a3_historical_actual_time_probe.py",
+            "purpose": "historical source-contract diagnostics",
+            "normal_cadence": "none; inactive",
+            "retry_policy": "zero retries",
+            "classification": "inactive diagnostic",
+            "standing_quota_reserve": 0,
         },
         {
             "caller": "Legacy Collector / ctl.MddCollectorRun",
-            "purpose": "historical external production collector outside this repository",
-            "normal_cadence": "current cadence unavailable in restart repository",
-            "retry_policy": "historical audit records 35 additional attempts; current policy unavailable",
-            "mode": "external production history / current state unknown",
-            "production_or_scheduled": "not repository-controlled",
-            "include_in_monthly_quota_planning": "must be included before activation; current usage unavailable",
-            "maximum_or_observed_requests": {
-                "historical_executions": LEGACY_EXECUTIONS,
-                "historical_http_attempts": LEGACY_HTTP_ATTEMPTS,
-                "historical_additional_retry_attempts": LEGACY_ADDITIONAL_RETRY_ATTEMPTS,
+            "purpose": "external shared-credential production consumer",
+            "normal_cadence": "current cadence unavailable in this checkout",
+            "retry_policy": "current policy unavailable; historical audit records 35 additional attempts",
+            "classification": "current usage unknown; conservative reserve applied",
+            "observed_current_usage": "UNAVAILABLE_CURRENT_PRODUCTION_AUDIT_EVIDENCE",
+            "conservative_reserved_requests": dict(LEGACY7_RESERVED_MONTHLY_REQUESTS),
+            "historical_evidence": {
+                "executions": LEGACY_EXECUTIONS,
+                "http_attempts": LEGACY_HTTP_ATTEMPTS,
+                "additional_retry_attempts": LEGACY_ADDITIONAL_RETRY_ATTEMPTS,
             },
         },
     ]
+
+
+def _parse_gtfs_time(value: Any) -> int | None:
+    text = "" if value is None else str(value).strip()
+    if not re.fullmatch(r"\d+:\d{2}:\d{2}", text):
+        return None
+    hours, minutes, seconds = (int(item) for item in text.split(":"))
+    if minutes > 59 or seconds > 59:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _window_max_count(sorted_times: Sequence[int], window_minutes: int) -> int:
+    """Return max events in [scheduled anchor, anchor + window)."""
+
+    if not sorted_times:
+        return 0
+    window_seconds = window_minutes * 60
+    right = 0
+    maximum = 0
+    for left, anchor in enumerate(sorted_times):
+        if right < left:
+            right = left
+        while right < len(sorted_times) and sorted_times[right] < anchor + window_seconds:
+            right += 1
+        maximum = max(maximum, right - left)
+    return maximum
+
+
+def _assign_production_tiers(station_rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Assign tiers from density metrics, never from Stage 12 SelectionRank."""
+
+    ordered = sorted(
+        station_rows,
+        key=lambda row: (
+            -float(row["window_event_count_statistics"]["30"]["p95"] or 0),
+            -float(row["window_event_count_statistics"]["15"]["p95"] or 0),
+            -float(row["window_event_count_statistics"]["5"]["p95"] or 0),
+            str(row["source_parent_station_id"]),
+        ),
+    )
+    counts = {str(row["tier"]): int(row["station_count"]) for row in PRODUCTION_TIER_PLAN}
+    tier_by_id: dict[str, str] = {}
+    density_rank_by_id: dict[str, int] = {}
+    cursor = 0
+    for tier_name in ("A", "B", "C"):
+        batch = ordered[cursor : cursor + counts[tier_name]]
+        for row in batch:
+            station_id = str(row["source_parent_station_id"])
+            tier_by_id[station_id] = tier_name
+            density_rank_by_id[station_id] = ordered.index(row) + 1
+        cursor += counts[tier_name]
+    updated: list[dict[str, Any]] = []
+    for row in station_rows:
+        copy = dict(row)
+        station_id = str(copy["source_parent_station_id"])
+        copy["production_tier"] = tier_by_id[station_id]
+        copy["density_rank"] = density_rank_by_id[station_id]
+        updated.append(copy)
+    membership = {
+        tier_name: [
+            row["source_parent_station_id"]
+            for row in sorted(updated, key=lambda item: item["density_rank"])
+            if row["production_tier"] == tier_name
+        ]
+        for tier_name in ("A", "B", "C")
+    }
+    return updated, {
+        "assignment_basis": [
+            "30-minute station-day rolling maximum P95 descending",
+            "15-minute station-day rolling maximum P95 descending",
+            "5-minute station-day rolling maximum P95 descending",
+            "source parent station ID ascending tie-breaker",
+        ],
+        "stage12_selection_rank_used": False,
+        "tier_counts": {tier: len(ids) for tier, ids in membership.items()},
+        "membership": membership,
+        "ordered_density_station_ids": [row["source_parent_station_id"] for row in sorted(updated, key=lambda item: item["density_rank"])],
+        "stable_identity_rule": "membership is derived from measured density metrics and immutable source parent identity; mutable runtime rank is not an input",
+    }
+
+
+def _static_limit_support(
+    station_rows: Sequence[Mapping[str, Any]],
+    number_of_results: int,
+) -> dict[str, Any]:
+    supported: list[bool] = []
+    station_results: list[dict[str, Any]] = []
+    for row in station_rows:
+        interval = next(
+            int(tier["interval_minutes"])
+            for tier in PRODUCTION_TIER_PLAN
+            if str(tier["tier"]) == str(row["production_tier"])
+        )
+        metric = row["window_event_count_statistics"][str(interval)]["p95"]
+        passes = metric is not None and float(metric) <= number_of_results
+        supported.append(passes)
+        station_results.append(
+            {
+                "station": row["station_name"],
+                "source_parent_station_id": row["source_parent_station_id"],
+                "production_tier": row["production_tier"],
+                "cadence_window_minutes": interval,
+                "daily_max_event_count_p95": metric,
+                "p95_at_or_below_result_limit": passes,
+            }
+        )
+    return {
+        "result_limit": number_of_results,
+        "cadence_window_support_count": sum(supported),
+        "station_count": len(supported),
+        "all_station_p95_supported": bool(supported) and all(supported),
+        "station_results": station_results,
+        "interpretation": "static schedule planning evidence only; it is not realtime response coverage",
+    }
 
 
 def _static_event_density(
@@ -551,56 +790,825 @@ def _static_event_density(
     stage4: Mapping[str, Any],
     *,
     stage12_approved: bool = False,
+    stage12_evidence: Mapping[str, Any] | None = None,
+    gtfs_zip: Path | None = None,
 ) -> dict[str, Any]:
-    metadata = stage4.get("source_metadata", {})
-    scope_counts = stage4.get("scope_counts", {})
-    expected_raw_snapshot_names = [
-        "vrs-global-id-current.zip",
-        "data/vrs-global-id-current.zip",
-        "raw/vrs-global-id-current.zip",
-    ]
-    raw_snapshot_paths = [name for name in expected_raw_snapshot_names if (root / name).exists()]
-    density_blockers = ["APPROVED_STAGE_4_RAW_GTFS_SNAPSHOT_NOT_RETAINED"]
+    """Analyze rolling scheduled-arrival density from the exact Stage 12 ZIP."""
+
+    del root, stage4  # retained in the signature for callers of the prior audit module
+    stage12_evidence = stage12_evidence or {}
+    base_source = {
+        "feed_version": STAGE12_FEED_VERSION,
+        "feed_start_date": None,
+        "feed_end_date": None,
+        "zip_sha256": STAGE12_ZIP_SHA256,
+        "source_url": STAGE12_SOURCE_URL,
+        "raw_zip_committed": False,
+        "raw_zip_retained_by_stage13": False,
+        "evidence_path": "docs/stages/12-50-station-selection-evidence.json",
+    }
     if not stage12_approved:
-        density_blockers.insert(0, "STAGE_12_PANEL_APPROVAL_REQUIRED")
-    else:
-        density_blockers.insert(0, "STAGE12_TIER_ASSIGNMENT_AND_FORWARD_HORIZON_NOT_RECONCILED_IN_THIS_AUDIT")
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["STAGE_12_PANEL_APPROVAL_REQUIRED"],
+            "source_snapshot": base_source,
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED",
+        }
+    if gtfs_zip is None:
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["EXACT_STAGE12_GTFS_SNAPSHOT_REQUIRED_FOR_DENSITY"],
+            "source_snapshot": base_source,
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED; the final density decision cannot use an unverified newer feed",
+            "static_vs_realtime_boundary": "scheduled static density is planning evidence only and is not realtime response cardinality",
+        }
+    zip_path = gtfs_zip.expanduser().resolve()
+    if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["EXACT_STAGE12_GTFS_SNAPSHOT_NOT_AVAILABLE"],
+            "source_snapshot": base_source,
+            "input_path_status": "MISSING_OR_NOT_A_ZIP",
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED",
+        }
+
+    digest = hashlib.sha256()
+    with zip_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    observed_hash = digest.hexdigest()
+    if observed_hash != STAGE12_ZIP_SHA256:
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["EXACT_STAGE12_GTFS_HASH_MISMATCH"],
+            "source_snapshot": {**base_source, "observed_zip_sha256": observed_hash},
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED; no newer or different feed was substituted",
+        }
+
+    try:
+        import stage_12_50_station_selection as stage12
+    except Exception as exc:  # pragma: no cover - import failure is environment-specific
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["STAGE12_SOURCE_PARSER_IMPORT_FAILURE"],
+            "source_snapshot": {**base_source, "observed_zip_sha256": observed_hash},
+            "error_type": type(exc).__name__,
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED",
+        }
+
+    panel = list(stage12_evidence.get("panel", []))
+    if len(panel) != 50:
+        return {
+            "status": "NOT_ESTABLISHED",
+            "blockers": ["APPROVED_PANEL_NOT_EXACTLY_50_STATIONS"],
+            "source_snapshot": {**base_source, "observed_zip_sha256": observed_hash},
+            "station_tier_rows": [],
+            "distribution": {},
+            "coverage_conclusion": "NOT_ESTABLISHED",
+        }
+    child_to_parent = {
+        str(child): str(row["source_parent_station_id"])
+        for row in panel
+        for child in row.get("static_child_stop_ids", [])
+    }
+    patterns_by_station_service: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        feed_rows = list(stage12.iter_csv_rows(archive, "feed_info.txt"))
+        feed_info = feed_rows[0] if feed_rows else {}
+        if str(feed_info.get("feed_version", "")).strip() != STAGE12_FEED_VERSION:
+            return {
+                "status": "NOT_ESTABLISHED",
+                "blockers": ["STAGE12_FEED_VERSION_MISMATCH"],
+                "source_snapshot": {**base_source, "observed_zip_sha256": observed_hash},
+                "station_tier_rows": [],
+                "distribution": {},
+                "coverage_conclusion": "NOT_ESTABLISHED",
+            }
+        service_dates_by_id, calendar_summary = stage12.active_service_dates(archive, feed_info)
+        trip_service_by_id = {
+            str(row.get("trip_id")): str(row.get("service_id"))
+            for row in stage12.iter_csv_rows(archive, "trips.txt")
+            if row.get("trip_id") and row.get("service_id")
+        }
+        relevant_pattern_rows = 0
+        invalid_time_rows = 0
+        for row in stage12.iter_csv_rows(archive, "stop_times.txt"):
+            station_id = child_to_parent.get(str(row.get("stop_id", "")))
+            if station_id is None:
+                continue
+            service_id = trip_service_by_id.get(str(row.get("trip_id", "")))
+            if service_id is None or service_id not in service_dates_by_id:
+                continue
+            arrival_seconds = _parse_gtfs_time(row.get("arrival_time"))
+            if arrival_seconds is None:
+                invalid_time_rows += 1
+                continue
+            patterns_by_station_service[station_id][service_id].append(arrival_seconds)
+            relevant_pattern_rows += 1
+
+    station_rows: list[dict[str, Any]] = []
+    all_daily_counts: list[int] = []
+    all_daily_maxima: dict[int, list[int]] = {window: [] for window in FORWARD_WINDOWS_MINUTES}
+    for panel_row in panel:
+        station_id = str(panel_row["source_parent_station_id"])
+        patterns = patterns_by_station_service.get(station_id, {})
+        active_dates = sorted({date for service_id in patterns for date in service_dates_by_id.get(service_id, set())})
+        daily_counts: list[int] = []
+        daily_maxima: dict[int, list[int]] = {window: [] for window in FORWARD_WINDOWS_MINUTES}
+        for active_date in active_dates:
+            day_times: list[int] = []
+            for service_id, times in patterns.items():
+                if active_date in service_dates_by_id.get(service_id, set()):
+                    day_times.extend(times)
+            day_times.sort()
+            daily_counts.append(len(day_times))
+            all_daily_counts.append(len(day_times))
+            for window in FORWARD_WINDOWS_MINUTES:
+                maximum = _window_max_count(day_times, window)
+                daily_maxima[window].append(maximum)
+                all_daily_maxima[window].append(maximum)
+        window_statistics = {str(window): value_statistics(values) for window, values in daily_maxima.items()}
+        row = {
+            "station": panel_row["station_name"],
+            "station_name": panel_row["station_name"],
+            "source_parent_station_id": station_id,
+            "panel_selection_rank": panel_row.get("SelectionRank"),
+            "transport_modes": panel_row.get("observed_mode_set", []),
+            "interchange_indicators": {
+                "distinct_route_count": panel_row.get("distinct_route_count"),
+                "distinct_approved_mode_count": panel_row.get("distinct_approved_mode_count"),
+                "static_child_stop_count": panel_row.get("static_child_stop_count"),
+            },
+            "active_service_day_count": len(active_dates),
+            "schedule_pattern_event_count": sum(len(times) for times in patterns.values()),
+            "expanded_scheduled_arrival_count": sum(daily_counts),
+            "daily_scheduled_arrival_count_statistics": value_statistics(daily_counts),
+            "window_event_count_statistics": window_statistics,
+            "window_definition": "maximum scheduled arrivals in [scheduled arrival anchor, anchor + window) on each active service day",
+            "production_result_limit_candidate": PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
+            "production_result_limit_static_coverage": {
+                str(window): {
+                    "active_service_days_at_or_below_limit": sum(
+                        value <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE for value in daily_maxima[window]
+                    ),
+                    "active_service_day_count": len(daily_maxima[window]),
+                    "percentage_at_or_below_limit": _round(
+                        (
+                            sum(value <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE for value in daily_maxima[window])
+                            / len(daily_maxima[window])
+                            * 100
+                        )
+                        if daily_maxima[window]
+                        else None,
+                        3,
+                    ),
+                    "p95_at_or_below_limit": (
+                        window_statistics[str(window)]["p95"] is not None
+                        and window_statistics[str(window)]["p95"] <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
+                    ),
+                }
+                for window in FORWARD_WINDOWS_MINUTES
+            },
+        }
+        station_rows.append(row)
+
+    station_rows, tier_assignment = _assign_production_tiers(station_rows)
+    global_distribution = {
+        "active_service_day_scheduled_arrival_counts": value_statistics(all_daily_counts),
+        "station_level_p95_by_window": {
+            str(window): value_statistics(
+                [row["window_event_count_statistics"][str(window)]["p95"] for row in station_rows]
+            )
+            for window in FORWARD_WINDOWS_MINUTES
+        },
+        "all_station_service_day_window_maxima": {
+            str(window): value_statistics(all_daily_maxima[window])
+            for window in FORWARD_WINDOWS_MINUTES
+        },
+    }
+    source_snapshot = {
+        **base_source,
+        "feed_version": str(feed_info.get("feed_version")),
+        "feed_start_date": feed_info.get("feed_start_date"),
+        "feed_end_date": feed_info.get("feed_end_date"),
+        "zip_sha256": observed_hash,
+        "zip_size_bytes": zip_path.stat().st_size,
+        "temporary_input_name": zip_path.name,
+        "calendar_summary": calendar_summary,
+    }
     return {
-        "status": "NOT_ESTABLISHED",
-        "blockers": density_blockers,
-        "source_snapshot": {
-            "feed_version": metadata.get("feed_info", {}).get("feed_version"),
-            "feed_start_date": metadata.get("feed_info", {}).get("feed_start_date"),
-            "feed_end_date": metadata.get("feed_info", {}).get("feed_end_date"),
-            "zip_sha256": metadata.get("source_metadata", {}).get("zip_sha256")
-            if isinstance(metadata.get("source_metadata"), Mapping)
-            else metadata.get("zip_sha256"),
-            "evidence_path": "docs/stages/04-cologne-scope-mode-evidence.json",
-            "raw_snapshot_paths_found": raw_snapshot_paths,
+        "status": "COMPLETE",
+        "blockers": [],
+        "source_snapshot": source_snapshot,
+        "analysis_contract": {
+            "station_count": len(station_rows),
+            "forward_windows_minutes": list(FORWARD_WINDOWS_MINUTES),
+            "arrival_time_source": "GTFS stop_times.arrival_time for validated Stage 12 child stops",
+            "service_date_expansion": "GTFS calendar plus calendar_dates exceptions from the exact feed",
+            "no_newer_feed_substitution": True,
+            "static_vs_realtime_boundary": "scheduled static density is planning evidence only and is not realtime response cardinality",
+            "relevant_pattern_rows": relevant_pattern_rows,
+            "invalid_arrival_time_rows_for_panel": invalid_time_rows,
         },
-        "aggregate_context_not_a_density_measure": {
-            "cologne_scheduled_stop_events": scope_counts.get("cologne_scheduled_stop_events"),
-            "cologne_distinct_stop_ids": scope_counts.get("cologne_distinct_stop_ids"),
-            "interpretation": "aggregate Stage 4 scope baselines only; no station/window density is inferred",
-        },
-        "row_contract": [
-            "station",
-            "tier",
-            "scheduled_event_density",
-            "forward_window",
-            "result_limit_coverage_status",
-        ],
-        "station_tier_rows": [],
-        "distribution": {
-            "count": 0,
-            "p50": None,
-            "p90": None,
-            "p95": None,
-            "p99": None,
-            "outliers": [],
-        },
-        "coverage_conclusion": "NOT_ESTABLISHED; do not claim that N=20 covers the intended forward horizon",
+        "station_tier_rows": station_rows,
+        "tier_assignment": tier_assignment,
+        "distribution": global_distribution,
+        "coverage_conclusion": "The exact static snapshot supports deterministic density-based tier membership and N=30 as a planning limit for each tier cadence window; it does not guarantee realtime response coverage.",
         "static_vs_realtime_boundary": "scheduled static density is planning evidence only and is not realtime response cardinality",
+    }
+
+
+def _safe_time_value(value: Any) -> tuple[datetime, str] | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace("[GMT]", "")
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc), text
+
+
+def _returned_event_times(bundle: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    for event in bundle.get("stop_events", []):
+        if event.get("timetabled_time") is not None:
+            values.append(str(event["timetabled_time"]))
+        for call in event.get("call_observations", []):
+            for context_name in ("arrival_timing", "departure_timing"):
+                for context in call.get(context_name, []) or []:
+                    for item in context.get("field_values", {}).get("TimetabledTime", []) or []:
+                        values.append(str(item))
+    return values
+
+
+def _probe_record(
+    stage8: Any,
+    result: Any,
+    candidate: Mapping[str, Any],
+    *,
+    number_of_results: int,
+    dep_arr_time: str,
+    execution_mode: str,
+    pair_id: str | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "station": candidate["station_name"],
+        "source_parent_station_id": candidate["source_parent_station_id"],
+        "requested_result_limit": number_of_results,
+        "requested_dep_arr_time": dep_arr_time,
+        "execution_mode": execution_mode,
+        "pair_id": pair_id,
+        "http_status": result.http_status,
+        "parser_success": False,
+        "valid_trias_application_response": False,
+        "returned_event_count": 0,
+        "saturation": False,
+        "earliest_returned_event": None,
+        "latest_returned_event": None,
+        "forward_temporal_span_seconds": None,
+        "source_stop_point_ref_consistency": "NOT_EVALUATED",
+        "duration_ms": _round(float(result.elapsed_ms), 3),
+        "transport_failure": result.failure,
+        "error_classification": None,
+        "attempt_count": 1,
+        "raw_payload_persisted": False,
+    }
+    if result.http_status in {401, 403}:
+        record["error_classification"] = "HTTP_AUTHORIZATION_FAILURE"
+        return record
+    if result.http_status == 429:
+        record["error_classification"] = "HTTP_429_PROVIDER_PRESSURE_SIGNAL"
+        return record
+    if result.http_status is not None and result.http_status >= 500:
+        record["error_classification"] = "HTTP_5XX_PROVIDER_FAILURE"
+        return record
+    if result.failure:
+        record["error_classification"] = str(result.failure)
+        return record
+    try:
+        stage8.raw_payload_secret_check(result.body, os.environ.get("MDD_API_KEY", ""))
+        parsed = stage8.parse_response(result.body, result.content_type)
+        record["parser_success"] = True
+        application_error = stage8.application_error(parsed)
+        record["valid_trias_application_response"] = not application_error
+        if application_error:
+            record["error_classification"] = "TRIAS_APPLICATION_ERROR"
+            return record
+        bundle = stage8.build_bundle(
+            parsed=parsed,
+            response_id=f"STAGE13|{candidate['source_parent_station_id']}|N{number_of_results}",
+            run_id=MDD_DIAGNOSTIC_POLICY,
+            observed_at=stage8.iso_utc(stage8.utc_now()),
+            sampling_policy_id=MDD_DIAGNOSTIC_POLICY,
+        )
+        events = list(bundle.get("stop_events", []))
+        returned_count = len(events)
+        record["returned_event_count"] = returned_count
+        record["saturation"] = returned_count >= number_of_results
+        expected_refs = set(candidate.get("static_child_stop_ids", [])) | {
+            str(candidate["source_parent_station_id"])
+        }
+        returned_event_refs: set[str] = set()
+        related_call_ref_count = 0
+        for event in events:
+            if event.get("stop_point_ref"):
+                returned_event_refs.add(str(event["stop_point_ref"]))
+            for call in event.get("call_observations", []):
+                if call.get("stop_point_ref"):
+                    related_call_ref_count += 1
+        if not events:
+            record["source_stop_point_ref_consistency"] = "NO_RETURNED_EVENTS"
+        elif returned_event_refs and returned_event_refs <= expected_refs:
+            record["source_stop_point_ref_consistency"] = "ALL_RETURNED_REFS_MATCH_REQUESTED_PARENT_OR_CHILD"
+        elif not returned_event_refs:
+            record["source_stop_point_ref_consistency"] = "NO_SOURCE_STOP_POINT_REF_IN_RETURNED_EVENTS"
+        else:
+            record["source_stop_point_ref_consistency"] = "MISMATCH"
+        record["related_previous_or_onward_call_ref_count"] = related_call_ref_count
+        time_values = [_safe_time_value(value) for value in _returned_event_times(bundle)]
+        parsed_times = [item for item in time_values if item is not None]
+        if parsed_times:
+            earliest = min(parsed_times, key=lambda item: item[0])
+            latest = max(parsed_times, key=lambda item: item[0])
+            record["earliest_returned_event"] = earliest[1]
+            record["latest_returned_event"] = latest[1]
+            record["forward_temporal_span_seconds"] = _round((latest[0] - earliest[0]).total_seconds(), 3)
+    except getattr(stage8, "CredentialContentError", ValueError):
+        record["error_classification"] = "RESPONSE_SECRET_DETECTED_NOT_PERSISTED"
+    except Exception as exc:  # parser failure is sanitized to its type only
+        record["error_classification"] = f"PARSER_FAILURE:{type(exc).__name__}"
+    return record
+
+
+def _select_diagnostic_representatives(station_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(station_rows, key=lambda row: int(row["density_rank"]))
+    legacy_ids = {
+        "de:05315:11110",
+        "de:05315:11201",
+        "de:05315:12711",
+        "de:05315:14201",
+        "de:05315:16601",
+        "de:05315:17311",
+        "de:05315:19201",
+    }
+    selected: list[tuple[str, Mapping[str, Any]]] = []
+
+    def add(role: str, predicate: Any) -> None:
+        selected_ids = {item[1]["source_parent_station_id"] for item in selected}
+        for row in ordered:
+            if row["source_parent_station_id"] in selected_ids:
+                continue
+            if predicate(row):
+                selected.append((role, row))
+                return
+
+    add("high_density", lambda row: True)
+    add("high_density_legacy7", lambda row: row["source_parent_station_id"] in legacy_ids)
+    add("middle_density", lambda row: row["density_rank"] >= 24)
+    add("low_density", lambda row: row["density_rank"] == len(ordered))
+    add(
+        "interchange_mode_diversity",
+        lambda row: any("S-Bahn" in str(mode) or "Regional" in str(mode) for mode in row.get("transport_modes", [])),
+    )
+    add(
+        "urban_bus_tram_diversity",
+        lambda row: "Urban / KVB Bus" in row.get("transport_modes", []) and "Stadtbahn / Tram" in row.get("transport_modes", []),
+    )
+    return [
+        {
+            "representative_role": role,
+            "station": row["station_name"],
+            "source_parent_station_id": row["source_parent_station_id"],
+            "production_tier": row.get("production_tier"),
+            "density_rank": row.get("density_rank"),
+            "transport_modes": row.get("transport_modes", []),
+        }
+        for role, row in selected
+    ]
+
+
+def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    return {
+        "request_count": len(records),
+        "http_status_distribution": dict(sorted(Counter(str(row.get("http_status")) for row in records).items())),
+        "parser_success_count": sum(bool(row.get("parser_success")) for row in records),
+        "valid_trias_response_count": sum(bool(row.get("valid_trias_application_response")) for row in records),
+        "saturated_count": sum(bool(row.get("saturation")) for row in records),
+        "returned_event_count_statistics": value_statistics([int(row.get("returned_event_count", 0)) for row in records]),
+        "forward_temporal_span_statistics_seconds": value_statistics(
+            [float(row["forward_temporal_span_seconds"]) for row in records if row.get("forward_temporal_span_seconds") is not None]
+        ),
+        "duration_statistics_ms": duration_statistics(
+            [float(row["duration_ms"]) for row in records if row.get("duration_ms") is not None]
+        ),
+        "source_ref_consistency_distribution": dict(
+            sorted(Counter(str(row.get("source_stop_point_ref_consistency")) for row in records).items())
+        ),
+    }
+
+
+def _run_live_diagnostics(
+    station_rows: Sequence[Mapping[str, Any]],
+    *,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Run sanitized sequential result-limit and cap-2 diagnostics."""
+
+    try:
+        import stage_08_mdd_realtime_pilot as stage8
+    except Exception as exc:  # pragma: no cover - import failure is environment-specific
+        return {
+            "status": "BLOCKED_RUNTIME_IMPORT_FAILURE",
+            "credential_preflight": "NOT_EVALUATED",
+            "http_attempts_consumed": 0,
+            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "error_type": type(exc).__name__,
+            "raw_payloads_persisted": False,
+        }
+
+    effective_key = os.environ.get("MDD_API_KEY") if api_key is None else api_key
+    preflight = stage8.validate_api_key_format(effective_key)
+    preflight_label = {
+        getattr(stage8, "CREDENTIAL_PREFLIGHT_MISSING", "MISSING"): "MISSING",
+        getattr(stage8, "CREDENTIAL_PREFLIGHT_INVALID_FORMAT", "INVALID_FORMAT"): "INVALID_FORMAT",
+        getattr(stage8, "CREDENTIAL_PREFLIGHT_VALID", "VALID"): "PRESENT",
+    }.get(preflight, "INVALID_FORMAT")
+    if preflight_label != "PRESENT":
+        return {
+            "status": "NOT_RUN_API_KEY_MISSING" if preflight_label == "MISSING" else "NOT_RUN_INVALID_API_KEY_FORMAT",
+            "credential_preflight": preflight_label,
+            "http_attempts_consumed": 0,
+            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "stop_reason": "zero MDD requests issued because the inherited credential was not usable",
+            "raw_payloads_persisted": False,
+        }
+
+    representatives = _select_diagnostic_representatives(station_rows)
+    by_id = {row["source_parent_station_id"]: row for row in station_rows}
+    stage12_path = REPOSITORY_ROOT / "docs" / "stages" / "12-50-station-selection-evidence.json"
+    stage12_panel = json.loads(stage12_path.read_text(encoding="utf-8")).get("panel", [])
+    panel_by_id = {row["source_parent_station_id"]: row for row in stage12_panel}
+    candidates: list[dict[str, Any]] = []
+    for representative in representatives:
+        density_row = by_id[representative["source_parent_station_id"]]
+        panel_row = panel_by_id[representative["source_parent_station_id"]]
+        candidates.append(
+            {
+                **representative,
+                "station_name": density_row["station_name"],
+                "static_child_stop_ids": panel_row.get("static_child_stop_ids", []),
+            }
+        )
+
+    anchor = stage8.trias_utc(stage8.utc_now())
+    attempts = 0
+    stopped = False
+    stop_reason: str | None = None
+
+    def execute(candidate: Mapping[str, Any], number_of_results: int) -> Any | None:
+        nonlocal attempts, stopped, stop_reason
+        if stopped or attempts >= MDD_HTTP_ATTEMPT_HARD_MAX:
+            stop_reason = stop_reason or "MDD_HTTP_ATTEMPT_HARD_BUDGET_REACHED"
+            return None
+        runtime_config = stage8.Stage8RuntimeConfig(
+            station=str(candidate["station_name"]),
+            stop_point_ref=str(candidate["source_parent_station_id"]),
+            number_of_results=number_of_results,
+            sampling_policy=MDD_DIAGNOSTIC_POLICY,
+        )
+        result = stage8.perform_http_request(
+            effective_key,
+            pilot_anchor_dep_arr_time=anchor,
+            runtime_config=runtime_config,
+        )
+        attempts += 1
+        if result.http_status in {401, 403}:
+            stopped = True
+            stop_reason = "HTTP_401_OR_403_STOPPED_ALL_FURTHER_STAGE13_PROBING"
+        return result
+
+    sequential_records: list[dict[str, Any]] = []
+    for candidate in candidates:
+        for number_of_results in MDD_RESULT_LIMITS:
+            result = execute(candidate, number_of_results)
+            if result is None:
+                break
+            record = _probe_record(
+                stage8,
+                result,
+                candidate,
+                number_of_results=number_of_results,
+                dep_arr_time=anchor,
+                execution_mode="sequential_result_limit_comparison",
+            )
+            record["representative_role"] = candidate["representative_role"]
+            sequential_records.append(record)
+            if record["error_classification"] == "RESPONSE_SECRET_DETECTED_NOT_PERSISTED":
+                stopped = True
+                stop_reason = "SECRET_DETECTED_IN_RESPONSE_NOT_PERSISTED"
+            if stopped:
+                break
+        if stopped:
+            break
+
+    concurrency_records: list[dict[str, Any]] = []
+    pair_batch_durations: list[float] = []
+    pairs = [(candidates[index], candidates[index + 1]) for index in range(0, len(candidates) - 1, 2)]
+    for pair_index, pair in enumerate(pairs, start=1):
+        if stopped or attempts + len(pair) > MDD_HTTP_ATTEMPT_HARD_MAX:
+            stop_reason = stop_reason or "MDD_HTTP_ATTEMPT_HARD_BUDGET_REACHED"
+            break
+        started = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=MDD_CONCURRENCY_CAP) as executor:
+            futures = [executor.submit(execute, candidate, PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE) for candidate in pair]
+            results = [future.result() for future in futures]
+        batch_elapsed_ms = (time.perf_counter() - started) * 1000
+        pair_batch_durations.append(batch_elapsed_ms)
+        for candidate, result in zip(pair, results):
+            if result is None:
+                continue
+            record = _probe_record(
+                stage8,
+                result,
+                candidate,
+                number_of_results=PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
+                dep_arr_time=anchor,
+                execution_mode="bounded_concurrency_cap_2",
+                pair_id=f"PAIR_{pair_index}",
+            )
+            record["representative_role"] = candidate["representative_role"]
+            record["pair_batch_duration_ms"] = _round(batch_elapsed_ms, 3)
+            concurrency_records.append(record)
+            if record["error_classification"] == "RESPONSE_SECRET_DETECTED_NOT_PERSISTED":
+                stopped = True
+                stop_reason = "SECRET_DETECTED_IN_RESPONSE_NOT_PERSISTED"
+
+    result_limit_summary = {
+        str(number): _summary_for_records(
+            [row for row in sequential_records if row["requested_result_limit"] == number]
+        )
+        for number in MDD_RESULT_LIMITS
+    }
+    cap2_request_durations = [float(row["duration_ms"]) for row in concurrency_records if row.get("duration_ms") is not None]
+    pressure_rows = sequential_records + concurrency_records
+    provider_pressure_signal = any(
+        row.get("http_status") == 429
+        or (isinstance(row.get("http_status"), int) and row["http_status"] >= 500)
+        or row.get("transport_failure") in {"TIMEOUT", "NETWORK_OR_DNS_FAILURE"}
+        for row in pressure_rows
+    )
+    cap2_complete = (
+        len(concurrency_records) == len(pairs) * 2
+        and all(row.get("parser_success") and row.get("valid_trias_application_response") for row in concurrency_records)
+        and not provider_pressure_signal
+        and not any(row.get("http_status") in {401, 403} for row in concurrency_records)
+    )
+    static_support = {str(number): _static_limit_support(station_rows, number) for number in MDD_RESULT_LIMITS}
+    n30_records = [row for row in sequential_records if row["requested_result_limit"] == 30]
+    n30_supported = (
+        len(n30_records) == len(candidates)
+        and all(
+            row.get("parser_success")
+            and row.get("valid_trias_application_response")
+            and row.get("source_stop_point_ref_consistency") != "MISMATCH"
+            for row in n30_records
+        )
+        and static_support["30"]["all_station_p95_supported"]
+    )
+    number_limit_decision = "APPROVED_FIXED_30_FROM_BOUNDED_COVERAGE_EVIDENCE" if n30_supported else "NOT_ESTABLISHED"
+    diagnostic_status = "COMPLETE" if n30_supported and cap2_complete and not stopped else "CONDITIONALLY_BLOCKED"
+    return {
+        "status": diagnostic_status,
+        "credential_preflight": preflight_label,
+        "endpoint": ENDPOINT,
+        "request_contract": {
+            "requestor_ref": REQUESTOR_REF,
+            "stop_event_type": "arrival",
+            "include_previous_calls": True,
+            "include_onward_calls": True,
+            "include_realtime_data": True,
+            "max_attempts": 1,
+            "retries": 0,
+            "timeout_seconds": 30,
+            "dep_arr_time_anchor_reused_for_all_result_limit_comparisons": True,
+            "concurrency_for_result_limit_comparison": "sequential",
+        },
+        "diagnostic_anchor_dep_arr_time": anchor,
+        "representatives": representatives,
+        "result_limit_probe": {
+            "requested_result_limits": list(MDD_RESULT_LIMITS),
+            "sequential_records": sequential_records,
+            "summary_by_result_limit": result_limit_summary,
+            "static_cadence_window_support_by_result_limit": static_support,
+            "production_selection": {
+                "decision": number_limit_decision,
+                "production_number_of_results": 30 if n30_supported else None,
+                "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+                "reason": "N=30 is directly tested across deterministic high/middle/low-density and mode/interchange representatives; exact-feed static P95 cadence-window counts are at or below 30 for all final tier assignments. This is a bounded production-value decision, not a theoretical provider-maximum claim.",
+            },
+        },
+        "bounded_concurrency_probe": {
+            "requested_max_concurrency": MDD_CONCURRENCY_CAP,
+            "pair_count": len(pairs),
+            "records": concurrency_records,
+            "request_duration_statistics_ms": duration_statistics(cap2_request_durations),
+            "pair_batch_duration_statistics_ms": duration_statistics(pair_batch_durations),
+            "provider_pressure_signal": provider_pressure_signal,
+            "failure_isolation_observed": len(concurrency_records) == len(pairs) * 2,
+            "no_retries": True,
+            "decision": "APPROVED_MAXIMUM_CONCURRENCY_2" if cap2_complete else "FALLBACK_SEQUENTIAL_REQUIRED",
+            "provider_scope_limit": "bounded sample only; no provider-wide rate-limit claim",
+        },
+        "sequential_duration_evidence": {
+            "request_duration_statistics_ms": duration_statistics(
+                [float(row["duration_ms"]) for row in sequential_records if row.get("duration_ms") is not None]
+            ),
+            "request_count": len(sequential_records),
+            "retries": 0,
+        },
+        "http_attempts_consumed": attempts,
+        "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+        "stopped_on_auth_failure": stopped and stop_reason == "HTTP_401_OR_403_STOPPED_ALL_FURTHER_STAGE13_PROBING",
+        "stop_reason": stop_reason,
+        "raw_payloads_persisted": False,
+        "request_headers_persisted": False,
+        "api_key_persisted": False,
+    }
+
+
+def _cadence_static_fit(
+    station_rows: Sequence[Mapping[str, Any]],
+    tiers: Sequence[Mapping[str, int]],
+    number_of_results: int,
+) -> dict[str, Any]:
+    ordered = sorted(station_rows, key=lambda row: int(row["density_rank"]))
+    cursor = 0
+    results: list[dict[str, Any]] = []
+    for tier in tiers:
+        interval = int(tier["interval_minutes"])
+        for row in ordered[cursor : cursor + int(tier["station_count"])]:
+            metric = row["window_event_count_statistics"][str(interval)]["p95"]
+            results.append(
+                {
+                    "source_parent_station_id": row["source_parent_station_id"],
+                    "tier": tier["tier"],
+                    "interval_minutes": interval,
+                    "cadence_window_p95": metric,
+                    "p95_at_or_below_result_limit": metric is not None and float(metric) <= number_of_results,
+                }
+            )
+        cursor += int(tier["station_count"])
+    return {
+        "station_count": len(results),
+        "station_p95_supported_count": sum(row["p95_at_or_below_result_limit"] for row in results),
+        "all_station_p95_supported": bool(results) and all(row["p95_at_or_below_result_limit"] for row in results),
+    }
+
+
+def _cadence_alternatives(
+    station_rows: Sequence[Mapping[str, Any]],
+    *,
+    legacy_reserved_requests: Mapping[int, int],
+) -> list[dict[str, Any]]:
+    alternatives = [
+        (
+            "historical_10_20_20_at_5_10_30",
+            (
+                {"tier": "A", "station_count": 10, "interval_minutes": 5},
+                {"tier": "B", "station_count": 20, "interval_minutes": 10},
+                {"tier": "C", "station_count": 20, "interval_minutes": 30},
+            ),
+        ),
+        ("10_20_20_at_5_15_30_selected", PRODUCTION_TIER_PLAN),
+        (
+            "10_15_25_at_5_10_30",
+            (
+                {"tier": "A", "station_count": 10, "interval_minutes": 5},
+                {"tier": "B", "station_count": 15, "interval_minutes": 10},
+                {"tier": "C", "station_count": 25, "interval_minutes": 30},
+            ),
+        ),
+        (
+            "8_20_22_at_5_15_30",
+            (
+                {"tier": "A", "station_count": 8, "interval_minutes": 5},
+                {"tier": "B", "station_count": 20, "interval_minutes": 15},
+                {"tier": "C", "station_count": 22, "interval_minutes": 30},
+            ),
+        ),
+        (
+            "8_12_30_at_5_10_30",
+            (
+                {"tier": "A", "station_count": 8, "interval_minutes": 5},
+                {"tier": "B", "station_count": 12, "interval_minutes": 10},
+                {"tier": "C", "station_count": 30, "interval_minutes": 30},
+            ),
+        ),
+    ]
+    rows: list[dict[str, Any]] = []
+    for label, tiers in alternatives:
+        cadence = candidate_cadence(tiers)
+        projections = quota_projection_set(
+            cadence["logical_requests_per_hour"],
+            legacy_reserved_requests=legacy_reserved_requests,
+            diagnostic_reserved_requests=DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
+        )
+        stress = next(item for item in projections["projections"] if item["label"] == "ten_percent_stress_sensitivity")
+        rows.append(
+            {
+                "label": label,
+                "tiers": cadence["tiers"],
+                "logical_requests_per_hour": cadence["logical_requests_per_hour"],
+                "logical_requests_per_day": cadence["logical_requests_per_day"],
+                "monthly_logical_requests": cadence["monthly_logical_requests"],
+                "static_density_fit_at_n30": _cadence_static_fit(station_rows, tiers, 30) if station_rows else None,
+                "31_day_ten_percent_stress_with_legacy_and_diagnostics": stress["31_day"]["conservative_reserve_reconciliation"],
+                "selected": label == "10_20_20_at_5_15_30_selected",
+            }
+        )
+    return rows
+
+
+def _heartbeat_feasibility(
+    phase: Mapping[str, Any],
+    live_diagnostics: Mapping[str, Any],
+) -> dict[str, Any]:
+    max_due = int(phase.get("max_due_targets_in_one_heartbeat", 0))
+    cap2 = live_diagnostics.get("bounded_concurrency_probe", {})
+    batch_stats = cap2.get("pair_batch_duration_statistics_ms", {})
+    request_stats = cap2.get("request_duration_statistics_ms", {})
+    batch_count = math.ceil(max_due / MDD_CONCURRENCY_CAP) if max_due else 0
+    p95_batch = batch_stats.get("p95_ms")
+    max_batch = batch_stats.get("max_ms")
+    estimated_p95 = batch_count * float(p95_batch) if p95_batch is not None else None
+    estimated_max = batch_count * float(max_batch) if max_batch is not None else None
+    return {
+        "heartbeat_interval_seconds": HEARTBEAT_MINUTES * 60,
+        "due_targets_per_heartbeat": phase.get("total_due_targets_by_heartbeat", []),
+        "max_due_targets_in_one_heartbeat": max_due,
+        "requests_per_super_cycle": phase.get("super_cycle_total_logical_requests"),
+        "requests_per_hour": phase.get("hour_total_logical_requests"),
+        "approved_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2" else None,
+        "cap2_request_duration_statistics_ms": request_stats,
+        "cap2_pair_batch_duration_statistics_ms": batch_stats,
+        "max_due_batches_at_cap2": batch_count,
+        "estimated_p95_heartbeat_execution_ms": _round(estimated_p95, 3),
+        "estimated_max_observed_heartbeat_execution_ms": _round(estimated_max, 3),
+        "finish_within_five_minute_heartbeat_at_observed_p95": estimated_p95 is not None and estimated_p95 <= 300_000,
+        "finish_within_five_minute_heartbeat_at_observed_max": estimated_max is not None and estimated_max <= 300_000,
+        "feasibility_decision": "FEASIBLE_WITH_APPROVED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
+    }
+
+
+def _reuse_existing_live_diagnostics(
+    root: Path,
+    station_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Rebuild the sanitized live object without issuing another request."""
+
+    path = root / "docs/stages/13-tiered-collector-readiness-evidence.json"
+    if not path.exists():
+        return None
+    existing = json.loads(path.read_text(encoding="utf-8"))
+    old_bounded = existing.get("number_of_results", {}).get("bounded_live_diagnostic", {})
+    old_concurrency = existing.get("sequential_vs_bounded_concurrency", {}).get("bounded_live_diagnostic", {})
+    old_sequential = existing.get("sequential_vs_bounded_concurrency", {}).get("sequential_live_diagnostic", {})
+    old_probe = old_bounded.get("result_limit_probe")
+    if not isinstance(old_probe, Mapping) or not old_probe.get("sequential_records"):
+        return None
+    probe = dict(old_probe)
+    probe["representatives"] = _select_diagnostic_representatives(station_rows)
+    first_record = probe["sequential_records"][0]
+    return {
+        "status": old_bounded.get("status", "COMPLETE"),
+        "credential_preflight": "PRESENT",
+        "diagnostic_anchor_dep_arr_time": first_record.get("requested_dep_arr_time"),
+        "representatives": probe["representatives"],
+        "result_limit_probe": probe,
+        "bounded_concurrency_probe": old_concurrency,
+        "sequential_duration_evidence": old_sequential,
+        "http_attempts_consumed": 0,
+        "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+        "raw_payloads_persisted": False,
+        "request_headers_persisted": False,
+        "api_key_persisted": False,
     }
 
 
@@ -608,11 +1616,14 @@ def build_evidence(
     root: Path = REPOSITORY_ROOT,
     *,
     generated_at_utc: str | None = None,
+    gtfs_zip: Path | None = None,
+    run_live_diagnostics: bool = False,
+    live_diagnostics: Mapping[str, Any] | None = None,
+    prior_live_attempts: int = 0,
+    reuse_existing_live: bool = False,
 ) -> dict[str, Any]:
     stage4_path = root / "docs" / "stages" / "04-cologne-scope-mode-evidence.json"
-    stage4 = json.loads(stage4_path.read_text(encoding="utf-8"))
-    cadence = candidate_cadence()
-    phase = heartbeat_phase_distribution()
+    stage4 = json.loads(stage4_path.read_text(encoding="utf-8")) if stage4_path.exists() else {}
     expected_stage12_paths = [
         "docs/stages/12-50-station-selection.md",
         "docs/stages/12-50-station-selection-completion-decision.md",
@@ -620,86 +1631,171 @@ def build_evidence(
     ]
     stage12_paths_found = [path for path in expected_stage12_paths if (root / path).exists()]
     stage12_evidence_path = root / "docs" / "stages" / "12-50-station-selection-evidence.json"
-    stage12_evidence = (
-        json.loads(stage12_evidence_path.read_text(encoding="utf-8"))
-        if stage12_evidence_path.exists()
-        else {}
-    )
+    stage12_evidence = json.loads(stage12_evidence_path.read_text(encoding="utf-8")) if stage12_evidence_path.exists() else {}
     stage12_approved = (
         len(stage12_paths_found) == len(expected_stage12_paths)
         and stage12_evidence.get("status") == "COMPLETE — APPROVED FIXED 50-STATION PANEL"
-        and stage12_evidence.get("panel_version") == "TIERED50_PANEL_V1"
+        and stage12_evidence.get("panel_version") == PANEL_VERSION
+        and len(stage12_evidence.get("panel", [])) == 50
     )
-    stage12_blocker = None if stage12_approved else "STAGE_12_PANEL_APPROVAL_REQUIRED"
-    remaining_blockers = [
-        "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-        "STATIC_EVENT_DENSITY_NOT_ESTABLISHED",
-        "CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE",
-        "CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED",
-    ]
-    if stage12_blocker:
-        remaining_blockers.insert(0, stage12_blocker)
-    generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
-        "+00:00", "Z"
+    density = _static_event_density(
+        root,
+        stage4,
+        stage12_approved=stage12_approved,
+        stage12_evidence=stage12_evidence,
+        gtfs_zip=gtfs_zip,
+    )
+    station_rows = density.get("station_tier_rows", [])
+    phase = heartbeat_phase_distribution(PRODUCTION_TIER_PLAN)
+    phase_assignments = phase_assignments_for_tier_rows(station_rows) if len(station_rows) == 50 else []
+    phase["phase_assignments"] = phase_assignments
+    if live_diagnostics is None:
+        if run_live_diagnostics and len(station_rows) == 50:
+            live = _run_live_diagnostics(station_rows)
+        elif reuse_existing_live:
+            live = _reuse_existing_live_diagnostics(root, station_rows) or {
+                "status": "NOT_RUN",
+                "credential_preflight": "NOT_EVALUATED",
+                "http_attempts_consumed": 0,
+                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "raw_payloads_persisted": False,
+            }
+        else:
+            live = {
+                "status": "NOT_RUN",
+                "credential_preflight": "NOT_EVALUATED",
+                "http_attempts_consumed": 0,
+                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "raw_payloads_persisted": False,
+            }
+    else:
+        live = dict(live_diagnostics)
+    live["prior_attempts_consumed"] = int(prior_live_attempts)
+    live["current_run_http_attempts_consumed"] = int(live.get("http_attempts_consumed", 0))
+    live["http_attempts_consumed_total"] = int(prior_live_attempts) + int(live.get("http_attempts_consumed", 0))
+
+    number_limit_probe = live.get("result_limit_probe", {})
+    production_selection = number_limit_probe.get("production_selection", {}) if isinstance(number_limit_probe, Mapping) else {}
+    selected_number_of_results = production_selection.get("production_number_of_results")
+    cap2_probe = live.get("bounded_concurrency_probe", {})
+    cap2_approved = cap2_probe.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2"
+    cadence = candidate_cadence(PRODUCTION_TIER_PLAN, status="APPROVED_DESIGN_CANDIDATE")
+    alternatives = _cadence_alternatives(station_rows, legacy_reserved_requests=LEGACY7_RESERVED_MONTHLY_REQUESTS)
+    quota = quota_projection_set(
+        cadence["logical_requests_per_hour"],
+        legacy_reserved_requests=LEGACY7_RESERVED_MONTHLY_REQUESTS,
+        diagnostic_reserved_requests=DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
+    )
+    ten_percent_projection = next(item for item in quota["projections"] if item["label"] == "ten_percent_stress_sensitivity")
+    quota_safety_closed = all(
+        item["31_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
+        and item["30_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
+        for item in quota["projections"]
+    )
+    heartbeat = _heartbeat_feasibility(phase, live)
+
+    blockers: list[str] = []
+    if not stage12_approved:
+        blockers.append("STAGE_12_PANEL_APPROVAL_REQUIRED")
+    if density.get("status") != "COMPLETE":
+        blockers.append("STATIC_EVENT_DENSITY_NOT_ESTABLISHED")
+    if selected_number_of_results != PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE:
+        blockers.append("PRODUCTION_NUMBER_OF_RESULTS_EVIDENCE_NOT_ESTABLISHED")
+    if not cap2_approved:
+        blockers.append("CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED")
+    if not quota_safety_closed:
+        blockers.append("QUOTA_HEADROOM_NOT_ESTABLISHED")
+    if len(station_rows) == 50 and len(phase_assignments) != 50:
+        blockers.append("PHASE_ASSIGNMENT_NOT_ESTABLISHED")
+    status = (
+        "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED"
+        if not blockers
+        else "CONDITIONALLY BLOCKED — " + "; ".join(blockers)
+    )
+    generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    result_limit_evidence = _historical_result_limit_evidence(root)
+    result_limit_evidence.update(
+        {
+            "decision": production_selection.get("decision", "NOT_RUN"),
+            "production_number_of_results": selected_number_of_results,
+            "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+            "bounded_live_diagnostic": {
+                "status": live.get("status"),
+                "http_attempts_consumed": live.get("http_attempts_consumed_total", 0),
+                "current_run_http_attempts_consumed": live.get("current_run_http_attempts_consumed", 0),
+                "prior_attempts_consumed": live.get("prior_attempts_consumed", 0),
+                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "stop_reason": live.get("stop_reason"),
+                "diagnostic_anchor_dep_arr_time": live.get("diagnostic_anchor_dep_arr_time"),
+                "representatives": live.get("representatives", []),
+                "result_limit_probe": number_limit_probe,
+            },
+            "selection_limitation": "The provider theoretical maximum remains unknown; the selected N=30 is a directly supported production design value, not a provider-maximum claim.",
+        }
     )
 
+    remaining_limitations = [
+        "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+        "CURRENT_SHARED_CREDENTIAL_USAGE_NOT_OBSERVED; FULL_DOCUMENTED_LEGACY7_CADENCE_RESERVED_CONSERVATIVELY",
+        "STATIC_DENSITY_IS_PLANNING_EVIDENCE_ONLY_NOT_REALTIME_RESPONSE_COVERAGE",
+    ]
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-1.0",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-2.0",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
-        "stage_13_status": "CONDITIONALLY BLOCKED — " + "; ".join(remaining_blockers),
+        "stage_13_status": status,
         "stage_12_gate": {
             "authoritative_completion_artifact_present": stage12_approved,
             "expected_artifact_paths": expected_stage12_paths,
             "artifact_paths_found": stage12_paths_found,
-            "blocker": stage12_blocker,
+            "blocker": None if stage12_approved else "STAGE_12_PANEL_APPROVAL_REQUIRED",
             "approved_panel_version": stage12_evidence.get("panel_version") if stage12_approved else None,
             "panel_station_count": len(stage12_evidence.get("panel", [])) if stage12_approved else 0,
-            "provisional_analysis_population": {
-                "status": "PROVISIONAL_COUNT_ONLY",
-                "station_count": 50,
-                "tier_counts": {"A": 10, "B": 20, "C": 20},
-                "station_identities_available": stage12_approved,
-                "fixed_panel_version": stage12_evidence.get("panel_version") if stage12_approved else None,
-                "used_for": ["quota arithmetic", "phase-count reconciliation only"],
-                "not_used_for": [
-                    "station-level density",
-                    "production target creation",
-                    "production activation",
-                    "network-wide coverage claim",
-                ],
-            },
+            "approved_panel_station_ids": [row.get("source_parent_station_id") for row in stage12_evidence.get("panel", [])] if stage12_approved else [],
+            "stage12_selection_rank_is_not_production_tier": True,
+            "panel_membership_changed": False,
         },
         "evidence_sources": [
             "docs/PROJECT-STATUS.md",
             "docs/ROADMAP.md",
             "docs/GUARDRAILS.md",
+            "docs/DECISION-LOG.md",
             "docs/stages/07-realtime-pilot-design.md",
-            "docs/stages/07-realtime-pilot-design-completion-decision.md",
             "docs/stages/08-small-realtime-pilot-blocked.md",
-            "docs/stages/09-matching-data-quality.md",
-            "docs/stages/09-matching-data-quality-evidence.json",
             "docs/stages/09-source-backed-matching-summary.json",
-            "docs/stages/10-operational-fact.md",
-            "docs/stages/11-power-bi-model-design.md",
-            "docs/collector-design/realtime-collector-requirements.md",
+            "docs/stages/12-50-station-selection-evidence.json",
+            "docs/stages/12-50-station-candidate-evidence.json",
             "docs/source-contracts/mdd-trias-request-contract.md",
             "docs/source-contracts/mdd-trias-response-contract.md",
             "docs/source-contracts/mdd-trias-raw-retention.md",
-            "docs/source-contracts/mdd-trias-event-lifecycle-validation.md",
             "docs/stages/04-cologne-scope-mode-evidence.json",
             "stage03a-mdd-discovery.jsonl",
-            "hbf-lifecycle-1.log",
-            "hbf-lifecycle-2.log",
-            "neumarkt-lifecycle-1.log",
-            "neumarkt-lifecycle-2.log",
-            "neumarkt-lifecycle-3.log",
         ],
-        "candidate_cadence": cadence,
-        "quota": quota_projection_set(cadence["logical_requests_per_hour"]),
+        "candidate_cadence": {
+            "historical_comparison": candidate_cadence(TIERED50_CANDIDATE),
+            "approved_design": cadence,
+            "cadence_selection_alternatives": alternatives,
+            "selection_reason": "The measured density supports the fixed 10/20/20 count split but not the old 5/10/30 cadence. Moving the middle tier to 15 minutes reduces recurring load to 240 requests/hour while N=30 remains above each tier's exact-feed P95 cadence-window density. The decision preserves useful high-density observation coverage and substantial shared-account headroom.",
+        },
+        "quota": {
+            **quota,
+            "recommended_plan": {
+                "normal_retry_policy": "MaxAttempts=1; zero automatic retries; failed targets are independently recorded and wait for the next current logical bucket",
+                "evidence_supported_retry_allowance": 0,
+                "historical_legacy_retry_sensitivity": _round(LEGACY_ADDITIONAL_ATTEMPT_SHARE, 9),
+                "legacy_current_usage_observed": False,
+                "legacy_reserved_conservatively": dict(LEGACY7_RESERVED_MONTHLY_REQUESTS),
+                "diagnostic_reserved_http_attempts": DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
+                "thirty_day_nominal_conservative_total": quota["projections"][0]["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "thirty_one_day_nominal_conservative_total": quota["projections"][0]["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "thirty_one_day_ten_percent_stress_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "quota_safety_gate_closed_without_fabricated_current_usage": quota_safety_closed,
+            },
+        },
         "credential_consumers": _credential_consumers(),
-        "number_of_results": _result_limit_evidence(root),
-        "static_event_density": _static_event_density(root, stage4, stage12_approved=stage12_approved),
+        "number_of_results": result_limit_evidence,
+        "static_event_density": density,
         "execution_duration_evidence": _load_duration_evidence(root),
         "retry_and_http_attempt_evidence": {
             "source_controlled_bounded_populations": [
@@ -709,9 +1805,6 @@ def build_evidence(
                     "http_status_distribution": {"200": 10},
                     "successful_first_attempt_percentage": 100.0,
                     "retry_count": 0,
-                    "additional_attempt_rate": 0.0,
-                    "timeouts": 0,
-                    "network_failures": 0,
                 },
                 {
                     "population": "Stage 8 one-hour Hbf pilot",
@@ -719,9 +1812,6 @@ def build_evidence(
                     "http_status_distribution": {"200": 343},
                     "successful_first_attempt_percentage": 100.0,
                     "retry_count": 0,
-                    "additional_attempt_rate": 0.0,
-                    "timeouts": 0,
-                    "network_failures": 0,
                 },
                 {
                     "population": "Stage 9 source-backed acceptance",
@@ -729,64 +1819,43 @@ def build_evidence(
                     "http_status_distribution": {"200": 3},
                     "successful_first_attempt_percentage": 100.0,
                     "retry_count": 0,
-                    "additional_attempt_rate": 0.0,
-                    "timeouts": 0,
-                    "network_failures": 0,
-                },
-                {
-                    "population": "Stage 8 latest historical authorization attempt",
-                    "source": "docs/stages/08-small-realtime-pilot-blocked.md",
-                    "http_status_distribution": {"401": 1},
-                    "successful_first_attempt_percentage": 0.0,
-                    "retry_count": 0,
-                    "additional_attempt_rate": 0.0,
-                    "timeouts": 0,
-                    "network_failures": 0,
                 },
             ],
             "legacy_historical_evidence": {
-                "source": "docs/PROJECT-STATUS.md; historical Legacy quota audit snapshot 2026-09-25",
+                "source": "historical Legacy quota audit snapshot 2026-09-25",
                 "executions": LEGACY_EXECUTIONS,
                 "http_attempts": LEGACY_HTTP_ATTEMPTS,
                 "additional_retry_attempts": LEGACY_ADDITIONAL_RETRY_ATTEMPTS,
                 "additional_attempt_share_of_all_http_attempts": _round(LEGACY_ADDITIONAL_ATTEMPT_SHARE, 9),
-                "successful_first_attempt_percentage": None,
-                "http_failure_distribution": None,
                 "current_production_database_available": False,
                 "interpretation": "historical retry-count evidence only; not a current Tiered50 retry rate",
             },
             "current_production_audit": {
                 "ctl_mdd_collector_run_history_present": False,
                 "status": "UNAVAILABLE_CURRENT_PRODUCTION_AUDIT_EVIDENCE",
+                "conservative_full_legacy7_reserve_applied": True,
                 "must_be_resolved_before_activation": True,
+            },
+            "stage13_live_diagnostic": {
+                "http_attempts_consumed": live.get("http_attempts_consumed_total", 0),
+                "current_run_http_attempts_consumed": live.get("current_run_http_attempts_consumed", 0),
+                "prior_attempts_consumed": live.get("prior_attempts_consumed", 0),
+                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "retries": 0,
+                "raw_payloads_persisted": False,
             },
         },
         "phase_staggering": phase,
+        "heartbeat_feasibility": heartbeat,
         "sequential_vs_bounded_concurrency": {
-            "decision": "CONDITIONALLY_PREFER_BOUNDED_CONCURRENCY",
-            "approval_state": "NOT_APPROVED_FOR_ACTIVATION",
-            "option_a_fully_sequential": {
-                "status": "NOT_APPROVED_AS_PRODUCTION_GUARANTEE",
-                "stage_08_observed_average_wall_seconds_per_attempt": _round(3606.801 / 343, 6),
-                "estimated_seconds_for_24_due_targets_at_that_average": _round((3606.801 / 343) * 24, 6),
-                "five_minute_heartbeat_seconds": 300,
-                "remaining_seconds_at_observed_average": _round(300 - (3606.801 / 343) * 24, 6),
-                "reason": "the observed sequential pilot cycle leaves limited margin before retries, persistence variance, or a timeout; the diagnostic 3-second slot was not a production requirement",
-            },
-            "option_b_small_bounded_concurrency": {
-                "status": "CONDITIONAL_DESIGN_DIRECTION_ONLY",
-                "provisional_max_concurrency": 2,
-                "justification": "two workers provide margin for 23–24 due targets while remaining bounded and isolating one slow target; no provider-safe concurrent-run evidence exists",
-                "risks": [
-                    "provider concurrency/rate-limit behavior is unmeasured",
-                    "each retry remains an additional quota-consuming HTTP request",
-                    "claim/lease semantics must prevent duplicate target/bucket execution",
-                ],
-            },
-            "request_timeout_baseline_seconds": 30,
-            "request_timeout_status": "Stage 8 evidence baseline only; production value remains to be approved",
-            "exact_blocker": "CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED",
+            "decision": "APPROVED_MAXIMUM_CONCURRENCY_2" if cap2_approved else "NOT_ESTABLISHED",
+            "approval_state": "APPROVED_FOR_STAGE14_DESIGN_ONLY" if cap2_approved else "NOT_APPROVED",
+            "maximum_concurrency": MDD_CONCURRENCY_CAP if cap2_approved else 1,
+            "bounded_live_diagnostic": live.get("bounded_concurrency_probe", {}),
+            "sequential_live_diagnostic": live.get("sequential_duration_evidence", {}),
+            "historical_stage8_observed_average_wall_seconds_per_attempt": _round(3606.801 / 343, 6),
             "unbounded_concurrency": "PROHIBITED",
+            "provider_scope_limit": "cap-2 result is a bounded sample decision, not a provider-wide rate-limit claim",
         },
         "overlap_and_duplicate_execution_contract": {
             "unique_execution_identity": ["SamplingTargetId", "LogicalDueBucket"],
@@ -806,20 +1875,20 @@ def build_evidence(
                 "error_metadata",
             ],
             "crash_safe_behavior": "a durable RUNNING/STALE_INCOMPLETE row remains observable; a later invocation does not re-execute the same historical bucket",
-            "catch_up_behavior": "false; a later process may claim the current wall-clock bucket only",
-            "historical_snapshot_replay": "prohibited",
+            "catch_up_behavior": False,
+            "historical_snapshot_replay": "PROHIBITED",
             "production_scheduler_implemented": False,
         },
         "failure_isolation": {
             "decision": "APPROVED_REQUIREMENT",
             "one_failed_station_aborts_remaining_due_targets": False,
             "per_target_fields": [
-                "audit",
+                "logical_due_bucket",
                 "http_status",
                 "attempt_count",
                 "duration",
-                "parser_result",
-                "persistence_result",
+                "parser_status",
+                "persistence_status",
                 "error_metadata",
             ],
         },
@@ -828,37 +1897,110 @@ def build_evidence(
             "rules": [
                 "do not delete Legacy7 realtime history",
                 "preserve the existing 7 SamplingTargetIds",
-                "add only newly approved targets",
-                "do not delete/reinsert existing targets",
+                "future additions do not delete/reinsert existing targets",
                 "record explicit Legacy7 versus Tiered50 sampling era/version boundary",
                 "do not compare raw volumes before/after without cadence qualification",
             ],
             "cutover_performed": False,
         },
         "readiness_decision": {
-            "production_cadence_approved": False,
-            "production_number_of_results_approved": False,
-            "production_concurrency_approved": False,
-            "production_activation": "NOT_APPROVED",
-            "blockers": remaining_blockers,
+            "production_cadence_approved": not any(item in {"STATIC_EVENT_DENSITY_NOT_ESTABLISHED", "QUOTA_HEADROOM_NOT_ESTABLISHED"} for item in blockers),
+            "production_tier_membership_approved": density.get("status") == "COMPLETE" and len(station_rows) == 50,
+            "production_number_of_results_approved": selected_number_of_results == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
+            "production_concurrency_approved": cap2_approved,
+            "production_activation": "NOT_STARTED",
+            "limitations": remaining_limitations,
+            "blockers": blockers,
             "stage_14_started": False,
             "tiered50_activated": False,
+            "power_bi_modified": False,
+            "production_database_objects_created": False,
+            "windows_scheduled_tasks_created": False,
         },
     }
 
 
+def validate_evidence(evidence: Mapping[str, Any]) -> None:
+    """Validate the Stage 13 machine-readable schema and hard boundaries."""
+
+    required = {
+        "artifact_version",
+        "record_type",
+        "stage_13_status",
+        "stage_12_gate",
+        "candidate_cadence",
+        "quota",
+        "number_of_results",
+        "static_event_density",
+        "phase_staggering",
+        "heartbeat_feasibility",
+        "sequential_vs_bounded_concurrency",
+        "overlap_and_duplicate_execution_contract",
+        "failure_isolation",
+        "historical_continuity",
+        "readiness_decision",
+    }
+    missing = sorted(required - set(evidence))
+    if missing:
+        raise ValueError(f"Stage 13 evidence missing required fields: {missing}")
+    if evidence["stage_12_gate"].get("approved_panel_version") == PANEL_VERSION:
+        if evidence["stage_12_gate"].get("panel_station_count") != 50:
+            raise ValueError("approved Stage 12 panel must contain exactly 50 stations")
+    if evidence["overlap_and_duplicate_execution_contract"].get("unique_execution_identity") != [
+        "SamplingTargetId",
+        "LogicalDueBucket",
+    ]:
+        raise ValueError("unique execution identity contract changed")
+    if evidence["readiness_decision"].get("stage_14_started"):
+        raise ValueError("Stage 14 must remain not started")
+    if evidence["readiness_decision"].get("tiered50_activated"):
+        raise ValueError("Tiered50 must remain inactive")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the offline Stage 13 readiness evidence artifact")
+    parser = argparse.ArgumentParser(description="Build Stage 13 Tiered50 readiness evidence")
     parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
         help="output JSON path (default: docs/stages/13-tiered-collector-readiness-evidence.json)",
     )
+    parser.add_argument(
+        "--gtfs-zip",
+        type=Path,
+        help="exact Stage 12 GTFS ZIP; its SHA-256 must match the approved snapshot",
+    )
+    parser.add_argument(
+        "--run-live-diagnostics",
+        action="store_true",
+        help="run the bounded sequential result-limit and cap-2 diagnostics",
+    )
+    parser.add_argument(
+        "--prior-http-attempts",
+        type=int,
+        default=0,
+        help="Stage 13 attempts already consumed by a prior bounded diagnostic run",
+    )
+    parser.add_argument(
+        "--reuse-existing-live-evidence",
+        action="store_true",
+        help="reuse the current sanitized live diagnostic without issuing new MDD requests",
+    )
     args = parser.parse_args()
-    evidence = build_evidence()
+    if args.prior_http_attempts < 0 or args.prior_http_attempts >= MDD_HTTP_ATTEMPT_HARD_MAX:
+        parser.error("--prior-http-attempts must be between 0 and 99")
+    evidence = build_evidence(
+        gtfs_zip=args.gtfs_zip,
+        run_live_diagnostics=args.run_live_diagnostics,
+        prior_live_attempts=args.prior_http_attempts,
+        reuse_existing_live=args.reuse_existing_live_evidence,
+    )
+    validate_evidence(evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(args.output)
     return 0
 

@@ -259,14 +259,14 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     aggregate evidence for the bounded observed sample and do not prove
     provider-wide absence.
 94. This hardening change is prospective only. Stage 8 remains **COMPLETE**;
-    the fixed future 50-station objective and the `250,000` monthly quota are
-    unchanged; Stage 13 retains production cadence, concurrency,
-    `NumberOfResults`, and rollout ownership; and Stage 9+ implementation is
-    not started.
-95. Stage 13 may use the historical `10/20/20` Tiered50 counts for provisional
-    quota and phase arithmetic only when Stage 12 has no approved fixed panel;
-    it must not invent station identities or present the population as
-    production-approved.
+    the fixed `TIERED50_PANEL_V1` objective and the `250,000` monthly quota are
+    unchanged. Stage 13 now has an approved readiness design, but Stage 9+
+    physical implementation, scheduler work, and activation remain separately
+    gated.
+95. The historical `10/20/20` Tiered50 plan at 5/10/30 minutes is comparison
+    evidence only. The approved Stage 13 design uses the fixed 10/20/20 panel
+    counts at 5/15/30 minutes, with station membership assigned from exact-feed
+    density evidence and never from Stage 12 `SelectionRank`.
 96. The unique future realtime execution identity is
     `(SamplingTargetId, LogicalDueBucket)`. Claims must be atomic and durable;
     a duplicate claim must not issue another HTTP request.
@@ -279,20 +279,23 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 99. One failed station must not abort other due targets. Audit, HTTP status,
     attempts, duration, parser, persistence, and error metadata remain
     independently attributable to each target.
-100. The candidate `NumberOfResults` is not approved when bounded samples
-     saturate at the configured limit and provider maximum/forward-horizon
-     coverage are not established. Application validation ranges are not
-     provider evidence.
-101. Unbounded MDD concurrency is prohibited. A bounded concurrency cap is not
-     production-approved until provider rate-limit, timeout, retry, failure
-     isolation, and quota behavior are measured.
+100. Stage 13 approves `NumberOfResults=30` as a bounded production-design
+     value because exact-feed static P95 cadence-window density and the
+     bounded multi-representative N5/N10/N20/N30 diagnostic support it. The
+     provider theoretical maximum remains unknown; application validation
+     ranges are not provider evidence.
+101. Unbounded MDD concurrency is prohibited. Stage 13 approves a maximum of
+     two concurrent workers as a bounded design/Stage 14 validation input after
+     the cap-2 diagnostic showed no pressure signal and preserved failure
+     isolation. This is not a provider-wide rate-limit claim or activation.
 102. Current shared-credential production usage must be auditable before
      activation. Missing current `ctl.MddCollectorRun` history must not be
      represented as zero usage, and completed/inactive diagnostics do not
      receive a standing quota reserve.
 103. Stage 13 readiness analysis does not authorize Stage 14, production
-     scheduler implementation, a 50-station target population, or Tiered50
-     activation.
+     scheduler implementation, database objects, Power BI work, Windows tasks,
+     or Tiered50 activation. The Stage 13 readiness design is complete, but
+     production remains not started.
 104. Stage 12 panel membership is fixed after approval. A dynamic station
      replacement is prohibited during collection; a membership change requires
      a new version with effective date/time, reason, and predecessor panel
@@ -316,3 +319,11 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      authoritative selector. The artifact must contain no raw GTFS ZIP, raw
      MDD payload, or secret; deterministic algorithm reproducibility and exact
      durable-input replayability are separate required gates.
+110. Stage 13 diagnostics may use only the inherited `MDD_API_KEY` environment
+     value. If it is missing, the diagnostic makes zero requests. The key,
+     request headers, raw MDD payloads, and credential-bearing errors must not
+     be persisted, printed, hashed, or committed; a 401/403 stops the run.
+111. The Stage 13 diagnostic budget is at most 100 new HTTP attempts, including
+     all result-limit and cap-2 checks. Reuse of already sanitized evidence does
+     not issue another request and must remain visibly distinguished from a new
+     live run.

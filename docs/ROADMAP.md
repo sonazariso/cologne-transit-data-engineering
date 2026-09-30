@@ -290,7 +290,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 remains conditionally blocked as recorded below.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 is now closed as an approved readiness design while production remains not started.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -337,25 +337,27 @@ The [selection document](stages/12-50-station-selection.md), [completion decisio
 Stage 4 semantics were approved against `VERSION__20260928_0042`; Stage 12
 selection used the later `VERSION__20260930_0053` snapshot. Parent, child-stop,
 and event-count differences are snapshot evolution, while Stage 4 identity and
-classification semantics were re-applied to Stage 12. Stage 13 production work
-and Stage 14 remain **NOT STARTED**.
+classification semantics were re-applied to Stage 12. Stage 13 readiness design
+is complete; Stage 13 production work and Stage 14 remain **NOT STARTED**.
 
-## Stage 13 — Tiered Collector Readiness — CONDITIONALLY BLOCKED
+## Stage 13 — Tiered Collector Readiness — COMPLETE — APPROVED DESIGN; PRODUCTION NOT STARTED
 
-The [readiness audit](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [evidence artifact](stages/13-tiered-collector-readiness-evidence.json) reconcile the provisional `10/20/20` cadence, 30/31-day quota projections, bounded retry sensitivity, separate execution-duration populations, static-density evidence boundary, deterministic `5/10/30` phase cycle, atomic target/bucket claim contract, failure isolation, and Legacy7 continuity rules.
+The [readiness audit](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [evidence artifact](stages/13-tiered-collector-readiness-evidence.json) close the exact-feed readiness design for `TIERED50_PANEL_V1`. The panel has 10 Tier A stations at five-minute cadence, 20 Tier B stations at 15-minute cadence, and 20 Tier C stations at 30-minute cadence. Density uses scheduled child-stop arrivals across 5/10/15/30-minute windows and does not use Stage 12 `SelectionRank` as a tier.
 
-Stage 13 is not complete for production readiness and production work remains
-**NOT STARTED**. Stage 12 now has an approved fixed panel, but
-`NumberOfResults` remains blocked by
-`PROVIDER_MAXIMUM_NOT_ESTABLISHED`; station/tier static density and forward
-horizon coverage are unavailable; current shared-credential production usage
-is unavailable; and provider-safe bounded concurrency is unmeasured. The
-conditional design direction is at most two concurrent workers subject to a
-separate validation; unbounded concurrency is prohibited. No scheduler,
-collector activation, or Stage 14 cutover is authorized.
-The existing Stage 13 evidence is a pre-Stage-12 handoff snapshot and has not
-been rerun; its former panel prerequisite is satisfied by the Stage 12
-closeout, while all other Stage 13 blockers remain.
+The approved request design is `NumberOfResults=30`, based on 24 sequential
+N5/N10/N20/N30 diagnostics across six deterministic representatives, with
+three cap-2 pairs. All tested limits saturated; the provider theoretical
+maximum remains unknown. The design reconciles 240 logical requests/hour,
+5,760/day, 172,800/30-day month, and 178,560/31-day month, with zero automatic
+retries, a conservative Legacy7 reserve of 8,640/8,928 requests, and no more
+than 100 Stage 13 diagnostic attempts. The heartbeat distribution is
+`[21, 21, 19, 20, 20, 19]`; atomic target/bucket claims, no catch-up,
+failure isolation, and Legacy7 history preservation remain mandatory.
+
+The cap-2 result is a bounded design decision, not a provider-wide rate-limit
+claim. Current shared-credential production usage remains unavailable and is
+not treated as zero. Stage 13 does not authorize a scheduler, collector
+activation, database objects, Power BI work, Windows tasks, or Stage 14 cutover.
 
 ## Stage 14 — Controlled 50-Station Cutover
 Preserve legacy history and IDs, add only approved targets, record sampling-era change, dry-run first, and do not fabricate missed snapshots.

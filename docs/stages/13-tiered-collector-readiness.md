@@ -1,392 +1,320 @@
 # Stage 13 — Tiered Collector Readiness
 
 **Date:** `2026-09-30`  
-**Status:** `CONDITIONALLY BLOCKED — PROVIDER_MAXIMUM_NOT_ESTABLISHED; STATIC_EVENT_DENSITY_NOT_ESTABLISHED; CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE; CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED`  
+**Status:** `COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED`
 **Production status:** `NOT STARTED`
 
-The authoritative machine-readable audit is
+The authoritative machine-readable evidence is
 [`13-tiered-collector-readiness-evidence.json`](13-tiered-collector-readiness-evidence.json).
-The audit is source-controlled and offline. It does not create a scheduler,
-collector, database object, station target, or production request.
+The implementation is an evidence/design closeout only. It creates no
+production target rows, scheduler, database object, Windows Scheduled Task,
+Power BI artifact, or Tiered50 activation.
 
 ## Decision summary
 
-The historical Tiered50 cadence arithmetic is reproducible:
-
-- Tier A: 10 targets every 5 minutes;
-- Tier B: 20 targets every 10 minutes; and
-- Tier C: 20 targets every 30 minutes.
-
-That candidate produces `280` logical requests/hour, `6,720`/day, `201,600`
-in a 30-day month, and `208,320` in a 31-day month. The arithmetic is not a
-production approval. The 31-day base is already `99.2%` of the upper
-`210,000` normal planning envelope before retries or legitimate diagnostics.
-The repository has historical retry-count evidence, but no current production
-caller audit or live `ctl.MddCollectorRun` history from which a safe total
-budget can be established.
-
-The production `NumberOfResults` remains unset. Both `5` and `20` reached the
-configured response limit in bounded samples. This establishes compatibility
-and saturation in those samples, not provider maximum, forward-horizon
-coverage, or an all-station result limit. The required explicit classification
-is `PROVIDER_MAXIMUM_NOT_ESTABLISHED`.
-
-Stage 12 now approves fixed panel version `TIERED50_PANEL_V1` with 50 parent
-stations. This readiness artifact does not assign those stations to production
-tiers or activate targets. The historical `10/20/20` population remains only a
-provisional count population for quota and phase arithmetic, not a production
-tier assignment.
-
-## 1. Evidence boundary and prerequisite gate
-
-Earlier approved semantics remain in force: MDD/TRIAS is the primary targeted
-realtime source, GTFS-RT remains complementary, source timestamps and
-estimated timing remain distinct, `RecordedAtTime` is not inferred, raw
-payloads are not made permanent, and sampled station evidence is not
-network-wide performance evidence.
-
-The Stage 12 completion artifacts are now present and authoritative:
-
-- `docs/stages/12-50-station-selection.md`;
-- `docs/stages/12-50-station-selection-completion-decision.md`; and
-- `docs/stages/12-50-station-selection-evidence.json`.
-
-The previously discussed `10/20/20` candidate is retained as:
-
-| Provisional population field | Value | Use in this audit |
-| --- | ---: | --- |
-| Total station count | 50 | quota and phase-count arithmetic only |
-| Tier A count | 10 | quota and phase-count arithmetic only |
-| Tier B count | 20 | quota and phase-count arithmetic only |
-| Tier C count | 20 | quota and phase-count arithmetic only |
-| Station identities | fixed `TIERED50_PANEL_V1` | no target creation or production activation |
-
-The Stage 12 prerequisite is satisfied. The remaining blockers are provider
-result-limit evidence, Stage 13-specific tier/density and forward-horizon
-analysis, current shared-credential usage, and provider-safe concurrency. No
-Stage 13 production implementation is started by this handoff.
-
-## 2. Candidate cadence and quota
-
-### 2.1 Logical request math
-
-`NumberOfResults` is a per-response result limit; it does not multiply HTTP
-request count. The candidate base load is:
-
-| Tier | Targets | Interval | Logical requests/hour | Logical requests/day |
-| --- | ---: | ---: | ---: | ---: |
-| A | 10 | 5 min | 120 | 2,880 |
-| B | 20 | 10 min | 120 | 2,880 |
-| C | 20 | 30 min | 40 | 960 |
-| **Total** | **50** | — | **280** | **6,720** |
-
-| Calendar month | Base logical requests | % of 250,000 ceiling | % of 207,500 lower envelope | % of 210,000 upper envelope | Headroom to ceiling |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 30 days | 201,600 | 80.640% | 97.157% | 96.000% | 48,400 |
-| 31 days | 208,320 | 83.328% | 100.395% | 99.200% | 41,680 |
-
-The 30-day base is below the nominal 83% lower edge, which is conservative;
-the 31-day base is inside the nominal 83–84% range but leaves only `1,680`
-requests to the `210,000` upper edge. Neither row is an activation approval.
-Retries, legitimate diagnostics, any still-running external Legacy Collector,
-and operational changes must remain outside the intentional base schedule.
-
-### 2.2 Retry sensitivity
-
-The only durable quota retry count in the restart repository is the historical
-Legacy audit snapshot: `35` additional retry attempts among `1,629` HTTP
-attempts, an additional-attempt share of approximately `2.1486%`. It is not an
-observed Tiered50 retry rate. Applying it as a sensitivity only gives:
-
-| Additional-attempt scenario | 30-day projected HTTP requests | 31-day projected HTTP requests | 31-day % of ceiling | 31-day headroom to ceiling |
-| --- | ---: | ---: | ---: | ---: |
-| 0% | 201,600 | 208,320 | 83.328% | 41,680 |
-| Legacy historical share, 2.1486% | 205,931.49 | 212,795.87 | 85.118% | 37,204.13 |
-| 5% scenario | 211,680 | 218,736 | 87.494% | 31,264 |
-| 10% scenario | 221,760 | 229,152 | 91.661% | 20,848 |
-
-The scenario rows are calculations, not observed retry rates. They show why a
-candidate base schedule cannot be approved from base-request arithmetic alone.
-All retries count as actual HTTP requests. No quota is reserved for completed
-or inactive diagnostics merely because their scripts remain in the repository.
-
-## 3. MDD credential consumers
-
-The repository contains no scheduled production collector or Windows Task
-definition. The following are the repository-controlled callers that can use
-`MDD_API_KEY`:
-
-| Caller | Purpose / normal cadence | Retry policy | Classification | Included in forward monthly planning? |
-| --- | --- | --- | --- | --- |
-| `scripts/stage_08_mdd_realtime_pilot.py` | One bounded Hbf diagnostic; no normal cadence; historical run complete | 0 retries; 30-second timeout; overlap slots skipped | bounded diagnostic, inactive after completion | historical actual only; no standing reserve |
-| `scripts/stage_08_authorization_request_contract_diagnostic.py` | Manual Hbf N5/N20 decision-tree controls | 0 retries; bounded controls | bounded diagnostic, inactive after completion | no standing reserve; explicit approval required for any rerun |
-| `scripts/stage_03a_disruption_evidence_probe.py` | Stage 3A MDD Situation/discovery evidence; manual host-only run | 0 retries; sequential; no fallback | bounded diagnostic, inactive after completion | historical actual only; no standing reserve |
-| `scripts/stage_09_source_backed_acceptance.py` | Up to three station requests for Stage 9 acceptance | 0 retries; one request per target | bounded diagnostic, inactive after completion | historical actual only; no standing reserve |
-| `scripts/mdd_recorded_time_lifecycle_probe.py` | Near-event `RecordedAtTime` lifecycle diagnostic | 0 retries; seven sequential attempts maximum | bounded diagnostic, historical | no standing reserve |
-| `scripts/stage_02a2_probe.py` | One-request source-contract diagnostic | 0 retries; one request maximum | inactive diagnostic | no |
-| `scripts/stage_02a3_historical_actual_time_probe.py` | Five historical-horizon availability requests | 0 retries; one per horizon | inactive diagnostic | no |
-
-The external Legacy Collector / SQL Server `ctl.MddCollectorRun` history is a
-shared-credential consumer outside this restart repository. Its historical
-2026-09-25 snapshot recorded `1,599` executions, `1,629` HTTP attempts, and
-`35` additional retry attempts. Current cadence, current account usage, and
-current database history are unavailable here. It must be included in the
-activation budget once audited; it is not silently treated as zero.
-
-## 4. `NumberOfResults` decision
-
-The audit does not carry forward either `5` or `20` as a production default.
-
-| Evidence population | Requested limit | Returned-result evidence | Interpretation |
-| --- | ---: | --- | --- |
-| Stage 3A ten-station MDD discovery | 5 | 10/10 responses returned 5 results | saturated at N5; N5 is not sufficient evidence for production coverage |
-| Stage 8 one-hour Köln Hbf pilot | 20 | 343 successful responses and 6,860 `StopEventResult` occurrences, equal to 343 × 20 | bounded Hbf saturation/compatibility only; raw per-response rows were cleaned after evidence extraction |
-| Stage 9 three-station source-backed acceptance | 20 | 3/3 request contexts had 20 stop-event results | bounded three-station saturation only |
-| Stage 8 N5/N20 controls | 5 and 20 | both HTTP 200 and parseable at Köln Hbf | compatibility controls only |
-
-The following remain unresolved:
-
-- provider maximum: `PROVIDER_MAXIMUM_NOT_ESTABLISHED`;
-- forward temporal coverage beyond the configured result limit;
-- differences by station, tier, mode, time of day, or density;
-- static scheduled-event density for the future population; and
-- whether tier-specific result limits would materially improve coverage.
-
-Application-side validation ranges are not provider evidence. Because the
-bounded samples saturate at both tested limits and the provider maximum is not
-established, the production value remains `NULL`/unset and the gate is
-conditionally blocked.
-
-## 5. Static event-density audit
-
-The current approved Stage 4 evidence is the VRS Global-ID snapshot
-`VERSION__20260928_0042`, valid `2026-09-02` through `2026-12-12`, with ZIP
-SHA-256
-`6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`.
-It retains aggregate scope evidence, including `3,137` Cologne stop rows and
-`1,144,295` Cologne scheduled stop events. The raw approved GTFS ZIP and the
-station/tier panel are not present in this checkout. The current Stage 4 JSON
-does not contain station-level stop-time rows or active-calendar expansions.
-
-Consequently, the required station/tier rows cannot be produced without
-inventing station identities or treating an aggregate as a density. The
-machine-readable artifact records an empty row set with this contract:
-
-`station | tier | scheduled_event_density | forward_window | result_limit_coverage_status`
-
-The density distribution, percentiles, outliers, and evidence that a result
-limit covers the intended forward horizon are all
-`NOT_ESTABLISHED`. Static scheduled density is planning evidence only and is
-not realtime response cardinality.
-
-## 6. Execution-duration evidence
-
-Different execution modes remain separate. Percentiles use linear interpolation
-over the retained `elapsed_ms` values in each population.
-
-| Population | Count | Min ms | P50 ms | P90 ms | P95 ms | P99 ms | Max ms | Failures / timeouts |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Stage 3A ten-station discovery | 10 | 405.888 | 494.601 | 763.346 | 816.290 | 858.646 | 869.235 | 0 / 0 |
-| Stage 8 near-event lifecycle logs | 35 | 528.158 | 671.382 | 1,154.985 | 1,239.916 | 1,773.889 | 2,009.980 | 0 / 0 |
-| Stage 9 source-backed acceptance | 3 | 550.525 | 839.481 | 921.824 | 932.117 | 940.351 | 942.410 | 0 / 0 |
-
-The Stage 8 one-hour pilot has durable run-level evidence, not per-request
-durations: `343` attempts in approximately `3,606.801` seconds, `857` skipped
-overlap slots, and no parser, persistence, network, timeout, or MDD
-application failures. Its average whole-loop wall time is approximately
-`10.516` seconds per attempted request. Twenty-four sequential due targets at
-that average would take approximately `252.379` seconds of a 300-second
-heartbeat, before retries or variance. The skipped 3-second diagnostic slots
-are relevant evidence about serialization overhead, not a production
-requirement.
-
-These measurements support a five-minute feasibility analysis but do not
-establish a production service-level guarantee across fifty targets.
-
-## 7. Retry and `HttpAttempts` evidence
-
-### Source-controlled bounded evidence
-
-- Stage 3A discovery: 10 HTTP 200 responses, zero retries, zero timeouts and
-  network failures; successful first-attempt percentage `100%` for that
-  bounded population.
-- Stage 8 one-hour pilot: 343 HTTP 200 responses, zero retries, zero parser,
-  persistence, network/DNS, timeout, and MDD application failures; successful
-  first-attempt percentage `100%` for that bounded population.
-- Stage 9 source-backed acceptance: 3 HTTP 200 responses, zero retries and
-  zero recorded transport failures; successful first-attempt percentage
-  `100%` for that bounded population.
-- The later historical Stage 8 authorization attempt returned one HTTP 401
-  without a retry. It is failure chronology, not a current production failure
-  rate.
-
-### Legacy and unavailable current evidence
-
-The legacy audit count of 35 additional attempts is retained as historical
-evidence and used only for labeled quota sensitivity. It does not provide a
-successful-first-attempt percentage or HTTP failure distribution. The current
-SQL Server `ctl.MddCollectorRun` history is not in the restart repository, so
-there is no current production measurement to present as current. The exact
-state is `UNAVAILABLE_CURRENT_PRODUCTION_AUDIT_EVIDENCE`.
-
-## 8. Deterministic phase staggering
-
-The count-level design reconciles over a six-heartbeat, 30-minute super-cycle:
-
-| Heartbeat | Tier A | Tier B | Tier C | Total due targets |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 10 | 10 | 4 | 24 |
-| 2 | 10 | 10 | 3 | 23 |
-| 3 | 10 | 10 | 3 | 23 |
-| 4 | 10 | 10 | 4 | 24 |
-| 5 | 10 | 10 | 3 | 23 |
-| 6 | 10 | 10 | 3 | 23 |
-| **Total / 30 min** | **60** | **60** | **20** | **140** |
-
-The next 30-minute cycle repeats, so the total is `280` logical requests/hour.
-Tier A is due every heartbeat. Tier B has two persisted phases of ten. Tier C
-has six persisted phases with counts `4/3/3/4/3/3`.
-
-Each approved target must carry an immutable `SamplingTargetId` and a persisted
-phase index. A stable target-ID-based assignment may be materialized during
-Stage 12, but mutable rank ordering must not be an input. The assignments must
-be deterministic, persisted/configured, auditable, and versioned with the
-panel. No production scheduler is implemented here.
-
-## 9. Sequential versus bounded concurrency
-
-The explicit Stage 13 readiness direction is **small bounded concurrency, with
-a provisional maximum of two workers, but not approved for activation**.
-
-### Option A — fully sequential
-
-The retained Stage 8 run-level evidence implies approximately 252.379 seconds
-for 24 targets at its observed average whole-loop time, leaving only about
-47.621 seconds in a five-minute heartbeat. That margin is not a guarantee once
-retries, persistence variance, a 30-second timeout, or a slower station are
-included. Fully sequential execution is therefore not approved as a production
-guarantee.
-
-### Option B — small bounded concurrency
-
-Two workers would provide schedule margin for 23–24 due targets while keeping
-provider load bounded and isolating a slow or failed target. Unbounded
-concurrency is prohibited. However, the repository contains no controlled
-provider-safe concurrent MDD evidence, no rate-limit behavior under
-concurrency, and no current production retry population. The cap of two is a
-conditional design direction, not an activation approval.
-
-The exact blocker is `CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED`. Before any
-activation, a separately approved bounded concurrency validation must measure
-provider response behavior, HTTP 429/5xx outcomes, timeout and retry behavior,
-failure isolation, and quota impact. The Stage 8 30-second timeout is the only
-available timeout baseline; it is not silently promoted as a final production
-value.
-
-| Evaluation factor | Option A: sequential | Option B: bounded cap 2 |
-| --- | --- | --- |
-| 23–24 targets in 5 minutes | only limited margin at the Stage 8 run-level average | materially more schedule margin, subject to validation |
-| Request timeout | a single 30-second timeout can consume a large part of the heartbeat | timeout impact is isolated to one worker, but still consumes quota/time |
-| Retry behavior | simple to reason about, but retries extend the serial queue | bounded retries can run on one worker; every retry remains a real request |
-| Quota impact | lowest concurrency pressure; base/retry counts are unchanged | same logical quota arithmetic, with additional provider burst pressure |
-| Provider load | one request at a time | two simultaneous requests maximum; provider behavior is unmeasured |
-| Failure isolation | requires explicit per-target continuation | naturally isolates a slow/failed worker if claims are independent |
-| Operational simplicity | simplest implementation | more coordination and lease/claim observability |
-| Overlap risk | still requires atomic target/bucket claims | requires the same atomic claims plus bounded worker ownership |
-
-This comparison supports a conditional cap-2 direction, not a production
-approval.
-
-## 10. Overlap and duplicate-execution protection
-
-The future dispatcher must enforce unique execution identity at:
-
-`(SamplingTargetId, LogicalDueBucket)`
-
-The logical due bucket is the integer UTC epoch bucket
-`floor(current_utc_epoch_seconds / 300)`. UTC bucket identity avoids DST
-duplication/omission. The future durable control relation must have a unique
-constraint on the target/bucket pair. Overlapping Windows Task/process
-invocations must therefore compete for the same atomic claim; a process
-atomically inserts a claim with
-a run ID and claim token; a unique-key conflict means another invocation owns
-the target/bucket and no HTTP request may be issued by the loser.
-
-The claim contract must retain at least:
-
-- target and logical bucket identity;
-- claim token and collector-run identity;
-- claimed, started, and completed timestamps;
-- status and error metadata; and
-- stale/lease observability.
-
-A crash leaves a durable `RUNNING` or `STALE_INCOMPLETE` record visible for
-operations. It does not authorize re-executing the same historical bucket.
-A later invocation may claim the current wall-clock bucket, but missed buckets
-must not be replayed and no historical realtime snapshot may be fabricated.
-No physical claim table or scheduler is created in Stage 13.
-
-## 11. Failure isolation
-
-The requirement is approved as a design contract: one failed station must not
-abort the remaining due targets. Each target request retains independent audit,
-HTTP status, attempt count, duration, parser result, persistence result, and
-error metadata. A batch summary may report incomplete coverage, but it must not
-erase the per-target failure or turn a missing observation into an on-time,
-cancelled, or served claim.
-
-## 12. Quota guardrails
-
-The production guardrails are:
-
-1. The monthly full ceiling is `250,000` HTTP requests.
-2. Normal planning remains around `207,500–210,000` requests/month, not the
-   full ceiling.
-3. Retries are real HTTP requests and must be counted in the active budget.
-4. `NumberOfResults` does not multiply HTTP request count.
-5. The base cadence must be calculated for both 30-day and 31-day months.
-6. Current account/caller usage must be audited before activation; the absent
-   current `ctl.MddCollectorRun` history cannot be treated as zero usage.
-7. Completed/inactive diagnostics receive no standing quota reserve.
-8. Catch-up bursts are prohibited.
-9. A duplicate target/bucket claim is not allowed to spend another request.
-10. A budget must show base requests, bounded retry sensitivity, other active
-    credential consumers, calendar-month variation, and remaining headroom.
-
-The current evidence does not approve the candidate as a final production
-budget because the fixed panel, provider result maximum, current shared-caller
-usage, and concurrency behavior are unresolved.
-
-## 13. Historical continuity and rollout boundary
-
-The future Stage 14 handoff must preserve the seven existing Legacy7
-`SamplingTargetId` values and their realtime history. It may add only newly
-approved targets, must not delete/reinsert existing targets, and must record an
-explicit `Legacy7` versus `Tiered50` sampling era/version boundary. Before/after
-raw-volume comparisons require cadence qualification. Stage 13 performs no
-cutover, no data migration, and no activation.
-
-## 14. What is and is not approved
-
-Approved as Stage 13 readiness requirements:
-
-- the quota accounting rules and 30/31-day arithmetic;
-- the six-heartbeat phase-count reconciliation;
-- deterministic, persisted, rank-independent phase assignment as a future
-  panel contract;
-- unique target/bucket claim semantics;
-- no historical replay/catch-up behavior;
-- per-target failure isolation; and
-- Legacy7 historical-continuity requirements.
-
-Not approved:
-
-- the final 50-station panel or production target identities;
-- a production `NumberOfResults` value;
-- production cadence activation;
-- a production retry count or final timeout policy;
-- production concurrency; and
-- any Stage 14 cutover or Tiered50 collector activation.
-
-The completion decision records the resulting conditional block rather than
-marking Stage 13 complete merely for chronology.
+Stage 13 is complete as a controlled production-readiness design. The fixed
+Stage 12 panel is reused exactly as `TIERED50_PANEL_V1`; no panel membership
+was changed and Stage 12 `SelectionRank` was not treated as a production tier.
+
+The approved design is:
+
+| Tier | Stations | Cadence | Logical requests/hour |
+|---|---:|---:|---:|
+| A | 10 | every 5 minutes | 120 |
+| B | 20 | every 15 minutes | 80 |
+| C | 20 | every 30 minutes | 40 |
+| **Total** | **50** | — | **240** |
+
+The exact Stage 12 static snapshot supports this assignment and the selected
+cadence-window result limit of `NumberOfResults = 30`. Bounded live evidence
+also supports `MaximumConcurrency = 2`. The provider's theoretical maximum
+result limit remains intentionally unknown and is recorded as
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED`; that limitation is not a completion
+blocker because the selected production value is supported directly by the
+bounded evidence.
+
+## 1. Stage 12 dependency and source boundary
+
+The approved panel gate is satisfied:
+
+- panel version: `TIERED50_PANEL_V1`;
+- exactly 50 unique parent stations;
+- all seven Legacy7 continuity anchors retained;
+- exact candidate-universe evidence remains the Stage 12 source of panel
+  membership; and
+- no Stage 12 redesign, replacement, cutover, or historical deletion occurred.
+
+Static density used the exact Stage 12 feed snapshot:
+
+| Field | Value |
+|---|---|
+| Feed version | `VERSION__20260930_0053` |
+| ZIP SHA-256 | `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147` |
+| Feed period | `2026-09-02` through `2026-12-12` |
+| Active service dates | `102` |
+| Station/service-day density rows | `5,100` |
+| Raw ZIP retention | not committed or retained by Stage 13 |
+
+The verified ZIP was read from temporary storage only. A newer or different
+feed was not substituted.
+
+## 2. Static scheduled-event density and deterministic tiers
+
+For each approved parent station, GTFS `stop_times.arrival_time` rows for the
+validated Stage 12 child stops were expanded against `calendar.txt` and
+`calendar_dates.txt`. For each active service day and each forward window, the
+analysis calculated the maximum scheduled arrivals in the half-open interval
+`[scheduled arrival anchor, anchor + window)`.
+
+This is schedule planning evidence, not realtime response coverage. It does
+not claim that the provider returns every scheduled event or that a live
+response is complete.
+
+The distribution below is across the 50 station-level P95 values. The separate
+machine-readable artifact also retains the 5,100 station/service-day maxima.
+
+| Forward window | Median | P90 | P95 | P99 | Max |
+|---:|---:|---:|---:|---:|---:|
+| 5 min | 7.5 | 12.1 | 14.1 | 17.53 | 19 |
+| 10 min | 11 | 20 | 21.55 | 26.02 | 27 |
+| 15 min | 17.5 | 28.3 | 33 | 42.04 | 44 |
+| 30 min | 31 | 50.4 | 58.3 | 76.02 | 77 |
+
+The final tier assignment sorts only by measured 30-minute station-day P95,
+then 15-minute P95, then 5-minute P95, with source parent ID as the stable
+tie-breaker. It does not use `SelectionRank`.
+
+| Density rank | Tier | Station | Source parent | 5m P95 | 15m P95 | 30m P95 |
+|---:|:---:|---|---|---:|---:|---:|
+| 1 | A | Köln Mülheim Wiener Platz | `de:05315:19211` | 19 | 44 | 77 |
+| 2 | A | Köln Neumarkt | `de:05315:11111` | 15 | 40 | 75 |
+| 3 | A | Köln Heumarkt | `de:05315:11110` | 13 | 33 | 61 |
+| 4 | A | Köln Bf Mülheim | `de:05315:19201` | 16 | 33 | 55 |
+| 5 | A | Köln Bf Deutz/Messe LANXESS arena | `de:05315:11907` | 13 | 31 | 54 |
+| 6 | A | Köln Breslauer Platz/Hbf | `de:05315:11212` | 12 | 28 | 50 |
+| 7 | A | Köln Rudolfplatz | `de:05315:11610` | 10 | 24 | 42 |
+| 8 | A | Köln Aachener Str./Gürtel | `de:05315:13411` | 10 | 23 | 42 |
+| 9 | A | Köln Friesenplatz | `de:05315:11710` | 9 | 23 | 42 |
+| 10 | A | Köln Ebertplatz | `de:05315:11810` | 10 | 23 | 41 |
+| 11 | B | Köln Chlodwigplatz | `de:05315:11411` | 10 | 22 | 39 |
+| 12 | B | Köln Appellhofplatz | `de:05315:11209` | 8 | 20 | 36 |
+| 13 | B | Köln Dom/Hbf | `de:05315:11211` | 7 | 19 | 36 |
+| 14 | B | Köln Kalk Post | `de:05315:18010` | 8 | 19 | 35 |
+| 15 | B | Köln Messe/Deutz Bf | `de:05315:11901` | 9 | 19 | 34 |
+| 16 | B | Köln Barbarossaplatz | `de:05315:11511` | 9 | 19 | 33 |
+| 17 | B | Köln Buchheim Herler Str. | `de:05315:19312` | 9 | 19 | 33 |
+| 18 | B | Köln Hansaring | `de:05315:11801` | 7 | 18 | 33 |
+| 19 | B | Köln Kalk Kapelle | `de:05315:18011` | 7 | 18 | 33 |
+| 20 | B | Köln Chorweiler | `de:05315:16101` | 11 | 21 | 32 |
+| 21 | B | Köln Bf Ehrenfeld | `de:05315:14201` | 9 | 19 | 32 |
+| 22 | B | Köln Wahn S-Bahn | `de:05315:17701` | 9 | 19 | 32 |
+| 23 | B | Köln Hbf | `de:05315:11201` | 9 | 18.95 | 32 |
+| 24 | B | Köln Neusser Str./Gürtel | `de:05315:15011` | 10 | 19 | 31 |
+| 25 | B | Köln Bocklemünd | `de:05315:14611` | 9 | 19 | 31 |
+| 26 | B | Köln Poststr. | `de:05315:11112` | 7 | 17 | 31 |
+| 27 | B | Köln Venloer Str./Gürtel | `de:05315:14211` | 7 | 17 | 30 |
+| 28 | B | Köln Moltkestr. | `de:05315:11611` | 7 | 16 | 30 |
+| 29 | B | Köln Porz Markt | `de:05315:17311` | 8 | 17 | 29 |
+| 30 | B | Köln Ubierring | `de:05315:11410` | 5 | 14 | 28 |
+| 31 | C | Köln Deutz Technische Hochschule | `de:05315:11914` | 6 | 14 | 27 |
+| 32 | C | Köln Rodenkirchen Bf | `de:05315:12711` | 7 | 15 | 26 |
+| 33 | C | Köln Stammheim S-Bahn | `de:05315:19801` | 8 | 15 | 25 |
+| 34 | C | Köln Sülzgürtel | `de:05315:13211` | 6 | 14 | 25 |
+| 35 | C | Köln Stammheimer Ring | `de:05315:19851` | 7 | 15 | 24 |
+| 36 | C | Köln Deutzer Freiheit | `de:05315:11909` | 6 | 13 | 24 |
+| 37 | C | Köln Reichenspergerplatz | `de:05315:11809` | 6 | 13 | 23 |
+| 38 | C | Köln Weißhausstr. | `de:05315:13111` | 8 | 15 | 22 |
+| 39 | C | Köln Weiden Zentrum | `de:05315:13708` | 6 | 12 | 22 |
+| 40 | C | Köln Amsterdamer Str./Gürtel | `de:05315:15121` | 7 | 13 | 21 |
+| 41 | C | Köln Merheim | `de:05315:18511` | 6 | 13 | 21 |
+| 42 | C | Köln Eifelwall/Stadtarchiv | `de:05315:11514` | 5.95 | 12 | 21 |
+| 43 | C | Köln Dellbrück Hauptstr. | `de:05315:19511` | 6 | 11 | 20 |
+| 44 | C | Köln Worringen S-Bahn | `de:05315:16601` | 6 | 11 | 19 |
+| 45 | C | Köln Sülzburgstr. | `de:05315:13113` | 5 | 10 | 17 |
+| 46 | C | Köln Junkersdorf | `de:05315:13611` | 5 | 10 | 17 |
+| 47 | C | Köln Sürth Bf | `de:05315:12811` | 4 | 9 | 16 |
+| 48 | C | Köln Slabystr. | `de:05315:15113` | 4 | 9 | 15 |
+| 49 | C | Köln Klettenbergpark | `de:05315:13221` | 4 | 9 | 14 |
+| 50 | C | Köln Thielenbruch | `de:05315:19512` | 3 | 7 | 12 |
+
+For the selected tier cadence, `NumberOfResults = 30` is above the exact-feed
+station-level P95 density for all 50 cadence windows. The machine-readable
+coverage check is `50/50`; this remains static planning evidence only.
+
+## 3. Cadence and quota decision
+
+The selected design is `10/20/20` with `5/15/30` minute intervals. The old
+`10/20/20` with `5/10/30` remains a comparison only and is not approved.
+
+| Plan | Requests/hour | 30-day base | 31-day base | N30 static P95 fit | 31-day total at 10% stress + Legacy7 reserve + 100 diagnostics |
+|---|---:|---:|---:|---|---:|
+| Historical 10/20/20 at 5/10/30 | 280 | 201,600 | 208,320 | 50/50 | 238,180 — fails |
+| **Selected 10/20/20 at 5/15/30** | **240** | **172,800** | **178,560** | **50/50** | **205,444 — passes** |
+| 10/15/25 at 5/10/30 | 260 | 187,200 | 193,440 | 0/50 | 221,812 — fails |
+| 8/20/22 at 5/15/30 | 220 | 158,400 | 163,680 | 50/50 | 189,076 — passes |
+| 8/12/30 at 5/10/30 | 228 | 164,160 | 169,632 | 0/50 | 195,624 — passes |
+
+The selected plan retains useful five-minute coverage for the ten densest
+stations, gives the next 20 measured-density stations a 15-minute cadence, and
+keeps the lower-density 20 at 30 minutes. It leaves more headroom than the
+historical candidate without minimizing observation coverage solely to reduce
+API usage.
+
+The normal design uses `MaxAttempts = 1` and zero automatic retries, which is
+consistent with the approved bounded request contract. A failed target is
+independently recorded and waits for the next current logical bucket; it is not
+retried immediately and missed historical buckets are not replayed.
+
+| Scenario | 30-day conservative total | 31-day conservative total | 31-day headroom to 210,000 |
+|---|---:|---:|---:|
+| Normal zero-retry policy | 181,540 | 187,588 | 22,412 |
+| Historical Legacy additional-attempt share, sensitivity only | 185,253 | 191,425 | 18,575 |
+| 5% stress sensitivity | 190,180 | 196,516 | 13,484 |
+| 10% stress sensitivity | 198,820 | 205,444 | 4,556 |
+
+Current shared-account Legacy Collector usage was not observable through an
+established read-only database mechanism. It is not reported as zero. The
+documented full Legacy7 baseline is reserved conservatively as `8,640` logical
+requests for 30 days and `8,928` for 31 days. Inactive repository diagnostics
+have no standing recurring reserve; the Stage 13 hard diagnostic budget of 100
+HTTP attempts is included in the conservative reconciliation above.
+
+Known repository callers and the external Legacy consumer are listed in the
+machine-readable `credential_consumers` section. No other normal production
+caller was found in repository evidence. Current shared-account usage remains
+an activation precondition for a later implementation stage.
+
+## 4. Production `NumberOfResults` evidence
+
+The bounded live comparison used one fixed `DepArrTime` anchor per station
+comparison (the final successful comparison anchor was
+`2026-09-30T10:40:59Z`), sequential requests, `MaxAttempts = 1`, and zero
+retries. Six representatives were selected deterministically:
+
+| Role | Station | Density rank | Tier | Mode/interchange coverage |
+|---|---|---:|:---:|---|
+| High density | Köln Mülheim Wiener Platz | 1 | A | Regional/Bus, Tram, KVB Bus |
+| High-density Legacy7 | Köln Heumarkt | 3 | A | Regional/Bus, Tram, KVB Bus |
+| Middle density | Köln Neusser Str./Gürtel | 24 | B | Tram, KVB Bus |
+| Low density | Köln Thielenbruch | 50 | C | Tram |
+| Interchange diversity | Köln Bf Mülheim | 4 | A | Regional/Bus, RB, RE, S-Bahn, Tram, KVB Bus |
+| Urban bus/tram diversity | Köln Neumarkt | 2 | A | Tram, KVB Bus |
+
+Each result limit was requested for all six representatives. Every response in
+the corrected successful comparison was HTTP 200, parser-successful, a valid
+TRIAS application response, and had returned-event `StopPointRef` consistency
+with the requested parent or an approved static child.
+
+| Requested N | Requests | Saturated | HTTP 200 / valid | Forward-span median | Forward-span P95 | Duration P50 / P95 ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 6 | 6 | 6 / 6 | 5,220 s | 9,600 s | 446.397 / 502.147 |
+| 10 | 6 | 6 | 6 / 6 | 7,830 s | 10,320 s | 509.750 / 1,084.616 |
+| 20 | 6 | 6 | 6 / 6 | 9,000 s | 11,115 s | 537.159 / 581.138 |
+| **30** | **6** | **6** | **6 / 6** | **11,430 s** | **13,470 s** | **682.994 / 722.676** |
+
+All tested limits saturated in this bounded sample; saturation is therefore
+reported honestly and is not treated as a provider-maximum discovery. N=30 is
+selected because it is the smallest tested fixed value whose exact-feed P95
+cadence-window planning evidence supports all 50 final tier assignments and
+whose bounded live result sets provide the strongest measured forward span.
+
+The final production design value is `NumberOfResults = 30`.
+
+Provider status remains `PROVIDER_MAXIMUM_NOT_ESTABLISHED`. The design does not
+claim guaranteed full realtime coverage from static schedules or a bounded
+sample.
+
+Stage 13 consumed 90 new MDD HTTP/transport attempts in total: 30 sandboxed
+transport attempts before network escalation, 30 successful bounded attempts
+in the first escalated run, and 30 successful corrected attempts after the
+returned-event `StopPointRef` sanitizer was fixed. The final evidence retains
+only sanitized records from the successful corrected matrix plus the total
+attempt accounting. No raw payload, request header, or credential was
+persisted.
+
+## 5. Bounded concurrency and heartbeat feasibility
+
+The cap-2 diagnostic executed three pairs, six requests total, with no retry.
+All six final requests were valid HTTP 200/parseable responses. There was no
+429, 5xx, timeout, or transport-pressure signal, and completion of one pair
+member was not dependent on the other. This is a bounded sample decision, not
+a provider-wide rate-limit claim.
+
+| Population | Count | P50 ms | P90 ms | P95 ms | P99 ms | Max ms |
+|---|---:|---:|---:|---:|---:|---:|
+| Cap-2 request durations | 6 | 758.949 | 883.496 | 929.695 | 966.654 | 975.894 |
+| Cap-2 pair/batch durations | 3 | 791.728 | 940.051 | 958.591 | 973.423 | 977.131 |
+
+The Stage 13 concurrency decision is:
+
+`MaximumConcurrency = 2`
+
+The complete six-heartbeat, 30-minute super-cycle is:
+
+| Heartbeat | Tier A | Tier B | Tier C | Total due |
+|---:|---:|---:|---:|---:|
+| 1 | 10 | 7 | 4 | 21 |
+| 2 | 10 | 7 | 4 | 21 |
+| 3 | 10 | 6 | 3 | 19 |
+| 4 | 10 | 7 | 3 | 20 |
+| 5 | 10 | 7 | 3 | 20 |
+| 6 | 10 | 6 | 3 | 19 |
+| **Total / 30 min** | **60** | **40** | **20** | **120** |
+
+The maximum due count is 21. At cap 2 this is 11 measured-duration batches.
+Using the observed cap-2 P95 batch duration gives an estimated
+`10,544.501 ms` heartbeat execution time; the observed maximum-based estimate
+is `10,748.441 ms`. Both are below the 300-second heartbeat interval, so the
+design is feasible with substantial measured duration margin.
+
+## 6. Phase-assignment contract
+
+The phase contract is design-only and does not materialize production target
+rows. It is deterministic and auditable:
+
+- identity input is immutable `SamplingTargetId` / source parent identity;
+- assignment key is `SHA-256(panel version + tier + immutable SamplingTargetId)`;
+- stable identity-hash ordering fills balanced phase capacities;
+- Tier A has one phase of 10 targets;
+- Tier B has three phases with target counts `7/7/6`;
+- Tier C has six phases with target counts `4/4/3/3/3/3`; and
+- mutable `SelectionRank` is not used at runtime.
+
+The exact 50 phase assignments are retained in the machine-readable evidence
+under `phase_staggering.phase_assignments`. Stage 14 may materialize them only
+under the approved panel/version boundary.
+
+## 7. Claims, overlap, failure isolation, and continuity
+
+The approved execution contract remains:
+
+- unique execution identity: `(SamplingTargetId, LogicalDueBucket)`;
+- `LogicalDueBucket = floor(current UTC epoch seconds / 300)`;
+- atomic durable claim with a unique-key conflict as the duplicate decision;
+- only the winning claim may issue HTTP;
+- stale/incomplete `RUNNING` state remains independently observable;
+- no catch-up or historical replay;
+- one failed target does not abort remaining due targets; and
+- every target independently records bucket, HTTP status, attempt count,
+  duration, parser status, persistence status, and error metadata.
+
+All Legacy7 history and existing Legacy7 target identities remain preserved.
+The future implementation must distinguish the `Legacy7` and `Tiered50`
+sampling eras and must not infer a naive before/after raw-volume change.
+
+## 8. Completion boundary
+
+Stage 13 completion means the production design is ready for controlled Stage
+14 implementation. It does not mean the collector is live.
+
+- Stage 14: **NOT STARTED**.
+- Tiered50 activation: **NOT PERFORMED**.
+- 7→50 cutover: **NOT PERFORMED**.
+- Windows Scheduled Tasks: **NOT CREATED**.
+- Production database objects: **NOT CREATED**.
+- Power BI: **NOT MODIFIED**.
+- Legacy7 history: **PRESERVED**.
+
+The current shared Legacy audit remains an explicit activation precondition,
+despite the conservative reserve used to close the Stage 13 design quota
+gate.

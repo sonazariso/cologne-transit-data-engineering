@@ -13,16 +13,16 @@
   selection evidence, current core-mode coverage, concentration review, a
   bounded 50-request MDD compatibility probe, reserve candidates, and an
   explicit fixed-membership/versioning contract.
-- Stage 13 Tiered Collector Readiness audit and machine-readable evidence:
-  provisional 10/20/20 cadence and 30/31-day quota math; labeled legacy retry
-  sensitivity; repository-controlled MDD consumer inventory; bounded N5/N20
-  result-limit saturation evidence with explicit
-  `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; separate duration populations; missing
-  Stage 12 panel/static-density evidence; deterministic 5/10/30 phase
-  reconciliation; atomic target/bucket claim and no-replay contract; failure
-  isolation; Legacy7 continuity; and a conditional bounded-concurrency
-  direction. Stage 12 now has an approved fixed panel; production activation
-  remains blocked, and Stage 14 was not started.
+- Stage 13 Tiered Collector Readiness closeout and machine-readable evidence:
+  exact-feed 5/10/15/30-minute density windows; deterministic 10/20/20
+  density tiers at 5/15/30-minute cadence; 240 logical requests/hour and
+  30/31-day quota math; zero automatic retries; labeled historical retry
+  sensitivity; conservative Legacy7 reserve; bounded N5/N10/N20/N30 result-
+  limit evidence with approved `NumberOfResults=30` and explicit
+  `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; cap-2 concurrency and heartbeat
+  feasibility; atomic target/bucket claim and no-replay contract; failure
+  isolation; and Legacy7 continuity. Production activation and Stage 14 remain
+  not started.
 - Stage 11 approved Power BI semantic-model design: separate static schedule,
   HIGH-only operational evidence, and all-confidence matching/data-quality
   subject areas; explicit table grains and single-direction relationships;

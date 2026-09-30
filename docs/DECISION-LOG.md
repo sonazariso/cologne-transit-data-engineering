@@ -48,6 +48,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
 | D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
+| D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: approve exact-feed density tiers, 5/15/30-minute cadence, `NumberOfResults=30`, 240 logical requests/hour, zero automatic retries, cap-2 bounded concurrency, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 remains NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -884,3 +885,51 @@ outcome. The Stage 12 acceptance gates now distinguish deterministic algorithm
 reproducibility from durable exact-input replayability, and both are required
 for COMPLETE. No new MDD request was issued. Stage 13 production work and Stage
 14 remain NOT STARTED.
+
+## D-046 — Stage 13 Tiered Collector Readiness Design Closeout
+
+Stage 13 completed the required readiness design for the approved fixed panel
+`TIERED50_PANEL_V1`. The exact VRS Global-ID feed is
+`VERSION__20260930_0053` with ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
+Static scheduled-arrival density was expanded over the exact feed calendar and
+`calendar_dates` exceptions and measured with 5-, 10-, 15-, and 30-minute
+rolling windows. Tier membership is deterministic density evidence and does
+not use Stage 12 `SelectionRank` as a production tier.
+
+The approved tier plan is 10 Tier A stations at five-minute cadence, 20 Tier B
+stations at 15-minute cadence, and 20 Tier C stations at 30-minute cadence.
+It reconciles to 240 logical requests/hour, 5,760/day, 172,800 in a 30-day
+month, and 178,560 in a 31-day month. The six-heartbeat 30-minute distribution
+is `[21, 21, 19, 20, 20, 19]`, with 120 requests per super-cycle. The
+alternative historical 10/20/20 plan at 5/10/30 minutes remains a comparison
+only at 280 requests/hour; the selected 15-minute middle tier preserves the
+station count split while reducing quota pressure.
+
+Bounded live diagnostics used a fixed `DepArrTime` anchor and six deterministic
+high-, middle-, low-density, interchange, Legacy7, and urban bus/tram
+representatives. Sequential N5/N10/N20/N30 diagnostics made 24 valid HTTP 200
+requests; all tested limits saturated. A separate three-pair cap-2 diagnostic
+made six valid responses without a pressure signal or failure propagation.
+The approved design value is `NumberOfResults=30`, while
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit because the provider's
+theoretical maximum was not established. The cap-2 result is a bounded design
+maximum, not a provider-wide rate-limit claim.
+
+The normal policy is one attempt per logical target with zero automatic retries.
+The full documented Legacy7 cadence is reserved conservatively at 8,640/8,928
+requests for 30/31-day months because current shared-credential production
+usage is unavailable; it is not represented as zero. The Stage 13 diagnostic
+budget is capped at 100 attempts. Historical retry evidence is retained as
+sensitivity only. Future execution identity remains the atomic
+`(SamplingTargetId, LogicalDueBucket)` claim, missed buckets are never replayed,
+each target records its own failure, and Legacy7 history and identities are
+preserved.
+
+**Final Stage 13 status:** `COMPLETE — APPROVED TIERED COLLECTOR READINESS
+DESIGN; PRODUCTION NOT STARTED`.
+
+This closeout does not create a scheduler, database objects, Windows scheduled
+tasks, Power BI artifacts, or a collector activation, and it does not start
+Stage 14. The current shared-credential audit remains a prerequisite for any
+future activation decision.
