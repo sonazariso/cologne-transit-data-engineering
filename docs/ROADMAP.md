@@ -290,7 +290,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 is now **IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED** while production remains not started.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 is now **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED** while Stage 14 remains not started.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -337,41 +337,19 @@ The [selection document](stages/12-50-station-selection.md), [completion decisio
 Stage 4 semantics were approved against `VERSION__20260928_0042`; Stage 12
 selection used the later `VERSION__20260930_0053` snapshot. Parent, child-stop,
 and event-count differences are snapshot evolution, while Stage 4 identity and
-classification semantics were re-applied to Stage 12. Stage 13 evidence is
-retained, but its material readiness choices require explicit user approval;
-Stage 13 production work and Stage 14 remain **NOT STARTED**.
+classification semantics were re-applied to Stage 12. Stage 13 is now complete
+as an explicitly approved readiness design; production work and Stage 14 remain
+**NOT STARTED**.
 
-## Stage 13 — Tiered Collector Readiness — IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED
+## Stage 13 — Tiered Collector Readiness — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED
 
-The [readiness audit](stages/13-tiered-collector-readiness.md), [reopened decision record](stages/13-tiered-collector-readiness-completion-decision.md), and [evidence artifact](stages/13-tiered-collector-readiness-evidence.json) retain the exact-feed evidence for `TIERED50_PANEL_V1`. The 10/20/20 panel split and 5/15/30 cadence remain technical options, not final user-approved choices; the current user recommendation is to review `8/20/22 @ 5/15/30`. Density uses scheduled child-stop arrivals across 5/10/15/30-minute windows and does not use Stage 12 `SelectionRank` as a tier.
+The [readiness design](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [evidence artifact](stages/13-tiered-collector-readiness-evidence.json) record the explicit final approval in `prompts/S68.md` for `TIERED50_PANEL_V1`. The fixed 50-station panel is unchanged. Density ranks 1–8 / 9–28 / 29–50 define Tier A/B/C counts 8 / 20 / 22 at 5 / 15 / 30-minute cadence, with 110 logical requests per 30-minute super-cycle and 220/hour.
 
-The retained bounded evidence technically evaluates `NumberOfResults=30`
-using 24 historical sequential N5/N10/N20/N30 records across six deterministic
-representatives, plus three cap-2 pairs. The historical sequential population
-reconciles to 24 client request invocations, 24 HTTP responses, and 24
-confirmed provider HTTP attempts. The old mixed-call temporal-span fields are
-invalid for forward-coverage decisions. The explicitly approved corrected
-comparison issued exactly 24 additional sequential client-side request
-invocations; all 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before an HTTP
-response, with 0 HTTP responses and 0 confirmed provider HTTP attempts.
-Provider quota consumption is unknown/not confirmed, while 24 is retained
-separately for conservative quota accounting. The historical 100-attempt
-diagnostic ceiling remains unchanged as a historical budget, cumulative client
-request invocations are 114, and the provider theoretical maximum remains
-unknown.
+The approved result limits are Tier A/B/C `NumberOfResults` 20 / 30 / 30. Retained station-level exact-feed evidence supports A max station P95/max observed 19/20, B 23/23, and C 29/29, for 50/50 total P95 support. This is static planning evidence only; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations.
 
-The machine-readable `user_decision_gate` keeps production result limit,
-concurrency, cadence, and retry approval flags false. Fixed N20, fixed N30, and
-A20/B30/C30 remain undecided because the corrected run produced no valid live
-response; static planning evidence alone is not realtime completeness evidence.
-The technically evaluated cadence option reconciles 240 logical requests/hour,
-5,760/day, 172,800/30-day month, and 178,560/31-day month. The cap-2 result
-remains a bounded technical option, not a provider-wide rate-limit claim.
-Current shared-credential production usage remains unavailable and is not
-treated as zero. The user's concurrency-2 and MaxAttempts-2 preferences remain
-recommendations subject to later gates. Stage 13 does not authorize a
-scheduler, collector activation, database objects, Power BI work, Windows
-tasks, or Stage 14 cutover.
+Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. The normal planning retry reserve is 10%; conservative totals are 182,980 for 30 days and 189,076 for 31 days, and automatic retries are blocked above 207,500 projected/current monthly consumption. The persisted phase sequence is 19/18/18/18/19/18 with maximum due load 19. Atomic `(SamplingTargetId, LogicalDueBucket)` claims, no duplicate HTTP, no catch-up replay, failed-station isolation, and Legacy7 continuity remain required.
+
+Stage 14, scheduler/database work, Windows tasks, Power BI work, target-row creation, and Tiered50 activation remain NOT STARTED. The closeout issued no MDD request or DNS/live-network operation.
 
 ## Stage 14 — Controlled 50-Station Cutover
 Preserve legacy history and IDs, add only approved targets, record sampling-era change, dry-run first, and do not fabricate missed snapshots.

@@ -1,142 +1,120 @@
 # Stage 13 — Tiered Collector Readiness Completion Decision
 
-**Date:** `2026-09-30`  
-**Current status:** `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`
-**Production status:** `NOT STARTED`
+**Date:** 2026-09-30
+**Current status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED
+**Stage 14:** NOT STARTED
+**Production activation:** NOT STARTED
 
-## Reopened decision state
+## Final decision
 
-Stage 13 evidence is retained using the exact approved Stage 12 panel and
-sanitized bounded evidence, but the material production design gates are open
-because explicit user approval was required before finalizing them. The
-machine-readable artifact at
-[`13-tiered-collector-readiness-evidence.json`](13-tiered-collector-readiness-evidence.json)
-is authoritative. The prior D-046 closeout is preserved as historical audit
-evidence, superseded, and not valid as final user approval.
+The explicit approval recorded in prompts/S68.md finalizes Stage 13 as an
+approved readiness design. The machine-readable
+[13-tiered-collector-readiness-evidence.json](13-tiered-collector-readiness-evidence.json)
+is authoritative for the retained panel, density ranks, phase assignments,
+static support, quota arithmetic, retry contract, limitations, and gate
+status. Stage 12 evidence and the fixed panel were not changed.
 
-| Gate | Result | Evidence / decision |
-|---|---|---|
-| Stage 12 fixed panel | **PASS** | `TIERED50_PANEL_V1`; exactly 50 fixed parent stations; all Legacy7 anchors preserved |
-| Exact static feed | **PASS** | `VERSION__20260930_0053`; ZIP SHA-256 `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147` |
-| Station/tier density | **PASS** | 5,100 station/service-day rows; 5/10/15/30-minute forward-window evidence; deterministic density tiers |
-| Production tier assignment | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | A=10, B=20, C=20; density metrics only; no Stage 12 rank reuse |
-| Cadence | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | A/5 min, B/15 min, C/30 min; 240 logical requests/hour |
-| Quota planning | **TECHNICALLY EVALUATED OPTION — CONSERVATIVE** | 30-day nominal total 181,540; 31-day nominal total 187,588; 10% stress total 205,444 after Legacy7 and diagnostic reserves |
-| Current shared credential usage | **LIMITATION, NOT FALSE ZERO** | current Legacy audit unavailable; full documented Legacy7 reserve of 8,640/8,928 is applied |
-| Production `NumberOfResults` | **UNDECIDED — USER APPROVAL REQUIRED** | static P95 comparison retains 36/50 for N20 and 50/50 for N30 and A20/B30/C30; the corrected live run produced no valid response |
-| Provider maximum | **LIMITATION** | `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; no provider-maximum claim is needed or made while NumberOfResults remains undecided |
-| Sequential duration evidence | **PASS — HISTORICAL EVIDENCE RETAINED** | six representatives × four result limits; 24 client invocations, 24 HTTP responses, and 24 confirmed provider HTTP attempts; temporal-span fields invalid for forward coverage |
-| Corrected result-limit diagnostic | **EXECUTED — NO VALID LIVE RESPONSES** | exactly 24 approved client-side invocations; 0 HTTP responses; retained safe category `OTHER_NETWORK_FAILURE`; provider quota consumption is unknown/not confirmed; NumberOfResults remains undecided |
-| Bounded concurrency | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | three cap-2 pairs; 6 client invocations, 6 HTTP responses, and 6 confirmed provider HTTP attempts; all valid HTTP 200/parseable responses; no 429/5xx/timeout/transport pressure |
-| Heartbeat feasibility | **PASS** | due sequence `21/21/19/20/20/19`; max 21; cap-2 P95 estimate 10,544.501 ms |
-| Phase assignment | **PASS — DESIGN CONTRACT** | stable identity-hash assignment; exact 50 assignments recorded; no production rows created |
-| Claim/overlap contract | **PASS — DESIGN CONTRACT** | unique `(SamplingTargetId, LogicalDueBucket)` atomic claim; duplicate invocation does not issue HTTP |
-| Failure isolation | **PASS — DESIGN REQUIREMENT** | independent per-target status, attempts, duration, parser, persistence, and error metadata |
-| Historical continuity | **PASS** | Legacy7 history and target identities preserved; no cutover or replay |
+D-046 remains historical evidence. D-047 and D-048 preserve the reopened gate
+and corrected diagnostic chronology. D-049 records this final explicit
+approval without rewriting those earlier entries.
 
-## Technically evaluated options (not final user approval)
+| Gate or decision | Final result |
+|---|---|
+| Fixed panel | PASS — TIERED50_PANEL_V1, exactly 50 stations, all seven Legacy7 continuity anchors preserved |
+| Density tier membership | APPROVED — ranks 1–8 / 9–28 / 29–50 for A / B / C; counts 8 / 20 / 22 |
+| Cadence | APPROVED — A/B/C every 5 / 15 / 30 minutes; 110 requests per 30-minute super-cycle and 220 per hour |
+| NumberOfResults | APPROVED DESIGN — Tier A 20, Tier B 30, Tier C 30 |
+| Static support | PASS — A max station P95 19 and max observed 20; B 23/23; C 29/29; 50/50 total P95 support |
+| Provider maximum | LIMITATION RETAINED — PROVIDER_MAXIMUM_NOT_ESTABLISHED |
+| Corrected live coverage | LIMITATION RETAINED — CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT |
+| Concurrency | APPROVED DESIGN — maximum concurrency 2; Stage 14 must validate the full persistence path |
+| Retry policy | APPROVED DESIGN — MaxAttempts=2, one automatic retry only for approved transient HTTP/transport conditions |
+| Retry guardrail | APPROVED — block automatic retries when projected/current monthly consumption would exceed 207,500 |
+| Claims and overlap | APPROVED DESIGN — atomic (SamplingTargetId, LogicalDueBucket) identity; no duplicate HTTP request; no catch-up replay |
+| Production state | NOT STARTED — no scheduler, database objects, target rows, Windows task, Power BI change, or Tiered50 activation |
+| Stage 14 | NOT STARTED |
 
-The retained production-readiness options for later review are:
+## Approved tier and result-limit design
 
-- `TIERED50_PANEL_V1`, exactly 50 Stage 12-approved stations;
-- Tier A: 10 density-ranked stations every 5 minutes;
-- Tier B: 20 density-ranked stations every 15 minutes;
-- Tier C: 20 density-ranked stations every 30 minutes;
-- N20, N30, and A20/B30/C30 remain unselected; static schedule support is not
-  realtime coverage evidence;
-- `MaxAttempts = 1`, zero automatic retries, as a technically evaluated retry option;
-- `MaximumConcurrency = 2`, as a technically evaluated bounded option;
-- six-heartbeat phase super-cycle with due counts `21/21/19/20/20/19`; and
-- atomic execution identity `(SamplingTargetId, LogicalDueBucket)` with no
-  catch-up replay.
+The runtime design uses the immutable Stage 12 panel identity and retained
+Stage 13 density evidence. Stage 12 SelectionRank is not a runtime tier input.
 
-The provider maximum remains unknown. The old forward-span algorithm was
-invalid because it mixed PreviousCall, ThisCall, OnwardCall, and departure
-timings. The user explicitly approved the corrected comparison, and exactly 24
-sequential client-side MDD request invocations were issued, increasing
-cumulative client invocations from 90 to 114. All 24 ended before a valid HTTP
-response. The retained safe category is `OTHER_NETWORK_FAILURE` because the
-historical raw exception details were not retained; confirmed provider HTTP
-attempts are 0 and provider quota consumption is
-`UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE`. The
-historical initial diagnostic budget is 100, the explicit additional user
-authorization is 24, and the authorized cumulative client-attempt ceiling is
-114. The historical budget was not rewritten.
+| Tier | Density ranks | Stations | Cadence | NumberOfResults |
+|---|---:|---:|---:|---:|
+| A | 1–8 | 8 | 5 minutes | 20 |
+| B | 9–28 | 20 | 15 minutes | 30 |
+| C | 29–50 | 22 | 30 minutes | 30 |
 
-## Credential and quota boundary
+The static support recalculation is based on retained station-level exact-feed
+evidence and was performed offline. It does not establish realtime response
+completeness, a provider-wide result maximum, guaranteed 20/30-event
+availability, or complete forward coverage. Historical valid N20/N30
+diagnostics remain bounded acceptance evidence only.
 
-The repository inventory found only inactive bounded diagnostics plus the
-external Legacy Collector / `ctl.MddCollectorRun` consumer. Current shared
-credential usage was unavailable through an established read-only audit path.
-The design therefore reserves the complete documented Legacy7 monthly
-baseline rather than fabricating zero current usage. The historical Stage 13
-initial diagnostic budget is 100 client attempts; 90 historical client
-diagnostic attempts plus the explicitly approved 24 corrected client
-invocations produce a cumulative client-invocation count of 114 without
-silently changing that historical budget. The corrected run received 0 HTTP
-responses, so no provider quota count is claimed. For conservative planning,
-24 is retained separately as `conservative_quota_accounting_attempts`. Only
-sanitized evidence was retained.
+## Quota and retry reserve
 
-The technically evaluated normal and stress plans remain under the 210,000
-upper edge of the project's normal planning envelope even with the conservative
-Legacy7 reserve and the 10% stress sensitivity. Current shared usage must still
-be audited before any production activation, and the cadence/retry choices
-remain gated by user approval.
+The documented absolute provider ceiling remains 250,000 requests/month. The
+normal planning envelope remains 207,500–210,000. The approved nominal
+Tiered50 load, 10% retry reserve, Legacy7 reserve, and diagnostic reserve
+reconcile as follows:
 
-## User decision gate
+| Month | Nominal Tiered50 | 10% retry reserve | Tiered50 with reserve | Legacy7 reserve | Diagnostic reserve | Conservative total |
+|---|---:|---:|---:|---:|---:|---:|
+| 30 days | 158,400 | 15,840 | 174,240 | 8,640 | 100 | **182,980** |
+| 31 days | 163,680 | 16,368 | 180,048 | 8,928 | 100 | **189,076** |
 
-The machine-readable artifact explicitly records all material design choices as
-technically evaluated options. Until the user approves them, all of these flags
-remain `false`:
+The retry contract permits one retry for HTTP 408, 429, 500, 502, 503, 504
+and approved transient transport failures. HTTP 429 must respect Retry-After.
+HTTP 401/403, deterministic request-contract failures, deterministic
+parser/schema failures, and deterministic TRIAS application errors are not
+retryable. A failed station is isolated from other due targets. MaxAttempts=2
+is bounded by the monthly 207,500 automatic-retry guardrail; it does not
+authorize unlimited retries.
 
-- `production_number_of_results_approved`;
-- `production_concurrency_approved`;
-- `production_cadence_approved`; and
-- `production_retry_policy_approved`.
+Current shared-credential usage remains unavailable through an established
+read-only audit path, so the documented Legacy7 reserve is retained
+conservatively and is not treated as zero.
 
-The current user recommendations are retained separately from approval:
+## Phase, overlap, and continuity contract
 
-- preferred cadence candidate: `8/20/22 @ 5/15/30`, subject to the boundary
-  review in the evidence artifact;
-- preferred bounded concurrency: `2`, subject to Stage 14 end-to-end dry-run
-  validation;
-- preferred retry policy: `MaxAttempts=2` with at most one bounded retry for
-  approved transient failures; and
-- NumberOfResults remains undecided because the corrected run produced no
-  valid live response.
+The six-heartbeat phase capacities are:
 
-No new final decision may be recorded while the gate is open.
+| Heartbeat | Tier A | Tier B | Tier C | Total |
+|---:|---:|---:|---:|---:|
+| 0 | 8 | 7 | 4 | **19** |
+| 1 | 8 | 7 | 3 | **18** |
+| 2 | 8 | 6 | 4 | **18** |
+| 3 | 8 | 7 | 3 | **18** |
+| 4 | 8 | 7 | 4 | **19** |
+| 5 | 8 | 6 | 4 | **18** |
 
-## Future live-diagnostic boundary
+The persisted due sequence is [19, 18, 18, 18, 19, 18]; maximum due load is
+19. Phase assignment is deterministic from panel version, tier, and immutable
+SamplingTargetId, and is a Stage 14 materialization contract rather than a
+production row created by Stage 13.
 
-The previous 24-invocation authorization has been exercised and is not
-authorization for another rerun. Any future live retry requires a new explicit
-approval after review of the offline correction. The execution environment must
-first pass the zero-request DNS preflight; the first authorized MDD invocation
-is then a smoke request, and the remaining matrix may proceed only after a
-usable HTTP/TRIAS response. DNS/network, TLS/proxy/connectivity, and 401/403
-failures stop immediately. Provider HTTP errors such as 429/5xx follow the
-explicit stop policy and are never relabeled as DNS/network failures.
+The unique execution identity is
+(SamplingTargetId, LogicalDueBucket). Claims must be atomic and durable.
+Duplicate invocations issue no HTTP request, missed historical buckets are not
+replayed, and no fabricated historical realtime snapshot is created. Legacy7
+history and all seven existing target identities remain unchanged.
 
-The exact network-capable local action is:
+## Retained diagnostic evidence and boundaries
 
-```text
-python3 scripts/stage_13_tiered_collector_readiness.py --gtfs-zip /path/to/verified-stage12-vrs-global-id.zip --run-live-diagnostics --approve-live-rerun-after-network-preflight --prior-client-attempts 114
-```
+The retained historical sequential population reconciles to 24 client-side
+invocations, 24 HTTP responses, and 24 confirmed provider HTTP attempts. The
+retained cap-2 population reconciles to 6/6/6. The corrected diagnostic
+reconciles to 24 client-side invocations, 0 HTTP responses, 0 confirmed
+provider HTTP attempts, unknown provider quota consumption, and 24 separate
+conservative quota-accounting attempts. Cumulative client invocations are 114;
+this is not a claim that 114 provider requests or quota units were consumed.
 
-`MDD_API_KEY` must be supplied through the inherited environment only. A
-successful rerun authorizes at most 24 additional client-side request
-invocations; provider quota consumption remains unknown unless HTTP responses
-are actually received.
+The historical 100-attempt diagnostic budget remains historical, and the
+explicit 24-invocation extension is retained in the evidence chronology. The
+corrected live limitation is not a provider-wide completeness claim. No raw
+response, request header, API key, or secret-bearing error text was persisted.
 
-## Boundary confirmation
-
-- Stage 14 remains **NOT STARTED**.
-- Tiered50 was not activated.
-- No 7→50 cutover was performed.
-- No Windows Scheduled Task was created.
-- No production database object, scheduler, or target row was created.
-- Power BI was not modified.
-- Legacy7 history and the seven existing target identities were not deleted or
-  reinserted.
+Stage 14 must be separately started and must validate cap-2 concurrency,
+database persistence, atomic claims, retry guardrails, failure isolation, and
+continuity before any activation decision. This Stage 13 closeout itself made
+zero MDD requests and performed no DNS/live-network operation.

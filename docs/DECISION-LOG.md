@@ -50,6 +50,8 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
 | D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: historical record of the exact-feed density tiers, 5/15/30-minute cadence option, `NumberOfResults=30` option, 240 logical requests/hour, zero automatic retries option, cap-2 bounded concurrency option, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL |
 | D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-invocation diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
+| D-048 | 2026-09-30 | Corrected Stage 13 result-limit diagnostic: 24 additional client invocations, 0 HTTP responses, 0 confirmed provider attempts, unknown provider quota consumption, and no final result-limit decision from live coverage | Historical corrected diagnostic result; superseded by D-049 |
+| D-049 | 2026-09-30 | Explicit final approval of Stage 13 tiered collector readiness: fixed TIERED50_PANEL_V1, density ranks 1–8/9–28/29–50, 8/20/22 at 5/15/30 minutes, A20/B30/C30, concurrency 2, MaxAttempts=2 with one approved transient retry, 10% retry reserve, exact quota guardrail, phase sequence 19/18/18/18/19/18, and atomic overlap contract | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1005,3 +1007,48 @@ Current user recommendations remain unapproved: review `8/20/22 @ 5/15/30`,
 consider bounded concurrency 2 subject to Stage 14 dry-run validation, and
 consider `MaxAttempts=2` with one bounded retry for approved transient failures.
 Stage 13 remains `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`.
+
+## D-049 — Explicit Final Approval of Stage 13 Tiered Collector Readiness
+
+**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
+NOT STARTED
+
+The explicit approval recorded in prompts/S68.md finalizes the Stage 13
+readiness design. The fixed Stage 12 panel TIERED50_PANEL_V1 remains exactly
+50 stations and Stage 12 evidence is unchanged. Density ranks 1–8, 9–28, and
+29–50 define Tier A/B/C counts of 8, 20, and 22 at five-, fifteen-, and
+thirty-minute cadence. The approved load is 110 logical requests per
+30-minute super-cycle and 220 per hour.
+
+The approved result limits are Tier A/B/C NumberOfResults 20/30/30. Retained
+station-level exact-feed evidence recalculates maximum station P95 and maximum
+observed static scheduled-arrival counts as A 19/20, B 23/23, and C 29/29,
+with 50/50 total P95 support. This is static planning evidence only. The
+limitations PROVIDER_MAXIMUM_NOT_ESTABLISHED and
+CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT remain
+explicit; no provider-wide maximum, guaranteed realtime completeness,
+guaranteed 20/30 availability, or complete forward-coverage claim is made.
+
+Maximum concurrency 2 is approved as a bounded design. MaxAttempts=2 permits
+one automatic retry for HTTP 408, 429, 500, 502, 503, 504 and approved
+transient transport failures; Retry-After is respected for HTTP 429, while
+401/403 and deterministic request, parser/schema, and TRIAS application
+failures are not retryable. The normal retry reserve is 10% of nominal
+Tiered50 requests. The 30-day accounting is 158,400 nominal, 15,840 reserve,
+174,240 Tiered50 with reserve, 8,640 Legacy7 reserve, and 100 diagnostic
+reserve, totaling 182,980. The 31-day accounting is 163,680, 16,368,
+180,048, 8,928, and 100, totaling 189,076. Automatic retries are blocked
+above the 207,500 projected/current monthly boundary.
+
+The approved phase sequence is 19/18/18/18/19/18 with capacities A 8,
+B 7/7/6, and C 4/3/4/3/4/4. The execution identity remains
+(SamplingTargetId, LogicalDueBucket); claims are atomic, duplicate invocation
+does not issue HTTP, missed buckets are not replayed, and one failed station
+does not abort other due targets. Legacy7 history and identities remain
+preserved.
+
+The final evidence records all material design approvals as true, Stage 13
+complete, production activation not started, and Stage 14 not started. No
+database object, scheduler, Windows task, target row, Power BI artifact, or
+Tiered50 activation was created. This closeout issued zero MDD requests and
+required no DNS/live-network operation.

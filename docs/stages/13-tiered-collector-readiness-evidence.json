@@ -1,5 +1,5 @@
 {
-  "artifact_version": "stage-13-tiered-collector-readiness-evidence-4.0",
+  "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.0",
   "cadence_boundary_review": {
     "a_to_b_boundary_stations": [
       {
@@ -376,7 +376,7 @@
   "candidate_cadence": {
     "cadence_selection_alternatives": [
       {
-        "31_day_ten_percent_stress_with_legacy_and_diagnostics": {
+        "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
           "conservative_total_http_requests": 238180,
           "diagnostic_reserved_requests": 100,
           "headroom_to_250000_ceiling": 11820,
@@ -427,23 +427,23 @@
         "user_review_preference": false
       },
       {
-        "31_day_ten_percent_stress_with_legacy_and_diagnostics": {
-          "conservative_total_http_requests": 205444,
+        "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
+          "conservative_total_http_requests": 189076,
           "diagnostic_reserved_requests": 100,
-          "headroom_to_250000_ceiling": 44556,
-          "headroom_to_normal_envelope_max": 4556,
-          "headroom_to_normal_envelope_min": 2056,
+          "headroom_to_250000_ceiling": 60924,
+          "headroom_to_normal_envelope_max": 20924,
+          "headroom_to_normal_envelope_min": 18424,
           "legacy_reserved_requests": 8928,
-          "projected_http_requests_rounded_up": 196416,
+          "projected_http_requests_rounded_up": 180048,
           "within_monthly_ceiling": true,
           "within_normal_envelope_max": true
         },
         "label": "10_20_20_at_5_15_30_evaluated_option",
-        "logical_requests_per_day": 5760,
-        "logical_requests_per_hour": 240,
+        "logical_requests_per_day": 5280,
+        "logical_requests_per_hour": 220,
         "monthly_logical_requests": {
-          "30_day": 172800,
-          "31_day": 178560
+          "30_day": 158400,
+          "31_day": 163680
         },
         "static_density_fit_at_n30": {
           "all_station_p95_supported": true,
@@ -454,9 +454,9 @@
         "tiers": [
           {
             "interval_minutes": 5,
-            "logical_requests_per_day": 2880,
-            "logical_requests_per_hour": 120,
-            "station_count": 10,
+            "logical_requests_per_day": 2304,
+            "logical_requests_per_hour": 96,
+            "station_count": 8,
             "tier": "A"
           },
           {
@@ -468,9 +468,9 @@
           },
           {
             "interval_minutes": 30,
-            "logical_requests_per_day": 960,
-            "logical_requests_per_hour": 40,
-            "station_count": 20,
+            "logical_requests_per_day": 1056,
+            "logical_requests_per_hour": 44,
+            "station_count": 22,
             "tier": "C"
           }
         ],
@@ -478,7 +478,7 @@
         "user_review_preference": false
       },
       {
-        "31_day_ten_percent_stress_with_legacy_and_diagnostics": {
+        "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
           "conservative_total_http_requests": 221812,
           "diagnostic_reserved_requests": 100,
           "headroom_to_250000_ceiling": 28188,
@@ -529,7 +529,7 @@
         "user_review_preference": false
       },
       {
-        "31_day_ten_percent_stress_with_legacy_and_diagnostics": {
+        "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
           "conservative_total_http_requests": 189076,
           "diagnostic_reserved_requests": 100,
           "headroom_to_250000_ceiling": 60924,
@@ -576,11 +576,11 @@
             "tier": "C"
           }
         ],
-        "user_approved_design": false,
+        "user_approved_design": true,
         "user_review_preference": true
       },
       {
-        "31_day_ten_percent_stress_with_legacy_and_diagnostics": {
+        "31_day_approved_retry_reserve_with_legacy_and_diagnostics": {
           "conservative_total_http_requests": 195624,
           "diagnostic_reserved_requests": 100,
           "headroom_to_250000_ceiling": 54376,
@@ -632,7 +632,7 @@
       }
     ],
     "historical_comparison": {
-      "candidate_status": "CALCULATED_ONLY_NOT_APPROVED",
+      "candidate_status": "HISTORICAL_COMPARISON",
       "logical_requests_per_day": 6720,
       "logical_requests_per_hour": 280,
       "monthly_logical_requests": {
@@ -668,26 +668,26 @@
         }
       ]
     },
-    "selection_reason": "The measured density technically supports the 10/20/20 count split with a 5/15/30-minute cadence option, while the old 5/10/30 comparison exceeds the normal planning envelope. This is an evaluated option pending explicit user approval.",
+    "selection_reason": "The user-approved 8/20/22 split follows the deterministic density ranks 1–8 / 9–28 / 29–50 and reconciles to 220 logical requests/hour, 110 per 30-minute super-cycle, and 220 per hour.",
     "technically_evaluated_option": {
-      "candidate_status": "TECHNICALLY_EVALUATED_OPTION",
-      "logical_requests_per_day": 5760,
-      "logical_requests_per_hour": 240,
+      "candidate_status": "APPROVED_STAGE13_DESIGN",
+      "logical_requests_per_day": 5280,
+      "logical_requests_per_hour": 220,
       "monthly_logical_requests": {
-        "30_day": 172800,
-        "31_day": 178560
+        "30_day": 158400,
+        "31_day": 163680
       },
       "reconciliation": {
-        "requests_per_30_minutes": 120,
-        "requests_per_hour_from_30_minute_super_cycle": 240
+        "requests_per_30_minutes": 110,
+        "requests_per_hour_from_30_minute_super_cycle": 220
       },
       "station_count": 50,
       "tiers": [
         {
           "interval_minutes": 5,
-          "logical_requests_per_day": 2880,
-          "logical_requests_per_hour": 120,
-          "station_count": 10,
+          "logical_requests_per_day": 2304,
+          "logical_requests_per_hour": 96,
+          "station_count": 8,
           "tier": "A"
         },
         {
@@ -699,14 +699,50 @@
         },
         {
           "interval_minutes": 30,
-          "logical_requests_per_day": 960,
-          "logical_requests_per_hour": 40,
-          "station_count": 20,
+          "logical_requests_per_day": 1056,
+          "logical_requests_per_hour": 44,
+          "station_count": 22,
           "tier": "C"
         }
       ]
     },
-    "user_approved_design": null
+    "user_approved_design": {
+      "candidate_status": "APPROVED_STAGE13_DESIGN",
+      "logical_requests_per_day": 5280,
+      "logical_requests_per_hour": 220,
+      "monthly_logical_requests": {
+        "30_day": 158400,
+        "31_day": 163680
+      },
+      "reconciliation": {
+        "requests_per_30_minutes": 110,
+        "requests_per_hour_from_30_minute_super_cycle": 220
+      },
+      "station_count": 50,
+      "tiers": [
+        {
+          "interval_minutes": 5,
+          "logical_requests_per_day": 2304,
+          "logical_requests_per_hour": 96,
+          "station_count": 8,
+          "tier": "A"
+        },
+        {
+          "interval_minutes": 15,
+          "logical_requests_per_day": 1920,
+          "logical_requests_per_hour": 80,
+          "station_count": 20,
+          "tier": "B"
+        },
+        {
+          "interval_minutes": 30,
+          "logical_requests_per_day": 1056,
+          "logical_requests_per_hour": 44,
+          "station_count": 22,
+          "tier": "C"
+        }
+      ]
+    }
   },
   "credential_consumers": [
     {
@@ -908,7 +944,7 @@
     }
   ],
   "failure_isolation": {
-    "decision": "TECHNICALLY_EVALUATED_REQUIREMENT_PENDING_USER_APPROVAL",
+    "decision": "APPROVED_DESIGN_REQUIREMENT",
     "one_failed_station_aborts_remaining_due_targets": false,
     "per_target_fields": [
       "logical_due_bucket",
@@ -931,7 +967,7 @@
     "provider_quota_consumption_for_rerun": "UNKNOWN_UNTIL_HTTP_RESPONSES_ARE_RECEIVED; DO NOT INFER FROM CLIENT INVOCATIONS",
     "smoke_request_required_before_remaining_matrix": true
   },
-  "generated_at_utc": "2026-09-30T13:04:23Z",
+  "generated_at_utc": "2026-09-30T13:56:47Z",
   "heartbeat_feasibility": {
     "cap2_pair_batch_duration_statistics_ms": {
       "count": 3,
@@ -952,25 +988,25 @@
       "p99_ms": 966.654
     },
     "due_targets_per_heartbeat": [
-      21,
-      21,
       19,
-      20,
-      20,
-      19
+      18,
+      18,
+      18,
+      19,
+      18
     ],
-    "estimated_max_observed_heartbeat_execution_ms": 10748.441,
-    "estimated_p95_heartbeat_execution_ms": 10544.501,
-    "feasibility_decision": "FEASIBLE_WITH_TECHNICALLY_EVALUATED_CAP_2",
+    "estimated_max_observed_heartbeat_execution_ms": 9771.31,
+    "estimated_p95_heartbeat_execution_ms": 9585.91,
+    "feasibility_decision": "FEASIBLE_WITH_APPROVED_CAP_2",
     "finish_within_five_minute_heartbeat_at_observed_max": true,
     "finish_within_five_minute_heartbeat_at_observed_p95": true,
     "heartbeat_interval_seconds": 300,
-    "max_due_batches_at_cap2": 11,
-    "max_due_targets_in_one_heartbeat": 21,
-    "requests_per_hour": 240,
-    "requests_per_super_cycle": 120,
+    "max_due_batches_at_cap2": 10,
+    "max_due_targets_in_one_heartbeat": 19,
+    "requests_per_hour": 220,
+    "requests_per_super_cycle": 110,
     "technically_evaluated_maximum_concurrency": 2,
-    "user_approved_maximum_concurrency": false
+    "user_approved_maximum_concurrency": true
   },
   "historical_continuity": {
     "cutover_performed": false,
@@ -1002,6 +1038,40 @@
       "required": true
     },
     "application_validation_ranges_are_not_provider_evidence": true,
+    "approved_static_support": {
+      "all_station_p95_supported": true,
+      "by_tier": {
+        "A": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 5,
+          "maximum_observed_static_scheduled_arrival_count": 20.0,
+          "maximum_station_p95": 19.0,
+          "result_limit": 20,
+          "station_count": 8,
+          "station_p95_supported_count": 8
+        },
+        "B": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 15,
+          "maximum_observed_static_scheduled_arrival_count": 23.0,
+          "maximum_station_p95": 23.0,
+          "result_limit": 30,
+          "station_count": 20,
+          "station_p95_supported_count": 20
+        },
+        "C": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 30,
+          "maximum_observed_static_scheduled_arrival_count": 29.0,
+          "maximum_station_p95": 29.0,
+          "result_limit": 30,
+          "station_count": 22,
+          "station_p95_supported_count": 22
+        }
+      },
+      "station_count": 50,
+      "station_p95_supported_count": 50
+    },
     "bounded_live_diagnostic": {
       "additional_request_gate": {
         "additional_client_request_attempts_issued": 24,
@@ -3593,9 +3663,7 @@
         "summary_by_result_limit": {
           "10": {
             "client_request_attempts_issued": 6,
-            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
-            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
@@ -3649,6 +3717,7 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3678,9 +3747,7 @@
           },
           "20": {
             "client_request_attempts_issued": 6,
-            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
-            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
@@ -3734,6 +3801,7 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3763,9 +3831,7 @@
           },
           "30": {
             "client_request_attempts_issued": 6,
-            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
-            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
@@ -3819,6 +3885,7 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3848,9 +3915,7 @@
           },
           "5": {
             "client_request_attempts_issued": 6,
-            "http_responses_received": 0,
             "confirmed_provider_http_attempts": 0,
-            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "conservative_quota_accounting_attempts": 6,
             "duration_statistics_ms": {
               "count": 6,
@@ -3904,6 +3969,7 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
+            "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3936,8 +4002,9 @@
       "status": "COMPLETED_NO_VALID_HTTP_RESPONSES",
       "stop_reason": "HISTORICAL_RUN_COMPLETED_WITHOUT_VALID_HTTP_RESPONSES"
     },
-    "corrected_metric_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
-    "decision": "NOT_ESTABLISHED",
+    "corrected_live_limitation": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+    "corrected_metric_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+    "decision": "APPROVED_USER_DESIGN_A20_B30_C30",
     "failed_corrected_diagnostic_audit": {
       "client_request_attempts_issued": 24,
       "confirmed_provider_http_attempts": 0,
@@ -4029,7 +4096,7 @@
       },
       "status": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
       "timestamp_basis": "retained artifact generated_at_utc; per-request timestamps were not retained",
-      "timestamp_utc": "2026-09-30T12:55:49Z",
+      "timestamp_utc": "2026-09-30T13:04:23Z",
       "transport_failure_category_distribution": {
         "OTHER_NETWORK_FAILURE": 24
       }
@@ -4806,6 +4873,9 @@
     ],
     "historical_invalidated_sequential_summary_by_result_limit": {
       "10": {
+        "client_request_attempts_issued": 6,
+        "confirmed_provider_http_attempts": 6,
+        "conservative_quota_accounting_attempts": 6,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 1251.639,
@@ -4835,6 +4905,7 @@
           "p99": 10320
         },
         "forward_temporal_span_statistics_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
+        "http_responses_received": 6,
         "http_status_distribution": {
           "200": 6
         },
@@ -4849,11 +4920,7 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "client_request_attempts_issued": 6,
-        "http_responses_received": 6,
-        "confirmed_provider_http_attempts": 6,
         "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
-        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 10,
@@ -4870,6 +4937,9 @@
         "valid_trias_response_count": 6
       },
       "20": {
+        "client_request_attempts_issued": 6,
+        "confirmed_provider_http_attempts": 6,
+        "conservative_quota_accounting_attempts": 6,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 590.306,
@@ -4899,6 +4969,7 @@
           "p99": 11151
         },
         "forward_temporal_span_statistics_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
+        "http_responses_received": 6,
         "http_status_distribution": {
           "200": 6
         },
@@ -4913,11 +4984,7 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "client_request_attempts_issued": 6,
-        "http_responses_received": 6,
-        "confirmed_provider_http_attempts": 6,
         "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
-        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 20,
@@ -4934,6 +5001,9 @@
         "valid_trias_response_count": 6
       },
       "30": {
+        "client_request_attempts_issued": 6,
+        "confirmed_provider_http_attempts": 6,
+        "conservative_quota_accounting_attempts": 6,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 724.053,
@@ -4963,6 +5033,7 @@
           "p99": 13734
         },
         "forward_temporal_span_statistics_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
+        "http_responses_received": 6,
         "http_status_distribution": {
           "200": 6
         },
@@ -4977,11 +5048,7 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "client_request_attempts_issued": 6,
-        "http_responses_received": 6,
-        "confirmed_provider_http_attempts": 6,
         "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
-        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 30,
@@ -4998,6 +5065,9 @@
         "valid_trias_response_count": 6
       },
       "5": {
+        "client_request_attempts_issued": 6,
+        "confirmed_provider_http_attempts": 6,
+        "conservative_quota_accounting_attempts": 6,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 510.258,
@@ -5027,6 +5097,7 @@
           "p99": 10176
         },
         "forward_temporal_span_statistics_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
+        "http_responses_received": 6,
         "http_status_distribution": {
           "200": 6
         },
@@ -5041,11 +5112,7 @@
         },
         "legacy_forward_temporal_span_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
         "parser_success_count": 6,
-        "client_request_attempts_issued": 6,
-        "http_responses_received": 6,
-        "confirmed_provider_http_attempts": 6,
         "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
-        "conservative_quota_accounting_attempts": 6,
         "returned_event_count_statistics": {
           "count": 6,
           "max": 5,
@@ -5062,9 +5129,25 @@
         "valid_trias_response_count": 6
       }
     },
-    "production_number_of_results": null,
+    "historical_provider_acceptance": {
+      "accepted_result_limits": [
+        20,
+        30
+      ],
+      "provider_wide_maximum_established": false,
+      "realtime_completeness_guaranteed": false,
+      "scope": "bounded representative historical diagnostics only",
+      "valid_http_trias_responses": true
+    },
+    "historically_evaluated_number_of_results": null,
+    "production_number_of_results": {
+      "A": 20,
+      "B": 30,
+      "C": 30
+    },
+    "production_number_of_results_policy": "A20/B30/C30",
     "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-    "selection_limitation": "N=20, N=30, and A20/B30/C30 remain undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses. Static scheduled-density evidence is planning evidence only and is not realtime coverage evidence.",
+    "selection_limitation": "The approved A20/B30/C30 policy is a user-approved production-design choice; provider-wide maximum, guaranteed realtime completeness, guaranteed 20/30-event availability, and complete realtime forward coverage remain unestablished.",
     "source_controlled_historical_samples": [
       {
         "coverage_interpretation": "all observed responses reached N=5; N=5 is not sufficient production evidence",
@@ -5107,15 +5190,26 @@
         "source": "docs/stages/09-source-backed-matching-summary.json",
         "station_scope": "Köln Hbf, Heumarkt, Neumarkt; not a Tiered50 panel"
       }
-    ],
-    "technically_evaluated_number_of_results": null
+    ]
   },
   "number_of_results_comparison": {
-    "corrected_diagnostic_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+    "approved_policy_basis": [
+      "exact-feed static density support",
+      "bounded historical provider acceptance of N20 and N30",
+      "lower unnecessary response volume for Tier A",
+      "simple two-value configuration"
+    ],
+    "approved_production_policy": {
+      "A": 20,
+      "B": 30,
+      "C": 30
+    },
+    "corrected_diagnostic_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+    "corrected_live_limitation": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
     "fixed_n20": {
       "corrected_live": {
         "client_request_attempts_issued": 6,
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+        "comparison_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
         "confirmed_provider_http_attempts": 0,
         "duration_statistics_ms": {
           "count": 6,
@@ -5152,17 +5246,17 @@
         "saturated_count": 0,
         "valid_trias_response_count": 0
       },
-      "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+      "decision": "COMPARISON_ONLY_NOT_APPROVED",
       "static_cadence_window_fit": {
         "all_station_p95_supported": false,
         "station_count": 50,
-        "station_p95_supported_count": 36
+        "station_p95_supported_count": 32
       }
     },
     "fixed_n30": {
       "corrected_live": {
         "client_request_attempts_issued": 6,
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+        "comparison_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
         "confirmed_provider_http_attempts": 0,
         "duration_statistics_ms": {
           "count": 6,
@@ -5199,7 +5293,7 @@
         "saturated_count": 0,
         "valid_trias_response_count": 0
       },
-      "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+      "decision": "COMPARISON_ONLY_NOT_APPROVED",
       "static_cadence_window_fit": {
         "all_station_p95_supported": true,
         "station_count": 50,
@@ -5207,27 +5301,29 @@
       }
     },
     "forward_coverage_metric_basis": "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime",
-    "number_of_results_finalized": false,
+    "number_of_results_finalized": true,
     "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
     "simpler_alternative": {
       "candidate": "A=20, B=30, C=30",
-      "corrected_live_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
-      "recommendation": "NO_SELECTION_UNTIL_VALID_CORRECTED_LIVE_RESPONSES_EXIST",
+      "corrected_live_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+      "recommendation": "APPROVED_BY_USER_AS_PRODUCTION_DESIGN_WITH_RETAINED_LIVE_LIMITATION",
       "static_cadence_window_fit": {
         "all_station_p95_supported": true,
         "by_tier": {
           "A": {
             "all_station_p95_supported": true,
             "interval_minutes": 5,
+            "maximum_observed_static_scheduled_arrival_count": 20.0,
             "maximum_station_p95": 19.0,
             "result_limit": 20,
-            "station_count": 10,
-            "station_p95_supported_count": 10
+            "station_count": 8,
+            "station_p95_supported_count": 8
           },
           "B": {
             "all_station_p95_supported": true,
             "interval_minutes": 15,
-            "maximum_station_p95": 22.0,
+            "maximum_observed_static_scheduled_arrival_count": 23.0,
+            "maximum_station_p95": 23.0,
             "result_limit": 30,
             "station_count": 20,
             "station_p95_supported_count": 20
@@ -5235,10 +5331,11 @@
           "C": {
             "all_station_p95_supported": true,
             "interval_minutes": 30,
-            "maximum_station_p95": 27.0,
+            "maximum_observed_static_scheduled_arrival_count": 29.0,
+            "maximum_station_p95": 29.0,
             "result_limit": 30,
-            "station_count": 20,
-            "station_p95_supported_count": 20
+            "station_count": 22,
+            "station_p95_supported_count": 22
           }
         },
         "station_count": 50,
@@ -5248,11 +5345,46 @@
     "static_evidence_boundary": "static scheduled-density evidence is planning evidence only; it is not realtime response coverage",
     "static_scheduled_density_is_not_realtime_coverage": true,
     "tier_specific_a20_b30_c30": {
+      "approved_production_design": true,
+      "approved_static_support": {
+        "all_station_p95_supported": true,
+        "by_tier": {
+          "A": {
+            "all_station_p95_supported": true,
+            "interval_minutes": 5,
+            "maximum_observed_static_scheduled_arrival_count": 20.0,
+            "maximum_station_p95": 19.0,
+            "result_limit": 20,
+            "station_count": 8,
+            "station_p95_supported_count": 8
+          },
+          "B": {
+            "all_station_p95_supported": true,
+            "interval_minutes": 15,
+            "maximum_observed_static_scheduled_arrival_count": 23.0,
+            "maximum_station_p95": 23.0,
+            "result_limit": 30,
+            "station_count": 20,
+            "station_p95_supported_count": 20
+          },
+          "C": {
+            "all_station_p95_supported": true,
+            "interval_minutes": 30,
+            "maximum_observed_static_scheduled_arrival_count": 29.0,
+            "maximum_station_p95": 29.0,
+            "result_limit": 30,
+            "station_count": 22,
+            "station_p95_supported_count": 22
+          }
+        },
+        "station_count": 50,
+        "station_p95_supported_count": 50
+      },
       "corrected_live": {
         "available_result_limit_probes": {
           "N20": {
             "client_request_attempts_issued": 6,
-            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+            "comparison_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
             "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
@@ -5291,7 +5423,7 @@
           },
           "N30": {
             "client_request_attempts_issued": 6,
-            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+            "comparison_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
             "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
@@ -5329,29 +5461,43 @@
             "valid_trias_response_count": 0
           }
         },
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+        "comparison_status": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
         "source_result_limits": {
           "A": 20,
           "B": 30,
           "C": 30
         }
       },
-      "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+      "corrected_live_limitation": "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+      "decision": "APPROVED_USER_DESIGN_STATIC_SUPPORTED_LIVE_LIMITATION_RETAINED",
+      "historical_provider_acceptance": {
+        "accepted_result_limits": [
+          20,
+          30
+        ],
+        "provider_wide_maximum_established": false,
+        "realtime_completeness_guaranteed": false,
+        "scope": "bounded representative historical diagnostics only",
+        "valid_http_trias_responses": true
+      },
+      "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
       "static_cadence_window_fit": {
         "all_station_p95_supported": true,
         "by_tier": {
           "A": {
             "all_station_p95_supported": true,
             "interval_minutes": 5,
+            "maximum_observed_static_scheduled_arrival_count": 20.0,
             "maximum_station_p95": 19.0,
             "result_limit": 20,
-            "station_count": 10,
-            "station_p95_supported_count": 10
+            "station_count": 8,
+            "station_p95_supported_count": 8
           },
           "B": {
             "all_station_p95_supported": true,
             "interval_minutes": 15,
-            "maximum_station_p95": 22.0,
+            "maximum_observed_static_scheduled_arrival_count": 23.0,
+            "maximum_station_p95": 23.0,
             "result_limit": 30,
             "station_count": 20,
             "station_p95_supported_count": 20
@@ -5359,10 +5505,11 @@
           "C": {
             "all_station_p95_supported": true,
             "interval_minutes": 30,
-            "maximum_station_p95": 27.0,
+            "maximum_observed_static_scheduled_arrival_count": 29.0,
+            "maximum_station_p95": 29.0,
             "result_limit": 30,
-            "station_count": 20,
-            "station_p95_supported_count": 20
+            "station_count": 22,
+            "station_p95_supported_count": 22
           }
         },
         "station_count": 50,
@@ -5397,14 +5544,40 @@
   },
   "phase_staggering": {
     "heartbeat_interval_minutes": 5,
-    "hour_total_logical_requests": 240,
-    "max_due_targets_in_one_heartbeat": 21,
+    "hour_total_logical_requests": 220,
+    "max_due_targets_in_one_heartbeat": 19,
     "phase_assignment_contract": {
+      "approved_phase_capacity_order": {
+        "A": [
+          8
+        ],
+        "B": [
+          7,
+          7,
+          6
+        ],
+        "C": [
+          4,
+          3,
+          4,
+          3,
+          4,
+          4
+        ]
+      },
       "assignment_hash": "SHA-256(panel version + tier + immutable SamplingTargetId)",
       "assignment_key": "immutable SamplingTargetId",
-      "balanced_phase_rule": "sort by stable identity hash and fill deterministic phase capacities in order",
+      "balanced_phase_rule": "sort by stable identity hash and fill the persisted deterministic phase capacities in order",
       "independent_of_mutable_rank_order": true,
       "materialization_status": "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED",
+      "optimal_total_distribution": [
+        19,
+        18,
+        18,
+        18,
+        19,
+        18
+      ],
       "phase_index_is_persisted": true
     },
     "phase_assignments": [
@@ -5412,6 +5585,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5422,6 +5596,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5432,6 +5607,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5442,6 +5618,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5452,26 +5629,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
-        "phase_count": 1,
-        "phase_index": 0,
-        "production_tier": "A",
-        "sampling_target_identity": "de:05315:11710",
-        "station": "Köln Friesenplatz"
-      },
-      {
-        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
-        "interval_minutes": 5,
-        "panel_version": "TIERED50_PANEL_V1",
-        "phase_count": 1,
-        "phase_index": 0,
-        "production_tier": "A",
-        "sampling_target_identity": "de:05315:11810",
-        "station": "Köln Ebertplatz"
-      },
-      {
-        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
-        "interval_minutes": 5,
-        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5482,6 +5640,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5492,6 +5651,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5502,6 +5662,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 5,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 8,
         "phase_count": 1,
         "phase_index": 0,
         "production_tier": "A",
@@ -5512,6 +5673,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5522,6 +5684,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
         "phase_count": 3,
         "phase_index": 2,
         "production_tier": "B",
@@ -5532,6 +5695,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5542,6 +5706,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5552,16 +5717,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
-        "phase_count": 3,
-        "phase_index": 2,
-        "production_tier": "B",
-        "sampling_target_identity": "de:05315:11410",
-        "station": "Köln Ubierring"
-      },
-      {
-        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
-        "interval_minutes": 15,
-        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5572,6 +5728,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5582,8 +5739,9 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
-        "phase_index": 0,
+        "phase_index": 1,
         "production_tier": "B",
         "sampling_target_identity": "de:05315:11611",
         "station": "Köln Moltkestr."
@@ -5592,6 +5750,18 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
+        "phase_count": 3,
+        "phase_index": 2,
+        "production_tier": "B",
+        "sampling_target_identity": "de:05315:11710",
+        "station": "Köln Friesenplatz"
+      },
+      {
+        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+        "interval_minutes": 15,
+        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5602,6 +5772,18 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
+        "phase_count": 3,
+        "phase_index": 0,
+        "production_tier": "B",
+        "sampling_target_identity": "de:05315:11810",
+        "station": "Köln Ebertplatz"
+      },
+      {
+        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+        "interval_minutes": 15,
+        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5612,6 +5794,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
         "phase_count": 3,
         "phase_index": 2,
         "production_tier": "B",
@@ -5622,6 +5805,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 1,
         "production_tier": "B",
@@ -5632,6 +5816,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5642,6 +5827,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5652,6 +5838,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
         "phase_count": 3,
         "phase_index": 2,
         "production_tier": "B",
@@ -5662,16 +5849,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
-        "phase_count": 3,
-        "phase_index": 1,
-        "production_tier": "B",
-        "sampling_target_identity": "de:05315:17311",
-        "station": "Köln Porz Markt"
-      },
-      {
-        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
-        "interval_minutes": 15,
-        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5682,6 +5860,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 7,
         "phase_count": 3,
         "phase_index": 0,
         "production_tier": "B",
@@ -5692,6 +5871,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
         "phase_count": 3,
         "phase_index": 2,
         "production_tier": "B",
@@ -5702,6 +5882,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 15,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 6,
         "phase_count": 3,
         "phase_index": 2,
         "production_tier": "B",
@@ -5712,6 +5893,18 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
+        "phase_count": 6,
+        "phase_index": 4,
+        "production_tier": "C",
+        "sampling_target_identity": "de:05315:11410",
+        "station": "Köln Ubierring"
+      },
+      {
+        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+        "interval_minutes": 30,
+        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 0,
         "production_tier": "C",
@@ -5722,6 +5915,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 1,
         "production_tier": "C",
@@ -5732,6 +5926,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 3,
         "production_tier": "C",
@@ -5742,6 +5937,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 5,
         "production_tier": "C",
@@ -5752,6 +5948,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 5,
         "production_tier": "C",
@@ -5762,6 +5959,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 3,
         "production_tier": "C",
@@ -5772,8 +5970,9 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
-        "phase_index": 4,
+        "phase_index": 5,
         "production_tier": "C",
         "sampling_target_identity": "de:05315:13111",
         "station": "Köln Weißhausstr."
@@ -5782,8 +5981,9 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
-        "phase_index": 1,
+        "phase_index": 2,
         "production_tier": "C",
         "sampling_target_identity": "de:05315:13113",
         "station": "Köln Sülzburgstr."
@@ -5792,6 +5992,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 3,
         "production_tier": "C",
@@ -5802,6 +6003,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 2,
         "production_tier": "C",
@@ -5812,6 +6014,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 4,
         "production_tier": "C",
@@ -5822,6 +6025,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 0,
         "production_tier": "C",
@@ -5832,6 +6036,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 5,
         "production_tier": "C",
@@ -5842,6 +6047,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 2,
         "production_tier": "C",
@@ -5852,6 +6058,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 0,
         "production_tier": "C",
@@ -5862,6 +6069,18 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
+        "phase_count": 6,
+        "phase_index": 4,
+        "production_tier": "C",
+        "sampling_target_identity": "de:05315:17311",
+        "station": "Köln Porz Markt"
+      },
+      {
+        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+        "interval_minutes": 30,
+        "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 2,
         "production_tier": "C",
@@ -5872,6 +6091,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 1,
         "production_tier": "C",
@@ -5882,6 +6102,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 4,
         "production_tier": "C",
@@ -5892,6 +6113,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 3,
         "phase_count": 6,
         "phase_index": 1,
         "production_tier": "C",
@@ -5902,6 +6124,7 @@
         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
         "interval_minutes": 30,
         "panel_version": "TIERED50_PANEL_V1",
+        "phase_capacity": 4,
         "phase_count": 6,
         "phase_index": 0,
         "production_tier": "C",
@@ -5912,21 +6135,21 @@
     "phase_distribution_reconciles": true,
     "super_cycle_heartbeats": 6,
     "super_cycle_minutes": 30,
-    "super_cycle_total_logical_requests": 120,
+    "super_cycle_total_logical_requests": 110,
     "tier_phase_distribution": [
       {
         "due_targets_by_heartbeat": [
-          10,
-          10,
-          10,
-          10,
-          10,
-          10
+          8,
+          8,
+          8,
+          8,
+          8,
+          8
         ],
         "interval_minutes": 5,
         "phase_count": 1,
         "phase_target_counts": [
-          10
+          8
         ],
         "tier": "A"
       },
@@ -5951,32 +6174,32 @@
       {
         "due_targets_by_heartbeat": [
           4,
+          3,
           4,
           3,
-          3,
-          3,
-          3
+          4,
+          4
         ],
         "interval_minutes": 30,
         "phase_count": 6,
         "phase_target_counts": [
           4,
+          3,
           4,
           3,
-          3,
-          3,
-          3
+          4,
+          4
         ],
         "tier": "C"
       }
     ],
     "total_due_targets_by_heartbeat": [
-      21,
-      21,
       19,
-      20,
-      20,
-      19
+      18,
+      18,
+      18,
+      19,
+      18
     ]
   },
   "quota": {
@@ -5985,10 +6208,77 @@
       "NumberOfResults changes response cardinality, not HTTP request count.",
       "Duplicate claimed target/buckets must not issue another HTTP request.",
       "No catch-up burst may spend quota on missed historical buckets.",
-      "The normal Stage 13 retry policy option uses MaxAttempts=1 and zero automatic retries; user approval remains required.",
+      "The approved production retry policy uses MaxAttempts=2, meaning one initial attempt plus at most one automatic retry for approved transient failures.",
+      "The normal planning reserve is 10% of nominal Tiered50 logical requests; it is a quota-planning reserve, not an observed Tiered50 retry rate.",
+      "Automatic retries must be blocked when projected/current monthly consumption would exceed the 207500 conservative protection boundary.",
       "The full documented Legacy7 monthly cadence is reserved conservatively because current shared-account usage is unavailable.",
       "Repository diagnostics are inactive after closeout; the Stage 13 diagnostic hard budget is reserved for reconciliation only."
     ],
+    "approved_production_design": {
+      "automatic_retry_guardrail": {
+        "automatic_retries_allowed": true,
+        "automatic_retry_protection_boundary": 207500,
+        "current_month_requests": 0,
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
+        "over_boundary_action": "ALLOW_WITHIN_BOUNDARY",
+        "projected_automatic_retry_requests": 180048,
+        "projected_monthly_consumption": 180048
+      },
+      "automatic_retry_protection_boundary": 207500,
+      "corrected_diagnostic_conservative_quota_accounting_attempts": 24,
+      "corrected_diagnostic_provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+      "historical_diagnostic_reserved_attempts": 100,
+      "historical_legacy_retry_sensitivity": 0.021485574,
+      "legacy_current_usage_observed": false,
+      "legacy_reserved_conservatively": {
+        "30": 8640,
+        "31": 8928
+      },
+      "normal_retry_policy": {
+        "approved_transient_http_statuses": [
+          408,
+          429,
+          500,
+          502,
+          503,
+          504
+        ],
+        "approved_transient_transport_failure_categories": [
+          "CONNECTION_REFUSED",
+          "NETWORK_UNREACHABLE",
+          "OTHER_NETWORK_FAILURE",
+          "PROXY_OR_ENVIRONMENT_FAILURE",
+          "TIMEOUT",
+          "TLS_FAILURE"
+        ],
+        "automatic_retry_count_max": 1,
+        "do_not_retry_deterministic_parser_schema_errors": true,
+        "do_not_retry_deterministic_request_contract_errors": true,
+        "do_not_retry_deterministic_trias_application_errors": true,
+        "do_not_retry_http_statuses": [
+          401,
+          403
+        ],
+        "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+        "initial_attempt_included": true,
+        "max_attempts": 2,
+        "one_failed_station_does_not_abort_other_due_targets": true,
+        "respect_retry_after_for_http_429": true
+      },
+      "normal_retry_reserve_rate": 0.1,
+      "production_cadence_approved": true,
+      "production_retry_policy_approved": true,
+      "quota_safety_gate_closed_without_fabricated_current_usage": true,
+      "thirty_day_conservative_planning_total": 182980,
+      "thirty_day_nominal_requests": 158400,
+      "thirty_day_retry_reserve_requests": 15840,
+      "thirty_day_tiered50_with_retry_reserve": 174240.0,
+      "thirty_one_day_conservative_planning_total": 189076,
+      "thirty_one_day_nominal_requests": 163680,
+      "thirty_one_day_retry_reserve_requests": 16368,
+      "thirty_one_day_tiered50_with_retry_reserve": 180048.0,
+      "user_approved_design": true
+    },
     "diagnostic_reserved_http_attempts": 100,
     "legacy_reserved_monthly_requests": {
       "30_day": 8640,
@@ -6007,108 +6297,112 @@
       {
         "30_day": {
           "additional_attempt_rate": 0.0,
-          "base_logical_requests": 172800,
+          "base_logical_requests": 158400,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 181540,
+            "conservative_total_http_requests": 167140,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 68460,
-            "headroom_to_normal_envelope_max": 28460,
-            "headroom_to_normal_envelope_min": 25960,
+            "headroom_to_250000_ceiling": 82860,
+            "headroom_to_normal_envelope_max": 42860,
+            "headroom_to_normal_envelope_min": 40360,
             "legacy_reserved_requests": 8640,
-            "projected_http_requests_rounded_up": 172800,
+            "projected_http_requests_rounded_up": 158400,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 30,
-          "headroom_to_250000_ceiling": 77200.0,
-          "headroom_to_normal_envelope_max": 37200.0,
-          "headroom_to_normal_envelope_min": 34700.0,
-          "percentage_of_250000_ceiling": 69.12,
-          "percentage_of_normal_envelope_max": 82.285714,
-          "percentage_of_normal_envelope_min": 83.277108,
-          "projected_http_requests": 172800.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 91600.0,
+          "headroom_to_normal_envelope_max": 51600.0,
+          "headroom_to_normal_envelope_min": 49100.0,
+          "percentage_of_250000_ceiling": 63.36,
+          "percentage_of_normal_envelope_max": 75.428571,
+          "percentage_of_normal_envelope_min": 76.337349,
+          "projected_http_requests": 158400.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 0
         },
         "31_day": {
           "additional_attempt_rate": 0.0,
-          "base_logical_requests": 178560,
+          "base_logical_requests": 163680,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 187588,
+            "conservative_total_http_requests": 172708,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 62412,
-            "headroom_to_normal_envelope_max": 22412,
-            "headroom_to_normal_envelope_min": 19912,
+            "headroom_to_250000_ceiling": 77292,
+            "headroom_to_normal_envelope_max": 37292,
+            "headroom_to_normal_envelope_min": 34792,
             "legacy_reserved_requests": 8928,
-            "projected_http_requests_rounded_up": 178560,
+            "projected_http_requests_rounded_up": 163680,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 31,
-          "headroom_to_250000_ceiling": 71440.0,
-          "headroom_to_normal_envelope_max": 31440.0,
-          "headroom_to_normal_envelope_min": 28940.0,
-          "percentage_of_250000_ceiling": 71.424,
-          "percentage_of_normal_envelope_max": 85.028571,
-          "percentage_of_normal_envelope_min": 86.053012,
-          "projected_http_requests": 178560.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 86320.0,
+          "headroom_to_normal_envelope_max": 46320.0,
+          "headroom_to_normal_envelope_min": 43820.0,
+          "percentage_of_250000_ceiling": 65.472,
+          "percentage_of_normal_envelope_max": 77.942857,
+          "percentage_of_normal_envelope_min": 78.881928,
+          "projected_http_requests": 163680.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 0
         },
         "additional_attempt_rate": 0.0,
-        "kind": "technically_evaluated_policy",
+        "kind": "historical_comparison_scenario",
         "label": "normal_zero_retry_policy"
       },
       {
         "30_day": {
           "additional_attempt_rate": 0.021485574,
-          "base_logical_requests": 172800,
+          "base_logical_requests": 158400,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 185253,
+            "conservative_total_http_requests": 170544,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 64747,
-            "headroom_to_normal_envelope_max": 24747,
-            "headroom_to_normal_envelope_min": 22247,
+            "headroom_to_250000_ceiling": 79456,
+            "headroom_to_normal_envelope_max": 39456,
+            "headroom_to_normal_envelope_min": 36956,
             "legacy_reserved_requests": 8640,
-            "projected_http_requests_rounded_up": 176513,
+            "projected_http_requests_rounded_up": 161804,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 30,
-          "headroom_to_250000_ceiling": 73487.292818,
-          "headroom_to_normal_envelope_max": 33487.292818,
-          "headroom_to_normal_envelope_min": 30987.292818,
-          "percentage_of_250000_ceiling": 70.605083,
-          "percentage_of_normal_envelope_max": 84.05367,
-          "percentage_of_normal_envelope_min": 85.066365,
-          "projected_http_requests": 176512.707182,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 88196.685083,
+          "headroom_to_normal_envelope_max": 48196.685083,
+          "headroom_to_normal_envelope_min": 45696.685083,
+          "percentage_of_250000_ceiling": 64.721326,
+          "percentage_of_normal_envelope_max": 77.049198,
+          "percentage_of_normal_envelope_min": 77.977501,
+          "projected_http_requests": 161803.314917,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 3404
         },
         "31_day": {
           "additional_attempt_rate": 0.021485574,
-          "base_logical_requests": 178560,
+          "base_logical_requests": 163680,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 191425,
+            "conservative_total_http_requests": 176225,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 58575,
-            "headroom_to_normal_envelope_max": 18575,
-            "headroom_to_normal_envelope_min": 16075,
+            "headroom_to_250000_ceiling": 73775,
+            "headroom_to_normal_envelope_max": 33775,
+            "headroom_to_normal_envelope_min": 31275,
             "legacy_reserved_requests": 8928,
-            "projected_http_requests_rounded_up": 182397,
+            "projected_http_requests_rounded_up": 167197,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 31,
-          "headroom_to_250000_ceiling": 67603.535912,
-          "headroom_to_normal_envelope_max": 27603.535912,
-          "headroom_to_normal_envelope_min": 25103.535912,
-          "percentage_of_250000_ceiling": 72.958586,
-          "percentage_of_normal_envelope_max": 86.855459,
-          "percentage_of_normal_envelope_min": 87.90191,
-          "projected_http_requests": 182396.464088,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 82803.241252,
+          "headroom_to_normal_envelope_max": 42803.241252,
+          "headroom_to_normal_envelope_min": 40303.241252,
+          "percentage_of_250000_ceiling": 66.878703,
+          "percentage_of_normal_envelope_max": 79.617504,
+          "percentage_of_normal_envelope_min": 80.576751,
+          "projected_http_requests": 167196.758748,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 3517
         },
         "additional_attempt_rate": 0.021485573971761818,
         "kind": "observed_legacy_evidence_applied_as_sensitivity_only",
@@ -6118,53 +6412,55 @@
       {
         "30_day": {
           "additional_attempt_rate": 0.05,
-          "base_logical_requests": 172800,
+          "base_logical_requests": 158400,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 190180,
+            "conservative_total_http_requests": 175060,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 59820,
-            "headroom_to_normal_envelope_max": 19820,
-            "headroom_to_normal_envelope_min": 17320,
+            "headroom_to_250000_ceiling": 74940,
+            "headroom_to_normal_envelope_max": 34940,
+            "headroom_to_normal_envelope_min": 32440,
             "legacy_reserved_requests": 8640,
-            "projected_http_requests_rounded_up": 181440,
+            "projected_http_requests_rounded_up": 166320,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 30,
-          "headroom_to_250000_ceiling": 68560.0,
-          "headroom_to_normal_envelope_max": 28560.0,
-          "headroom_to_normal_envelope_min": 26060.0,
-          "percentage_of_250000_ceiling": 72.576,
-          "percentage_of_normal_envelope_max": 86.4,
-          "percentage_of_normal_envelope_min": 87.440964,
-          "projected_http_requests": 181440.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 83680.0,
+          "headroom_to_normal_envelope_max": 43680.0,
+          "headroom_to_normal_envelope_min": 41180.0,
+          "percentage_of_250000_ceiling": 66.528,
+          "percentage_of_normal_envelope_max": 79.2,
+          "percentage_of_normal_envelope_min": 80.154217,
+          "projected_http_requests": 166320.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 7920
         },
         "31_day": {
           "additional_attempt_rate": 0.05,
-          "base_logical_requests": 178560,
+          "base_logical_requests": 163680,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 196516,
+            "conservative_total_http_requests": 180892,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 53484,
-            "headroom_to_normal_envelope_max": 13484,
-            "headroom_to_normal_envelope_min": 10984,
+            "headroom_to_250000_ceiling": 69108,
+            "headroom_to_normal_envelope_max": 29108,
+            "headroom_to_normal_envelope_min": 26608,
             "legacy_reserved_requests": 8928,
-            "projected_http_requests_rounded_up": 187488,
+            "projected_http_requests_rounded_up": 171864,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 31,
-          "headroom_to_250000_ceiling": 62512.0,
-          "headroom_to_normal_envelope_max": 22512.0,
-          "headroom_to_normal_envelope_min": 20012.0,
-          "percentage_of_250000_ceiling": 74.9952,
-          "percentage_of_normal_envelope_max": 89.28,
-          "percentage_of_normal_envelope_min": 90.355663,
-          "projected_http_requests": 187488.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 78136.0,
+          "headroom_to_normal_envelope_max": 38136.0,
+          "headroom_to_normal_envelope_min": 35636.0,
+          "percentage_of_250000_ceiling": 68.7456,
+          "percentage_of_normal_envelope_max": 81.84,
+          "percentage_of_normal_envelope_min": 82.826024,
+          "projected_http_requests": 171864.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 8184
         },
         "additional_attempt_rate": 0.05,
         "kind": "calculation_scenario",
@@ -6173,106 +6469,126 @@
       {
         "30_day": {
           "additional_attempt_rate": 0.1,
-          "base_logical_requests": 172800,
+          "base_logical_requests": 158400,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 198820,
+            "conservative_total_http_requests": 182980,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 51180,
-            "headroom_to_normal_envelope_max": 11180,
-            "headroom_to_normal_envelope_min": 8680,
+            "headroom_to_250000_ceiling": 67020,
+            "headroom_to_normal_envelope_max": 27020,
+            "headroom_to_normal_envelope_min": 24520,
             "legacy_reserved_requests": 8640,
-            "projected_http_requests_rounded_up": 190080,
+            "projected_http_requests_rounded_up": 174240,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 30,
-          "headroom_to_250000_ceiling": 59920.0,
-          "headroom_to_normal_envelope_max": 19920.0,
-          "headroom_to_normal_envelope_min": 17420.0,
-          "percentage_of_250000_ceiling": 76.032,
-          "percentage_of_normal_envelope_max": 90.514286,
-          "percentage_of_normal_envelope_min": 91.604819,
-          "projected_http_requests": 190080.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 75760.0,
+          "headroom_to_normal_envelope_max": 35760.0,
+          "headroom_to_normal_envelope_min": 33260.0,
+          "percentage_of_250000_ceiling": 69.696,
+          "percentage_of_normal_envelope_max": 82.971429,
+          "percentage_of_normal_envelope_min": 83.971084,
+          "projected_http_requests": 174240.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 15840
         },
         "31_day": {
           "additional_attempt_rate": 0.1,
-          "base_logical_requests": 178560,
+          "base_logical_requests": 163680,
           "base_within_normal_envelope": false,
           "conservative_reserve_reconciliation": {
-            "conservative_total_http_requests": 205444,
+            "conservative_total_http_requests": 189076,
             "diagnostic_reserved_requests": 100,
-            "headroom_to_250000_ceiling": 44556,
-            "headroom_to_normal_envelope_max": 4556,
-            "headroom_to_normal_envelope_min": 2056,
+            "headroom_to_250000_ceiling": 60924,
+            "headroom_to_normal_envelope_max": 20924,
+            "headroom_to_normal_envelope_min": 18424,
             "legacy_reserved_requests": 8928,
-            "projected_http_requests_rounded_up": 196416,
+            "projected_http_requests_rounded_up": 180048,
             "within_monthly_ceiling": true,
             "within_normal_envelope_max": true
           },
           "days": 31,
-          "headroom_to_250000_ceiling": 53584.0,
-          "headroom_to_normal_envelope_max": 13584.0,
-          "headroom_to_normal_envelope_min": 11084.0,
-          "percentage_of_250000_ceiling": 78.5664,
-          "percentage_of_normal_envelope_max": 93.531429,
-          "percentage_of_normal_envelope_min": 94.658313,
-          "projected_http_requests": 196416.0,
-          "projected_within_normal_envelope": false
+          "headroom_to_250000_ceiling": 69952.0,
+          "headroom_to_normal_envelope_max": 29952.0,
+          "headroom_to_normal_envelope_min": 27452.0,
+          "percentage_of_250000_ceiling": 72.0192,
+          "percentage_of_normal_envelope_max": 85.737143,
+          "percentage_of_normal_envelope_min": 86.77012,
+          "projected_http_requests": 180048.0,
+          "projected_within_normal_envelope": false,
+          "retry_reserve_requests": 16368
         },
         "additional_attempt_rate": 0.1,
-        "kind": "calculation_scenario",
-        "label": "ten_percent_stress_sensitivity"
+        "approved_production_reserve": true,
+        "kind": "approved_planning_reserve",
+        "label": "approved_normal_retry_reserve"
       }
-    ],
-    "technically_evaluated_option": {
-      "corrected_diagnostic_conservative_quota_accounting_attempts": 24,
-      "corrected_diagnostic_provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
-      "evidence_supported_retry_allowance": 0,
-      "historical_diagnostic_reserved_attempts": 100,
-      "historical_legacy_retry_sensitivity": 0.021485574,
-      "legacy_current_usage_observed": false,
-      "legacy_reserved_conservatively": {
-        "30": 8640,
-        "31": 8928
-      },
-      "normal_retry_policy": "MaxAttempts=1; zero automatic retries; failed targets are independently recorded and wait for the next current logical bucket",
-      "production_cadence_approved": false,
-      "production_retry_policy_approved": false,
-      "quota_safety_gate_closed_without_fabricated_current_usage": true,
-      "thirty_day_nominal_conservative_total": 181540,
-      "thirty_one_day_nominal_conservative_total": 187588,
-      "thirty_one_day_ten_percent_stress_total": 205444,
-      "user_approved_design": null
-    }
+    ]
   },
   "readiness_decision": {
-    "blockers": [
-      "PRODUCTION_NUMBER_OF_RESULTS_EVIDENCE_NOT_ESTABLISHED",
-      "USER_DESIGN_APPROVAL_REQUIRED"
-    ],
+    "blockers": [],
     "limitations": [
       "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
       "CURRENT_SHARED_CREDENTIAL_USAGE_NOT_OBSERVED; FULL_DOCUMENTED_LEGACY7_CADENCE_RESERVED_CONSERVATIVELY",
       "STATIC_DENSITY_IS_PLANNING_EVIDENCE_ONLY_NOT_REALTIME_RESPONSE_COVERAGE",
-      "USER_DESIGN_APPROVAL_REQUIRED_FOR_NUMBER_OF_RESULTS_CADENCE_CONCURRENCY_AND_RETRY_POLICY",
-      "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE"
+      "HISTORICAL_BOUNDED_N20_N30_ACCEPTANCE_IS_NOT_GUARANTEED_REALTIME_COMPLETENESS",
+      "GUARANTEED_20_30_EVENT_AVAILABILITY_NOT_ESTABLISHED",
+      "COMPLETE_REALTIME_FORWARD_COVERAGE_NOT_ESTABLISHED",
+      "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT"
     ],
     "power_bi_modified": false,
     "production_activation": "NOT_STARTED",
-    "production_cadence_approved": false,
-    "production_concurrency_approved": false,
+    "production_cadence_approved": true,
+    "production_concurrency_approved": true,
     "production_database_objects_created": false,
-    "production_number_of_results_approved": false,
-    "production_retry_policy_approved": false,
-    "production_tier_membership_approved": false,
+    "production_number_of_results_approved": true,
+    "production_retry_policy_approved": true,
+    "production_tier_membership_approved": true,
+    "stage_13_status": "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED",
     "stage_14_started": false,
+    "stage_14_status": "NOT STARTED",
     "tiered50_activated": false,
     "windows_scheduled_tasks_created": false
   },
   "record_type": "stage_13_tiered_collector_readiness_evidence",
   "retry_and_http_attempt_evidence": {
+    "approved_production_retry_policy": {
+      "approved_transient_http_statuses": [
+        408,
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "approved_transient_transport_failure_categories": [
+        "CONNECTION_REFUSED",
+        "NETWORK_UNREACHABLE",
+        "OTHER_NETWORK_FAILURE",
+        "PROXY_OR_ENVIRONMENT_FAILURE",
+        "TIMEOUT",
+        "TLS_FAILURE"
+      ],
+      "automatic_retry_count_max": 1,
+      "do_not_retry_deterministic_parser_schema_errors": true,
+      "do_not_retry_deterministic_request_contract_errors": true,
+      "do_not_retry_deterministic_trias_application_errors": true,
+      "do_not_retry_http_statuses": [
+        401,
+        403
+      ],
+      "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+      "initial_attempt_included": true,
+      "max_attempts": 2,
+      "one_failed_station_does_not_abort_other_due_targets": true,
+      "respect_retry_after_for_http_429": true
+    },
+    "automatic_retry_quota_guardrail": {
+      "boundary": 207500,
+      "rule": "block automatic retries when projected/current monthly consumption would exceed 207500",
+      "stage14_required": true
+    },
     "current_production_audit": {
       "conservative_full_legacy7_reserve_applied": true,
       "ctl_mdd_collector_run_history_present": false,
@@ -6334,17 +6650,54 @@
       "retries": 0
     }
   },
+  "retry_policy": {
+    "approved_transient_http_statuses": [
+      408,
+      429,
+      500,
+      502,
+      503,
+      504
+    ],
+    "approved_transient_transport_failure_categories": [
+      "CONNECTION_REFUSED",
+      "NETWORK_UNREACHABLE",
+      "OTHER_NETWORK_FAILURE",
+      "PROXY_OR_ENVIRONMENT_FAILURE",
+      "TIMEOUT",
+      "TLS_FAILURE"
+    ],
+    "automatic_retry_count_max": 1,
+    "do_not_retry_deterministic_parser_schema_errors": true,
+    "do_not_retry_deterministic_request_contract_errors": true,
+    "do_not_retry_deterministic_trias_application_errors": true,
+    "do_not_retry_http_statuses": [
+      401,
+      403
+    ],
+    "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+    "initial_attempt_included": true,
+    "max_attempts": 2,
+    "one_failed_station_does_not_abort_other_due_targets": true,
+    "respect_retry_after_for_http_429": true
+  },
   "sequential_vs_bounded_concurrency": {
-    "approval_state": "USER_APPROVAL_REQUIRED",
+    "approval_rationale": [
+      "sequential execution is technically feasible under current HTTP measurements",
+      "bounded cap-2 was successfully tested on the retained representative sample",
+      "concurrency 2 provides additional heartbeat execution margin",
+      "no 429, timeout, 5xx, transport-pressure, or parse failure was observed in the bounded cap-2 sample",
+      "cap-2 is not a provider-wide rate-limit claim"
+    ],
+    "approval_state": "USER_APPROVED",
     "bounded_live_diagnostic": {
-      "decision": "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
       "client_request_attempts_issued": 6,
-      "http_responses_received": 6,
       "confirmed_provider_http_attempts": 6,
-      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
       "conservative_quota_accounting_attempts": 6,
+      "decision": "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
       "failure_isolation_observed": true,
       "forward_coverage_metric_status": "INVALID_FOR_FORWARD_COVERAGE_DECISION",
+      "http_responses_received": 6,
       "no_retries": true,
       "pair_batch_duration_statistics_ms": {
         "count": 3,
@@ -6357,6 +6710,7 @@
       },
       "pair_count": 3,
       "provider_pressure_signal": false,
+      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
       "provider_scope_limit": "bounded sample only; no provider-wide rate-limit claim",
       "records": [
         {
@@ -6570,16 +6924,16 @@
       "requested_max_concurrency": 2,
       "user_approved_design": false
     },
-    "decision": "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL",
+    "decision": "APPROVED_MAXIMUM_CONCURRENCY_2",
     "historical_stage8_observed_average_wall_seconds_per_attempt": 10.515455,
-    "maximum_concurrency": null,
+    "maximum_concurrency": 2,
     "provider_scope_limit": "cap-2 result is a bounded sample decision, not a provider-wide rate-limit claim",
     "sequential_live_diagnostic": {
       "client_request_attempts_issued": 24,
-      "http_responses_received": 24,
       "confirmed_provider_http_attempts": 24,
-      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
       "conservative_quota_accounting_attempts": 24,
+      "http_responses_received": 24,
+      "provider_quota_consumption_status": "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT",
       "request_duration_statistics_ms": {
         "count": 24,
         "max_ms": 1251.639,
@@ -6591,9 +6945,11 @@
       },
       "retries": 0
     },
+    "stage14_activation_condition": "validate concurrency 2 end-to-end including actual persistence/database behavior; stop activation on provider pressure, SQL contention, persistence instability, overlap problems, or other material failure",
     "technically_evaluated_maximum_concurrency": 2,
     "unbounded_concurrency": "PROHIBITED",
-    "user_approved_design": false
+    "user_approved_design": true,
+    "values_above_two_require_new_evidence_and_decision": true
   },
   "stage_12_gate": {
     "approved_panel_station_ids": [
@@ -6665,10 +7021,17 @@
     "panel_station_count": 50,
     "stage12_selection_rank_is_not_production_tier": true
   },
-  "stage_13_status": "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED",
+  "stage_13_status": "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED",
   "static_event_density": {
     "analysis_contract": {
       "arrival_time_source": "GTFS stop_times.arrival_time for validated Stage 12 child stops",
+      "final_number_of_results_policy": {
+        "A": 20,
+        "B": 30,
+        "C": 30
+      },
+      "final_static_support_recalculated": true,
+      "final_tier_membership_basis": "density ranks 1–8 / 9–28 / 29–50 from retained exact-feed metrics",
       "forward_windows_minutes": [
         5,
         10,
@@ -6683,7 +7046,7 @@
       "station_count": 50
     },
     "blockers": [],
-    "coverage_conclusion": "The exact static snapshot supports deterministic density-based tier membership and N=30 as a planning limit for each tier cadence window; it does not guarantee realtime response coverage.",
+    "coverage_conclusion": "The retained exact static snapshot supports deterministic density-based final tier membership and the approved A20/B30/C30 static planning limits; it does not guarantee realtime response coverage.",
     "distribution": {
       "active_service_day_scheduled_arrival_counts": {
         "count": 5100,
@@ -6771,6 +7134,47 @@
         }
       }
     },
+    "final_approved_static_support": {
+      "all_station_p95_supported": true,
+      "by_tier": {
+        "A": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 5,
+          "maximum_observed_static_scheduled_arrival_count": 20.0,
+          "maximum_station_p95": 19.0,
+          "result_limit": 20,
+          "station_count": 8,
+          "station_p95_supported_count": 8
+        },
+        "B": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 15,
+          "maximum_observed_static_scheduled_arrival_count": 23.0,
+          "maximum_station_p95": 23.0,
+          "result_limit": 30,
+          "station_count": 20,
+          "station_p95_supported_count": 20
+        },
+        "C": {
+          "all_station_p95_supported": true,
+          "interval_minutes": 30,
+          "maximum_observed_static_scheduled_arrival_count": 29.0,
+          "maximum_station_p95": 29.0,
+          "result_limit": 30,
+          "station_count": 22,
+          "station_p95_supported_count": 22
+        }
+      },
+      "station_count": 50,
+      "station_p95_supported_count": 50
+    },
+    "recalculation": {
+      "basis": "retained Stage 13 station-level exact-feed evidence",
+      "gtfs_zip_reopened": false,
+      "network_access_required": false,
+      "source_path": "docs/stages/13-tiered-collector-readiness-evidence.json",
+      "stage12_panel_membership_changed": false
+    },
     "source_snapshot": {
       "calendar_summary": {
         "calendar_dates_row_count": 133194,
@@ -6787,6 +7191,8 @@
       "feed_version": "VERSION__20260930_0053",
       "raw_zip_committed": false,
       "raw_zip_retained_by_stage13": false,
+      "recalculated_offline_for_final_stage13_design": true,
+      "retained_stage13_source_evidence": "docs/stages/13-tiered-collector-readiness-evidence.json",
       "source_url": "https://download.vrs.de/gtfs/google_transit_goR.zip",
       "temporary_input_name": "stage12-vrs-global-id.zip",
       "zip_sha256": "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147",
@@ -6796,6 +7202,9 @@
     "station_tier_rows": [
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1913.0,
@@ -6807,6 +7216,7 @@
         },
         "density_rank": 3,
         "expanded_scheduled_arrival_count": 159784,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 12,
@@ -6892,6 +7302,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1113.0,
@@ -6903,6 +7316,7 @@
         },
         "density_rank": 23,
         "expanded_scheduled_arrival_count": 101958,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 19,
@@ -6988,6 +7402,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 696.0,
@@ -6999,6 +7416,7 @@
         },
         "density_rank": 32,
         "expanded_scheduled_arrival_count": 62388,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 8,
@@ -7083,6 +7501,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1016.0,
@@ -7094,6 +7515,7 @@
         },
         "density_rank": 21,
         "expanded_scheduled_arrival_count": 78193,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 5,
           "distinct_route_count": 16,
@@ -7181,6 +7603,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 487.0,
@@ -7192,6 +7617,7 @@
         },
         "density_rank": 44,
         "expanded_scheduled_arrival_count": 34441,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 6,
@@ -7277,6 +7703,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 834.0,
@@ -7288,6 +7717,7 @@
         },
         "density_rank": 29,
         "expanded_scheduled_arrival_count": 78922,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 9,
@@ -7321,7 +7751,7 @@
             "percentage_at_or_below_limit": 100.0
           }
         },
-        "production_tier": "B",
+        "production_tier": "C",
         "schedule_pattern_event_count": 4325,
         "source_parent_station_id": "de:05315:17311",
         "station": "Köln Porz Markt",
@@ -7372,6 +7802,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1739.0,
@@ -7383,6 +7816,7 @@
         },
         "density_rank": 4,
         "expanded_scheduled_arrival_count": 147853,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 6,
           "distinct_route_count": 18,
@@ -7471,6 +7905,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1344.0,
@@ -7482,6 +7919,7 @@
         },
         "density_rank": 10,
         "expanded_scheduled_arrival_count": 125407,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -7515,7 +7953,7 @@
             "percentage_at_or_below_limit": 100.0
           }
         },
-        "production_tier": "A",
+        "production_tier": "B",
         "schedule_pattern_event_count": 11330,
         "source_parent_station_id": "de:05315:11810",
         "station": "Köln Ebertplatz",
@@ -7566,6 +8004,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1952.0,
@@ -7577,6 +8018,7 @@
         },
         "density_rank": 5,
         "expanded_scheduled_arrival_count": 134321,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 17,
@@ -7662,6 +8104,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 732.0,
@@ -7673,6 +8118,7 @@
         },
         "density_rank": 37,
         "expanded_scheduled_arrival_count": 64180,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 3,
@@ -7757,6 +8203,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1107.0,
@@ -7768,6 +8217,7 @@
         },
         "density_rank": 8,
         "expanded_scheduled_arrival_count": 82617,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 8,
@@ -7852,6 +8302,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1228.0,
@@ -7863,6 +8316,7 @@
         },
         "density_rank": 11,
         "expanded_scheduled_arrival_count": 114417,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 9,
@@ -7947,6 +8401,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 860.0,
@@ -7958,6 +8415,7 @@
         },
         "density_rank": 19,
         "expanded_scheduled_arrival_count": 75498,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -8042,6 +8500,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 392.0,
@@ -8053,6 +8514,7 @@
         },
         "density_rank": 49,
         "expanded_scheduled_arrival_count": 30874,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 1,
           "distinct_route_count": 2,
@@ -8136,6 +8598,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 954.0,
@@ -8147,6 +8612,7 @@
         },
         "density_rank": 30,
         "expanded_scheduled_arrival_count": 69675,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -8180,7 +8646,7 @@
             "percentage_at_or_below_limit": 100.0
           }
         },
-        "production_tier": "B",
+        "production_tier": "C",
         "schedule_pattern_event_count": 4827,
         "source_parent_station_id": "de:05315:11410",
         "station": "Köln Ubierring",
@@ -8231,6 +8697,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 645.0,
@@ -8242,6 +8711,7 @@
         },
         "density_rank": 39,
         "expanded_scheduled_arrival_count": 60238,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 9,
@@ -8327,6 +8797,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 595.0,
@@ -8338,6 +8811,7 @@
         },
         "density_rank": 41,
         "expanded_scheduled_arrival_count": 53330,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 3,
@@ -8422,6 +8896,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 491.0,
@@ -8433,6 +8910,7 @@
         },
         "density_rank": 46,
         "expanded_scheduled_arrival_count": 46444,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -8517,6 +8995,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 730.0,
@@ -8528,6 +9009,7 @@
         },
         "density_rank": 33,
         "expanded_scheduled_arrival_count": 61582,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -8612,6 +9094,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 911.0,
@@ -8623,6 +9108,7 @@
         },
         "density_rank": 20,
         "expanded_scheduled_arrival_count": 83917,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 4,
           "distinct_route_count": 10,
@@ -8709,6 +9195,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 896.0,
@@ -8720,6 +9209,7 @@
         },
         "density_rank": 25,
         "expanded_scheduled_arrival_count": 80208,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 10,
@@ -8805,6 +9295,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 635.0,
@@ -8816,6 +9309,7 @@
         },
         "density_rank": 43,
         "expanded_scheduled_arrival_count": 59308,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 4,
@@ -8901,6 +9395,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 828.0,
@@ -8912,6 +9409,7 @@
         },
         "density_rank": 22,
         "expanded_scheduled_arrival_count": 74488,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 4,
           "distinct_route_count": 11,
@@ -8998,6 +9496,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 438.0,
@@ -9009,6 +9510,7 @@
         },
         "density_rank": 50,
         "expanded_scheduled_arrival_count": 41507,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 1,
           "distinct_route_count": 2,
@@ -9092,6 +9594,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 729.0,
@@ -9103,6 +9608,7 @@
         },
         "density_rank": 35,
         "expanded_scheduled_arrival_count": 60519,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 8,
@@ -9187,6 +9693,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 492.0,
@@ -9198,6 +9707,7 @@
         },
         "density_rank": 47,
         "expanded_scheduled_arrival_count": 43592,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -9282,6 +9792,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 2651.0,
@@ -9293,6 +9806,7 @@
         },
         "density_rank": 2,
         "expanded_scheduled_arrival_count": 204920,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 10,
@@ -9377,6 +9891,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 2203.0,
@@ -9388,6 +9905,7 @@
         },
         "density_rank": 1,
         "expanded_scheduled_arrival_count": 180792,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 20,
@@ -9473,6 +9991,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1437.0,
@@ -9484,6 +10005,7 @@
         },
         "density_rank": 6,
         "expanded_scheduled_arrival_count": 123014,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 29,
@@ -9569,6 +10091,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 5,
+        "approved_number_of_results": 20,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1890.0,
@@ -9580,6 +10105,7 @@
         },
         "density_rank": 7,
         "expanded_scheduled_arrival_count": 127642,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 7,
@@ -9664,6 +10190,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1261.0,
@@ -9675,6 +10204,7 @@
         },
         "density_rank": 12,
         "expanded_scheduled_arrival_count": 115679,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 1,
           "distinct_route_count": 5,
@@ -9758,6 +10288,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1097.0,
@@ -9769,6 +10302,7 @@
         },
         "density_rank": 16,
         "expanded_scheduled_arrival_count": 100371,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -9853,6 +10387,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1049.0,
@@ -9864,6 +10401,7 @@
         },
         "density_rank": 26,
         "expanded_scheduled_arrival_count": 94984,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 1,
           "distinct_route_count": 4,
@@ -9947,6 +10485,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 934.0,
@@ -9958,6 +10499,7 @@
         },
         "density_rank": 13,
         "expanded_scheduled_arrival_count": 83730,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -10042,6 +10584,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1455.0,
@@ -10053,6 +10598,7 @@
         },
         "density_rank": 28,
         "expanded_scheduled_arrival_count": 85244,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -10137,6 +10683,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 998.0,
@@ -10148,6 +10697,7 @@
         },
         "density_rank": 17,
         "expanded_scheduled_arrival_count": 91202,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -10232,6 +10782,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 700.0,
@@ -10243,6 +10796,7 @@
         },
         "density_rank": 34,
         "expanded_scheduled_arrival_count": 63955,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 5,
@@ -10327,6 +10881,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 907.0,
@@ -10338,6 +10895,7 @@
         },
         "density_rank": 36,
         "expanded_scheduled_arrival_count": 70998,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 4,
@@ -10422,6 +10980,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 467.0,
@@ -10433,6 +10994,7 @@
         },
         "density_rank": 48,
         "expanded_scheduled_arrival_count": 43715,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 1,
           "distinct_route_count": 2,
@@ -10516,6 +11078,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 991.0,
@@ -10527,6 +11092,7 @@
         },
         "density_rank": 24,
         "expanded_scheduled_arrival_count": 92897,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -10611,6 +11177,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 775.0,
@@ -10622,6 +11191,7 @@
         },
         "density_rank": 31,
         "expanded_scheduled_arrival_count": 69132,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 4,
@@ -10706,6 +11276,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1204.0,
@@ -10717,6 +11290,7 @@
         },
         "density_rank": 18,
         "expanded_scheduled_arrival_count": 110140,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 5,
           "distinct_route_count": 10,
@@ -10804,6 +11378,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 552.0,
@@ -10815,6 +11392,7 @@
         },
         "density_rank": 38,
         "expanded_scheduled_arrival_count": 48366,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 3,
           "distinct_route_count": 8,
@@ -10900,6 +11478,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 882.0,
@@ -10911,6 +11492,7 @@
         },
         "density_rank": 14,
         "expanded_scheduled_arrival_count": 77104,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 6,
@@ -10995,6 +11577,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 573.0,
@@ -11006,6 +11591,7 @@
         },
         "density_rank": 42,
         "expanded_scheduled_arrival_count": 49124,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 3,
@@ -11090,6 +11676,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1031.0,
@@ -11101,6 +11690,7 @@
         },
         "density_rank": 27,
         "expanded_scheduled_arrival_count": 94352,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 9,
@@ -11185,6 +11775,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 622.0,
@@ -11196,6 +11789,7 @@
         },
         "density_rank": 40,
         "expanded_scheduled_arrival_count": 57275,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 4,
@@ -11280,6 +11874,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 30,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 464.0,
@@ -11291,6 +11888,7 @@
         },
         "density_rank": 45,
         "expanded_scheduled_arrival_count": 38619,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 3,
@@ -11375,6 +11973,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1262.0,
@@ -11386,6 +11987,7 @@
         },
         "density_rank": 9,
         "expanded_scheduled_arrival_count": 115628,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 2,
           "distinct_route_count": 9,
@@ -11419,7 +12021,7 @@
             "percentage_at_or_below_limit": 100.0
           }
         },
-        "production_tier": "A",
+        "production_tier": "B",
         "schedule_pattern_event_count": 5288,
         "source_parent_station_id": "de:05315:11710",
         "station": "Köln Friesenplatz",
@@ -11470,6 +12072,9 @@
       },
       {
         "active_service_day_count": 102,
+        "approved_cadence_interval_minutes": 15,
+        "approved_number_of_results": 30,
+        "approved_static_support_basis": "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence",
         "daily_scheduled_arrival_count_statistics": {
           "count": 102,
           "max": 1111.0,
@@ -11481,6 +12086,7 @@
         },
         "density_rank": 15,
         "expanded_scheduled_arrival_count": 101363,
+        "historical_diagnostic_result_limit": 30,
         "interchange_indicators": {
           "distinct_approved_mode_count": 4,
           "distinct_route_count": 23,
@@ -11583,11 +12189,11 @@
           "de:05315:11907",
           "de:05315:11212",
           "de:05315:11610",
-          "de:05315:13411",
-          "de:05315:11710",
-          "de:05315:11810"
+          "de:05315:13411"
         ],
         "B": [
+          "de:05315:11710",
+          "de:05315:11810",
           "de:05315:11411",
           "de:05315:11209",
           "de:05315:11211",
@@ -11605,11 +12211,11 @@
           "de:05315:14611",
           "de:05315:11112",
           "de:05315:14211",
-          "de:05315:11611",
-          "de:05315:17311",
-          "de:05315:11410"
+          "de:05315:11611"
         ],
         "C": [
+          "de:05315:17311",
+          "de:05315:11410",
           "de:05315:11914",
           "de:05315:12711",
           "de:05315:19801",
@@ -11687,43 +12293,43 @@
       "stable_identity_rule": "membership is derived from measured density metrics and immutable source parent identity; mutable runtime rank is not an input",
       "stage12_selection_rank_used": false,
       "tier_counts": {
-        "A": 10,
+        "A": 8,
         "B": 20,
-        "C": 20
+        "C": 22
       }
     }
   },
   "user_decision_gate": {
-    "all_material_design_choices_user_approved": false,
+    "all_material_design_choices_user_approved": true,
     "approval_required_before": [
-      "recording a final Stage 13 production design",
       "starting Stage 14",
       "activating Tiered50",
       "creating production database objects or Windows Scheduled Tasks",
-      "modifying Power BI"
+      "modifying Power BI",
+      "materializing phase assignments or durable claims in production"
     ],
     "material_decisions": {
       "production_cadence": {
-        "approved": false,
-        "technically_evaluated_option": {
-          "candidate_status": "TECHNICALLY_EVALUATED_OPTION",
-          "logical_requests_per_day": 5760,
-          "logical_requests_per_hour": 240,
+        "approved": true,
+        "user_approved_design": {
+          "candidate_status": "APPROVED_STAGE13_DESIGN",
+          "logical_requests_per_day": 5280,
+          "logical_requests_per_hour": 220,
           "monthly_logical_requests": {
-            "30_day": 172800,
-            "31_day": 178560
+            "30_day": 158400,
+            "31_day": 163680
           },
           "reconciliation": {
-            "requests_per_30_minutes": 120,
-            "requests_per_hour_from_30_minute_super_cycle": 240
+            "requests_per_30_minutes": 110,
+            "requests_per_hour_from_30_minute_super_cycle": 220
           },
           "station_count": 50,
           "tiers": [
             {
               "interval_minutes": 5,
-              "logical_requests_per_day": 2880,
-              "logical_requests_per_hour": 120,
-              "station_count": 10,
+              "logical_requests_per_day": 2304,
+              "logical_requests_per_hour": 96,
+              "station_count": 8,
               "tier": "A"
             },
             {
@@ -11735,55 +12341,129 @@
             },
             {
               "interval_minutes": 30,
-              "logical_requests_per_day": 960,
-              "logical_requests_per_hour": 40,
-              "station_count": 20,
+              "logical_requests_per_day": 1056,
+              "logical_requests_per_hour": 44,
+              "station_count": 22,
               "tier": "C"
             }
           ]
-        },
-        "user_approved_design": null
+        }
       },
       "production_concurrency": {
-        "approved": false,
-        "technically_evaluated_option": 2,
-        "user_approved_design": null
+        "approved": true,
+        "bounded_historical_sample": 2,
+        "user_approved_design": 2
       },
       "production_number_of_results": {
-        "approved": false,
-        "technically_evaluated_option": null,
-        "user_approved_design": null
+        "approved": true,
+        "historical_bounded_acceptance": [
+          20,
+          30
+        ],
+        "user_approved_design": {
+          "A": 20,
+          "B": 30,
+          "C": 30
+        }
       },
       "production_retry_policy": {
-        "approved": false,
-        "technically_evaluated_option": {
-          "automatic_retries": 0,
-          "max_attempts": 1
-        },
-        "user_approved_design": null
+        "approved": true,
+        "user_approved_design": {
+          "approved_transient_http_statuses": [
+            408,
+            429,
+            500,
+            502,
+            503,
+            504
+          ],
+          "approved_transient_transport_failure_categories": [
+            "CONNECTION_REFUSED",
+            "NETWORK_UNREACHABLE",
+            "OTHER_NETWORK_FAILURE",
+            "PROXY_OR_ENVIRONMENT_FAILURE",
+            "TIMEOUT",
+            "TLS_FAILURE"
+          ],
+          "automatic_retry_count_max": 1,
+          "do_not_retry_deterministic_parser_schema_errors": true,
+          "do_not_retry_deterministic_request_contract_errors": true,
+          "do_not_retry_deterministic_trias_application_errors": true,
+          "do_not_retry_http_statuses": [
+            401,
+            403
+          ],
+          "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+          "initial_attempt_included": true,
+          "max_attempts": 2,
+          "one_failed_station_does_not_abort_other_due_targets": true,
+          "respect_retry_after_for_http_429": true
+        }
+      },
+      "production_tier_membership": {
+        "approved": true,
+        "user_approved_design": {
+          "density_rank_ranges": {
+            "A": "1-8",
+            "B": "9-28",
+            "C": "29-50"
+          },
+          "panel_version": "TIERED50_PANEL_V1"
+        }
       }
     },
-    "production_cadence_approved": false,
-    "production_concurrency_approved": false,
-    "production_number_of_results_approved": false,
-    "production_retry_policy_approved": false,
-    "production_tier_membership_approved": false,
-    "stage_13_complete_allowed": false,
-    "status": "USER_APPROVAL_REQUIRED",
-    "technical_evaluation_status": "TECHNICALLY_EVALUATED_OPTIONS_RECORDED",
-    "user_approval_received": false
+    "production_cadence_approved": true,
+    "production_concurrency_approved": true,
+    "production_number_of_results_approved": true,
+    "production_retry_policy_approved": true,
+    "production_tier_membership_approved": true,
+    "stage_13_complete_allowed": true,
+    "status": "USER_APPROVED_FINAL_STAGE13_DESIGN",
+    "technical_evaluation_status": "RETAINED_AND_RECONCILED",
+    "user_approval_received": true
   },
   "user_review_preferences": {
-    "number_of_results": "UNDECIDED_PENDING_CORRECTED_DIAGNOSTIC",
-    "preferred_bounded_production_concurrency": 2,
-    "preferred_cadence_candidate": "8/20/22 @ 5/15/30",
-    "preferred_concurrency_condition": "subject to Stage 14 end-to-end dry-run validation",
-    "preferred_production_retry_policy": {
-      "approved_transient_failures_only": true,
-      "bounded_retry_count": 1,
-      "max_attempts": 2
+    "approved_bounded_production_concurrency": 2,
+    "approved_cadence": "8/20/22 @ 5/15/30",
+    "approved_concurrency_condition": "Stage 14 must validate concurrency 2 end-to-end including actual persistence/database behavior",
+    "approved_number_of_results": {
+      "A": 20,
+      "B": 30,
+      "C": 30
     },
-    "source": "explicit current user recommendation; not a final approval",
-    "stage_13_complete_allowed": false
+    "approved_panel_version": "TIERED50_PANEL_V1",
+    "approved_production_retry_policy": {
+      "approved_transient_http_statuses": [
+        408,
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "approved_transient_transport_failure_categories": [
+        "CONNECTION_REFUSED",
+        "NETWORK_UNREACHABLE",
+        "OTHER_NETWORK_FAILURE",
+        "PROXY_OR_ENVIRONMENT_FAILURE",
+        "TIMEOUT",
+        "TLS_FAILURE"
+      ],
+      "automatic_retry_count_max": 1,
+      "do_not_retry_deterministic_parser_schema_errors": true,
+      "do_not_retry_deterministic_request_contract_errors": true,
+      "do_not_retry_deterministic_trias_application_errors": true,
+      "do_not_retry_http_statuses": [
+        401,
+        403
+      ],
+      "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+      "initial_attempt_included": true,
+      "max_attempts": 2,
+      "one_failed_station_does_not_abort_other_due_targets": true,
+      "respect_retry_after_for_http_429": true
+    },
+    "source": "explicit current user approval recorded in S68.md",
+    "stage_13_complete_allowed": true
   }
 }

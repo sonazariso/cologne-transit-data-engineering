@@ -47,10 +47,14 @@ REQUESTOR_REF = "CologneTransitIntelligence"
 MDD_DIAGNOSTIC_POLICY = "STAGE13_TIERED_READINESS_DIAGNOSTIC_V1"
 HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET = 100
 MDD_RESULT_LIMITS = (5, 10, 20, 30)
-# This remains a technically evaluated option.  It is not a user-approved
-# production setting until the Stage 13 decision gate is explicitly closed.
-MDD_CONCURRENCY_CAP = 2
-PRODUCTION_MAX_ATTEMPTS_CANDIDATE = 1
+# Stage 13 records the approved design, while the live diagnostic remains a
+# bounded historical sample.  No production collector is implemented here.
+PRODUCTION_MAXIMUM_CONCURRENCY = 2
+DIAGNOSTIC_CONCURRENCY_CAP = PRODUCTION_MAXIMUM_CONCURRENCY
+PRODUCTION_MAX_ATTEMPTS = 2
+PRODUCTION_MAX_AUTOMATIC_RETRIES = PRODUCTION_MAX_ATTEMPTS - 1
+PRODUCTION_RETRY_RESERVE_RATE = 0.10
+AUTOMATIC_RETRY_PROTECTION_BOUNDARY = 207_500
 ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS = 24
 PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS = 90
 AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING = (
@@ -99,24 +103,49 @@ LEGACY_ADDITIONAL_ATTEMPT_SHARE = LEGACY_ADDITIONAL_RETRY_ATTEMPTS / LEGACY_HTTP
 LEGACY7_RESERVED_MONTHLY_REQUESTS = {30: 8_640, 31: 8_928}
 DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS = HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET
 FORWARD_WINDOWS_MINUTES = (5, 10, 15, 30)
-# This remains a technically evaluated option.  It must not be serialized as
-# an approved production decision before explicit user approval.
-PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE = 30
+# The historical bounded diagnostic used fixed N30.  The approved production
+# policy is explicitly tier-specific and must not be collapsed to fixed N30.
+HISTORICAL_DIAGNOSTIC_RESULT_LIMIT = 30
+PRODUCTION_NUMBER_OF_RESULTS_BY_TIER = {"A": 20, "B": 30, "C": 30}
+CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION = (
+    "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT"
+)
 
-# Retained only as the historical comparison candidate. It is never used as
-# an approved tier assignment.
-TIERED50_CANDIDATE = (
+APPROVED_TRANSIENT_HTTP_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+APPROVED_TRANSIENT_TRANSPORT_FAILURE_CATEGORIES = frozenset(
+    {
+        "CONNECTION_REFUSED",
+        "NETWORK_UNREACHABLE",
+        "PROXY_OR_ENVIRONMENT_FAILURE",
+        "TIMEOUT",
+        "TLS_FAILURE",
+        "OTHER_NETWORK_FAILURE",
+    }
+)
+
+# A deterministic, persisted phase-capacity order is part of the approved
+# design.  The C order is deliberately a permutation of the balanced counts
+# so the combined six-heartbeat load is 19/18/18/18/19/18.
+FINAL_PHASE_CAPACITIES = {
+    "A": (8,),
+    "B": (7, 7, 6),
+    "C": (4, 3, 4, 3, 4, 4),
+}
+
+# Retained only as the historical comparison candidate. It is never used for
+# the approved tier assignment or runtime phase materialization.
+HISTORICAL_TIERED50_PLAN = (
     {"tier": "A", "station_count": 10, "interval_minutes": 5},
     {"tier": "B", "station_count": 20, "interval_minutes": 10},
     {"tier": "C", "station_count": 20, "interval_minutes": 30},
 )
 
-# The production design candidate is evaluated against measured density and
-# quota evidence, but remains an option until the user decision gate is closed.
+# The final user-approved production design.  This is readiness evidence only;
+# Stage 14 must still implement and validate it end to end.
 PRODUCTION_TIER_PLAN = (
-    {"tier": "A", "station_count": 10, "interval_minutes": 5},
+    {"tier": "A", "station_count": 8, "interval_minutes": 5},
     {"tier": "B", "station_count": 20, "interval_minutes": 15},
-    {"tier": "C", "station_count": 20, "interval_minutes": 30},
+    {"tier": "C", "station_count": 22, "interval_minutes": 30},
 )
 
 
@@ -188,9 +217,9 @@ def duration_statistics(values: Sequence[float]) -> dict[str, Any]:
 
 
 def candidate_cadence(
-    tiers: Sequence[Mapping[str, int]] = TIERED50_CANDIDATE,
+    tiers: Sequence[Mapping[str, int]] = PRODUCTION_TIER_PLAN,
     *,
-    status: str = "CALCULATED_ONLY_NOT_APPROVED",
+    status: str = "APPROVED_STAGE13_DESIGN",
 ) -> dict[str, Any]:
     """Calculate logical request load for a tier-count/cadence candidate."""
 
@@ -241,10 +270,12 @@ def quota_projection(
 
     base = logical_requests_per_hour * 24 * days
     projected = base * (1.0 + additional_attempt_rate)
+    retry_reserve = math.ceil(base * additional_attempt_rate)
     return {
         "days": days,
         "base_logical_requests": base,
         "additional_attempt_rate": _round(additional_attempt_rate, 9),
+        "retry_reserve_requests": retry_reserve,
         "projected_http_requests": _round(projected, 6),
         "percentage_of_250000_ceiling": _round(projected / MONTHLY_CEILING * 100, 6),
         "percentage_of_normal_envelope_min": _round(projected / NORMAL_ENVELOPE_MIN * 100, 6),
@@ -287,7 +318,7 @@ def quota_projection_set(
     scenarios = [
         {
             "label": "normal_zero_retry_policy",
-            "kind": "technically_evaluated_policy",
+            "kind": "historical_comparison_scenario",
             "additional_attempt_rate": 0.0,
         },
         {
@@ -302,9 +333,10 @@ def quota_projection_set(
             "additional_attempt_rate": 0.05,
         },
         {
-            "label": "ten_percent_stress_sensitivity",
-            "kind": "calculation_scenario",
-            "additional_attempt_rate": 0.10,
+            "label": "approved_normal_retry_reserve",
+            "kind": "approved_planning_reserve",
+            "additional_attempt_rate": PRODUCTION_RETRY_RESERVE_RATE,
+            "approved_production_reserve": True,
         },
     ]
     reserved = dict(legacy_reserved_requests or {30: 0, 31: 0})
@@ -352,10 +384,71 @@ def quota_projection_set(
             "NumberOfResults changes response cardinality, not HTTP request count.",
             "Duplicate claimed target/buckets must not issue another HTTP request.",
             "No catch-up burst may spend quota on missed historical buckets.",
-            "The normal Stage 13 retry policy option uses MaxAttempts=1 and zero automatic retries; user approval remains required.",
+            "The approved production retry policy uses MaxAttempts=2, meaning one initial attempt plus at most one automatic retry for approved transient failures.",
+            "The normal planning reserve is 10% of nominal Tiered50 logical requests; it is a quota-planning reserve, not an observed Tiered50 retry rate.",
+            "Automatic retries must be blocked when projected/current monthly consumption would exceed the 207500 conservative protection boundary.",
             "The full documented Legacy7 monthly cadence is reserved conservatively because current shared-account usage is unavailable.",
             "Repository diagnostics are inactive after closeout; the Stage 13 diagnostic hard budget is reserved for reconciliation only.",
         ],
+    }
+
+
+def retry_eligible(
+    *,
+    http_status: int | None = None,
+    transport_failure_category: str | None = None,
+) -> bool:
+    """Return whether the approved policy permits one automatic retry."""
+
+    if http_status in {401, 403}:
+        return False
+    if http_status is not None:
+        return http_status in APPROVED_TRANSIENT_HTTP_STATUS_CODES
+    return transport_failure_category in APPROVED_TRANSIENT_TRANSPORT_FAILURE_CATEGORIES
+
+
+def retry_policy_contract() -> dict[str, Any]:
+    """Return the approved retry contract without implementing a collector."""
+
+    return {
+        "max_attempts": PRODUCTION_MAX_ATTEMPTS,
+        "automatic_retry_count_max": PRODUCTION_MAX_AUTOMATIC_RETRIES,
+        "initial_attempt_included": True,
+        "approved_transient_http_statuses": sorted(APPROVED_TRANSIENT_HTTP_STATUS_CODES),
+        "approved_transient_transport_failure_categories": sorted(
+            APPROVED_TRANSIENT_TRANSPORT_FAILURE_CATEGORIES
+        ),
+        "respect_retry_after_for_http_429": True,
+        "do_not_retry_http_statuses": [401, 403],
+        "do_not_retry_deterministic_request_contract_errors": True,
+        "do_not_retry_deterministic_parser_schema_errors": True,
+        "do_not_retry_deterministic_trias_application_errors": True,
+        "one_failed_station_does_not_abort_other_due_targets": True,
+        "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+    }
+
+
+def automatic_retry_guardrail(
+    current_month_requests: int,
+    projected_automatic_retry_requests: int,
+    *,
+    protection_boundary: int = AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+) -> dict[str, Any]:
+    """Evaluate the Stage 14 automatic-retry quota protection boundary."""
+
+    current = int(current_month_requests)
+    projected = int(projected_automatic_retry_requests)
+    if current < 0 or projected < 0:
+        raise ValueError("monthly request counts must be non-negative")
+    projected_total = current + projected
+    return {
+        "current_month_requests": current,
+        "projected_automatic_retry_requests": projected,
+        "projected_monthly_consumption": projected_total,
+        "automatic_retry_protection_boundary": int(protection_boundary),
+        "automatic_retries_allowed": projected_total <= int(protection_boundary),
+        "over_boundary_action": "BLOCK_AUTOMATIC_RETRY" if projected_total > int(protection_boundary) else "ALLOW_WITHIN_BOUNDARY",
+        "implementation_status": "DESIGN_ONLY_STAGE14_GUARDRAIL_REQUIRED",
     }
 
 
@@ -370,8 +463,30 @@ def _balanced_counts(total: int, slots: int) -> list[int]:
     return [base + (1 if index < remainder else 0) for index in range(slots)]
 
 
+def _phase_capacities_for_tier(
+    tier: Mapping[str, int],
+    *,
+    station_count: int | None = None,
+) -> list[int]:
+    """Return the approved phase order when the final plan is in use."""
+
+    tier_name = str(tier["tier"])
+    expected_count = int(tier["station_count"])
+    actual_count = expected_count if station_count is None else int(station_count)
+    phase_count = _phase_slot_count(int(tier["interval_minutes"]))
+    approved = FINAL_PHASE_CAPACITIES.get(tier_name)
+    if (
+        approved is not None
+        and actual_count == expected_count
+        and len(approved) == phase_count
+        and sum(approved) == expected_count
+    ):
+        return list(approved)
+    return _balanced_counts(actual_count, phase_count)
+
+
 def heartbeat_phase_distribution(
-    tiers: Sequence[Mapping[str, int]] = TIERED50_CANDIDATE,
+    tiers: Sequence[Mapping[str, int]] = PRODUCTION_TIER_PLAN,
 ) -> dict[str, Any]:
     """Reconcile deterministic phase offsets over the cadence super-cycle."""
 
@@ -380,7 +495,7 @@ def heartbeat_phase_distribution(
     for tier in tiers:
         slots = _phase_slot_count(int(tier["interval_minutes"]))
         super_cycle_steps = math.lcm(super_cycle_steps, slots)
-        tier_phase_counts[str(tier["tier"])] = _balanced_counts(int(tier["station_count"]), slots)
+        tier_phase_counts[str(tier["tier"])] = _phase_capacities_for_tier(tier)
 
     total_due = []
     per_tier_due: dict[str, list[int]] = {str(tier["tier"]): [] for tier in tiers}
@@ -418,7 +533,12 @@ def heartbeat_phase_distribution(
             "assignment_hash": "SHA-256(panel version + tier + immutable SamplingTargetId)",
             "phase_index_is_persisted": True,
             "independent_of_mutable_rank_order": True,
-            "balanced_phase_rule": "sort by stable identity hash and fill deterministic phase capacities in order",
+            "balanced_phase_rule": "sort by stable identity hash and fill the persisted deterministic phase capacities in order",
+            "approved_phase_capacity_order": {
+                tier: list(capacities)
+                for tier, capacities in FINAL_PHASE_CAPACITIES.items()
+            },
+            "optimal_total_distribution": [19, 18, 18, 18, 19, 18],
             "materialization_status": "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED",
         },
     }
@@ -455,7 +575,10 @@ def phase_assignments_for_tier_rows(
         cadence = cadence_by_tier[tier_name]
         interval = int(cadence["interval_minutes"])
         phase_count = _phase_slot_count(interval)
-        capacities = _balanced_counts(len(rows_by_tier[tier_name]), phase_count)
+        capacities = _phase_capacities_for_tier(
+            cadence,
+            station_count=len(rows_by_tier[tier_name]),
+        )
         ordered = sorted(
             rows_by_tier[tier_name],
             key=lambda row: hashlib.sha256(
@@ -474,6 +597,7 @@ def phase_assignments_for_tier_rows(
                         "interval_minutes": interval,
                         "phase_index": phase_index,
                         "phase_count": phase_count,
+                        "phase_capacity": capacities[phase_index],
                         "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
                     }
                 )
@@ -794,6 +918,88 @@ def _assign_production_tiers(station_rows: Sequence[Mapping[str, Any]]) -> tuple
     }
 
 
+def _annotate_approved_density_rows(
+    station_rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Reapply the approved density tiers and result-limit policy to retained rows."""
+
+    updated, tier_assignment = _assign_production_tiers(station_rows)
+    for row in updated:
+        tier_name = str(row["production_tier"])
+        tier = next(item for item in PRODUCTION_TIER_PLAN if str(item["tier"]) == tier_name)
+        interval = int(tier["interval_minutes"])
+        row["approved_cadence_interval_minutes"] = interval
+        row["approved_number_of_results"] = PRODUCTION_NUMBER_OF_RESULTS_BY_TIER[tier_name]
+        row["historical_diagnostic_result_limit"] = HISTORICAL_DIAGNOSTIC_RESULT_LIMIT
+        row["approved_static_support_basis"] = (
+            "station-level P95 and observed station-day window maximum recalculated from retained exact-feed evidence"
+        )
+    final_static_support = _tier_specific_static_fit(
+        updated,
+        PRODUCTION_TIER_PLAN,
+        PRODUCTION_NUMBER_OF_RESULTS_BY_TIER,
+    )
+    return updated, tier_assignment, final_static_support
+
+
+def _retained_stage13_density(root: Path) -> dict[str, Any] | None:
+    """Recalculate final density outputs from the retained Stage 13 rows offline."""
+
+    path = root / "docs" / "stages" / "13-tiered-collector-readiness-evidence.json"
+    if not path.exists():
+        return None
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    retained = existing.get("static_event_density", {})
+    raw_rows = retained.get("station_tier_rows", [])
+    source_snapshot = retained.get("source_snapshot", {})
+    if (
+        retained.get("status") != "COMPLETE"
+        or len(raw_rows) != 50
+        or source_snapshot.get("feed_version") != STAGE12_FEED_VERSION
+        or source_snapshot.get("zip_sha256") != STAGE12_ZIP_SHA256
+    ):
+        return None
+    rows, tier_assignment, final_static_support = _annotate_approved_density_rows(
+        json.loads(json.dumps(raw_rows))
+    )
+    recalculated = json.loads(json.dumps(retained))
+    recalculated.update(
+        {
+            "status": "COMPLETE",
+            "blockers": [],
+            "station_tier_rows": rows,
+            "tier_assignment": tier_assignment,
+            "final_approved_static_support": final_static_support,
+            "recalculation": {
+                "basis": "retained Stage 13 station-level exact-feed evidence",
+                "source_path": "docs/stages/13-tiered-collector-readiness-evidence.json",
+                "network_access_required": False,
+                "gtfs_zip_reopened": False,
+                "stage12_panel_membership_changed": False,
+            },
+            "coverage_conclusion": (
+                "The retained exact static snapshot supports deterministic density-based final tier membership and "
+                "the approved A20/B30/C30 static planning limits; it does not guarantee realtime response coverage."
+            ),
+        }
+    )
+    recalculated["source_snapshot"] = {
+        **source_snapshot,
+        "retained_stage13_source_evidence": "docs/stages/13-tiered-collector-readiness-evidence.json",
+        "recalculated_offline_for_final_stage13_design": True,
+    }
+    recalculated["analysis_contract"] = {
+        **recalculated.get("analysis_contract", {}),
+        "final_tier_membership_basis": "density ranks 1–8 / 9–28 / 29–50 from retained exact-feed metrics",
+        "final_number_of_results_policy": dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER),
+        "final_static_support_recalculated": True,
+    }
+    return recalculated
+
+
 def _static_limit_support(
     station_rows: Sequence[Mapping[str, Any]],
     number_of_results: int,
@@ -839,7 +1045,7 @@ def _static_event_density(
 ) -> dict[str, Any]:
     """Analyze rolling scheduled-arrival density from the exact Stage 12 ZIP."""
 
-    del root, stage4  # retained in the signature for callers of the prior audit module
+    del stage4  # retained in the signature for callers of the prior audit module
     stage12_evidence = stage12_evidence or {}
     base_source = {
         "feed_version": STAGE12_FEED_VERSION,
@@ -861,6 +1067,9 @@ def _static_event_density(
             "coverage_conclusion": "NOT_ESTABLISHED",
         }
     if gtfs_zip is None:
+        retained = _retained_stage13_density(root)
+        if retained is not None:
+            return retained
         return {
             "status": "NOT_ESTABLISHED",
             "blockers": ["EXACT_STAGE12_GTFS_SNAPSHOT_REQUIRED_FOR_DENSITY"],
@@ -999,16 +1208,16 @@ def _static_event_density(
             "daily_scheduled_arrival_count_statistics": value_statistics(daily_counts),
             "window_event_count_statistics": window_statistics,
             "window_definition": "maximum scheduled arrivals in [scheduled arrival anchor, anchor + window) on each active service day",
-            "production_result_limit_candidate": PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
-            "production_result_limit_static_coverage": {
+            "historical_diagnostic_result_limit": HISTORICAL_DIAGNOSTIC_RESULT_LIMIT,
+            "historical_diagnostic_result_limit_static_coverage": {
                 str(window): {
                     "active_service_days_at_or_below_limit": sum(
-                        value <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE for value in daily_maxima[window]
+                        value <= HISTORICAL_DIAGNOSTIC_RESULT_LIMIT for value in daily_maxima[window]
                     ),
                     "active_service_day_count": len(daily_maxima[window]),
                     "percentage_at_or_below_limit": _round(
                         (
-                            sum(value <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE for value in daily_maxima[window])
+                            sum(value <= HISTORICAL_DIAGNOSTIC_RESULT_LIMIT for value in daily_maxima[window])
                             / len(daily_maxima[window])
                             * 100
                         )
@@ -1018,7 +1227,7 @@ def _static_event_density(
                     ),
                     "p95_at_or_below_limit": (
                         window_statistics[str(window)]["p95"] is not None
-                        and window_statistics[str(window)]["p95"] <= PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
+                        and window_statistics[str(window)]["p95"] <= HISTORICAL_DIAGNOSTIC_RESULT_LIMIT
                     ),
                 }
                 for window in FORWARD_WINDOWS_MINUTES
@@ -1026,7 +1235,7 @@ def _static_event_density(
         }
         station_rows.append(row)
 
-    station_rows, tier_assignment = _assign_production_tiers(station_rows)
+    station_rows, tier_assignment, final_static_support = _annotate_approved_density_rows(station_rows)
     global_distribution = {
         "active_service_day_scheduled_arrival_counts": value_statistics(all_daily_counts),
         "station_level_p95_by_window": {
@@ -1067,7 +1276,8 @@ def _static_event_density(
         "station_tier_rows": station_rows,
         "tier_assignment": tier_assignment,
         "distribution": global_distribution,
-        "coverage_conclusion": "The exact static snapshot supports deterministic density-based tier membership and N=30 as a planning limit for each tier cadence window; it does not guarantee realtime response coverage.",
+        "coverage_conclusion": "The exact static snapshot supports deterministic density-based final tier membership and the approved A20/B30/C30 static planning limits; it does not guarantee realtime response coverage.",
+        "final_approved_static_support": final_static_support,
         "static_vs_realtime_boundary": "scheduled static density is planning evidence only and is not realtime response cardinality",
     }
 
@@ -1737,8 +1947,8 @@ def _run_live_diagnostics(
             stop_reason = stop_reason or "CURRENT_RUN_CLIENT_ATTEMPT_BUDGET_REACHED"
             break
         started = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=MDD_CONCURRENCY_CAP) as executor:
-            futures = [executor.submit(execute, candidate, PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE) for candidate in pair]
+        with ThreadPoolExecutor(max_workers=DIAGNOSTIC_CONCURRENCY_CAP) as executor:
+            futures = [executor.submit(execute, candidate, HISTORICAL_DIAGNOSTIC_RESULT_LIMIT) for candidate in pair]
             results = [future.result() for future in futures]
         batch_elapsed_ms = (time.perf_counter() - started) * 1000
         pair_batch_durations.append(batch_elapsed_ms)
@@ -1749,7 +1959,7 @@ def _run_live_diagnostics(
                 stage8,
                 result,
                 candidate,
-                number_of_results=PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE,
+                number_of_results=HISTORICAL_DIAGNOSTIC_RESULT_LIMIT,
                 dep_arr_time=anchor,
                 execution_mode="bounded_concurrency_cap_2",
                 pair_id=f"PAIR_{pair_index}",
@@ -1834,7 +2044,7 @@ def _run_live_diagnostics(
             "include_previous_calls": True,
             "include_onward_calls": True,
             "include_realtime_data": True,
-            "max_attempts": PRODUCTION_MAX_ATTEMPTS_CANDIDATE,
+            "max_attempts": 1,
             "retries": 0,
             "timeout_seconds": 30,
             "dep_arr_time_anchor_reused_for_all_result_limit_comparisons": True,
@@ -1858,7 +2068,7 @@ def _run_live_diagnostics(
             },
         },
         "bounded_concurrency_probe": {
-            "requested_max_concurrency": MDD_CONCURRENCY_CAP,
+            "requested_max_concurrency": DIAGNOSTIC_CONCURRENCY_CAP,
             "pair_count": len(pairs),
             **concurrency_accounting,
             "records": concurrency_records,
@@ -2053,7 +2263,7 @@ def _cadence_alternatives(
             legacy_reserved_requests=legacy_reserved_requests,
             diagnostic_reserved_requests=DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
         )
-        stress = next(item for item in projections["projections"] if item["label"] == "ten_percent_stress_sensitivity")
+        stress = next(item for item in projections["projections"] if item["label"] == "approved_normal_retry_reserve")
         rows.append(
             {
                 "label": label,
@@ -2062,10 +2272,10 @@ def _cadence_alternatives(
                 "logical_requests_per_day": cadence["logical_requests_per_day"],
                 "monthly_logical_requests": cadence["monthly_logical_requests"],
                 "static_density_fit_at_n30": _cadence_static_fit(station_rows, tiers, 30) if station_rows else None,
-                "31_day_ten_percent_stress_with_legacy_and_diagnostics": stress["31_day"]["conservative_reserve_reconciliation"],
+                "31_day_approved_retry_reserve_with_legacy_and_diagnostics": stress["31_day"]["conservative_reserve_reconciliation"],
                 "technically_evaluated_option": label == "10_20_20_at_5_15_30_evaluated_option",
                 "user_review_preference": label == "8_20_22_at_5_15_30",
-                "user_approved_design": False,
+                "user_approved_design": label == "8_20_22_at_5_15_30",
             }
         )
     return rows
@@ -2088,6 +2298,11 @@ def _tier_specific_static_fit(
         limit = int(result_limits[tier_name])
         rows = ordered[cursor : cursor + station_count]
         p95_values = [row["window_event_count_statistics"][interval]["p95"] for row in rows]
+        observed_max_values = [
+            row["window_event_count_statistics"][interval]["max"]
+            for row in rows
+            if row["window_event_count_statistics"][interval].get("max") is not None
+        ]
         supported = [value is not None and float(value) <= limit for value in p95_values]
         by_tier[tier_name] = {
             "result_limit": limit,
@@ -2096,6 +2311,9 @@ def _tier_specific_static_fit(
             "station_p95_supported_count": sum(supported),
             "all_station_p95_supported": bool(rows) and all(supported),
             "maximum_station_p95": max(p95_values) if p95_values else None,
+            "maximum_observed_static_scheduled_arrival_count": max(observed_max_values)
+            if observed_max_values
+            else None,
         }
         cursor += station_count
     return {
@@ -2121,10 +2339,7 @@ def _corrected_diagnostic_metric_status(live_diagnostics: Mapping[str, Any]) -> 
         if row.get("http_status") is None
     }
     if records and all(row.get("http_status") is None for row in records) and transport_categories:
-        if len(transport_categories) == 1:
-            category = next(iter(transport_categories))
-            return f"CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_{category}"
-        return "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_TRANSPORT_FAILURE"
+        return CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION
     if all(row.get("http_status") in {401, 403} for row in records):
         return "CORRECTED_DIAGNOSTIC_STOPPED_AUTHORIZATION_FAILURE"
     return "CORRECTED_DIAGNOSTIC_COMPLETED_WITHOUT_USABLE_FORWARD_COVERAGE"
@@ -2173,18 +2388,19 @@ def _result_limit_comparison(
     live_n30 = comparison_for_limit(30)
     return {
         "corrected_diagnostic_status": corrected_status,
+        "corrected_live_limitation": CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION,
         "forward_coverage_metric_basis": "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime",
         "static_scheduled_density_is_not_realtime_coverage": True,
         "static_evidence_boundary": "static scheduled-density evidence is planning evidence only; it is not realtime response coverage",
         "fixed_n20": {
             "static_cadence_window_fit": fixed_n20,
             "corrected_live": live_n20,
-            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+            "decision": "COMPARISON_ONLY_NOT_APPROVED",
         },
         "fixed_n30": {
             "static_cadence_window_fit": fixed_n30,
             "corrected_live": live_n30,
-            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+            "decision": "COMPARISON_ONLY_NOT_APPROVED",
         },
         "tier_specific_a20_b30_c30": {
             "static_cadence_window_fit": tier_specific,
@@ -2196,16 +2412,34 @@ def _result_limit_comparison(
                 },
                 "comparison_status": corrected_status,
             },
-            "decision": "UNDECIDED_NO_VALID_CORRECTED_LIVE_RESPONSES",
+            "decision": "APPROVED_USER_DESIGN_STATIC_SUPPORTED_LIVE_LIMITATION_RETAINED",
+            "approved_production_design": True,
+            "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+            "historical_provider_acceptance": {
+                "accepted_result_limits": [20, 30],
+                "scope": "bounded representative historical diagnostics only",
+                "valid_http_trias_responses": True,
+                "provider_wide_maximum_established": False,
+                "realtime_completeness_guaranteed": False,
+            },
+            "approved_static_support": tier_specific,
+            "corrected_live_limitation": CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION,
         },
         "simpler_alternative": {
             "candidate": "A=20, B=30, C=30",
             "static_cadence_window_fit": tier_specific,
             "corrected_live_status": corrected_status,
-            "recommendation": "NO_SELECTION_UNTIL_VALID_CORRECTED_LIVE_RESPONSES_EXIST",
+            "recommendation": "APPROVED_BY_USER_AS_PRODUCTION_DESIGN_WITH_RETAINED_LIVE_LIMITATION",
         },
         "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-        "number_of_results_finalized": False,
+        "number_of_results_finalized": True,
+        "approved_production_policy": dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER),
+        "approved_policy_basis": [
+            "exact-feed static density support",
+            "bounded historical provider acceptance of N20 and N30",
+            "lower unnecessary response volume for Tier A",
+            "simple two-value configuration",
+        ],
     }
 
 
@@ -2278,7 +2512,7 @@ def _heartbeat_feasibility(
     cap2 = live_diagnostics.get("bounded_concurrency_probe", {})
     batch_stats = cap2.get("pair_batch_duration_statistics_ms", {})
     request_stats = cap2.get("request_duration_statistics_ms", {})
-    batch_count = math.ceil(max_due / MDD_CONCURRENCY_CAP) if max_due else 0
+    batch_count = math.ceil(max_due / PRODUCTION_MAXIMUM_CONCURRENCY) if max_due else 0
     p95_batch = batch_stats.get("p95_ms")
     max_batch = batch_stats.get("max_ms")
     estimated_p95 = batch_count * float(p95_batch) if p95_batch is not None else None
@@ -2289,11 +2523,11 @@ def _heartbeat_feasibility(
         "max_due_targets_in_one_heartbeat": max_due,
         "requests_per_super_cycle": phase.get("super_cycle_total_logical_requests"),
         "requests_per_hour": phase.get("hour_total_logical_requests"),
-        "technically_evaluated_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2.get("decision") in {
+        "technically_evaluated_maximum_concurrency": PRODUCTION_MAXIMUM_CONCURRENCY if cap2.get("decision") in {
             "APPROVED_MAXIMUM_CONCURRENCY_2",
             "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
         } else None,
-        "user_approved_maximum_concurrency": False,
+        "user_approved_maximum_concurrency": True,
         "cap2_request_duration_statistics_ms": request_stats,
         "cap2_pair_batch_duration_statistics_ms": batch_stats,
         "max_due_batches_at_cap2": batch_count,
@@ -2301,7 +2535,7 @@ def _heartbeat_feasibility(
         "estimated_max_observed_heartbeat_execution_ms": _round(estimated_max, 3),
         "finish_within_five_minute_heartbeat_at_observed_p95": estimated_p95 is not None and estimated_p95 <= 300_000,
         "finish_within_five_minute_heartbeat_at_observed_max": estimated_max is not None and estimated_max <= 300_000,
-        "feasibility_decision": "FEASIBLE_WITH_TECHNICALLY_EVALUATED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
+        "feasibility_decision": "FEASIBLE_WITH_APPROVED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
     }
 
 
@@ -2392,7 +2626,7 @@ def _reuse_existing_live_diagnostics(
         )
         production_selection["decision"] = (
             "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
-            if production_selection["technically_evaluated_number_of_results"] == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
+            if production_selection["technically_evaluated_number_of_results"] == HISTORICAL_DIAGNOSTIC_RESULT_LIMIT
             else "NOT_ESTABLISHED"
         )
         production_selection["production_number_of_results"] = None
@@ -2485,7 +2719,7 @@ def _reuse_existing_live_diagnostics(
     production_selection["decision"] = "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
     production_selection["technically_evaluated_number_of_results"] = production_selection.get(
         "technically_evaluated_number_of_results",
-        production_selection.get("production_number_of_results", PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE),
+        production_selection.get("production_number_of_results", HISTORICAL_DIAGNOSTIC_RESULT_LIMIT),
     )
     production_selection["production_number_of_results"] = None
     production_selection["user_approved_design"] = False
@@ -2777,24 +3011,23 @@ def build_evidence(
 
     number_limit_probe = live.get("result_limit_probe", {})
     production_selection = number_limit_probe.get("production_selection", {}) if isinstance(number_limit_probe, Mapping) else {}
-    technically_evaluated_number_of_results = production_selection.get(
+    historically_evaluated_number_of_results = production_selection.get(
         "technically_evaluated_number_of_results",
         production_selection.get("production_number_of_results"),
     )
-    selected_number_of_results = None
     cap2_probe = live.get("bounded_concurrency_probe", {})
     cap2_evaluated = cap2_probe.get("decision") in {
         "APPROVED_MAXIMUM_CONCURRENCY_2",
         "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
     }
-    cadence = candidate_cadence(PRODUCTION_TIER_PLAN, status="TECHNICALLY_EVALUATED_OPTION")
+    cadence = candidate_cadence(PRODUCTION_TIER_PLAN, status="APPROVED_STAGE13_DESIGN")
     alternatives = _cadence_alternatives(station_rows, legacy_reserved_requests=LEGACY7_RESERVED_MONTHLY_REQUESTS)
     quota = quota_projection_set(
         cadence["logical_requests_per_hour"],
         legacy_reserved_requests=LEGACY7_RESERVED_MONTHLY_REQUESTS,
         diagnostic_reserved_requests=DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
     )
-    ten_percent_projection = next(item for item in quota["projections"] if item["label"] == "ten_percent_stress_sensitivity")
+    ten_percent_projection = next(item for item in quota["projections"] if item["label"] == "approved_normal_retry_reserve")
     quota_safety_closed = all(
         item["31_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
         and item["30_day"]["conservative_reserve_reconciliation"]["within_normal_envelope_max"]
@@ -2812,16 +3045,25 @@ def build_evidence(
         blockers.append("STAGE_12_PANEL_APPROVAL_REQUIRED")
     if density.get("status") != "COMPLETE":
         blockers.append("STATIC_EVENT_DENSITY_NOT_ESTABLISHED")
-    if technically_evaluated_number_of_results != PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE:
-        blockers.append("PRODUCTION_NUMBER_OF_RESULTS_EVIDENCE_NOT_ESTABLISHED")
     if not cap2_evaluated:
         blockers.append("CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED")
     if not quota_safety_closed:
         blockers.append("QUOTA_HEADROOM_NOT_ESTABLISHED")
     if len(station_rows) == 50 and len(phase_assignments) != 50:
         blockers.append("PHASE_ASSIGNMENT_NOT_ESTABLISHED")
-    blockers.append("USER_DESIGN_APPROVAL_REQUIRED")
-    status = "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED"
+    design_ready = (
+        stage12_approved
+        and density.get("status") == "COMPLETE"
+        and cap2_evaluated
+        and quota_safety_closed
+        and len(station_rows) == 50
+        and len(phase_assignments) == 50
+    )
+    status = (
+        "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED"
+        if design_ready
+        else "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED"
+    )
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     result_limit_evidence = _historical_result_limit_evidence(root)
@@ -2833,14 +3075,22 @@ def build_evidence(
     live["additional_request_gate"] = additional_request_gate
     result_limit_evidence.update(
         {
-            "decision": (
-                "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
-                if technically_evaluated_number_of_results == PRODUCTION_NUMBER_OF_RESULTS_CANDIDATE
-                else "NOT_ESTABLISHED"
-            ),
-            "technically_evaluated_number_of_results": technically_evaluated_number_of_results,
-            "production_number_of_results": None,
+            "decision": "APPROVED_USER_DESIGN_A20_B30_C30",
+            "historically_evaluated_number_of_results": historically_evaluated_number_of_results,
+            "production_number_of_results": dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER),
+            "production_number_of_results_policy": "A20/B30/C30",
             "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+            "historical_provider_acceptance": {
+                "accepted_result_limits": [20, 30],
+                "scope": "bounded representative historical diagnostics only",
+                "valid_http_trias_responses": True,
+                "provider_wide_maximum_established": False,
+                "realtime_completeness_guaranteed": False,
+            },
+            "approved_static_support": number_of_results_comparison[
+                "tier_specific_a20_b30_c30"
+            ]["static_cadence_window_fit"],
+            "corrected_live_limitation": CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION,
             "additional_request_gate": additional_request_gate,
             "corrected_metric_status": corrected_metric_status,
             "failed_corrected_diagnostic_audit": {
@@ -2899,7 +3149,7 @@ def build_evidence(
                 "result_limit_probe": number_limit_probe,
                 "additional_request_gate": additional_request_gate,
             },
-            "selection_limitation": "N=20, N=30, and A20/B30/C30 remain undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses. Static scheduled-density evidence is planning evidence only and is not realtime coverage evidence.",
+            "selection_limitation": "The approved A20/B30/C30 policy is a user-approved production-design choice; provider-wide maximum, guaranteed realtime completeness, guaranteed 20/30-event availability, and complete realtime forward coverage remain unestablished.",
         }
     )
     if live.get("historical_invalidated_sequential_records"):
@@ -2914,55 +3164,59 @@ def build_evidence(
         "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
         "CURRENT_SHARED_CREDENTIAL_USAGE_NOT_OBSERVED; FULL_DOCUMENTED_LEGACY7_CADENCE_RESERVED_CONSERVATIVELY",
         "STATIC_DENSITY_IS_PLANNING_EVIDENCE_ONLY_NOT_REALTIME_RESPONSE_COVERAGE",
-        "USER_DESIGN_APPROVAL_REQUIRED_FOR_NUMBER_OF_RESULTS_CADENCE_CONCURRENCY_AND_RETRY_POLICY",
-        corrected_metric_status,
+        "HISTORICAL_BOUNDED_N20_N30_ACCEPTANCE_IS_NOT_GUARANTEED_REALTIME_COMPLETENESS",
+        "GUARANTEED_20_30_EVENT_AVAILABILITY_NOT_ESTABLISHED",
+        "COMPLETE_REALTIME_FORWARD_COVERAGE_NOT_ESTABLISHED",
+        CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION,
     ]
     user_decision_gate = {
-        "status": "USER_APPROVAL_REQUIRED",
-        "technical_evaluation_status": "TECHNICALLY_EVALUATED_OPTIONS_RECORDED",
-        "user_approval_received": False,
-        "all_material_design_choices_user_approved": False,
-        "stage_13_complete_allowed": False,
-        "production_number_of_results_approved": False,
-        "production_concurrency_approved": False,
-        "production_cadence_approved": False,
-        "production_retry_policy_approved": False,
-        "production_tier_membership_approved": False,
+        "status": "USER_APPROVED_FINAL_STAGE13_DESIGN",
+        "technical_evaluation_status": "RETAINED_AND_RECONCILED",
+        "user_approval_received": True,
+        "all_material_design_choices_user_approved": True,
+        "stage_13_complete_allowed": True,
+        "production_number_of_results_approved": True,
+        "production_concurrency_approved": True,
+        "production_cadence_approved": True,
+        "production_retry_policy_approved": True,
+        "production_tier_membership_approved": True,
         "material_decisions": {
             "production_number_of_results": {
-                "technically_evaluated_option": technically_evaluated_number_of_results,
-                "user_approved_design": None,
-                "approved": False,
+                "historical_bounded_acceptance": [20, 30],
+                "user_approved_design": dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER),
+                "approved": True,
             },
             "production_concurrency": {
-                "technically_evaluated_option": MDD_CONCURRENCY_CAP if cap2_evaluated else None,
-                "user_approved_design": None,
-                "approved": False,
+                "bounded_historical_sample": PRODUCTION_MAXIMUM_CONCURRENCY,
+                "user_approved_design": PRODUCTION_MAXIMUM_CONCURRENCY,
+                "approved": True,
             },
             "production_cadence": {
-                "technically_evaluated_option": cadence,
-                "user_approved_design": None,
-                "approved": False,
+                "user_approved_design": cadence,
+                "approved": True,
             },
             "production_retry_policy": {
-                "technically_evaluated_option": {
-                    "max_attempts": PRODUCTION_MAX_ATTEMPTS_CANDIDATE,
-                    "automatic_retries": 0,
+                "user_approved_design": retry_policy_contract(),
+                "approved": True,
+            },
+            "production_tier_membership": {
+                "user_approved_design": {
+                    "panel_version": PANEL_VERSION,
+                    "density_rank_ranges": {"A": "1-8", "B": "9-28", "C": "29-50"},
                 },
-                "user_approved_design": None,
-                "approved": False,
+                "approved": True,
             },
         },
         "approval_required_before": [
-            "recording a final Stage 13 production design",
             "starting Stage 14",
             "activating Tiered50",
             "creating production database objects or Windows Scheduled Tasks",
             "modifying Power BI",
+            "materializing phase assignments or durable claims in production",
         ],
     }
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-4.0",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.0",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
         "stage_13_status": status,
@@ -2995,12 +3249,13 @@ def build_evidence(
             "stage03a-mdd-discovery.jsonl",
         ],
         "candidate_cadence": {
-            "historical_comparison": candidate_cadence(TIERED50_CANDIDATE),
+            "historical_comparison": candidate_cadence(HISTORICAL_TIERED50_PLAN, status="HISTORICAL_COMPARISON"),
             "technically_evaluated_option": cadence,
-            "user_approved_design": None,
+            "user_approved_design": cadence,
             "cadence_selection_alternatives": alternatives,
-            "selection_reason": "The measured density technically supports the 10/20/20 count split with a 5/15/30-minute cadence option, while the old 5/10/30 comparison exceeds the normal planning envelope. This is an evaluated option pending explicit user approval.",
+            "selection_reason": "The user-approved 8/20/22 split follows the deterministic density ranks 1–8 / 9–28 / 29–50 and reconciles to 220 logical requests/hour, 110 per 30-minute super-cycle, and 220 per hour.",
         },
+        "retry_policy": retry_policy_contract(),
         "cadence_boundary_review": cadence_boundary_review,
         "number_of_results_comparison": number_of_results_comparison,
         "future_live_diagnostic_execution_boundary": {
@@ -3021,24 +3276,21 @@ def build_evidence(
             "api_key_requirement": "provide MDD_API_KEY through the inherited environment only; never put the key in command text or evidence",
         },
         "user_review_preferences": {
-            "source": "explicit current user recommendation; not a final approval",
-            "preferred_cadence_candidate": "8/20/22 @ 5/15/30",
-            "preferred_bounded_production_concurrency": 2,
-            "preferred_concurrency_condition": "subject to Stage 14 end-to-end dry-run validation",
-            "preferred_production_retry_policy": {
-                "max_attempts": 2,
-                "bounded_retry_count": 1,
-                "approved_transient_failures_only": True,
-            },
-            "number_of_results": "UNDECIDED_PENDING_CORRECTED_DIAGNOSTIC",
-            "stage_13_complete_allowed": False,
+            "source": "explicit current user approval recorded in S68.md",
+            "approved_panel_version": PANEL_VERSION,
+            "approved_cadence": "8/20/22 @ 5/15/30",
+            "approved_bounded_production_concurrency": PRODUCTION_MAXIMUM_CONCURRENCY,
+            "approved_concurrency_condition": "Stage 14 must validate concurrency 2 end-to-end including actual persistence/database behavior",
+            "approved_production_retry_policy": retry_policy_contract(),
+            "approved_number_of_results": dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER),
+            "stage_13_complete_allowed": True,
         },
         "quota": {
             **quota,
-            "technically_evaluated_option": {
-                "normal_retry_policy": "MaxAttempts=1; zero automatic retries; failed targets are independently recorded and wait for the next current logical bucket",
-                "user_approved_design": None,
-                "evidence_supported_retry_allowance": 0,
+            "approved_production_design": {
+                "normal_retry_policy": retry_policy_contract(),
+                "user_approved_design": True,
+                "normal_retry_reserve_rate": PRODUCTION_RETRY_RESERVE_RATE,
                 "historical_legacy_retry_sensitivity": _round(LEGACY_ADDITIONAL_ATTEMPT_SHARE, 9),
                 "legacy_current_usage_observed": False,
                 "legacy_reserved_conservatively": dict(LEGACY7_RESERVED_MONTHLY_REQUESTS),
@@ -3047,12 +3299,22 @@ def build_evidence(
                 "corrected_diagnostic_provider_quota_consumption_status": live.get(
                     "provider_quota_consumption_status"
                 ),
-                "thirty_day_nominal_conservative_total": quota["projections"][0]["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
-                "thirty_one_day_nominal_conservative_total": quota["projections"][0]["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
-                "thirty_one_day_ten_percent_stress_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "thirty_day_nominal_requests": quota["projections"][0]["30_day"]["base_logical_requests"],
+                "thirty_one_day_nominal_requests": quota["projections"][0]["31_day"]["base_logical_requests"],
+                "thirty_day_retry_reserve_requests": ten_percent_projection["30_day"]["retry_reserve_requests"],
+                "thirty_one_day_retry_reserve_requests": ten_percent_projection["31_day"]["retry_reserve_requests"],
+                "thirty_day_tiered50_with_retry_reserve": ten_percent_projection["30_day"]["projected_http_requests"],
+                "thirty_one_day_tiered50_with_retry_reserve": ten_percent_projection["31_day"]["projected_http_requests"],
+                "thirty_day_conservative_planning_total": ten_percent_projection["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "thirty_one_day_conservative_planning_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+                "automatic_retry_protection_boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+                "automatic_retry_guardrail": automatic_retry_guardrail(
+                    0,
+                    ten_percent_projection["31_day"]["projected_http_requests"],
+                ),
                 "quota_safety_gate_closed_without_fabricated_current_usage": quota_safety_closed,
-                "production_cadence_approved": False,
-                "production_retry_policy_approved": False,
+                "production_cadence_approved": True,
+                "production_retry_policy_approved": True,
             },
         },
         "credential_consumers": _credential_consumers(),
@@ -3060,6 +3322,12 @@ def build_evidence(
         "static_event_density": density,
         "execution_duration_evidence": _load_duration_evidence(root),
         "retry_and_http_attempt_evidence": {
+            "approved_production_retry_policy": retry_policy_contract(),
+            "automatic_retry_quota_guardrail": {
+                "boundary": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+                "rule": "block automatic retries when projected/current monthly consumption would exceed 207500",
+                "stage14_required": True,
+            },
             "source_controlled_bounded_populations": [
                 {
                     "population": "Stage 3A ten-station MDD discovery",
@@ -3118,11 +3386,20 @@ def build_evidence(
         "phase_staggering": phase,
         "heartbeat_feasibility": heartbeat,
         "sequential_vs_bounded_concurrency": {
-            "decision": "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL" if cap2_evaluated else "NOT_ESTABLISHED",
-            "approval_state": "USER_APPROVAL_REQUIRED" if cap2_evaluated else "NOT_ESTABLISHED",
-            "technically_evaluated_maximum_concurrency": MDD_CONCURRENCY_CAP if cap2_evaluated else None,
-            "maximum_concurrency": None,
-            "user_approved_design": False,
+            "decision": "APPROVED_MAXIMUM_CONCURRENCY_2" if cap2_evaluated else "NOT_ESTABLISHED",
+            "approval_state": "USER_APPROVED" if cap2_evaluated else "NOT_ESTABLISHED",
+            "technically_evaluated_maximum_concurrency": PRODUCTION_MAXIMUM_CONCURRENCY if cap2_evaluated else None,
+            "maximum_concurrency": PRODUCTION_MAXIMUM_CONCURRENCY if cap2_evaluated else None,
+            "user_approved_design": cap2_evaluated,
+            "approval_rationale": [
+                "sequential execution is technically feasible under current HTTP measurements",
+                "bounded cap-2 was successfully tested on the retained representative sample",
+                "concurrency 2 provides additional heartbeat execution margin",
+                "no 429, timeout, 5xx, transport-pressure, or parse failure was observed in the bounded cap-2 sample",
+                "cap-2 is not a provider-wide rate-limit claim",
+            ],
+            "stage14_activation_condition": "validate concurrency 2 end-to-end including actual persistence/database behavior; stop activation on provider pressure, SQL contention, persistence instability, overlap problems, or other material failure",
+            "values_above_two_require_new_evidence_and_decision": True,
             "bounded_live_diagnostic": live.get("bounded_concurrency_probe", {}),
             "sequential_live_diagnostic": live.get("sequential_duration_evidence", {}),
             "historical_stage8_observed_average_wall_seconds_per_attempt": _round(3606.801 / 343, 6),
@@ -3152,7 +3429,7 @@ def build_evidence(
             "production_scheduler_implemented": False,
         },
         "failure_isolation": {
-            "decision": "TECHNICALLY_EVALUATED_REQUIREMENT_PENDING_USER_APPROVAL",
+            "decision": "APPROVED_DESIGN_REQUIREMENT",
             "one_failed_station_aborts_remaining_due_targets": False,
             "per_target_fields": [
                 "logical_due_bucket",
@@ -3176,14 +3453,16 @@ def build_evidence(
             "cutover_performed": False,
         },
         "readiness_decision": {
-            "production_cadence_approved": False,
-            "production_tier_membership_approved": False,
-            "production_number_of_results_approved": False,
-            "production_concurrency_approved": False,
-            "production_retry_policy_approved": False,
+            "production_cadence_approved": True,
+            "production_tier_membership_approved": True,
+            "production_number_of_results_approved": True,
+            "production_concurrency_approved": True,
+            "production_retry_policy_approved": True,
+            "stage_13_status": status,
             "production_activation": "NOT_STARTED",
             "limitations": remaining_limitations,
             "blockers": blockers,
+            "stage_14_status": "NOT STARTED",
             "stage_14_started": False,
             "tiered50_activated": False,
             "power_bi_modified": False,
@@ -3193,8 +3472,8 @@ def build_evidence(
     }
 
 
-def validate_evidence(evidence: Mapping[str, Any]) -> None:
-    """Validate the Stage 13 machine-readable schema and hard boundaries."""
+def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
+    """Validate the closed Stage 13 design without network or live side effects."""
 
     required = {
         "artifact_version",
@@ -3205,9 +3484,9 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         "candidate_cadence",
         "cadence_boundary_review",
         "quota",
+        "retry_policy",
         "number_of_results",
         "number_of_results_comparison",
-        "user_review_preferences",
         "static_event_density",
         "phase_staggering",
         "heartbeat_feasibility",
@@ -3220,100 +3499,172 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
     missing = sorted(required - set(evidence))
     if missing:
         raise ValueError(f"Stage 13 evidence missing required fields: {missing}")
-    if evidence["stage_12_gate"].get("approved_panel_version") == PANEL_VERSION:
-        if evidence["stage_12_gate"].get("panel_station_count") != 50:
-            raise ValueError("approved Stage 12 panel must contain exactly 50 stations")
-    if evidence["overlap_and_duplicate_execution_contract"].get("unique_execution_identity") != [
-        "SamplingTargetId",
-        "LogicalDueBucket",
-    ]:
-        raise ValueError("unique execution identity contract changed")
-    if evidence["readiness_decision"].get("stage_14_started"):
-        raise ValueError("Stage 14 must remain not started")
-    if evidence["readiness_decision"].get("tiered50_activated"):
-        raise ValueError("Tiered50 must remain inactive")
+    final_status = "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED"
+    if evidence.get("stage_13_status") != final_status:
+        raise ValueError("Stage 13 is not in the final approved readiness state")
+
+    stage12 = evidence["stage_12_gate"]
+    if stage12.get("approved_panel_version") != PANEL_VERSION or stage12.get("panel_station_count") != 50:
+        raise ValueError("approved Stage 12 panel must remain TIERED50_PANEL_V1 with exactly 50 stations")
+    if stage12.get("panel_membership_changed") is not False:
+        raise ValueError("Stage 12 panel membership changed")
+
+    density = evidence["static_event_density"]
+    rows = list(density.get("station_tier_rows", []))
+    if density.get("status") != "COMPLETE" or len(rows) != 50:
+        raise ValueError("final density evidence must contain exactly 50 complete station rows")
+    if density.get("tier_assignment", {}).get("tier_counts") != {"A": 8, "B": 20, "C": 22}:
+        raise ValueError("final density tier counts are not 8/20/22")
+    ordered = sorted(rows, key=lambda row: int(row["density_rank"]))
+    if [int(row["density_rank"]) for row in ordered] != list(range(1, 51)):
+        raise ValueError("density ranks must be the complete immutable 1–50 ordering")
+    expected_tiers = ["A"] * 8 + ["B"] * 20 + ["C"] * 22
+    if [row.get("production_tier") for row in ordered] != expected_tiers:
+        raise ValueError("final tier membership is not density ranks 1–8 / 9–28 / 29–50")
+    if density.get("tier_assignment", {}).get("stage12_selection_rank_used") is not False:
+        raise ValueError("mutable Stage 12 SelectionRank was used for production tiers")
+
+    plan = evidence["candidate_cadence"].get("user_approved_design", {})
+    if plan.get("logical_requests_per_hour") != 220 or plan.get("monthly_logical_requests") != {
+        "30_day": 158400,
+        "31_day": 163680,
+    }:
+        raise ValueError("approved cadence arithmetic does not reconcile to 220/hour")
+    expected_plan = {"A": (8, 5), "B": (20, 15), "C": (22, 30)}
+    for tier in plan.get("tiers", []):
+        if expected_plan.get(str(tier.get("tier"))) != (
+            int(tier.get("station_count", -1)),
+            int(tier.get("interval_minutes", -1)),
+        ):
+            raise ValueError("approved cadence/tier plan is not 8/20/22 @ 5/15/30")
+
+    static_support = density.get("final_approved_static_support", {})
+    if static_support.get("station_p95_supported_count") != 50 or not static_support.get("all_station_p95_supported"):
+        raise ValueError("final static P95 support is not 50/50")
+    expected_support = {
+        "A": (8, 20, 19, 20),
+        "B": (20, 30, 23, 23),
+        "C": (22, 30, 29, 29),
+    }
+    for tier_name, (count, result_limit, p95_max, observed_max) in expected_support.items():
+        row = static_support.get("by_tier", {}).get(tier_name, {})
+        if (
+            row.get("station_count"),
+            row.get("result_limit"),
+            row.get("maximum_station_p95"),
+            row.get("maximum_observed_static_scheduled_arrival_count"),
+        ) != (count, result_limit, p95_max, observed_max):
+            raise ValueError(f"final exact-feed static support mismatch for Tier {tier_name}")
+
+    result_limits = evidence["number_of_results"]
+    if result_limits.get("production_number_of_results") != dict(PRODUCTION_NUMBER_OF_RESULTS_BY_TIER):
+        raise ValueError("approved tier-specific NumberOfResults policy is not A20/B30/C30")
+    if result_limits.get("decision") != "APPROVED_USER_DESIGN_A20_B30_C30":
+        raise ValueError("NumberOfResults approval decision is missing")
+    if result_limits.get("provider_maximum_status") != "PROVIDER_MAXIMUM_NOT_ESTABLISHED":
+        raise ValueError("provider maximum boundary was weakened")
+    if result_limits.get("corrected_live_limitation") != CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION:
+        raise ValueError("corrected live forward-coverage limitation was changed")
+    comparison = evidence["number_of_results_comparison"]
+    if comparison.get("tier_specific_a20_b30_c30", {}).get("decision") != "APPROVED_USER_DESIGN_STATIC_SUPPORTED_LIVE_LIMITATION_RETAINED":
+        raise ValueError("approved tier-specific NumberOfResults comparison is missing")
+
     gate = evidence["user_decision_gate"]
     required_gate_flags = {
         "production_number_of_results_approved",
         "production_concurrency_approved",
         "production_cadence_approved",
-        "production_retry_policy_approved",
         "production_tier_membership_approved",
+        "production_retry_policy_approved",
+        "user_approval_received",
+        "all_material_design_choices_user_approved",
+        "stage_13_complete_allowed",
     }
-    if any(gate.get(flag) is not False for flag in required_gate_flags):
-        raise ValueError("Stage 13 material design approval flags must remain false until explicit user approval")
-    if gate.get("all_material_design_choices_user_approved") is not False:
-        raise ValueError("Stage 13 cannot be complete without explicit user approval")
-    if evidence.get("stage_13_status") != "IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED":
-        raise ValueError("Stage 13 must remain in the reopened user-approval state")
-    additional_gate = evidence["number_of_results"].get("additional_request_gate", {})
-    if additional_gate.get("approval_request") != ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST or {
-        "requested_additional_client_request_attempts": additional_gate.get("requested_additional_client_request_attempts"),
-        "historical_client_diagnostic_attempts": additional_gate.get("historical_client_diagnostic_attempts"),
-        "prior_cumulative_client_request_invocations": additional_gate.get("prior_cumulative_client_request_invocations"),
-        "historical_initial_diagnostic_budget": additional_gate.get("historical_initial_diagnostic_budget"),
-        "explicit_additional_user_authorization": additional_gate.get("explicit_additional_user_authorization"),
-        "authorized_cumulative_client_attempt_ceiling": additional_gate.get("authorized_cumulative_client_attempt_ceiling"),
-    } != {
-        "requested_additional_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "historical_client_diagnostic_attempts": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
-        "prior_cumulative_client_request_invocations": additional_gate.get("prior_cumulative_client_request_invocations"),
-        "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
-        "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "authorized_cumulative_client_attempt_ceiling": additional_gate.get("prior_cumulative_client_request_invocations", PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS)
-        + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-    }:
-        raise ValueError("corrected Stage 13 NumberOfResults request gate is not preserved")
-    prior_cumulative = additional_gate.get(
-        "prior_cumulative_client_request_invocations",
-        PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
-    )
-    if prior_cumulative not in {
-        PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
-        AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
-    }:
-        raise ValueError("Stage 13 prior cumulative client-invocation count is not auditable")
-    issued = additional_gate.get("additional_client_request_attempts_issued")
-    if not isinstance(issued, int) or not 0 <= issued <= ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
-        raise ValueError("corrected Stage 13 additional request count is outside the explicit gate")
-    if additional_gate.get("approved") is False and (issued != 0 or additional_gate.get("corrected_live_diagnostic_issued") is not False):
-        raise ValueError("corrected Stage 13 requests were issued without approval")
-    bounded_live = evidence["number_of_results"].get("bounded_live_diagnostic", {})
-    accounting_fields = {
-        "client_request_attempts_issued",
-        "http_responses_received",
-        "confirmed_provider_http_attempts",
-        "provider_quota_consumption_status",
-        "conservative_quota_accounting_attempts",
-    }
-    if not accounting_fields <= set(bounded_live):
-        raise ValueError("Stage 13 live diagnostic accounting fields are incomplete")
-    if any(
-        obsolete in bounded_live
-        for obsolete in (
-            "http_attempts_consumed",
-            "current_run_http_attempts_consumed",
-            "prior_attempts_consumed",
-            "max_http_attempts",
-        )
-    ):
-        raise ValueError("ambiguous HTTP-attempt accounting field remains in Stage 13 evidence")
-    audit = evidence["number_of_results"].get("failed_corrected_diagnostic_audit", {})
-    if audit.get("client_request_attempts_issued") == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
-        if audit.get("http_responses_received") != 0:
-            raise ValueError("failed corrected diagnostic must retain zero HTTP responses")
-        if audit.get("confirmed_provider_http_attempts") != 0:
-            raise ValueError("failed corrected diagnostic cannot confirm provider HTTP attempts")
-        if audit.get("provider_quota_consumption_status") != PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE:
-            raise ValueError("failed corrected diagnostic provider quota status is not conservative/unknown")
-        if audit.get("conservative_quota_accounting_attempts") != ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
-            raise ValueError("conservative quota accounting must be separately labeled as 24 attempts")
+    if any(gate.get(flag) is not True for flag in required_gate_flags):
+        raise ValueError("final Stage 13 user-decision gate is not fully approved")
 
-    def require_population_accounting(
-        label: str,
-        aggregate: Mapping[str, Any],
-        records: Sequence[Mapping[str, Any]],
-    ) -> None:
+    retry = evidence["retry_policy"]
+    if retry.get("max_attempts") != 2 or retry.get("automatic_retry_count_max") != 1:
+        raise ValueError("approved retry policy must allow at most one retry")
+    if retry.get("approved_transient_http_statuses") != [408, 429, 500, 502, 503, 504]:
+        raise ValueError("approved transient HTTP retry statuses changed")
+    if retry.get("do_not_retry_http_statuses") != [401, 403]:
+        raise ValueError("401/403 retry prohibition changed")
+    if evidence["quota"]["approved_production_design"].get("automatic_retry_protection_boundary") != 207500:
+        raise ValueError("automatic-retry quota protection boundary changed")
+
+    approved_projection = next(
+        item for item in evidence["quota"]["projections"]
+        if item.get("label") == "approved_normal_retry_reserve"
+    )
+    expected_quota = {
+        "30_day": (158400, 15840, 174240, 182980),
+        "31_day": (163680, 16368, 180048, 189076),
+    }
+    for day, (base, reserve, tiered, total) in expected_quota.items():
+        projection = approved_projection[day]
+        reconciliation = projection["conservative_reserve_reconciliation"]
+        if projection.get("base_logical_requests") != base or projection.get("retry_reserve_requests") != reserve:
+            raise ValueError(f"{day} nominal/retry reserve arithmetic does not reconcile")
+        if projection.get("projected_http_requests") != tiered:
+            raise ValueError(f"{day} Tiered50 retry-reserve projection does not reconcile")
+        if reconciliation.get("conservative_total_http_requests") != total:
+            raise ValueError(f"{day} conservative planning total does not reconcile")
+
+    phase = evidence["phase_staggering"]
+    if phase.get("total_due_targets_by_heartbeat") != [19, 18, 18, 18, 19, 18]:
+        raise ValueError("final heartbeat phase distribution is not the persisted balanced order")
+    if phase.get("super_cycle_total_logical_requests") != 110 or phase.get("hour_total_logical_requests") != 220:
+        raise ValueError("final phase super-cycle/hour totals do not reconcile")
+    if phase.get("max_due_targets_in_one_heartbeat") != 19:
+        raise ValueError("final maximum heartbeat load is not 19")
+    if phase.get("tier_phase_distribution") != [
+        {
+            "tier": "A",
+            "interval_minutes": 5,
+            "phase_count": 1,
+            "phase_target_counts": [8],
+            "due_targets_by_heartbeat": [8, 8, 8, 8, 8, 8],
+        },
+        {
+            "tier": "B",
+            "interval_minutes": 15,
+            "phase_count": 3,
+            "phase_target_counts": [7, 7, 6],
+            "due_targets_by_heartbeat": [7, 7, 6, 7, 7, 6],
+        },
+        {
+            "tier": "C",
+            "interval_minutes": 30,
+            "phase_count": 6,
+            "phase_target_counts": [4, 3, 4, 3, 4, 4],
+            "due_targets_by_heartbeat": [4, 3, 4, 3, 4, 4],
+        },
+    ]:
+        raise ValueError("final persisted tier phase capacities changed")
+    assignments = phase.get("phase_assignments", [])
+    if len(assignments) != 50 or len({row.get("sampling_target_identity") for row in assignments}) != 50:
+        raise ValueError("all 50 final phase assignments must be unique and auditable")
+    if assignments != phase_assignments_for_tier_rows(rows):
+        raise ValueError("phase assignments are not reproducible from immutable identity")
+
+    concurrency = evidence["sequential_vs_bounded_concurrency"]
+    if concurrency.get("maximum_concurrency") != PRODUCTION_MAXIMUM_CONCURRENCY or not concurrency.get("user_approved_design"):
+        raise ValueError("approved concurrency must be bounded MaximumConcurrency=2")
+    if concurrency.get("values_above_two_require_new_evidence_and_decision") is not True:
+        raise ValueError("concurrency-above-two decision guardrail is missing")
+
+    overlap = evidence["overlap_and_duplicate_execution_contract"]
+    if overlap.get("unique_execution_identity") != ["SamplingTargetId", "LogicalDueBucket"]:
+        raise ValueError("unique execution identity contract changed")
+    if overlap.get("catch_up_behavior") is not False or overlap.get("production_scheduler_implemented") is not False:
+        raise ValueError("historical catch-up or scheduler implementation boundary changed")
+
+    historical_records = result_limits.get("historical_invalidated_sequential_records", [])
+    if len(historical_records) != 24:
+        raise ValueError("historical sequential evidence must retain 24 records")
+
+    def require_population_accounting(label: str, aggregate: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> None:
         expected = _request_accounting(
             len(records),
             sum(row.get("http_status") is not None for row in records),
@@ -3329,39 +3680,66 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
             if aggregate.get(field) != expected[field]:
                 raise ValueError(f"{label} accounting does not reconcile from retained records")
 
-    historical_records = evidence["number_of_results"].get(
-        "historical_invalidated_sequential_records", []
-    )
-    historical_summaries = evidence["number_of_results"].get(
-        "historical_invalidated_sequential_summary_by_result_limit", {}
-    )
-    if len(historical_records) != 24:
-        raise ValueError("historical Stage 13 sequential population must retain 24 records")
     require_population_accounting(
         "historical sequential diagnostic",
         evidence["sequential_vs_bounded_concurrency"].get("sequential_live_diagnostic", {}),
         historical_records,
     )
-    for number in MDD_RESULT_LIMITS:
-        rows = [row for row in historical_records if row.get("requested_result_limit") == number]
-        summary = historical_summaries.get(str(number), {})
-        if len(rows) != 6 or "request_count" in summary:
-            raise ValueError("historical Stage 13 per-limit accounting is not normalized")
-        require_population_accounting(f"historical N={number} diagnostic", summary, rows)
-        if any(row.get("forward_temporal_span_status") != "INVALID_FOR_FORWARD_COVERAGE_DECISION" for row in rows):
-            raise ValueError("historical Stage 13 forward-span invalidation was changed")
-
     cap2 = evidence["sequential_vs_bounded_concurrency"].get("bounded_live_diagnostic", {})
     cap2_records = cap2.get("records", [])
-    if len(cap2_records) != 6:
-        raise ValueError("retained Stage 13 cap-2 population must retain six records")
+    if len(cap2_records) != 6 or any(row.get("http_status") != 200 for row in cap2_records):
+        raise ValueError("retained cap-2 evidence must contain six HTTP 200 records")
     require_population_accounting("cap-2 diagnostic", cap2, cap2_records)
-    if any(row.get("http_status") != 200 for row in cap2_records):
-        raise ValueError("retained Stage 13 cap-2 population must contain six HTTP 200 responses")
+    failed = result_limits.get("failed_corrected_diagnostic_audit", {})
+    if {
+        failed.get("client_request_attempts_issued"),
+        failed.get("http_responses_received"),
+        failed.get("confirmed_provider_http_attempts"),
+        failed.get("provider_quota_consumption_status"),
+        failed.get("conservative_quota_accounting_attempts"),
+    } != {
+        24,
+        0,
+        0,
+        PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        24,
+    }:
+        raise ValueError("failed corrected diagnostic accounting changed")
+    if failed.get("status") != "INVALID_FOR_NUMBER_OF_RESULTS_DECISION":
+        raise ValueError("failed corrected diagnostic must remain invalid for final coverage evidence")
+    additional_gate = result_limits.get("additional_request_gate", {})
+    if (
+        additional_gate.get("historical_initial_diagnostic_budget") != 100
+        or additional_gate.get("explicit_additional_user_authorization") != 24
+        or additional_gate.get("prior_cumulative_client_request_invocations") != 90
+        or additional_gate.get("authorized_cumulative_client_attempt_ceiling") != 114
+    ):
+        raise ValueError("historical 100-budget and explicit 24 authorization are not separated")
+
     readiness = evidence["readiness_decision"]
-    for flag in required_gate_flags:
-        if readiness.get(flag) is not False:
-            raise ValueError(f"readiness decision {flag} must remain false")
+    for flag in (
+        "production_cadence_approved",
+        "production_tier_membership_approved",
+        "production_number_of_results_approved",
+        "production_concurrency_approved",
+        "production_retry_policy_approved",
+    ):
+        if readiness.get(flag) is not True:
+            raise ValueError(f"readiness decision {flag} is not approved")
+    if readiness.get("stage_14_started") or readiness.get("stage_14_status") != "NOT STARTED":
+        raise ValueError("Stage 14 must remain NOT STARTED")
+    if readiness.get("tiered50_activated") or readiness.get("production_activation") != "NOT_STARTED":
+        raise ValueError("Tiered50 production must remain inactive")
+    if readiness.get("production_database_objects_created") or readiness.get("windows_scheduled_tasks_created") or readiness.get("power_bi_modified"):
+        raise ValueError("Stage 13 created or modified a prohibited production artifact")
+    if evidence["historical_continuity"].get("cutover_performed") is not False:
+        raise ValueError("historical Legacy7/Tiered50 cutover occurred in Stage 13")
+
+
+def validate_evidence(evidence: Mapping[str, Any]) -> None:
+    """Validate the final Stage 13 machine-readable schema and hard boundaries."""
+
+    return _validate_final_evidence(evidence)
 
 
 def main() -> int:
