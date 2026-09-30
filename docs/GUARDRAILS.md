@@ -277,8 +277,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     not replay a missed historical bucket or fabricate a realtime snapshot.
 98. Future phase assignments must be deterministic, persisted/configured,
     auditable, versioned with the sampling panel, and independent of mutable
-    rank ordering. The approved due sequence is 19/18/18/18/19/18, with
-    capacities A 8, B 7/7/6, and C 4/3/4/3/4/4.
+    rank ordering. For the approved Stage 13 design, the assignment identity
+    is `source_parent_station_id / parent StopPointRef` and the hash is
+    `SHA-256(panel version + tier + source_parent_station_id)`; production
+    phase-index persistence is a Stage 14 materialization obligation. The
+    approved due sequence is 19/18/18/18/19/18, with capacities A 8, B 7/7/6,
+    and C 4/3/4/3/4/4.
 99. One failed station must not abort other due targets. Audit, HTTP status,
     attempts, duration, parser, persistence, and error metadata remain
     independently attributable to each target.

@@ -425,8 +425,12 @@ The readiness handoff adds the following future collector requirements:
   the winning claim may issue HTTP;
 - stale/incomplete claims remain observable, but missed historical buckets are
   never replayed or fabricated;
-- phase assignments are persisted/configured from immutable target identity and
-  are independent of mutable ranking;
+- phase assignments use the immutable approved panel identity
+  `source_parent_station_id / parent StopPointRef` and the equivalent hash
+  `SHA-256(panel version + tier + source_parent_station_id)`; Stage 14 must
+  persist/materialize the finalized indexes without recomputing from database
+  `SamplingTargetId` values, and assignments remain independent of mutable
+  ranking;
 - one failed target does not abort other due targets, and per-target audit,
   status, attempts, duration, parser, persistence, and error metadata remain
   independent; and

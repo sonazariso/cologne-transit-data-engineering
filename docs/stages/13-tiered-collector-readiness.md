@@ -6,7 +6,8 @@
 **Production activation:** `NOT STARTED`
 
 This is the final Stage 13 design decision approved explicitly in the current
-conversation and recorded in `prompts/S68.md`. The authoritative artifact is
+conversation and recorded in `prompts/S68.md`, with the post-closeout
+correctness hardening recorded in D-050. The authoritative artifact is
 [`13-tiered-collector-readiness-evidence.json`](13-tiered-collector-readiness-evidence.json).
 This closeout made no MDD request, DNS/live-network operation, database change,
 Windows Scheduled Task, Power BI change, target-row creation, scheduler
@@ -31,9 +32,11 @@ history.
 | Automatic-retry protection | Block automatic retries at projected/current monthly consumption above `207,500` |
 
 All final station IDs, density ranks, tier assignments, phase assignments, and
-calculated support values are persisted in the machine-readable evidence. The
-runtime assignment basis is approved density evidence plus immutable station
-identity; mutable Stage 12 `SelectionRank` is not a runtime input.
+calculated support values are finalized in the machine-readable design
+evidence. Stage 13 created no production target rows: production phase indexes
+are not persisted yet. The runtime tier assignment basis is approved density
+evidence plus immutable station identity; mutable Stage 12 `SelectionRank` is
+not a runtime input.
 
 ## Stage 12 panel and static source boundary
 
@@ -108,7 +111,7 @@ historical reconciliation, not a recurring production workload.
 
 ## Phase staggering and heartbeat feasibility
 
-The persisted six-heartbeat, 30-minute phase arrangement is:
+The finalized six-heartbeat, 30-minute phase arrangement is:
 
 | Heartbeat | Tier A | Tier B | Tier C | Total due |
 |---:|---:|---:|---:|---:|
@@ -121,16 +124,66 @@ The persisted six-heartbeat, 30-minute phase arrangement is:
 
 The phase capacities are A `8`; B `7/7/6`; and C `4/3/4/3/4/4`.
 This is the minimum possible maximum load for 110 requests distributed over
-six heartbeats, with two heartbeats at 19 and four at 18. Assignments are
-sorted by `SHA-256(panel version + tier + immutable SamplingTargetId)` and the
-persisted capacities are filled in order. Stage 14 may materialize these
-assignments; Stage 13 created no target rows.
+six heartbeats, with two heartbeats at 19 and four at 18. The authoritative
+phase-assignment identity is the immutable approved panel station identity,
+`source_parent_station_id / parent StopPointRef`, and the authoritative hash
+is equivalent to `SHA-256(panel version + tier + source_parent_station_id)`.
+The existing 50 phase indexes reproduce exactly under this corrected identity;
+future database-generated `SamplingTargetId` values do not participate in the
+phase hash. The separate production overlap/claim identity remains
+`(SamplingTargetId, LogicalDueBucket)`.
 
-The final maximum due load is 19. With approved cap-2 and retained bounded
-timing evidence, the calculated P95 heartbeat execution estimate is
-`9,585.91 ms` and the observed-max estimate is `9,771.31 ms`, within the
-five-minute heartbeat. This is bounded HTTP timing evidence, not full
-production SQL-persistence timing; Stage 14 must validate the complete path.
+Stage 13 finalized the phase assignment, but did not persist production phase
+indexes. The evidence records
+`production_phase_index_persisted = false`,
+`phase_index_must_be_persisted_in_stage14 = true`, and
+`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Stage 14 must materialize the
+approved indexes without recomputing them from database-generated IDs.
+
+### Normal observed heartbeat feasibility
+
+With approved cap-2 and retained bounded successful timing observations, the
+calculated P95 heartbeat execution estimate is `9,585.91 ms` and the
+observed-max estimate is `9,771.31 ms`, within the five-minute heartbeat in the
+retained successful sample. This
+is strong normal-observed timing evidence only; it is not a guarantee under
+timeout or retry failure conditions and is not full production
+SQL-persistence timing evidence.
+
+### Degraded-mode heartbeat budget
+
+The production request contract retains a 30-second per-attempt timeout. A
+theoretical timeout-heavy batch at the maximum normal due load is:
+
+| Input | Value |
+|---|---:|
+| Due targets | 19 |
+| Maximum concurrency | 2 |
+| Timeout per attempt | 30 seconds |
+| MaxAttempts | 2 |
+| Theoretical attempts | 38 |
+| Timeout-heavy wall-time pressure at cap-2 | 570 seconds |
+| Current heartbeat execution budget | 300 seconds |
+
+Thus an unconstrained timeout-heavy batch can exceed one logical heartbeat;
+Stage 13 does not lower the request timeout or invent a safety-margin
+duration. Each dispatcher invocation owns only its current logical heartbeat.
+It must not intentionally extend work into later logical buckets, must not
+start an initial attempt unless the remaining heartbeat budget can contain the
+approved attempt timeout, and must not start a retry unless the remaining
+budget can contain both `Retry-After` and the attempt timeout. In-flight work
+must obey the dispatcher deadline/cancellation contract.
+
+Targets not attempted because the budget is exhausted receive the explicit
+auditable outcome `SKIPPED_HEARTBEAT_BUDGET`; retries suppressed for the same
+reason receive `RETRY_SKIPPED_HEARTBEAT_BUDGET`. These outcomes do not trigger
+historical catch-up, are collection-quality outcomes rather than service-
+operational conclusions, and one target exhausting its budget must not abort
+unrelated targets that can still execute. For HTTP 429, `Retry-After` remains
+authoritative, but the dispatcher must not sleep or retry past the current
+heartbeat deadline. Stage 14 must determine and validate a concrete nonzero
+persistence/cleanup safety margin through end-to-end dry-run measurements
+before activation; no Stage 13 duration is assigned.
 
 ## Concurrency, retry, claims, and continuity
 
@@ -146,9 +199,11 @@ failure. A value above 2 requires new evidence and a new decision.
 The approved retry contract permits one automatic retry only for approved
 transient conditions: HTTP 408, 429, 500, 502, 503, 504, and approved
 transient transport/network failures. HTTP 429 must respect `Retry-After` where
-applicable. HTTP 401/403, deterministic request-contract errors, deterministic
-parser/schema errors, and deterministic TRIAS application errors are not
-retryable. One failed station must not abort other due targets.
+applicable, subject to the current heartbeat deadline and the explicit
+`RETRY_SKIPPED_HEARTBEAT_BUDGET` outcome. HTTP 401/403, deterministic
+request-contract errors, deterministic parser/schema errors, and deterministic
+TRIAS application errors are not retryable. One failed station must not abort
+other due targets.
 
 The execution identity remains exactly:
 

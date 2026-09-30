@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -168,6 +169,48 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(assignments, stage13.phase_assignments_for_tier_rows(shuffled))
         self.assertTrue(all("phase_capacity" in row for row in assignments))
 
+    def test_phase_identity_is_parent_stoppointref_and_ignores_future_database_ids(self) -> None:
+        contract = stage13.heartbeat_phase_distribution()["phase_assignment_contract"]
+        self.assertEqual(contract["assignment_key"], "source_parent_station_id / parent StopPointRef")
+        self.assertEqual(
+            contract["assignment_hash"],
+            "SHA-256(panel version + tier + source_parent_station_id)",
+        )
+        rows = json.loads(json.dumps(self.evidence["static_event_density"]["station_tier_rows"]))
+        baseline = stage13.phase_assignments_for_tier_rows(rows)
+        with_future_ids = [
+            {**row, "SamplingTargetId": f"future-db-id-{index}"}
+            for index, row in enumerate(rows, start=1)
+        ]
+        self.assertEqual(baseline, stage13.phase_assignments_for_tier_rows(with_future_ids))
+        self.assertTrue(all("SamplingTargetId" not in row for row in baseline))
+        self.assertTrue(
+            all(
+                row["phase_assignment_identity"] == row["source_parent_station_id"]
+                and row["phase_assignment_identity_type"] == "source_parent_station_id / parent StopPointRef"
+                for row in baseline
+            )
+        )
+
+    def test_existing_50_phase_indexes_reproduce_and_stage14_must_materialize_them(self) -> None:
+        phase = self.evidence["phase_staggering"]
+        assignments = phase["phase_assignments"]
+        recomputed = stage13.phase_assignments_for_tier_rows(
+            json.loads(json.dumps(self.evidence["static_event_density"]["station_tier_rows"]))
+        )
+        self.assertEqual(
+            {row["source_parent_station_id"]: row["phase_index"] for row in assignments},
+            {row["source_parent_station_id"]: row["phase_index"] for row in recomputed},
+        )
+        self.assertTrue(phase["phase_assignment_reproduction"]["phase_indexes_reproduced_exactly"])
+        self.assertEqual(phase["phase_assignment_reproduction"]["compared_assignment_count"], 50)
+        contract = phase["phase_assignment_contract"]
+        self.assertTrue(contract["phase_assignment_finalized_in_stage13"])
+        self.assertFalse(contract["production_phase_index_persisted"])
+        self.assertTrue(contract["phase_index_must_be_persisted_in_stage14"])
+        self.assertEqual(contract["materialization_status"], "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED")
+        self.assertTrue(contract["stage14_must_materialize_without_recomputing_from_database_ids"])
+
     def test_gate_concurrency_overlap_continuity_and_stage14_boundary(self) -> None:
         gate = self.evidence["user_decision_gate"]
         for flag in (
@@ -245,6 +288,60 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(rebuilt["stage_13_status"], FINAL_STATUS)
         self.assertEqual(rebuilt["static_event_density"]["final_approved_static_support"], self.evidence["static_event_density"]["final_approved_static_support"])
 
+    def test_normal_heartbeat_timing_is_separate_from_degraded_timeout_pressure(self) -> None:
+        heartbeat = self.evidence["heartbeat_feasibility"]
+        normal = heartbeat["NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY"]
+        degraded = heartbeat["DEGRADED_MODE_HEARTBEAT_BUDGET"]
+        self.assertTrue(normal["successful_observation_only"])
+        self.assertTrue(normal["not_a_guarantee_under_timeout_or_retry_failure"])
+        self.assertTrue(normal["observed_p95_within_300_second_heartbeat"])
+        self.assertTrue(normal["observed_max_within_300_second_heartbeat"])
+        self.assertEqual(
+            (
+                degraded["max_due_targets"],
+                degraded["maximum_concurrency"],
+                degraded["per_attempt_timeout_seconds"],
+                degraded["max_attempts"],
+                degraded["theoretical_timeout_heavy_attempt_count"],
+                degraded["theoretical_timeout_heavy_wall_seconds_at_cap2"],
+            ),
+            (19, 2, 30, 2, 38, 570),
+        )
+        self.assertTrue(degraded["unconstrained_timeout_heavy_batch_exceeds_300_seconds"])
+
+    def test_degraded_heartbeat_budget_skips_work_and_retry_without_cross_bucket_replay(self) -> None:
+        initial = stage13.dispatcher_heartbeat_budget_decision(275)
+        self.assertFalse(initial["start_allowed"])
+        self.assertEqual(initial["outcome"], stage13.SKIPPED_HEARTBEAT_BUDGET)
+
+        retry = stage13.dispatcher_heartbeat_budget_decision(
+            250,
+            retry=True,
+            retry_after_seconds=30,
+        )
+        self.assertFalse(retry["start_allowed"])
+        self.assertEqual(retry["outcome"], stage13.RETRY_SKIPPED_HEARTBEAT_BUDGET)
+        self.assertTrue(retry["retry_after_respected"])
+        allowed_retry = stage13.dispatcher_heartbeat_budget_decision(
+            240,
+            retry=True,
+            retry_after_seconds=20,
+        )
+        self.assertTrue(allowed_retry["start_allowed"])
+        self.assertIsNone(allowed_retry["outcome"])
+
+        contract = stage13.heartbeat_degraded_mode_contract()
+        self.assertFalse(contract["budget_outcomes_trigger_catch_up"])
+        self.assertTrue(contract["per_target_budget_isolation"])
+        self.assertTrue(contract["budget_exhaustion_does_not_abort_unrelated_targets"])
+        self.assertTrue(contract["retry_after_cannot_cross_heartbeat_deadline"])
+        self.assertTrue(contract["expired_dispatcher_cannot_execute_prior_bucket"])
+        self.assertEqual(contract["target_budget_exhaustion_outcome"], "SKIPPED_HEARTBEAT_BUDGET")
+        self.assertEqual(contract["retry_budget_exhaustion_outcome"], "RETRY_SKIPPED_HEARTBEAT_BUDGET")
+        self.assertFalse(stage13.may_execute_bucket(101, 100))
+        self.assertFalse(contract["persistence_cleanup_safety_margin"]["arbitrary_stage13_duration_invented"])
+        self.assertIsNone(contract["persistence_cleanup_safety_margin"]["stage13_concrete_seconds"])
+
     def test_forward_coverage_uses_thiscall_arrivals_only(self) -> None:
         anchor = "2026-09-30T10:40:00Z"
         bundle = {
@@ -274,6 +371,63 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         metrics = stage13._forward_coverage_metrics(bundle, anchor)
         self.assertEqual(metrics["returned_thiscall_event_count"], 2)
         self.assertEqual(metrics["events_before_anchor_count"], 0)
+        self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
+
+    def test_thiscall_arrival_before_anchor_is_counted_but_not_forward_coverage(self) -> None:
+        anchor = "2026-09-30T10:40:00Z"
+        bundle = {
+            "stop_events": [
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:30:00Z"]}}
+                            ],
+                            "departure_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:31:00Z"]}}
+                            ],
+                        },
+                        {
+                            "call_scope": "ONWARD",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T23:00:00Z"]}}
+                            ],
+                        },
+                        {
+                            "call_scope": "PREVIOUS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T09:00:00Z"]}}
+                            ],
+                        },
+                    ]
+                },
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:42:00Z"]}}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T11:15:00Z"]}}
+                            ]
+                        }
+                    ]
+                },
+            ]
+        }
+        metrics = stage13._forward_coverage_metrics(bundle, anchor)
+        self.assertEqual(metrics["returned_thiscall_event_count"], 3)
+        self.assertEqual(metrics["events_before_anchor_count"], 1)
+        self.assertEqual(metrics["events_at_or_after_anchor_count"], 2)
         self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
 
     def test_network_preflight_failure_issues_zero_mdd_requests(self) -> None:
@@ -342,8 +496,64 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
                 self.assertEqual(result["client_request_attempts_issued"], 1)
                 self.assertEqual(result["stop_reason"], "SMOKE_GATE_STOPPED_HTTP_401_OR_403")
 
+    def test_smoke_gate_network_failure_after_dns_issues_exactly_one_request(self) -> None:
+        rows = self.evidence["static_event_density"]["station_tier_rows"]
+        calls: list[object] = []
+        failed_result = stage8.HTTPResult(
+            request_timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+            request_timestamp_utc="2026-09-30T00:00:00Z",
+            http_status=None,
+            content_type=None,
+            body=b"",
+            elapsed_ms=30_000.0,
+            request_started_mono=1.0,
+            request_ended_mono=30_001.0,
+            failure="NETWORK_UNREACHABLE",
+            failure_detail="NETWORK_UNREACHABLE",
+        )
+
+        def fake_request(*_args: object, **_kwargs: object) -> stage8.HTTPResult:
+            calls.append(object())
+            return failed_result
+
+        preflight = {
+            "status": "DNS_RESOLUTION_OK",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 1,
+            "address_families": ["IPv4"],
+            "safe_failure_category": None,
+        }
+        secret = "offline-secret-api-key-123"
+        with patch.object(stage13, "_network_dns_preflight", return_value=preflight), patch.object(
+            stage8, "perform_http_request", side_effect=fake_request
+        ):
+            result = stage13._run_live_diagnostics(
+                rows,
+                api_key=secret,
+                include_concurrency_probe=False,
+                attempt_budget=24,
+            )
+        self.assertEqual(result["network_preflight"]["status"], "DNS_RESOLUTION_OK")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["client_request_attempts_issued"], 1)
+        self.assertEqual(24 - len(calls), 23)
+        self.assertEqual(
+            result["stop_reason"],
+            "SMOKE_GATE_STOPPED_ENVIRONMENT_FAILURE_NETWORK_UNREACHABLE",
+        )
+        self.assertEqual(result["result_limit_probe"]["smoke_gate"]["status"], "FAILED")
+        record = result["result_limit_probe"]["sequential_records"][0]
+        self.assertEqual(record["transport_failure_category"], "NETWORK_UNREACHABLE")
+        self.assertNotIn(secret, repr(result))
+        self.assertFalse(result["raw_payloads_persisted"])
+
     def test_transport_categories_are_allow_listed_and_secret_free(self) -> None:
         secret = "offline-secret-api-key-123"
+        self.assertEqual(
+            stage8.classify_transport_failure(socket.gaierror("private host detail")),
+            "DNS_RESOLUTION_FAILED",
+        )
         self.assertEqual(stage8.classify_transport_failure(ConnectionRefusedError(secret)), "CONNECTION_REFUSED")
         self.assertEqual(stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"), "OTHER_NETWORK_FAILURE")
         self.assertIn(stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"), stage13.SAFE_TRANSPORT_FAILURE_CATEGORIES)

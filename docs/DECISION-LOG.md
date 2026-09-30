@@ -52,6 +52,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-invocation diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
 | D-048 | 2026-09-30 | Corrected Stage 13 result-limit diagnostic: 24 additional client invocations, 0 HTTP responses, 0 confirmed provider attempts, unknown provider quota consumption, and no final result-limit decision from live coverage | Historical corrected diagnostic result; superseded by D-049 |
 | D-049 | 2026-09-30 | Explicit final approval of Stage 13 tiered collector readiness: fixed TIERED50_PANEL_V1, density ranks 1–8/9–28/29–50, 8/20/22 at 5/15/30 minutes, A20/B30/C30, concurrency 2, MaxAttempts=2 with one approved transient retry, 10% retry reserve, exact quota guardrail, phase sequence 19/18/18/18/19/18, and atomic overlap contract | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
+| D-050 | 2026-09-30 | Stage 13 post-closeout contract hardening: separate normal-observed timing from degraded heartbeat-budget feasibility, correct phase assignment to source_parent_station_id / parent StopPointRef, clarify design-time versus production phase-index materialization, and restore critical offline regressions without changing approved production values | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -945,6 +946,55 @@ This closeout does not create a scheduler, database objects, Windows scheduled
 tasks, Power BI artifacts, or a collector activation, and it does not start
 Stage 14. The current shared-credential audit remains a prerequisite for any
 future activation decision.
+
+## D-050 — Stage 13 Contract-Hardening Correction
+
+**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
+NOT STARTED
+
+D-050 is a post-closeout correctness correction. D-046 through D-049 remain
+historical decision records and are not rewritten. The authoritative current
+Stage 13 evidence now separates `NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY` from
+`DEGRADED_MODE_HEARTBEAT_BUDGET`. Retained successful cap-2 timing supports
+normal observed feasibility (`9,585.91 ms` P95 estimate and `9,771.31 ms`
+observed-max estimate), but it is not a degraded-mode guarantee. The
+theoretical maximum normal batch has 19 due targets, concurrency 2, a
+30-second per-attempt timeout, and MaxAttempts 2: 38 timeout-heavy attempts
+produce 570 seconds of wall-time pressure at cap-2, exceeding the 300-second
+heartbeat if unconstrained.
+
+The bounded degraded-mode contract is explicit: a dispatcher owns only its
+current logical heartbeat; it must not extend work into later logical buckets;
+it must not start an initial attempt or retry without sufficient remaining
+budget; in-flight work obeys the heartbeat deadline/cancellation contract;
+budget exhaustion is recorded as `SKIPPED_HEARTBEAT_BUDGET` or
+`RETRY_SKIPPED_HEARTBEAT_BUDGET`; those outcomes do not trigger catch-up and
+are collection-quality outcomes rather than service-operational conclusions;
+and one target's exhausted budget does not abort unrelated targets. HTTP 429
+continues to respect `Retry-After` but cannot sleep or retry past the current
+deadline. Stage 14 must determine and validate a concrete nonzero
+persistence/cleanup safety margin with end-to-end dry-run measurements; Stage
+13 assigns no arbitrary duration.
+
+The authoritative phase-assignment identity is corrected to
+`source_parent_station_id / parent StopPointRef`, with hash
+`SHA-256(panel version + tier + source_parent_station_id)`. All 50 approved
+phase indexes reproduce exactly; future database-generated `SamplingTargetId`
+values cannot change them. The production overlap/claim identity remains
+`(SamplingTargetId, LogicalDueBucket)`. Phase assignment is finalized in Stage
+13, but `production_phase_index_persisted = false` and
+`phase_index_must_be_persisted_in_stage14 = true`; the status remains
+`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`.
+
+The offline regression suite restores independent coverage for THIS-call
+pre-anchor timing, post-DNS smoke-gate transport failure, degraded heartbeat
+budget/deadline behavior, and parent-StopPointRef phase identity, including
+the existing DNS-zero-request and 401/403 safeguards. No MDD request, DNS
+lookup, or live-network operation was issued for this correction. The approved
+`TIERED50_PANEL_V1`, 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits,
+MaximumConcurrency 2, MaxAttempts 2, one approved transient retry, 10% retry
+reserve, quota boundary, phase sequence, no-catch-up rule, and Legacy7
+continuity remain unchanged. Stage 14 remains `NOT STARTED`.
 
 ## D-047 — Stage 13 Reopened for Explicit User Design Approval
 

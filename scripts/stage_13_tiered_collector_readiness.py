@@ -96,6 +96,7 @@ NORMAL_ENVELOPE_MIN = 207_500
 NORMAL_ENVELOPE_MAX = 210_000
 HEARTBEAT_MINUTES = 5
 HEARTBEAT_SECONDS = HEARTBEAT_MINUTES * 60
+PRODUCTION_REQUEST_TIMEOUT_SECONDS = 30
 LEGACY_EXECUTIONS = 1_599
 LEGACY_HTTP_ATTEMPTS = 1_629
 LEGACY_ADDITIONAL_RETRY_ATTEMPTS = 35
@@ -110,6 +111,12 @@ PRODUCTION_NUMBER_OF_RESULTS_BY_TIER = {"A": 20, "B": 30, "C": 30}
 CORRECTED_LIVE_FORWARD_COVERAGE_LIMITATION = (
     "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT"
 )
+
+PHASE_ASSIGNMENT_IDENTITY = "source_parent_station_id / parent StopPointRef"
+PHASE_ASSIGNMENT_HASH = "SHA-256(panel version + tier + source_parent_station_id)"
+PHASE_INDEX_MATERIALIZATION_STATUS = "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED"
+SKIPPED_HEARTBEAT_BUDGET = "SKIPPED_HEARTBEAT_BUDGET"
+RETRY_SKIPPED_HEARTBEAT_BUDGET = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
 
 APPROVED_TRANSIENT_HTTP_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 APPROVED_TRANSIENT_TRANSPORT_FAILURE_CATEGORIES = frozenset(
@@ -419,12 +426,112 @@ def retry_policy_contract() -> dict[str, Any]:
             APPROVED_TRANSIENT_TRANSPORT_FAILURE_CATEGORIES
         ),
         "respect_retry_after_for_http_429": True,
+        "retry_after_must_fit_current_heartbeat_deadline": True,
+        "retry_budget_exhaustion_outcome": RETRY_SKIPPED_HEARTBEAT_BUDGET,
         "do_not_retry_http_statuses": [401, 403],
         "do_not_retry_deterministic_request_contract_errors": True,
         "do_not_retry_deterministic_parser_schema_errors": True,
         "do_not_retry_deterministic_trias_application_errors": True,
         "one_failed_station_does_not_abort_other_due_targets": True,
         "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+    }
+
+
+def heartbeat_degraded_mode_contract() -> dict[str, Any]:
+    """Return the bounded dispatcher contract for degraded execution.
+
+    Stage 13 records the deadline and outcome contract only.  It does not
+    implement a dispatcher, choose a persistence/cleanup margin, or change
+    the production per-attempt timeout.
+    """
+
+    return {
+        "dispatcher_invocation_owns_only_current_logical_heartbeat": True,
+        "heartbeat_execution_budget_seconds": HEARTBEAT_SECONDS,
+        "production_work_must_not_extend_into_later_logical_buckets": True,
+        "initial_attempt_start_rule": (
+            "start only when the remaining current-heartbeat execution budget is at least the "
+            "approved per-attempt timeout"
+        ),
+        "retry_start_rule": (
+            "start only when the remaining current-heartbeat execution budget can contain both "
+            "Retry-After and the approved per-attempt timeout"
+        ),
+        "in_flight_operation_deadline_contract": (
+            "an in-flight operation must obey the dispatcher heartbeat deadline and cancellation contract"
+        ),
+        "target_budget_exhaustion_outcome": SKIPPED_HEARTBEAT_BUDGET,
+        "retry_budget_exhaustion_outcome": RETRY_SKIPPED_HEARTBEAT_BUDGET,
+        "budget_outcomes_trigger_catch_up": False,
+        "budget_outcome_classification": "COLLECTION_QUALITY_OUTCOME_NOT_SERVICE_OPERATIONAL_CONCLUSION",
+        "per_target_budget_isolation": True,
+        "budget_exhaustion_does_not_abort_unrelated_targets": True,
+        "retry_after_cannot_cross_heartbeat_deadline": True,
+        "http_429_retry_after_rule": (
+            "respect Retry-After; do not sleep or retry past the current heartbeat deadline; "
+            "record RETRY_SKIPPED_HEARTBEAT_BUDGET when it cannot fit"
+        ),
+        "expired_dispatcher_next_heartbeat_behavior": (
+            "an expired dispatcher cannot execute its prior bucket; the next heartbeat may execute "
+            "only its current logical bucket"
+        ),
+        "expired_dispatcher_cannot_execute_prior_bucket": True,
+        "persistence_cleanup_safety_margin": {
+            "stage13_concrete_seconds": None,
+            "required_before_stage14_activation": True,
+            "requirement": (
+                "Stage 14 must determine and validate a concrete nonzero persistence/cleanup safety "
+                "margin with end-to-end dry-run measurements before activation"
+            ),
+            "arbitrary_stage13_duration_invented": False,
+        },
+        "implementation_status": "DESIGN_ONLY_STAGE14_IMPLEMENTATION_REQUIRED",
+    }
+
+
+def dispatcher_heartbeat_budget_decision(
+    elapsed_seconds: float,
+    *,
+    retry: bool = False,
+    retry_after_seconds: float = 0.0,
+    operation_timeout_seconds: int = PRODUCTION_REQUEST_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Decide whether one attempt may start before the current deadline.
+
+    This is an offline contract helper, not a network operation.  It models
+    the approved 30-second request timeout and leaves any Stage 14
+    persistence/cleanup margin to end-to-end measurement.
+    """
+
+    elapsed = float(elapsed_seconds)
+    retry_after = float(retry_after_seconds)
+    timeout = int(operation_timeout_seconds)
+    if not math.isfinite(elapsed) or elapsed < 0:
+        raise ValueError("elapsed_seconds must be a finite non-negative number")
+    if not math.isfinite(retry_after) or retry_after < 0:
+        raise ValueError("retry_after_seconds must be a finite non-negative number")
+    if timeout <= 0:
+        raise ValueError("operation_timeout_seconds must be positive")
+
+    remaining = max(0.0, HEARTBEAT_SECONDS - elapsed)
+    required = float(timeout) + (retry_after if retry else 0.0)
+    allowed = remaining >= required
+    return {
+        "retry": bool(retry),
+        "retry_after_seconds": _round(retry_after, 3),
+        "operation_timeout_seconds": timeout,
+        "heartbeat_execution_budget_seconds": HEARTBEAT_SECONDS,
+        "elapsed_seconds": _round(elapsed, 3),
+        "remaining_heartbeat_budget_seconds": _round(remaining, 3),
+        "required_remaining_budget_seconds": _round(required, 3),
+        "start_allowed": allowed,
+        "outcome": None
+        if allowed
+        else RETRY_SKIPPED_HEARTBEAT_BUDGET
+        if retry
+        else SKIPPED_HEARTBEAT_BUDGET,
+        "retry_after_respected": bool(retry),
+        "cannot_cross_current_heartbeat_deadline": True,
     }
 
 
@@ -529,9 +636,11 @@ def heartbeat_phase_distribution(
         "hour_total_logical_requests": sum(total_due) * (60 // (super_cycle_steps * HEARTBEAT_MINUTES)),
         "phase_distribution_reconciles": True,
         "phase_assignment_contract": {
-            "assignment_key": "immutable SamplingTargetId",
-            "assignment_hash": "SHA-256(panel version + tier + immutable SamplingTargetId)",
-            "phase_index_is_persisted": True,
+            "assignment_key": PHASE_ASSIGNMENT_IDENTITY,
+            "assignment_hash": PHASE_ASSIGNMENT_HASH,
+            "phase_assignment_finalized_in_stage13": True,
+            "production_phase_index_persisted": False,
+            "phase_index_must_be_persisted_in_stage14": True,
             "independent_of_mutable_rank_order": True,
             "balanced_phase_rule": "sort by stable identity hash and fill the persisted deterministic phase capacities in order",
             "approved_phase_capacity_order": {
@@ -539,19 +648,20 @@ def heartbeat_phase_distribution(
                 for tier, capacities in FINAL_PHASE_CAPACITIES.items()
             },
             "optimal_total_distribution": [19, 18, 18, 18, 19, 18],
-            "materialization_status": "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED",
+            "materialization_status": PHASE_INDEX_MATERIALIZATION_STATUS,
+            "stage14_must_materialize_without_recomputing_from_database_ids": True,
         },
     }
 
 
-def deterministic_phase_index(sampling_target_id: str, phase_count: int) -> int:
-    """Return a stable candidate phase index from an immutable target ID."""
+def deterministic_phase_index(source_parent_station_id: str, phase_count: int) -> int:
+    """Return a stable candidate phase index from a parent StopPointRef."""
 
-    if not sampling_target_id:
-        raise ValueError("sampling_target_id must not be empty")
+    if not source_parent_station_id:
+        raise ValueError("source_parent_station_id must not be empty")
     if phase_count <= 0:
         raise ValueError("phase_count must be positive")
-    digest = hashlib.sha256(sampling_target_id.encode("utf-8")).digest()
+    digest = hashlib.sha256(source_parent_station_id.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") % phase_count
 
 
@@ -590,7 +700,9 @@ def phase_assignments_for_tier_rows(
             for row in ordered[cursor : cursor + capacity]:
                 assignments.append(
                     {
-                        "sampling_target_identity": row["source_parent_station_id"],
+                        "phase_assignment_identity": row["source_parent_station_id"],
+                        "phase_assignment_identity_type": PHASE_ASSIGNMENT_IDENTITY,
+                        "source_parent_station_id": row["source_parent_station_id"],
                         "station": row["station_name"],
                         "panel_version": panel_version,
                         "production_tier": tier_name,
@@ -598,11 +710,11 @@ def phase_assignments_for_tier_rows(
                         "phase_index": phase_index,
                         "phase_count": phase_count,
                         "phase_capacity": capacities[phase_index],
-                        "assignment_basis": "SHA-256(panel version + tier + immutable SamplingTargetId)",
+                        "assignment_basis": PHASE_ASSIGNMENT_HASH,
                     }
                 )
             cursor += capacity
-    return sorted(assignments, key=lambda row: (row["production_tier"], row["sampling_target_identity"]))
+    return sorted(assignments, key=lambda row: (row["production_tier"], row["phase_assignment_identity"]))
 
 
 def logical_due_bucket(epoch_seconds: float) -> int:
@@ -2046,7 +2158,7 @@ def _run_live_diagnostics(
             "include_realtime_data": True,
             "max_attempts": 1,
             "retries": 0,
-            "timeout_seconds": 30,
+            "timeout_seconds": PRODUCTION_REQUEST_TIMEOUT_SECONDS,
             "dep_arr_time_anchor_reused_for_all_result_limit_comparisons": True,
             "concurrency_for_result_limit_comparison": "sequential",
         },
@@ -2508,6 +2620,8 @@ def _heartbeat_feasibility(
     phase: Mapping[str, Any],
     live_diagnostics: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """Separate normal observed timing from degraded-mode deadline safety."""
+
     max_due = int(phase.get("max_due_targets_in_one_heartbeat", 0))
     cap2 = live_diagnostics.get("bounded_concurrency_probe", {})
     batch_stats = cap2.get("pair_batch_duration_statistics_ms", {})
@@ -2517,6 +2631,51 @@ def _heartbeat_feasibility(
     max_batch = batch_stats.get("max_ms")
     estimated_p95 = batch_count * float(p95_batch) if p95_batch is not None else None
     estimated_max = batch_count * float(max_batch) if max_batch is not None else None
+    normal_observed = {
+        "evidence_basis": "retained bounded cap-2 successful HTTP timing observations",
+        "successful_observation_only": True,
+        "not_a_guarantee_under_timeout_or_retry_failure": True,
+        "cap2_request_duration_statistics_ms": request_stats,
+        "cap2_pair_batch_duration_statistics_ms": batch_stats,
+        "max_due_batches_at_cap2": batch_count,
+        "estimated_p95_heartbeat_execution_ms": _round(estimated_p95, 3),
+        "estimated_max_observed_heartbeat_execution_ms": _round(estimated_max, 3),
+        "observed_p95_within_300_second_heartbeat": estimated_p95 is not None and estimated_p95 <= 300_000,
+        "observed_max_within_300_second_heartbeat": estimated_max is not None and estimated_max <= 300_000,
+        "feasibility_decision": (
+            "NORMAL_OBSERVED_FEASIBILITY_SUPPORTED"
+            if estimated_p95 is not None and estimated_p95 <= 300_000
+            else "NORMAL_OBSERVED_FEASIBILITY_NOT_ESTABLISHED"
+        ),
+    }
+    theoretical_attempts = max_due * PRODUCTION_MAX_ATTEMPTS
+    timeout_heavy_batches = (
+        math.ceil(theoretical_attempts / PRODUCTION_MAXIMUM_CONCURRENCY) if theoretical_attempts else 0
+    )
+    degraded_budget = {
+        "heartbeat_execution_budget_seconds": HEARTBEAT_SECONDS,
+        "max_due_targets": max_due,
+        "maximum_concurrency": PRODUCTION_MAXIMUM_CONCURRENCY,
+        "per_attempt_timeout_seconds": PRODUCTION_REQUEST_TIMEOUT_SECONDS,
+        "max_attempts": PRODUCTION_MAX_ATTEMPTS,
+        "automatic_retry_count_max": PRODUCTION_MAX_AUTOMATIC_RETRIES,
+        "theoretical_timeout_heavy_attempt_count": theoretical_attempts,
+        "initial_attempt_timeout_heavy_wall_seconds_at_cap2": (
+            math.ceil(max_due / PRODUCTION_MAXIMUM_CONCURRENCY) * PRODUCTION_REQUEST_TIMEOUT_SECONDS
+            if max_due
+            else 0
+        ),
+        "theoretical_timeout_heavy_wall_seconds_at_cap2": timeout_heavy_batches * PRODUCTION_REQUEST_TIMEOUT_SECONDS,
+        "theoretical_timeout_heavy_wall_seconds_is_lower_bound": True,
+        "unconstrained_timeout_heavy_batch_exceeds_300_seconds": (
+            timeout_heavy_batches * PRODUCTION_REQUEST_TIMEOUT_SECONDS > HEARTBEAT_SECONDS
+        ),
+        "pressure_scenario": (
+            "19 due targets; concurrency 2; 30-second timeout per attempt; MaxAttempts=2; "
+            "all allowed attempts reach timeout"
+        ),
+        "deadline_contract": heartbeat_degraded_mode_contract(),
+    }
     return {
         "heartbeat_interval_seconds": HEARTBEAT_MINUTES * 60,
         "due_targets_per_heartbeat": phase.get("total_due_targets_by_heartbeat", []),
@@ -2528,14 +2687,58 @@ def _heartbeat_feasibility(
             "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2",
         } else None,
         "user_approved_maximum_concurrency": True,
-        "cap2_request_duration_statistics_ms": request_stats,
-        "cap2_pair_batch_duration_statistics_ms": batch_stats,
-        "max_due_batches_at_cap2": batch_count,
-        "estimated_p95_heartbeat_execution_ms": _round(estimated_p95, 3),
-        "estimated_max_observed_heartbeat_execution_ms": _round(estimated_max, 3),
-        "finish_within_five_minute_heartbeat_at_observed_p95": estimated_p95 is not None and estimated_p95 <= 300_000,
-        "finish_within_five_minute_heartbeat_at_observed_max": estimated_max is not None and estimated_max <= 300_000,
-        "feasibility_decision": "FEASIBLE_WITH_APPROVED_CAP_2" if estimated_p95 is not None and estimated_p95 <= 300_000 else "NOT_ESTABLISHED",
+        "NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY": normal_observed,
+        "DEGRADED_MODE_HEARTBEAT_BUDGET": degraded_budget,
+    }
+
+
+def _phase_index_map(assignments: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Normalize current or legacy assignment rows for offline comparison."""
+
+    result: dict[str, int] = {}
+    for row in assignments:
+        identity = (
+            row.get("phase_assignment_identity")
+            or row.get("source_parent_station_id")
+            or row.get("sampling_target_identity")
+        )
+        if identity is not None and row.get("phase_index") is not None:
+            result[str(identity)] = int(row["phase_index"])
+    return result
+
+
+def _phase_index_reproduction(
+    root: Path,
+    assignments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Verify that the identity correction leaves approved indexes unchanged."""
+
+    current = _phase_index_map(assignments)
+    path = root / "docs" / "stages" / "13-tiered-collector-readiness-evidence.json"
+    if not path.exists():
+        return {
+            "identity": PHASE_ASSIGNMENT_IDENTITY,
+            "hash": PHASE_ASSIGNMENT_HASH,
+            "compared_to_prior_stage13_evidence": False,
+            "phase_indexes_reproduced_exactly": False,
+            "compared_assignment_count": 0,
+            "sampling_target_id_values_participate_in_phase_hash": False,
+        }
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        existing = {}
+    previous = existing.get("phase_staggering", {}).get("phase_assignments", [])
+    previous_map = _phase_index_map(previous)
+    compared = bool(previous_map) and previous_map == current
+    return {
+        "identity": PHASE_ASSIGNMENT_IDENTITY,
+        "hash": PHASE_ASSIGNMENT_HASH,
+        "compared_to_prior_stage13_evidence": bool(previous_map),
+        "phase_indexes_reproduced_exactly": compared,
+        "compared_assignment_count": len(current) if compared else 0,
+        "sampling_target_id_values_participate_in_phase_hash": False,
+        "database_generated_sampling_target_ids_can_change_phase_indexes": False,
     }
 
 
@@ -2918,6 +3121,7 @@ def build_evidence(
     phase = heartbeat_phase_distribution(PRODUCTION_TIER_PLAN)
     phase_assignments = phase_assignments_for_tier_rows(station_rows) if len(station_rows) == 50 else []
     phase["phase_assignments"] = phase_assignments
+    phase["phase_assignment_reproduction"] = _phase_index_reproduction(root, phase_assignments)
     if live_diagnostics is None:
         if run_live_diagnostics and len(station_rows) == 50:
             if not live_rerun_approved:
@@ -3216,7 +3420,7 @@ def build_evidence(
         ],
     }
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.0",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-5.1",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
         "stage_13_status": status,
@@ -3618,6 +3822,23 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
         raise ValueError("final phase super-cycle/hour totals do not reconcile")
     if phase.get("max_due_targets_in_one_heartbeat") != 19:
         raise ValueError("final maximum heartbeat load is not 19")
+    phase_contract = phase.get("phase_assignment_contract", {})
+    if phase_contract.get("assignment_key") != PHASE_ASSIGNMENT_IDENTITY:
+        raise ValueError("phase assignment identity must be the approved parent StopPointRef")
+    if phase_contract.get("assignment_hash") != PHASE_ASSIGNMENT_HASH:
+        raise ValueError("phase assignment hash must use source_parent_station_id")
+    if phase_contract.get("phase_assignment_finalized_in_stage13") is not True:
+        raise ValueError("phase assignment finalization is missing")
+    if phase_contract.get("production_phase_index_persisted") is not False:
+        raise ValueError("Stage 13 must not claim production phase indexes are persisted")
+    if phase_contract.get("phase_index_must_be_persisted_in_stage14") is not True:
+        raise ValueError("Stage 14 phase-index persistence requirement is missing")
+    if phase_contract.get("materialization_status") != PHASE_INDEX_MATERIALIZATION_STATUS:
+        raise ValueError("Stage 14 phase materialization status changed")
+    if phase_contract.get("stage14_must_materialize_without_recomputing_from_database_ids") is not True:
+        raise ValueError("Stage 14 must materialize phase indexes without database-ID recomputation")
+    if "phase_index_is_persisted" in phase_contract:
+        raise ValueError("ambiguous phase_index_is_persisted terminology remains")
     if phase.get("tier_phase_distribution") != [
         {
             "tier": "A",
@@ -3643,16 +3864,74 @@ def _validate_final_evidence(evidence: Mapping[str, Any]) -> None:
     ]:
         raise ValueError("final persisted tier phase capacities changed")
     assignments = phase.get("phase_assignments", [])
-    if len(assignments) != 50 or len({row.get("sampling_target_identity") for row in assignments}) != 50:
+    if len(assignments) != 50 or len({row.get("phase_assignment_identity") for row in assignments}) != 50:
         raise ValueError("all 50 final phase assignments must be unique and auditable")
+    if any(
+        row.get("phase_assignment_identity_type") != PHASE_ASSIGNMENT_IDENTITY
+        or row.get("source_parent_station_id") != row.get("phase_assignment_identity")
+        or row.get("assignment_basis") != PHASE_ASSIGNMENT_HASH
+        for row in assignments
+    ):
+        raise ValueError("phase assignment rows do not use the corrected parent StopPointRef identity")
     if assignments != phase_assignments_for_tier_rows(rows):
         raise ValueError("phase assignments are not reproducible from immutable identity")
+    reproduction = phase.get("phase_assignment_reproduction", {})
+    if reproduction.get("phase_indexes_reproduced_exactly") is not True:
+        raise ValueError("approved phase indexes were not reproduced exactly under the corrected identity")
+    if reproduction.get("compared_assignment_count") != 50:
+        raise ValueError("phase-index reproduction did not compare all 50 assignments")
+    if reproduction.get("sampling_target_id_values_participate_in_phase_hash") is not False:
+        raise ValueError("database-generated SamplingTargetId values must not participate in phase assignment")
 
     concurrency = evidence["sequential_vs_bounded_concurrency"]
     if concurrency.get("maximum_concurrency") != PRODUCTION_MAXIMUM_CONCURRENCY or not concurrency.get("user_approved_design"):
         raise ValueError("approved concurrency must be bounded MaximumConcurrency=2")
     if concurrency.get("values_above_two_require_new_evidence_and_decision") is not True:
         raise ValueError("concurrency-above-two decision guardrail is missing")
+
+    heartbeat = evidence["heartbeat_feasibility"]
+    normal_observed = heartbeat.get("NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY", {})
+    degraded = heartbeat.get("DEGRADED_MODE_HEARTBEAT_BUDGET", {})
+    if normal_observed.get("successful_observation_only") is not True:
+        raise ValueError("normal heartbeat feasibility must be explicitly observation-only")
+    if normal_observed.get("not_a_guarantee_under_timeout_or_retry_failure") is not True:
+        raise ValueError("normal timing evidence must not be represented as degraded-mode guarantee")
+    if degraded.get("max_due_targets") != 19:
+        raise ValueError("degraded heartbeat pressure must cover the 19-target maximum")
+    if (
+        degraded.get("maximum_concurrency"),
+        degraded.get("per_attempt_timeout_seconds"),
+        degraded.get("max_attempts"),
+    ) != (2, PRODUCTION_REQUEST_TIMEOUT_SECONDS, 2):
+        raise ValueError("degraded heartbeat pressure inputs changed")
+    if degraded.get("theoretical_timeout_heavy_attempt_count") != 38:
+        raise ValueError("degraded heartbeat attempt pressure does not reconcile")
+    if degraded.get("theoretical_timeout_heavy_wall_seconds_at_cap2") != 570:
+        raise ValueError("degraded heartbeat timeout pressure does not reconcile to 570 seconds")
+    if degraded.get("unconstrained_timeout_heavy_batch_exceeds_300_seconds") is not True:
+        raise ValueError("degraded timeout-heavy pressure must exceed one heartbeat")
+    degraded_contract = degraded.get("deadline_contract", {})
+    if degraded_contract.get("target_budget_exhaustion_outcome") != SKIPPED_HEARTBEAT_BUDGET:
+        raise ValueError("target heartbeat-budget outcome is missing")
+    if degraded_contract.get("retry_budget_exhaustion_outcome") != RETRY_SKIPPED_HEARTBEAT_BUDGET:
+        raise ValueError("retry heartbeat-budget outcome is missing")
+    if degraded_contract.get("budget_outcomes_trigger_catch_up") is not False:
+        raise ValueError("heartbeat-budget outcomes must not trigger catch-up")
+    if degraded_contract.get("per_target_budget_isolation") is not True:
+        raise ValueError("heartbeat budget exhaustion must isolate unrelated targets")
+    if degraded_contract.get("budget_exhaustion_does_not_abort_unrelated_targets") is not True:
+        raise ValueError("heartbeat budget exhaustion must not abort unrelated targets")
+    if degraded_contract.get("retry_after_cannot_cross_heartbeat_deadline") is not True:
+        raise ValueError("Retry-After must not cross the heartbeat deadline")
+    if degraded_contract.get("expired_dispatcher_cannot_execute_prior_bucket") is not True:
+        raise ValueError("expired dispatchers must not execute a prior bucket")
+    safety_margin = degraded_contract.get("persistence_cleanup_safety_margin", {})
+    if safety_margin.get("stage13_concrete_seconds") is not None:
+        raise ValueError("Stage 13 must not invent a persistence/cleanup safety margin")
+    if safety_margin.get("required_before_stage14_activation") is not True:
+        raise ValueError("Stage 14 safety-margin validation requirement is missing")
+    if safety_margin.get("arbitrary_stage13_duration_invented") is not False:
+        raise ValueError("Stage 13 safety-margin terminology is inconsistent")
 
     overlap = evidence["overlap_and_duplicate_execution_contract"]
     if overlap.get("unique_execution_identity") != ["SamplingTargetId", "LogicalDueBucket"]:

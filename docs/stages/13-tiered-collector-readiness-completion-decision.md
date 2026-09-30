@@ -7,8 +7,9 @@
 
 ## Final decision
 
-The explicit approval recorded in prompts/S68.md finalizes Stage 13 as an
-approved readiness design. The machine-readable
+The explicit approval recorded in prompts/S68.md, with the post-closeout
+hardening recorded in D-050, finalizes Stage 13 as an approved readiness
+design. The machine-readable
 [13-tiered-collector-readiness-evidence.json](13-tiered-collector-readiness-evidence.json)
 is authoritative for the retained panel, density ranks, phase assignments,
 static support, quota arithmetic, retry contract, limitations, and gate
@@ -64,7 +65,9 @@ reconcile as follows:
 | 31 days | 163,680 | 16,368 | 180,048 | 8,928 | 100 | **189,076** |
 
 The retry contract permits one retry for HTTP 408, 429, 500, 502, 503, 504
-and approved transient transport failures. HTTP 429 must respect Retry-After.
+and approved transient transport failures. HTTP 429 must respect Retry-After
+subject to the current heartbeat deadline and the explicit
+`RETRY_SKIPPED_HEARTBEAT_BUDGET` outcome.
 HTTP 401/403, deterministic request-contract failures, deterministic
 parser/schema failures, and deterministic TRIAS application errors are not
 retryable. A failed station is isolated from other due targets. MaxAttempts=2
@@ -88,10 +91,29 @@ The six-heartbeat phase capacities are:
 | 4 | 8 | 7 | 4 | **19** |
 | 5 | 8 | 6 | 4 | **18** |
 
-The persisted due sequence is [19, 18, 18, 18, 19, 18]; maximum due load is
-19. Phase assignment is deterministic from panel version, tier, and immutable
-SamplingTargetId, and is a Stage 14 materialization contract rather than a
-production row created by Stage 13.
+The finalized due sequence is [19, 18, 18, 18, 19, 18]; maximum due load is
+19. Phase assignment is deterministic from panel version, tier, and the
+immutable approved panel station identity `source_parent_station_id / parent
+StopPointRef`, using the equivalent hash
+`SHA-256(panel version + tier + source_parent_station_id)`. All 50 approved
+phase indexes reproduce exactly under that corrected identity. The separate
+production overlap identity remains `(SamplingTargetId, LogicalDueBucket)`.
+Stage 13 did not persist production phase indexes; Stage 14 must materialize
+the approved indexes without recomputing from database-generated IDs, as
+`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`.
+
+Normal heartbeat timing is supported by the retained successful cap-2 sample:
+the P95 estimate is `9,585.91 ms` and the observed-max estimate is
+`9,771.31 ms`. This is normal-observed evidence only, not a degraded-mode
+guarantee. At the maximum 19-target load, concurrency 2, 30-second attempt
+timeout, and MaxAttempts 2 produce 38 theoretical attempts and 570 seconds of
+timeout-heavy wall-time pressure at cap-2, which can exceed the 300-second
+heartbeat. The bounded degraded-mode contract therefore requires current-
+heartbeat deadline checks, explicit `SKIPPED_HEARTBEAT_BUDGET` and
+`RETRY_SKIPPED_HEARTBEAT_BUDGET` outcomes, no catch-up, per-target isolation,
+and deadline-bounded HTTP 429 `Retry-After` handling. Stage 14 must measure a
+concrete nonzero persistence/cleanup safety margin end to end before
+activation; Stage 13 assigns no arbitrary duration.
 
 The unique execution identity is
 (SamplingTargetId, LogicalDueBucket). Claims must be atomic and durable.
