@@ -22,8 +22,8 @@
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
-| 14 | Controlled 50-Station Cutover | Not started |
-| 15 | Post-Cutover Validation | Not started |
+| 14 | Collector Implementation and Controlled 50-Station Cutover | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED |
+| 15 | Post-Cutover Validation | NOT STARTED |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
 
@@ -398,7 +398,17 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
 - The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; production phase indexes are not yet persisted and require `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.
-- Stage 14, production scheduler/database work, Windows tasks, Power BI work, target-row creation, and Tiered50 activation remain not started.
+- Stage 14 collector implementation is complete and offline-validated. The real production cutover remains deferred: PostgreSQL host/adapter/schema, production target-ID materialization, sampling-era timestamp, deployment platform, live dry-run, target activation, and post-activation validation are not performed. Stage 15 remains NOT STARTED.
+
+### Stage 14 collector implementation — offline complete; production cutover deferred
+
+- **Overall status:** `IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED`.
+- **Implementation status:** `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. The package under `src/cologne_transit_collector/`, thin CLI `scripts/stage_14_collector.py`, fixed manifest `config/tiered50_runtime_manifest.json`, offline validation script, sanitized fixture, and Stage 14 tests are source-controlled.
+- The manifest contains exactly 50 targets, split 7 Legacy7 members / 43 new Tiered50 members, with approved 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits, persisted phase indexes, and no fabricated production SamplingTargetIds. Stage 13 phase evidence is reconciled at load time.
+- Pure UTC bucket scheduling reproduces `[19,18,18,18,19,18]`, 110 executions per 30-minute super-cycle, and 220/hour. The dispatcher is scheduler-neutral, cap-2, MaxAttempts 2, failure-isolated, and deadline-aware.
+- The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. The CLI `live` mode remains blocked because the production persistence adapter and activation gate do not exist.
+- SQLite is disposable development durability for atomic claims, duplicate prevention, run/target audit, quota accounting, parsed snapshots, stale claims, crash/restart visibility, and synthetic-only sampling-era tests. It is not a PostgreSQL implementation.
+- No MDD request, DNS preflight, provider quota consumption, database object creation, recurring scheduling, production target activation, or real cutover timestamp was performed.
 
 ## Post-Stage-02 validation
 

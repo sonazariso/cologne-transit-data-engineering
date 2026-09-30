@@ -16,6 +16,7 @@ secrets/
 *.log
 logs/
 runtime/
+.local/
 tmp/
 temp/
 
@@ -29,6 +30,8 @@ raw-payloads/
 *.mdf
 *.ldf
 *.sqlite
+*.sqlite3
+*.sqlite3-*
 *.db
 
 # Power BI local/binary state

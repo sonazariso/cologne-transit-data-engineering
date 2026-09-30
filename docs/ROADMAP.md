@@ -291,7 +291,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 is now **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED** while Stage 14 remains not started.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED**.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -339,8 +339,8 @@ Stage 4 semantics were approved against `VERSION__20260928_0042`; Stage 12
 selection used the later `VERSION__20260930_0053` snapshot. Parent, child-stop,
 and event-count differences are snapshot evolution, while Stage 4 identity and
 classification semantics were re-applied to Stage 12. Stage 13 is now complete
-as an explicitly approved readiness design; production work and Stage 14 remain
-**NOT STARTED**.
+as an explicitly approved readiness design; Stage 14 implementation is now
+complete offline while its production cutover remains deferred.
 
 ## Stage 13 — Tiered Collector Readiness — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED
 
@@ -350,10 +350,26 @@ The approved result limits are Tier A/B/C `NumberOfResults` 20 / 30 / 30. Retain
 
 Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. The normal planning retry reserve is 10%; conservative shared-credential totals are 182,980 for 30 days and 189,076 for 31 days, and automatic retries are blocked above 207,500 projected/current shared-credential consumption across all known consumers. The 31-day Tiered50 component is 180,048 and the guardrail total is 189,076, leaving 18,424 headroom to the retry boundary. The historical/evaluated 10/20/20 @ 5/15/30 option remains unapproved and reconciles to 205,444 for 31 days. The approved phase-capacity sequence is 19/18/18/18/19/18 with maximum due load 19. Phase assignment uses `source_parent_station_id / parent StopPointRef` and is finalized in Stage 13, while production phase-index persistence remains a `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED` obligation. Atomic `(SamplingTargetId, LogicalDueBucket)` claims, no duplicate HTTP, no catch-up replay, failed-station isolation, and Legacy7 continuity remain required.
 
-Stage 14, scheduler/database work, Windows tasks, Power BI work, target-row creation, and Tiered50 activation remain NOT STARTED. The closeout issued no MDD request or DNS/live-network operation.
+The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Controlled 50-Station Cutover
-Preserve legacy history and IDs, add only approved targets, record sampling-era change, dry-run first, and do not fabricate missed snapshots.
+## Stage 14 — Collector Implementation and Offline Cutover Readiness — IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED
+
+The [Stage 14 implementation record](stages/14-collector-implementation.md)
+documents the collector-first Python architecture. The fixed runtime manifest
+materializes all 50 approved Stage 13 targets and verifies every persisted
+phase index against Stage 13 evidence. Pure UTC five-minute buckets reproduce
+the approved `[19,18,18,18,19,18]` sequence and 220/hour load. The dispatcher
+uses maximum concurrency 2, MaxAttempts 2, approved transient retries,
+heartbeat deadline outcomes, shared-credential quota protection, isolated
+target outcomes, and durable local claim/audit behavior.
+
+`plan`, `dry-run`, and `simulate` are offline-safe; `live` is explicitly
+blocked until production persistence and safety state exist. SQLite is
+disposable development infrastructure only. The final PostgreSQL adapter and
+host, production SamplingTargetId materialization, real sampling-era cutover
+timestamp, deployment/scheduler activation, controlled live dry-run, actual
+Tiered50 activation, and post-activation validation are deferred. Stage 15
+remains **NOT STARTED**.
 
 ## Stage 15 — Post-Cutover Validation
 Monitor from day one and define when the new sampling era has enough data for broader interpretation.

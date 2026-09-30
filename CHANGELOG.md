@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Stage 14 collector-first implementation: added the cross-platform Python
+  collector package, fixed `TIERED50_PANEL_V1` runtime manifest, pure UTC
+  five-minute due-target engine, cap-2 dispatcher, approved retry/deadline and
+  shared-credential quota policies, TRIAS client/parser ports, disposable
+  SQLite claim/audit backend, restart/crash visibility, and deterministic
+  offline fault-injection harness. Overall Stage 14 remains
+  `IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER
+  DEFERRED`; no PostgreSQL, scheduler, deployment, target activation, live
+  MDD, or DNS activity was performed.
 - Stage 13 final offline contract-consistency correction: restored the explicit
   historical/evaluated 10/20/20 @ 5/15/30 plan (240/hour and 205,444 for the
   31-day 10% comparison), kept it distinct from the approved 8/20/22 plan,

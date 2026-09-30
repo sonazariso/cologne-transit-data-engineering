@@ -1,0 +1,484 @@
+"""Single-heartbeat dispatcher with bounded execution and failure isolation."""
+
+from __future__ import annotations
+
+import email.utils
+import logging
+import threading
+import time
+import uuid
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping, Optional
+
+from .domain import (
+    APPROVED_TRANSIENT_HTTP_STATUS_CODES,
+    APPROVED_TRANSIENT_TRANSPORT_CATEGORIES,
+    HEARTBEAT_SECONDS,
+    INTERRUPTED_SHUTDOWN,
+    MAX_ATTEMPTS,
+    MAXIMUM_CONCURRENCY,
+    RETRY_SKIPPED_HEARTBEAT_BUDGET,
+    RETRY_SKIPPED_QUOTA,
+    REQUEST_TIMEOUT_SECONDS,
+    SKIPPED_HEARTBEAT_BUDGET,
+    SKIPPED_QUOTA,
+    CollectorRunResult,
+    HttpResponse,
+    Plan,
+    Target,
+    TargetOutcome,
+    TransportFailure,
+)
+from .manifest import RuntimeManifest
+from .ports import MddClient, PersistencePort
+from .quota import QuotaGuard
+from .schedule import bucket_for, plan_for
+from .trias import TriasApplicationError, TriasParserError, parse_trias_response
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class LiveModeBlocked(RuntimeError):
+    """Live activation remains intentionally unavailable in this iteration."""
+
+
+class HeartbeatBudget:
+    """Monotonic execution budget bounded by the current UTC bucket."""
+
+    def __init__(
+        self,
+        *,
+        bucket_end_utc: datetime,
+        started_at_utc: datetime,
+        heartbeat_seconds: float = HEARTBEAT_SECONDS,
+        safety_margin_seconds: float = 5.0,
+        monotonic_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._monotonic = monotonic_fn
+        self._lock = threading.Lock()
+        self._started_monotonic = monotonic_fn()
+        wall_remaining = max(0.0, (bucket_end_utc - started_at_utc).total_seconds())
+        self._budget_seconds = max(0.0, min(float(heartbeat_seconds), wall_remaining) - float(safety_margin_seconds))
+        self._deadline_monotonic = self._started_monotonic + self._budget_seconds
+
+    @property
+    def budget_seconds(self) -> float:
+        return self._budget_seconds
+
+    @property
+    def remaining_seconds(self) -> float:
+        return max(0.0, self._deadline_monotonic - self._monotonic())
+
+    def can_start(self, *, operation_seconds: float = REQUEST_TIMEOUT_SECONDS, sleep_seconds: float = 0.0) -> bool:
+        return self.remaining_seconds >= max(0.0, float(operation_seconds)) + max(0.0, float(sleep_seconds))
+
+
+def heartbeat_budget_decision(
+    remaining_seconds: float,
+    *,
+    operation_seconds: float = REQUEST_TIMEOUT_SECONDS,
+    retry: bool = False,
+    retry_after_seconds: float = 0.0,
+) -> dict[str, Any]:
+    """Pure budget decision helper used by offline validation and tests."""
+
+    enough = float(remaining_seconds) >= float(operation_seconds) + (float(retry_after_seconds) if retry else 0.0)
+    return {
+        "start_allowed": enough,
+        "outcome": None if enough else (RETRY_SKIPPED_HEARTBEAT_BUDGET if retry else SKIPPED_HEARTBEAT_BUDGET),
+        "remaining_seconds": float(remaining_seconds),
+        "required_seconds": float(operation_seconds) + (float(retry_after_seconds) if retry else 0.0),
+        "retry_after_respected": not retry or enough,
+    }
+
+
+def retry_eligible(*, response: HttpResponse | None = None, transport_failure: TransportFailure | None = None) -> bool:
+    if response is not None and response.status_code in APPROVED_TRANSIENT_HTTP_STATUS_CODES:
+        return True
+    return bool(transport_failure and transport_failure.category in APPROVED_TRANSIENT_TRANSPORT_CATEGORIES)
+
+
+def _retry_after_seconds(response: HttpResponse) -> float:
+    value = response.retry_after
+    if value is None:
+        return 0.0
+    try:
+        return max(0.0, float(value.strip()))
+    except ValueError:
+        try:
+            parsed = email.utils.parsedate_to_datetime(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return max(0.0, (parsed.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+
+
+def _error_category_for_response(response: HttpResponse) -> str | None:
+    if response.status_code is None:
+        return "HTTP_ERROR"
+    if 200 <= response.status_code < 300:
+        return None
+    return "HTTP_ERROR"
+
+
+class Collector:
+    """Orchestrates exactly one current heartbeat."""
+
+    def __init__(
+        self,
+        *,
+        manifest: RuntimeManifest,
+        persistence: PersistencePort,
+        mdd_client: MddClient,
+        quota_guard: QuotaGuard,
+        max_concurrency: int = MAXIMUM_CONCURRENCY,
+        max_attempts: int = MAX_ATTEMPTS,
+        request_timeout_seconds: float = REQUEST_TIMEOUT_SECONDS,
+        safety_margin_seconds: float = 5.0,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        monotonic_fn: Callable[[], float] = time.monotonic,
+        shutdown_event: threading.Event | None = None,
+    ) -> None:
+        if max_concurrency != MAXIMUM_CONCURRENCY:
+            raise ValueError("MaximumConcurrency is approved and fixed at 2")
+        if max_attempts != MAX_ATTEMPTS:
+            raise ValueError("MaxAttempts is approved and fixed at 2")
+        if request_timeout_seconds != REQUEST_TIMEOUT_SECONDS:
+            raise ValueError("request timeout is approved and fixed at 30 seconds")
+        self.manifest = manifest
+        self.persistence = persistence
+        self.mdd_client = mdd_client
+        self.quota_guard = quota_guard
+        self.max_concurrency = max_concurrency
+        self.max_attempts = max_attempts
+        self.request_timeout_seconds = request_timeout_seconds
+        self.safety_margin_seconds = safety_margin_seconds
+        self.sleep_fn = sleep_fn
+        self.monotonic_fn = monotonic_fn
+        self.shutdown_event = shutdown_event or threading.Event()
+        self._active_lock = threading.Lock()
+        self._active_count = 0
+        self._max_observed_concurrency = 0
+
+    def request_shutdown(self) -> None:
+        self.shutdown_event.set()
+
+    def plan(self, *, at_utc: datetime | None = None) -> Plan:
+        return plan_for(self.manifest.targets, at_utc or datetime.now(timezone.utc))
+
+    def run_once(
+        self,
+        *,
+        mode: str = "dry-run",
+        at_utc: datetime | None = None,
+        run_id: str | None = None,
+    ) -> CollectorRunResult:
+        if mode not in {"dry-run", "simulate", "live"}:
+            raise ValueError("run_once mode must be dry-run, simulate, or live")
+        if mode == "live":
+            raise LiveModeBlocked(
+                "live mode is blocked in Stage 14 implementation: production persistence and cutover are deferred"
+            )
+        if getattr(self.mdd_client, "live_network", False):
+            raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
+
+        now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        plan = self.plan(at_utc=now)
+        identifier = run_id or str(uuid.uuid4())
+        started_monotonic = self.monotonic_fn()
+        budget = HeartbeatBudget(
+            bucket_end_utc=plan.bucket.end_utc,
+            started_at_utc=now,
+            safety_margin_seconds=self.safety_margin_seconds,
+            monotonic_fn=lambda: self.monotonic_fn() - started_monotonic,
+        )
+        self.persistence.start_collector_run(
+            run_id=identifier,
+            panel_version=self.manifest.panel_version,
+            logical_due_bucket=plan.bucket.index,
+            mode=mode,
+            started_at=now,
+        )
+
+        winners: list[tuple[Target, int]] = []
+        outcomes: list[TargetOutcome] = []
+        for target in plan.due_targets:
+            if self.shutdown_event.is_set():
+                outcomes.append(self._interrupted_outcome(target, plan.bucket.index))
+                continue
+            claim = self.persistence.claim_target(
+                run_id=identifier,
+                target=target,
+                logical_due_bucket=plan.bucket.index,
+                claimed_at=now,
+            )
+            if claim.won:
+                winners.append((target, plan.bucket.index))
+            else:
+                outcomes.append(
+                    TargetOutcome(
+                        target_id=target.source_parent_station_id,
+                        station_name=target.station_name,
+                        tier=target.tier,
+                        phase_index=target.phase_index,
+                        logical_due_bucket=plan.bucket.index,
+                        status="DUPLICATE_CLAIM",
+                        claim_won=False,
+                    )
+                )
+
+        futures: dict[Future[TargetOutcome], Target] = {}
+        pending = list(winners)
+        with ThreadPoolExecutor(max_workers=self.max_concurrency, thread_name_prefix="stage14-target") as executor:
+            while pending or futures:
+                while pending and len(futures) < self.max_concurrency and not self.shutdown_event.is_set():
+                    target, bucket_index = pending.pop(0)
+                    future = executor.submit(self._execute_target, identifier, target, bucket_index, budget)
+                    futures[future] = target
+                if self.shutdown_event.is_set():
+                    for target, _bucket_index in pending:
+                        outcomes.append(self._interrupted_outcome(target, plan.bucket.index, run_id=identifier))
+                    pending.clear()
+                if not futures:
+                    break
+                done, _ = wait(tuple(futures), return_when=FIRST_COMPLETED)
+                for future in done:
+                    target = futures.pop(future)
+                    try:
+                        outcomes.append(future.result())
+                    except BaseException:
+                        outcomes.append(
+                            TargetOutcome(
+                                target_id=target.source_parent_station_id,
+                                station_name=target.station_name,
+                                tier=target.tier,
+                                phase_index=target.phase_index,
+                                logical_due_bucket=plan.bucket.index,
+                                status="FAILED",
+                                error_category="SANITIZED_ERROR",
+                            )
+                        )
+
+        outcomes.sort(key=lambda item: item.target_id)
+        if self.shutdown_event.is_set():
+            status = "INTERRUPTED"
+        elif outcomes and all(item.status == "DUPLICATE_CLAIM" for item in outcomes):
+            status = "DUPLICATE_NO_WORK"
+        elif any(item.status == "FAILED" for item in outcomes):
+            status = "COMPLETED_WITH_FAILURES"
+        else:
+            status = "COMPLETE"
+        result = CollectorRunResult(
+            run_id=identifier,
+            mode=mode,
+            bucket=plan.bucket,
+            due_count=plan.due_count,
+            outcomes=tuple(outcomes),
+            status=status,
+            max_observed_concurrency=self._max_observed_concurrency,
+            live_network_used=False,
+        )
+        self.persistence.complete_collector_run(
+            run_id=identifier,
+            status=status,
+            completed_at=datetime.now(timezone.utc),
+            summary=result.to_dict(),
+        )
+        return result
+
+    def _interrupted_outcome(self, target: Target, bucket_index: int, *, run_id: str | None = None) -> TargetOutcome:
+        outcome = TargetOutcome(
+            target_id=target.source_parent_station_id,
+            station_name=target.station_name,
+            tier=target.tier,
+            phase_index=target.phase_index,
+            logical_due_bucket=bucket_index,
+            status="SKIPPED",
+            skip_reason=INTERRUPTED_SHUTDOWN,
+        )
+        if run_id is not None:
+            try:
+                audit_id = self.persistence.start_target_audit(
+                    run_id=run_id,
+                    target=target,
+                    logical_due_bucket=bucket_index,
+                    started_at=datetime.now(timezone.utc),
+                )
+                self.persistence.complete_target_audit(
+                    audit_id=audit_id,
+                    outcome=outcome.to_dict(),
+                    completed_at=datetime.now(timezone.utc),
+                )
+            except BaseException:
+                pass
+        return outcome
+
+    def _enter_worker(self) -> None:
+        with self._active_lock:
+            self._active_count += 1
+            self._max_observed_concurrency = max(self._max_observed_concurrency, self._active_count)
+            if self._active_count > MAXIMUM_CONCURRENCY:
+                raise AssertionError("collector concurrency exceeded approved maximum")
+
+    def _leave_worker(self) -> None:
+        with self._active_lock:
+            self._active_count -= 1
+
+    def _execute_target(self, run_id: str, target: Target, bucket_index: int, budget: HeartbeatBudget) -> TargetOutcome:
+        self._enter_worker()
+        started = datetime.now(timezone.utc)
+        audit_id: Any = None
+        attempts = 0
+        last_status: int | None = None
+        parser_outcome: str | None = None
+        persistence_outcome: str | None = None
+        retry_outcome: str | None = None
+        retry_decision: str | None = None
+        error_category: str | None = None
+        result_count: int | None = None
+        pending_retry_after = 0.0
+        try:
+            audit_id = self.persistence.start_target_audit(
+                run_id=run_id, target=target, logical_due_bucket=bucket_index, started_at=started
+            )
+            initial_quota = self.quota_guard.allow_initial(at_utc=started)
+            self._record_quota(run_id, target, bucket_index, "INITIAL", initial_quota.to_dict(), started)
+            if not initial_quota.allowed:
+                outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", skip_reason=SKIPPED_QUOTA, error_category="QUOTA_DENIED")
+                self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                return outcome
+            while attempts < self.max_attempts:
+                retrying = attempts > 0
+                retry_after = pending_retry_after if retrying else 0.0
+                if not budget.can_start(operation_seconds=self.request_timeout_seconds):
+                    reason = RETRY_SKIPPED_HEARTBEAT_BUDGET if retrying else SKIPPED_HEARTBEAT_BUDGET
+                    outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_attempts=attempts, skip_reason=reason, retry_outcome=reason)
+                    self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                    return outcome
+                if retrying:
+                    retry_quota = self.quota_guard.allow_retry(at_utc=datetime.now(timezone.utc))
+                    self._record_quota(run_id, target, bucket_index, "RETRY", retry_quota.to_dict(), datetime.now(timezone.utc))
+                    if not retry_quota.allowed:
+                        retry_decision = "RETRY_DENIED_QUOTA"
+                        retry_outcome = RETRY_SKIPPED_QUOTA
+                        outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_status=last_status, http_attempts=attempts, parser_outcome=parser_outcome, persistence_outcome=persistence_outcome, error_category="QUOTA_DENIED", retry_outcome=retry_outcome)
+                        self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                        return outcome
+                    if retry_after and not budget.can_start(operation_seconds=self.request_timeout_seconds, sleep_seconds=retry_after):
+                        retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
+                        retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
+                        outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome)
+                        self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                        return outcome
+                    if retry_after:
+                        self.sleep_fn(retry_after)
+                        if not budget.can_start(operation_seconds=self.request_timeout_seconds):
+                            retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
+                            retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
+                            outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome)
+                            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                            return outcome
+
+                attempts += 1
+                attempt_started = datetime.now(timezone.utc)
+                try:
+                    response_or_failure = self.mdd_client.fetch(
+                        target,
+                        request_timestamp_utc=attempt_started,
+                        timeout_seconds=self.request_timeout_seconds,
+                        attempt_number=attempts,
+                    )
+                except Exception as exc:
+                    response_or_failure = TransportFailure("OTHER_NETWORK_FAILURE", "transport failure")
+                    if isinstance(exc, TimeoutError):
+                        response_or_failure = TransportFailure("TIMEOUT", "transport failure")
+                attempt_completed = datetime.now(timezone.utc)
+                if isinstance(response_or_failure, TransportFailure):
+                    error_category = response_or_failure.category
+                    self.persistence.record_http_attempt(audit_id=audit_id, attempt_number=attempts, started_at=attempt_started, completed_at=attempt_completed, transport_failure=response_or_failure, retry_decision="RETRY_CANDIDATE" if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts else "NO_RETRY")
+                    self._add_local_attempt()
+                    if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts:
+                        retry_decision = "RETRY_CANDIDATE"
+                        retry_outcome = "RETRY_PENDING"
+                        continue
+                    break
+
+                response = response_or_failure
+                last_status = response.status_code
+                retry_after = _retry_after_seconds(response)
+                pending_retry_after = retry_after
+                can_retry = retry_eligible(response=response) and attempts < self.max_attempts
+                self.persistence.record_http_attempt(audit_id=audit_id, attempt_number=attempts, started_at=attempt_started, completed_at=attempt_completed, response=response, retry_decision="RETRY_CANDIDATE" if can_retry else "NO_RETRY", retry_after_seconds=retry_after or None)
+                self._add_local_attempt()
+                if response.status_code is None or not 200 <= response.status_code < 300:
+                    error_category = _error_category_for_response(response)
+                    if can_retry:
+                        if not budget.can_start(operation_seconds=self.request_timeout_seconds, sleep_seconds=retry_after):
+                            retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
+                            retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
+                            break
+                        retry_decision = "RETRY_CANDIDATE"
+                        retry_outcome = "RETRY_PENDING"
+                        continue
+                    break
+                try:
+                    parsed = parse_trias_response(response.body, self._content_type(response))
+                except TriasApplicationError:
+                    parser_outcome = "TRIAS_APPLICATION_ERROR"
+                    error_category = "TRIAS_APPLICATION_ERROR"
+                    break
+                except (TriasParserError, ValueError):
+                    parser_outcome = "PARSER_FAILURE"
+                    error_category = "PARSER_FAILURE"
+                    break
+                parser_outcome = "PARSED"
+                if attempts > 1:
+                    retry_outcome = "RETRY_SUCCEEDED"
+                result_count = parsed.result_count
+                try:
+                    self.persistence.persist_snapshot(audit_id=audit_id, target=target, logical_due_bucket=bucket_index, parsed_snapshot=parsed.to_dict(), persisted_at=datetime.now(timezone.utc))
+                    persistence_outcome = "PERSISTED_PARSED_SNAPSHOT"
+                except BaseException:
+                    persistence_outcome = "PERSISTENCE_FAILURE"
+                    error_category = "PERSISTENCE_FAILURE"
+                    break
+                break
+
+            status = "SUCCEEDED" if parser_outcome == "PARSED" and persistence_outcome == "PERSISTED_PARSED_SNAPSHOT" else ("SKIPPED" if retry_outcome in {RETRY_SKIPPED_HEARTBEAT_BUDGET, RETRY_SKIPPED_QUOTA} or attempts == 0 else "FAILED")
+            outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, status, http_status=last_status, http_attempts=attempts, stop_event_result_count=result_count, parser_outcome=parser_outcome, persistence_outcome=persistence_outcome, duration_seconds=(datetime.now(timezone.utc) - started).total_seconds(), error_category=error_category, retry_decision=retry_decision, retry_outcome=retry_outcome, skip_reason=retry_outcome if status == "SKIPPED" else None)
+            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+            return outcome
+        except BaseException:
+            if audit_id is not None:
+                try:
+                    self.persistence.complete_target_audit(audit_id=audit_id, outcome={"status": "FAILED", "http_attempts": attempts, "error_category": "SANITIZED_ERROR", "persistence_outcome": "PERSISTENCE_FAILURE"}, completed_at=datetime.now(timezone.utc))
+                except BaseException:
+                    pass
+            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR")
+        finally:
+            self._leave_worker()
+
+    @staticmethod
+    def _content_type(response: HttpResponse) -> str | None:
+        for key, value in response.headers.items():
+            if key.lower() == "content-type":
+                return value
+        return None
+
+    def _record_quota(self, run_id: str, target: Target, bucket_index: int, kind: str, decision: Mapping[str, Any], at: datetime) -> None:
+        recorder = getattr(self.persistence, "record_quota_decision", None)
+        if callable(recorder):
+            recorder(run_id=run_id, source_parent_station_id=target.source_parent_station_id, logical_due_bucket=bucket_index, decision_kind=kind, decision=decision, recorded_at=at)
+
+    def _add_local_attempt(self) -> None:
+        provider = getattr(self.quota_guard, "usage_provider", None)
+        add_attempt = getattr(provider, "add_attempt", None)
+        if callable(add_attempt):
+            add_attempt()
+
+
+def build_logger(verbose: bool = False) -> None:
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

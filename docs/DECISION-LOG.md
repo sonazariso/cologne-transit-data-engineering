@@ -53,6 +53,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-048 | 2026-09-30 | Corrected Stage 13 result-limit diagnostic: 24 additional client invocations, 0 HTTP responses, 0 confirmed provider attempts, unknown provider quota consumption, and no final result-limit decision from live coverage | Historical corrected diagnostic result; superseded by D-049 |
 | D-049 | 2026-09-30 | Explicit final approval of Stage 13 tiered collector readiness: fixed TIERED50_PANEL_V1, density ranks 1–8/9–28/29–50, 8/20/22 at 5/15/30 minutes, A20/B30/C30, concurrency 2, MaxAttempts=2 with one approved transient retry, 10% retry reserve, exact quota guardrail, phase sequence 19/18/18/18/19/18, and atomic overlap contract | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 | D-050 | 2026-09-30 | Stage 13 post-closeout contract hardening: separate normal-observed timing from degraded heartbeat-budget feasibility, correct phase assignment to source_parent_station_id / parent StopPointRef, clarify design-time versus production phase-index materialization, and restore critical offline regressions without changing approved production values | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
+| D-051 | 2026-09-30 | Stage 14 collector-first implementation: implement a Python cross-platform scheduler-neutral collector with minimal runtime dependencies, remove future architectural dependence on Windows/VM-specific execution, defer PostgreSQL host/runtime and production cutover, keep the collector persistence-neutral, and permit SQLite only as disposable local development durability | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1119,3 +1120,57 @@ and `207,500` is the automatic-retry protection boundary. Stage 7's historical
 explicitly approved Stage 13 lower-load design supersedes any interpretation
 of `207,500` as a minimum utilization requirement. The approved `182,980` and
 `189,076` conservative totals are valid safely-below-boundary designs.
+
+## D-051 — Stage 14 Collector-First Implementation
+
+**Status:** IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION
+CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+The explicit S72 decision is implemented as a reusable Python collector with a
+cross-platform, scheduler-neutral execution contract. The collector core uses
+standard-library components, keeps domain/policy code separate from transport
+and persistence, and exposes one current-heartbeat command rather than a
+permanent scheduler loop. Future architecture no longer depends on a
+Windows-specific runtime, virtual machine, shell environment, or host-local
+task scheduler.
+
+The versioned `TIERED50_PANEL_V1` runtime manifest contains the exact 50
+approved targets, fixed Stage 13 phases, the 7/43 Legacy7/new continuity
+classification, approved 8/20/22 tier counts, 5/15/30 cadence, and A20/B30/C30
+result limits. Phase indexes are loaded and reconciled against Stage 13
+evidence; they are not recomputed from mutable rank, list order, station name,
+or future database IDs. The retained evidence contains no concrete
+`SamplingTargetId` values, so no production IDs are invented.
+
+The implemented flow is configuration/manifest -> pure UTC schedule -> bounded
+dispatcher -> atomic claim port -> quota guard -> MDD client port -> TRIAS
+parser -> persistence port -> audit/result. Maximum concurrency remains 2 and
+MaxAttempts remains 2. The approved transient retry categories, Retry-After
+deadline rule, `SKIPPED_HEARTBEAT_BUDGET`,
+`RETRY_SKIPPED_HEARTBEAT_BUDGET`, shared-credential retry boundary, failure
+isolation, no-catch-up rule, and source-faithful parser semantics are covered
+by offline simulations and tests.
+
+SQLite is permitted only as disposable development/test durability. It
+implements stable local claims, duplicate audit, run/target audit, HTTP
+attempt accounting, parsed snapshot persistence without raw payloads, shared
+usage values, sampling-era metadata, and stale/incomplete claim visibility.
+The future production overlap identity remains
+`(SamplingTargetId, LogicalDueBucket)`, and the future production persistence
+adapter/schema is intentionally not implemented.
+
+`plan`, `dry-run`, and `simulate` are offline-safe. The real POST/TRIAS client
+is explicitly opt-in, reads the key only from `MDD_API_KEY`, and performs no
+network work on import or initialization. CLI `live` remains blocked until the
+production adapter, safety state, authorized dry-run, and cutover gates exist.
+No MDD request, DNS preflight, quota consumption, production database object,
+target activation, deployment schedule, or real Tiered50 cutover timestamp was
+created or recorded for D-051.
+
+Required later work remains: select the PostgreSQL host/runtime; implement its
+adapter and production schema; materialize and retain real target IDs; perform
+the seven-to-50 migration; record the real sampling-era timestamp; select the
+deployment platform and final safety margin; execute an authorized live
+dry-run; activate Tiered50; and run post-activation smoke/continuity/quota
+validation. These are explicit deferrals, not defects in the offline
+implementation.

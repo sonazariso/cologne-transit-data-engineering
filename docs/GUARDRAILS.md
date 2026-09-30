@@ -314,7 +314,9 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      scheduler implementation, database objects, Power BI work, Windows tasks,
      or Tiered50 activation. Stage 13 is
      `COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED`;
-     production remains not started.
+     production remains not started. D-051 separately authorizes the
+     cross-platform, offline Stage 14 collector implementation and validation;
+     production persistence, scheduling, and activation remain gated.
 104. Stage 12 panel membership is fixed after approval. A dynamic station
      replacement is prohibited during collection; a membership change requires
      a new version with effective date/time, reason, and predecessor panel
@@ -373,3 +375,53 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      be made for guaranteed 20/30-event availability, guaranteed realtime
      completeness, or complete forward coverage. Static P95 support is retained
      as planning evidence only.
+
+## Stage 14 implementation guardrails
+
+116. Stage 14's authoritative overall status is `IN PROGRESS — COLLECTOR
+     IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED`. The implementation
+     closeout must not be reported as a completed production cutover, and Stage
+     15 remains `NOT STARTED`.
+117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
+     collector package. Its core must not import PostgreSQL/SQL-driver modules,
+     platform-specific APIs, shell orchestration, or hardcoded platform paths.
+     Deployment scheduling and host selection remain outside the package.
+118. The versioned Stage 14 manifest is the authoritative offline runtime
+     configuration until a future approved persistence/configuration adapter
+     exists. It contains exactly 50 targets, fixed Stage 13 phase indexes, and
+     no fabricated future `SamplingTargetId` values. Manifest phase changes
+     fail closed against Stage 13 evidence.
+119. The production claim identity remains `(SamplingTargetId,
+     LogicalDueBucket)`. A disposable local backend may use the explicitly
+     labeled development identity `(panel_version, source_parent_station_id,
+     logical_due_bucket)` only because the 43 new production IDs do not yet
+     exist. The adapter boundary must prevent that local key from becoming a
+     production schema decision.
+120. The one-heartbeat command derives the current five-minute logical bucket
+     from UTC wall-clock time, executes only that bucket, and never replays
+     missed buckets or fabricates missed snapshots. It must not become a
+     permanent internal scheduler loop.
+121. SQLite is permitted only as disposable local development/test durability
+     for claims, audit, quota simulation, parsed snapshots, and restart/crash
+     visibility. It is not PostgreSQL, not a production cutover, and not a
+     reason to install or configure a database server during Stage 14.
+122. The real MDD client must be POST/TRIAS 1.2, arrival-scoped, per-target
+     result-limited, 30-second per-attempt, environment-secret-only, and
+     explicitly opted in. Importing or initializing the client must not issue
+     network traffic. Default plan/dry-run/simulate validation must remain
+     offline-safe.
+123. Raw production MDD payload retention remains disabled by the approved
+     source-retention contract. Offline sanitized fixtures and parsed
+     source-faithful snapshots are permitted; secrets, authorization headers,
+     unrestricted exceptions, and raw live payloads must not enter logs or
+     durable development audit.
+124. Stage 14 implementation validation must include a no-network check,
+     manifest reconciliation, full repository tests, syntax checks, static
+     architecture checks, duplicate-claim behavior, retry/deadline/quota
+     fault injection, restart/crash visibility, failure isolation, and
+     whitespace/diff review. No validation step may consume MDD quota or issue
+     DNS activity.
+125. The production cutover remains gated on final PostgreSQL host/runtime and
+     adapter selection, production target-ID materialization, real sampling-era
+     timestamp, final heartbeat safety margin, deployment platform, authorized
+     live dry-run, Tiered50 activation, and post-activation smoke validation.
