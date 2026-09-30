@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-09-29
+**Status date:** 2026-09-30
 
 ## Authoritative status
 
@@ -20,8 +20,8 @@
 | 9 | Matching & Data Quality | COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS |
 | 10 | Operational Fact | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED |
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
-| 12 | 50-Station Selection | Not started |
-| 13 | Tiered Collector Readiness | Not started |
+| 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
+| 13 | Tiered Collector Readiness | CONDITIONALLY BLOCKED — PRODUCTION NOT STARTED; RESULT-LIMIT, CURRENT-CALLER, DENSITY, AND CONCURRENCY EVIDENCE REQUIRED |
 | 14 | Controlled 50-Station Cutover | Not started |
 | 15 | Post-Cutover Validation | Not started |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
@@ -352,8 +352,68 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   compatible era/time scope or show a coverage/methodology warning.
   The `powerbi/` directory contains the implementation boundary README only.
 - Stage 10 remains **NOT COMPLETE — IMPLEMENTATION CORRECTED;
-  SOURCE/DATABASE VALIDATION BLOCKED**. Stage 12 — 50-Station Selection —
-  remains not started.
+  SOURCE/DATABASE VALIDATION BLOCKED**. Stage 12 is now closed as
+  **COMPLETE — APPROVED FIXED 50-STATION PANEL** under
+  [`TIERED50_PANEL_V1`](stages/12-50-station-selection.md).
+
+### Stage 12 closeout — approved fixed 50-station panel
+
+- **Stage 12 — COMPLETE — APPROVED FIXED 50-STATION PANEL.** The [selection document](stages/12-50-station-selection.md), [completion decision](stages/12-50-station-selection-completion-decision.md), and [sanitized machine-readable evidence](stages/12-50-station-selection-evidence.json) are authoritative.
+- The panel contains exactly 50 unique validated VRS parent stations. The
+  current feed has 864 valid Cologne parent-station candidates, all 864 with
+  scheduled child-stop evidence, and 1,146,295 parent-level scheduled events.
+  This is schedule/service evidence, not passenger demand.
+- All seven Legacy7 continuity anchors remain valid `location_type=1` parent
+  identities with scheduled service and are preserved unchanged.
+- The selection uses continuity, current Stage 4 core-mode coverage, a fixed
+  secondary geographic-cell spread pass, and an exposed lexicographic
+  operational-richness key. `SelectionRank` is not a production tier.
+- The current feed is `VERSION__20260930_0053` with ZIP SHA-256
+  `288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
+- The bounded MDD probe made 50 sequential provider HTTP attempts: all were
+  HTTP 200, parseable, valid TRIAS application responses, and returned source
+  `StopPointRef` evidence matching the requested parent or validated child.
+  No replacement was required and raw responses were not persisted.
+- `TIERED50_PANEL_V1` is fixed after approval. Later membership changes require
+  a new version with effective date/time, reason, and predecessor; historical
+  identities and sampling/panel eras remain interpretable.
+
+### Stage 13 readiness audit — conditionally blocked
+
+- **Stage 13 — CONDITIONALLY BLOCKED.** The [readiness audit](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [machine-readable evidence](stages/13-tiered-collector-readiness-evidence.json) are authoritative for the Stage 13 decision.
+- The existing Stage 13 readiness artifact is a pre-Stage-12 handoff snapshot;
+  its historical `STAGE_12_PANEL_APPROVAL_REQUIRED` prerequisite is now
+  satisfied by the Stage 12 closeout, but the artifact has not been rerun and
+  no Stage 13 production work is authorized.
+- Stage 12 now has an authoritative fixed panel, but the historical `10/20/20`
+  candidate remains a **provisional count population only** for quota and phase
+  arithmetic; it is not a production tier assignment and no scheduler target
+  population was activated.
+- The candidate calculates to `280` logical requests/hour, `6,720`/day,
+  `201,600` in a 30-day month, and `208,320` in a 31-day month. The monthly
+  ceiling remains `250,000`; normal planning remains `207,500–210,000` and
+  retries remain additional HTTP requests. The candidate is not approved for
+  production activation.
+- No production `NumberOfResults` was selected. Bounded N5 and N20 samples
+  reached their configured limits, so
+  `PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit. The approved Stage 4
+  evidence is aggregate-only in this checkout and does not support station/tier
+  scheduled-density percentiles or forward-horizon coverage.
+- Source-controlled bounded MDD populations report zero retries in their
+  sampled runs. The legacy historical snapshot reports 35 additional attempts
+  among 1,629 HTTP attempts, but current production `ctl.MddCollectorRun`
+  history and shared-caller usage are unavailable and are not presented as
+  current measurements.
+- The phase-count design reconciles `24, 23, 23, 24, 23, 23` per five-minute
+  heartbeat, `140` per 30-minute super-cycle, and `280`/hour. Future claims
+  must be atomic at `(SamplingTargetId, LogicalDueBucket)`; missed historical
+  buckets cannot be replayed. Per-target failure isolation is required.
+- Small bounded concurrency with a provisional cap of two is a conditional
+  design direction only. Provider-safe concurrent behavior is not established;
+  unbounded concurrency is prohibited. Stage 14 and Tiered50 production
+  activation were not started. Stage 13 production work remains **NOT
+  STARTED**; its readiness artifact is a blocked handoff, not a production
+  approval.
 
 ## Post-Stage-02 validation
 

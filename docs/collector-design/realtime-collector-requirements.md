@@ -406,6 +406,47 @@ collection, production cadence, or Actual Delay. The [Stage 7 completion
 decision](../stages/07-realtime-pilot-design-completion-decision.md) is the
 authoritative approval record.
 
+## 20. Stage 13 readiness handoff
+
+The Stage 13 audit is recorded in
+[`13-tiered-collector-readiness.md`](../stages/13-tiered-collector-readiness.md)
+and its [machine-readable evidence](../stages/13-tiered-collector-readiness-evidence.json).
+Stage 12 now approves fixed panel version `TIERED50_PANEL_V1`. The historical
+`10/20/20` Tiered50 candidate remains provisional as count-level quota/phase
+arithmetic only; it is not a production tier assignment. Its arithmetic is
+`280` logical requests/hour, `201,600` in a 30-day month, and `208,320` in a
+31-day month; these values do not activate production collection.
+
+The readiness handoff adds the following future collector requirements:
+
+- production target identity is `(SamplingTargetId, LogicalDueBucket)`;
+- `LogicalDueBucket` is a deterministic UTC five-minute bucket;
+- claim insertion is atomic under a unique target/bucket constraint, and only
+  the winning claim may issue HTTP;
+- stale/incomplete claims remain observable, but missed historical buckets are
+  never replayed or fabricated;
+- phase assignments are persisted/configured from immutable target identity and
+  are independent of mutable ranking;
+- one failed target does not abort other due targets, and per-target audit,
+  status, attempts, duration, parser, persistence, and error metadata remain
+  independent; and
+- unbounded concurrency is prohibited.
+
+Stage 13 did not establish a production `NumberOfResults`: the bounded N5 and
+N20 samples reached their configured limits, so
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit. It also did not establish
+station/tier static event density because the approved Stage 4 evidence is
+aggregate-only in the pre-Stage-12 readiness snapshot; the fixed Stage 12 panel
+now exists, but the Stage 13 audit has not assigned production tiers or
+reconciled forward-horizon coverage.
+
+The conditional design direction is small bounded concurrency with a maximum
+of two workers, subject to a separately approved provider-safe validation. This
+is not an activation approval. The current production shared-credential audit
+and SQL Server `ctl.MddCollectorRun` history are unavailable in the restart
+repository; any external Legacy Collector usage must be reconciled before
+activation. Stage 14 remains outside this handoff.
+
 ## Handoff gate
 
 Stage 8 host execution and any later collector implementation begin by

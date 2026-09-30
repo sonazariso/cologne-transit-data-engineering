@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Added
+- Stage 12 fixed 50-parent-station selection and versioning closeout:
+  `TIERED50_PANEL_V1` with exactly 50 unique validated VRS parent stations,
+  all seven Legacy7 continuity anchors, deterministic operational/geographic
+  selection evidence, current core-mode coverage, concentration review, a
+  bounded 50-request MDD compatibility probe, reserve candidates, and an
+  explicit fixed-membership/versioning contract.
+- Stage 13 Tiered Collector Readiness audit and machine-readable evidence:
+  provisional 10/20/20 cadence and 30/31-day quota math; labeled legacy retry
+  sensitivity; repository-controlled MDD consumer inventory; bounded N5/N20
+  result-limit saturation evidence with explicit
+  `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; separate duration populations; missing
+  Stage 12 panel/static-density evidence; deterministic 5/10/30 phase
+  reconciliation; atomic target/bucket claim and no-replay contract; failure
+  isolation; Legacy7 continuity; and a conditional bounded-concurrency
+  direction. Stage 12 now has an approved fixed panel; production activation
+  remains blocked, and Stage 14 was not started.
 - Stage 11 approved Power BI semantic-model design: separate static schedule,
   HIGH-only operational evidence, and all-confidence matching/data-quality
   subject areas; explicit table grains and single-direction relationships;

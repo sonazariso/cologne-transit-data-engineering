@@ -263,3 +263,51 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     unchanged; Stage 13 retains production cadence, concurrency,
     `NumberOfResults`, and rollout ownership; and Stage 9+ implementation is
     not started.
+95. Stage 13 may use the historical `10/20/20` Tiered50 counts for provisional
+    quota and phase arithmetic only when Stage 12 has no approved fixed panel;
+    it must not invent station identities or present the population as
+    production-approved.
+96. The unique future realtime execution identity is
+    `(SamplingTargetId, LogicalDueBucket)`. Claims must be atomic and durable;
+    a duplicate claim must not issue another HTTP request.
+97. A logical due bucket is a deterministic UTC five-minute bucket. A later
+    invocation may continue from the current wall-clock bucket, but it must
+    not replay a missed historical bucket or fabricate a realtime snapshot.
+98. Future phase assignments must be deterministic, persisted/configured,
+    auditable, versioned with the sampling panel, and independent of mutable
+    rank ordering.
+99. One failed station must not abort other due targets. Audit, HTTP status,
+    attempts, duration, parser, persistence, and error metadata remain
+    independently attributable to each target.
+100. The candidate `NumberOfResults` is not approved when bounded samples
+     saturate at the configured limit and provider maximum/forward-horizon
+     coverage are not established. Application validation ranges are not
+     provider evidence.
+101. Unbounded MDD concurrency is prohibited. A bounded concurrency cap is not
+     production-approved until provider rate-limit, timeout, retry, failure
+     isolation, and quota behavior are measured.
+102. Current shared-credential production usage must be auditable before
+     activation. Missing current `ctl.MddCollectorRun` history must not be
+     represented as zero usage, and completed/inactive diagnostics do not
+     receive a standing quota reserve.
+103. Stage 13 readiness analysis does not authorize Stage 14, production
+     scheduler implementation, a 50-station target population, or Tiered50
+     activation.
+104. Stage 12 panel membership is fixed after approval. A dynamic station
+     replacement is prohibited during collection; a membership change requires
+     a new version with effective date/time, reason, and predecessor panel
+     version.
+105. The approved Stage 12 panel version is `TIERED50_PANEL_V1`; historical
+     Legacy7 identities must never be deleted, and reporting must distinguish
+     sampling/panel eras.
+106. A Stage 12 `SelectionRank` is panel ordering evidence only. It must not be
+     interpreted as a production tier, cadence, result limit, concurrency,
+     retry budget, phase assignment, or overlap-claim decision.
+107. Parent-station panel membership requires a validated VRS source parent
+     with `location_type=1`, direct Cologne source identity, valid
+     `parent_station` child hierarchy, and scheduled child-stop evidence.
+     Names, operators, coordinates, and route labels do not establish Cologne
+     identity.
+108. Scheduled stop-event volume is timetable/service evidence, not passenger
+     demand. Ridership must not be inferred or invented from static schedule
+     density.

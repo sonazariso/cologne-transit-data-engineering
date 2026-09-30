@@ -1,0 +1,778 @@
+{
+  "artifact_version": "stage-13-tiered-collector-readiness-evidence-1.0",
+  "candidate_cadence": {
+    "candidate_status": "CALCULATED_ONLY_NOT_APPROVED",
+    "logical_requests_per_day": 6720,
+    "logical_requests_per_hour": 280,
+    "monthly_logical_requests": {
+      "30_day": 201600,
+      "31_day": 208320
+    },
+    "reconciliation": {
+      "expected_30_minute_requests": 140,
+      "expected_hour_requests": 280,
+      "requests_per_30_minutes": 140,
+      "requests_per_hour_from_30_minute_super_cycle": 280
+    },
+    "tiers": [
+      {
+        "interval_minutes": 5,
+        "logical_requests_per_day": 2880,
+        "logical_requests_per_hour": 120,
+        "station_count": 10,
+        "tier": "A"
+      },
+      {
+        "interval_minutes": 10,
+        "logical_requests_per_day": 2880,
+        "logical_requests_per_hour": 120,
+        "station_count": 20,
+        "tier": "B"
+      },
+      {
+        "interval_minutes": 30,
+        "logical_requests_per_day": 960,
+        "logical_requests_per_hour": 40,
+        "station_count": 20,
+        "tier": "C"
+      }
+    ]
+  },
+  "credential_consumers": [
+    {
+      "caller": "scripts/stage_08_mdd_realtime_pilot.py",
+      "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
+      "maximum_or_observed_requests": 1200,
+      "mode": "bounded diagnostic",
+      "normal_cadence": "none; manual bounded run, historical execution completed",
+      "production_or_scheduled": false,
+      "purpose": "bounded one-station Stage 8 pilot",
+      "retry_policy": "zero retries; 30-second timeout; overlap slots skipped"
+    },
+    {
+      "caller": "scripts/stage_08_authorization_request_contract_diagnostic.py",
+      "include_in_monthly_quota_planning": "no forward reserve; run only under explicit diagnostic approval",
+      "maximum_or_observed_requests": "bounded controls; exact historical count not retained in this checkout",
+      "mode": "bounded diagnostic",
+      "normal_cadence": "none; manual diagnostic",
+      "production_or_scheduled": false,
+      "purpose": "manual Hbf N5/N20 authorization and request-breadth controls",
+      "retry_policy": "zero retries; decision-tree controls only"
+    },
+    {
+      "caller": "scripts/stage_03a_disruption_evidence_probe.py",
+      "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
+      "maximum_or_observed_requests": 10,
+      "mode": "bounded diagnostic",
+      "normal_cadence": "none; manual host-only diagnostic",
+      "production_or_scheduled": false,
+      "purpose": "Stage 3A MDD Situation/disruption evidence and ten-station discovery",
+      "retry_policy": "zero retries; no fallback; sequential"
+    },
+    {
+      "caller": "scripts/stage_09_source_backed_acceptance.py",
+      "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
+      "maximum_or_observed_requests": 3,
+      "mode": "bounded diagnostic",
+      "normal_cadence": "none; manual bounded probe",
+      "production_or_scheduled": false,
+      "purpose": "bounded Stage 9 source-backed matching acceptance",
+      "retry_policy": "zero retries; one request per up to three stations"
+    },
+    {
+      "caller": "scripts/mdd_recorded_time_lifecycle_probe.py",
+      "include_in_monthly_quota_planning": "historical actual only; no forward reserve",
+      "maximum_or_observed_requests": 7,
+      "mode": "bounded diagnostic",
+      "normal_cadence": "none; historical diagnostic",
+      "production_or_scheduled": false,
+      "purpose": "manual near-event RecordedAtTime lifecycle validation",
+      "retry_policy": "zero retries; seven sequential attempts maximum"
+    },
+    {
+      "caller": "scripts/stage_02a2_probe.py",
+      "include_in_monthly_quota_planning": "no; obsolete/inactive for Stage 13",
+      "maximum_or_observed_requests": 1,
+      "mode": "inactive diagnostic",
+      "normal_cadence": "none; historical diagnostic",
+      "production_or_scheduled": false,
+      "purpose": "manual one-request MDD raw-response contract diagnostic",
+      "retry_policy": "zero retries; one request maximum"
+    },
+    {
+      "caller": "scripts/stage_02a3_historical_actual_time_probe.py",
+      "include_in_monthly_quota_planning": "no; obsolete/inactive for Stage 13",
+      "maximum_or_observed_requests": 5,
+      "mode": "inactive diagnostic",
+      "normal_cadence": "none; historical diagnostic",
+      "production_or_scheduled": false,
+      "purpose": "manual historical-horizon availability diagnostic",
+      "retry_policy": "zero retries; one request per configured horizon"
+    },
+    {
+      "caller": "Legacy Collector / ctl.MddCollectorRun",
+      "include_in_monthly_quota_planning": "must be included before activation; current usage unavailable",
+      "maximum_or_observed_requests": {
+        "historical_additional_retry_attempts": 35,
+        "historical_executions": 1599,
+        "historical_http_attempts": 1629
+      },
+      "mode": "external production history / current state unknown",
+      "normal_cadence": "current cadence unavailable in restart repository",
+      "production_or_scheduled": "not repository-controlled",
+      "purpose": "historical external production collector outside this repository",
+      "retry_policy": "historical audit records 35 additional attempts; current policy unavailable"
+    }
+  ],
+  "evidence_sources": [
+    "docs/PROJECT-STATUS.md",
+    "docs/ROADMAP.md",
+    "docs/GUARDRAILS.md",
+    "docs/stages/07-realtime-pilot-design.md",
+    "docs/stages/07-realtime-pilot-design-completion-decision.md",
+    "docs/stages/08-small-realtime-pilot-blocked.md",
+    "docs/stages/09-matching-data-quality.md",
+    "docs/stages/09-matching-data-quality-evidence.json",
+    "docs/stages/09-source-backed-matching-summary.json",
+    "docs/stages/10-operational-fact.md",
+    "docs/stages/11-power-bi-model-design.md",
+    "docs/collector-design/realtime-collector-requirements.md",
+    "docs/source-contracts/mdd-trias-request-contract.md",
+    "docs/source-contracts/mdd-trias-response-contract.md",
+    "docs/source-contracts/mdd-trias-raw-retention.md",
+    "docs/source-contracts/mdd-trias-event-lifecycle-validation.md",
+    "docs/stages/04-cologne-scope-mode-evidence.json",
+    "stage03a-mdd-discovery.jsonl",
+    "hbf-lifecycle-1.log",
+    "hbf-lifecycle-2.log",
+    "neumarkt-lifecycle-1.log",
+    "neumarkt-lifecycle-2.log",
+    "neumarkt-lifecycle-3.log"
+  ],
+  "execution_duration_evidence": [
+    {
+      "duration_statistics": {
+        "count": 10,
+        "max_ms": 869.235,
+        "min_ms": 405.888,
+        "p50_ms": 494.601,
+        "p90_ms": 763.346,
+        "p95_ms": 816.29,
+        "p99_ms": 858.646
+      },
+      "duration_unit": "milliseconds",
+      "execution_mode": "one sequential MDD request per diagnostic station",
+      "http_status_distribution": {
+        "200": 10
+      },
+      "parser_failure_count": 0,
+      "population_id": "stage_03a_mdd_discovery",
+      "population_is_combined_with_other_modes": false,
+      "retry_count": 0,
+      "source_paths": [
+        "stage03a-mdd-discovery.jsonl"
+      ],
+      "timeout_count": 0,
+      "transport_or_request_failure_count": 0
+    },
+    {
+      "duration_statistics": {
+        "count": 35,
+        "max_ms": 2009.98,
+        "min_ms": 528.158,
+        "p50_ms": 671.382,
+        "p90_ms": 1154.985,
+        "p95_ms": 1239.916,
+        "p99_ms": 1773.889
+      },
+      "duration_unit": "milliseconds",
+      "execution_mode": "five separate sequential lifecycle runs; seven observations each",
+      "http_status_distribution": {
+        "200": 35
+      },
+      "parser_failure_count": 0,
+      "population_id": "stage_08_near_event_lifecycle",
+      "population_is_combined_with_other_modes": false,
+      "retry_count": 0,
+      "source_paths": [
+        "hbf-lifecycle-1.log",
+        "hbf-lifecycle-2.log",
+        "neumarkt-lifecycle-1.log",
+        "neumarkt-lifecycle-2.log",
+        "neumarkt-lifecycle-3.log"
+      ],
+      "timeout_count": 0,
+      "transport_or_request_failure_count": 0
+    },
+    {
+      "duration_statistics": {
+        "count": 3,
+        "max_ms": 942.41,
+        "min_ms": 550.525,
+        "p50_ms": 839.481,
+        "p90_ms": 921.824,
+        "p95_ms": 932.117,
+        "p99_ms": 940.351
+      },
+      "duration_unit": "milliseconds",
+      "execution_mode": "three sequential source-backed MDD requests",
+      "http_status_distribution": {
+        "200": 3
+      },
+      "parser_failure_count": 0,
+      "population_id": "stage_09_source_backed_acceptance",
+      "population_is_combined_with_other_modes": false,
+      "retry_count": 0,
+      "source_paths": [
+        "docs/stages/09-source-backed-matching-summary.json"
+      ],
+      "timeout_count": 0,
+      "transport_or_request_failure_count": 0
+    },
+    {
+      "actual_elapsed_seconds": 3606.801,
+      "attempted_fraction_of_slots": 0.285833,
+      "attempted_http_requests": 343,
+      "duration_statistics": {
+        "count": 343,
+        "max_ms": null,
+        "min_ms": null,
+        "p50_ms": null,
+        "p90_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "duration_unit": "seconds for whole run; no per-request durations retained",
+      "execution_mode": "one sequential Stage 8 pilot with fixed 3-second diagnostic slots",
+      "http_status_distribution": {
+        "200": 343
+      },
+      "interpretation": "Run-level evidence only; the 3-second diagnostic interval is not a production requirement.",
+      "observed_average_wall_seconds_per_attempt": 10.515455,
+      "parser_failure_count": 0,
+      "persistence_failure_count": 0,
+      "population_id": "stage_08_one_hour_pilot_run_level",
+      "population_is_combined_with_other_modes": false,
+      "retry_count": 0,
+      "scheduled_logical_slots": 1200,
+      "skipped_fraction_of_slots": 0.714167,
+      "skipped_overlap_slots": 857,
+      "source_paths": [
+        "docs/stages/08-small-realtime-pilot-blocked.md",
+        "docs/PROJECT-STATUS.md"
+      ],
+      "timeout_count": 0,
+      "transport_or_request_failure_count": 0
+    }
+  ],
+  "failure_isolation": {
+    "decision": "APPROVED_REQUIREMENT",
+    "one_failed_station_aborts_remaining_due_targets": false,
+    "per_target_fields": [
+      "audit",
+      "http_status",
+      "attempt_count",
+      "duration",
+      "parser_result",
+      "persistence_result",
+      "error_metadata"
+    ]
+  },
+  "generated_at_utc": "2026-09-30T09:18:01Z",
+  "historical_continuity": {
+    "cutover_performed": false,
+    "decision": "PRESERVE",
+    "rules": [
+      "do not delete Legacy7 realtime history",
+      "preserve the existing 7 SamplingTargetIds",
+      "add only newly approved targets",
+      "do not delete/reinsert existing targets",
+      "record explicit Legacy7 versus Tiered50 sampling era/version boundary",
+      "do not compare raw volumes before/after without cadence qualification"
+    ]
+  },
+  "number_of_results": {
+    "application_validation_ranges_are_not_provider_evidence": true,
+    "audit_questions": {
+      "fixed_result_limit_defensible": false,
+      "forward_temporal_coverage": "NOT_ESTABLISHED",
+      "historical_returned_result_distribution": "bounded distributions are available only for the listed diagnostic populations",
+      "saturation_at_configured_limit": "observed at both N=5 and N=20 in bounded samples",
+      "static_scheduled_event_density": "NOT_ESTABLISHED in this Stage 13 audit; Stage 12 static panel evidence is separate and does not assign production tiers",
+      "station_or_tier_differences": "NOT_ESTABLISHED; the fixed panel is approved but production tiers and tier-specific evidence are not assigned",
+      "tier_specific_limits_materially_beneficial": "NOT_ESTABLISHED"
+    },
+    "decision": "BLOCKED_NO_PRODUCTION_VALUE_SELECTED",
+    "evidence_samples": [
+      {
+        "coverage_interpretation": "all observed responses reached N=5; N=5 is not a defensible production limit",
+        "execution_mode": "bounded ten-station MDD discovery",
+        "number_of_results": 5,
+        "request_count": 10,
+        "returned_result_count_distribution": {
+          "count": 10,
+          "max": 5,
+          "min": 5
+        },
+        "saturated_responses": 10,
+        "source": "stage03a-mdd-discovery.jsonl",
+        "station_scope": "ten diagnostic stations; not a Tiered50 panel"
+      },
+      {
+        "coverage_interpretation": "bounded Hbf compatibility and N20 saturation only; not provider-wide coverage",
+        "execution_mode": "one-hour Köln Hbf Stage 8 pilot",
+        "number_of_results": 20,
+        "request_count": 343,
+        "returned_result_count_total": 6860,
+        "saturated_responses_inferred": 343,
+        "saturation_basis": "aggregate 6860 equals 343 × 20; per-response rows were cleaned after evidence extraction",
+        "source": "docs/stages/08-small-realtime-pilot-blocked.md",
+        "station_scope": "one station only"
+      },
+      {
+        "coverage_interpretation": "all three bounded responses reached N=20; no forward-horizon or provider-maximum evidence",
+        "execution_mode": "three-station source-backed acceptance probe",
+        "number_of_results": 20,
+        "request_count": 3,
+        "returned_result_count_distribution": {
+          "count": 3,
+          "values": [
+            20,
+            20,
+            20
+          ]
+        },
+        "saturated_responses": 3,
+        "source": "docs/stages/09-source-backed-matching-summary.json",
+        "station_scope": "Köln Hbf, Heumarkt, Neumarkt; not a Tiered50 panel"
+      }
+    ],
+    "production_number_of_results": null,
+    "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+    "required_blocker": "PROVIDER_MAXIMUM_NOT_ESTABLISHED"
+  },
+  "overlap_and_duplicate_execution_contract": {
+    "atomic_claim": "insert the claim with a unique-key conflict as the only duplicate/overlap decision; only the winning claim may issue HTTP",
+    "catch_up_behavior": "false; a later process may claim the current wall-clock bucket only",
+    "claim_fields": [
+      "SamplingTargetId",
+      "LogicalDueBucket",
+      "claim_token",
+      "collector_run_id",
+      "claimed_at_utc",
+      "started_at_utc",
+      "completed_at_utc",
+      "status",
+      "stale_after_utc",
+      "error_metadata"
+    ],
+    "claim_persistence": "future durable control relation with a unique constraint on (SamplingTargetId, LogicalDueBucket); no physical table is created in Stage 13",
+    "crash_safe_behavior": "a durable RUNNING/STALE_INCOMPLETE row remains observable; a later invocation does not re-execute the same historical bucket",
+    "historical_snapshot_replay": "prohibited",
+    "logical_due_bucket": "floor(current UTC epoch seconds / 300); bucket identity is deterministic and DST-safe",
+    "production_scheduler_implemented": false,
+    "unique_execution_identity": [
+      "SamplingTargetId",
+      "LogicalDueBucket"
+    ]
+  },
+  "phase_staggering": {
+    "expected_sequence": [
+      24,
+      23,
+      23,
+      24,
+      23,
+      23
+    ],
+    "heartbeat_interval_minutes": 5,
+    "hour_total_logical_requests": 280,
+    "phase_assignment_contract": {
+      "assignment_key": "immutable SamplingTargetId",
+      "independent_of_mutable_rank_order": true,
+      "materialization_status": "WAITING_FOR_STAGE_12_FIXED_PANEL",
+      "phase_index_is_persisted": true,
+      "tier_a": "all 10 targets are due on every heartbeat",
+      "tier_b": "20 targets are persisted in two phases of 10; one phase is due on each heartbeat",
+      "tier_c": "20 targets are persisted in six phases with counts 4/3/3/4/3/3"
+    },
+    "phase_distribution_reconciles": true,
+    "super_cycle_minutes": 30,
+    "super_cycle_total_logical_requests": 140,
+    "tier_a_due_targets_by_heartbeat": [
+      10,
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "tier_b_due_targets_by_heartbeat": [
+      10,
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "tier_c_due_targets_by_heartbeat": [
+      4,
+      3,
+      3,
+      4,
+      3,
+      3
+    ],
+    "total_due_targets_by_heartbeat": [
+      24,
+      23,
+      23,
+      24,
+      23,
+      23
+    ]
+  },
+  "quota": {
+    "accounting_rules": [
+      "Each retry/additional attempt is one additional HTTP request.",
+      "NumberOfResults changes response cardinality, not HTTP request count.",
+      "Duplicate claimed target/buckets must not issue another HTTP request.",
+      "No catch-up burst may spend quota on missed historical buckets.",
+      "No quota reserve is assigned to completed or inactive diagnostics.",
+      "Current shared-account production usage remains unavailable and must be audited before activation."
+    ],
+    "monthly_ceiling": 250000,
+    "normal_operational_planning_envelope": {
+      "maximum": 210000,
+      "minimum": 207500,
+      "percentage_of_ceiling": {
+        "maximum": 84.0,
+        "minimum": 83.0
+      }
+    },
+    "projections": [
+      {
+        "30_day": {
+          "additional_attempt_rate": 0.0,
+          "base_logical_requests": 201600,
+          "base_within_normal_envelope": false,
+          "days": 30,
+          "headroom_to_250000_ceiling": 48400.0,
+          "headroom_to_normal_envelope_max": 8400.0,
+          "headroom_to_normal_envelope_min": 5900.0,
+          "percentage_of_250000_ceiling": 80.64,
+          "percentage_of_normal_envelope_max": 96.0,
+          "percentage_of_normal_envelope_min": 97.156627,
+          "projected_http_requests": 201600.0,
+          "projected_within_normal_envelope": false
+        },
+        "31_day": {
+          "additional_attempt_rate": 0.0,
+          "base_logical_requests": 208320,
+          "base_within_normal_envelope": true,
+          "days": 31,
+          "headroom_to_250000_ceiling": 41680.0,
+          "headroom_to_normal_envelope_max": 1680.0,
+          "headroom_to_normal_envelope_min": -820.0,
+          "percentage_of_250000_ceiling": 83.328,
+          "percentage_of_normal_envelope_max": 99.2,
+          "percentage_of_normal_envelope_min": 100.395181,
+          "projected_http_requests": 208320.0,
+          "projected_within_normal_envelope": true
+        },
+        "additional_attempt_rate": 0.0,
+        "kind": "calculation_scenario",
+        "label": "no_additional_attempts"
+      },
+      {
+        "30_day": {
+          "additional_attempt_rate": 0.021485574,
+          "base_logical_requests": 201600,
+          "base_within_normal_envelope": false,
+          "days": 30,
+          "headroom_to_250000_ceiling": 44068.508287,
+          "headroom_to_normal_envelope_max": 4068.508287,
+          "headroom_to_normal_envelope_min": 1568.508287,
+          "percentage_of_250000_ceiling": 82.372597,
+          "percentage_of_normal_envelope_max": 98.062615,
+          "percentage_of_normal_envelope_min": 99.244092,
+          "projected_http_requests": 205931.491713,
+          "projected_within_normal_envelope": false
+        },
+        "31_day": {
+          "additional_attempt_rate": 0.021485574,
+          "base_logical_requests": 208320,
+          "base_within_normal_envelope": true,
+          "days": 31,
+          "headroom_to_250000_ceiling": 37204.12523,
+          "headroom_to_normal_envelope_max": -2795.87477,
+          "headroom_to_normal_envelope_min": -5295.87477,
+          "percentage_of_250000_ceiling": 85.11835,
+          "percentage_of_normal_envelope_max": 101.331369,
+          "percentage_of_normal_envelope_min": 102.552229,
+          "projected_http_requests": 212795.87477,
+          "projected_within_normal_envelope": false
+        },
+        "additional_attempt_rate": 0.021485573971761818,
+        "kind": "observed_legacy_evidence_applied_as_sensitivity_only",
+        "label": "legacy_observed_additional_attempt_share",
+        "not_an_observed_tiered50_retry_rate": true
+      },
+      {
+        "30_day": {
+          "additional_attempt_rate": 0.05,
+          "base_logical_requests": 201600,
+          "base_within_normal_envelope": false,
+          "days": 30,
+          "headroom_to_250000_ceiling": 38320.0,
+          "headroom_to_normal_envelope_max": -1680.0,
+          "headroom_to_normal_envelope_min": -4180.0,
+          "percentage_of_250000_ceiling": 84.672,
+          "percentage_of_normal_envelope_max": 100.8,
+          "percentage_of_normal_envelope_min": 102.014458,
+          "projected_http_requests": 211680.0,
+          "projected_within_normal_envelope": false
+        },
+        "31_day": {
+          "additional_attempt_rate": 0.05,
+          "base_logical_requests": 208320,
+          "base_within_normal_envelope": true,
+          "days": 31,
+          "headroom_to_250000_ceiling": 31264.0,
+          "headroom_to_normal_envelope_max": -8736.0,
+          "headroom_to_normal_envelope_min": -11236.0,
+          "percentage_of_250000_ceiling": 87.4944,
+          "percentage_of_normal_envelope_max": 104.16,
+          "percentage_of_normal_envelope_min": 105.41494,
+          "projected_http_requests": 218736.0,
+          "projected_within_normal_envelope": false
+        },
+        "additional_attempt_rate": 0.05,
+        "kind": "calculation_scenario",
+        "label": "five_percent_sensitivity"
+      },
+      {
+        "30_day": {
+          "additional_attempt_rate": 0.1,
+          "base_logical_requests": 201600,
+          "base_within_normal_envelope": false,
+          "days": 30,
+          "headroom_to_250000_ceiling": 28240.0,
+          "headroom_to_normal_envelope_max": -11760.0,
+          "headroom_to_normal_envelope_min": -14260.0,
+          "percentage_of_250000_ceiling": 88.704,
+          "percentage_of_normal_envelope_max": 105.6,
+          "percentage_of_normal_envelope_min": 106.872289,
+          "projected_http_requests": 221760.0,
+          "projected_within_normal_envelope": false
+        },
+        "31_day": {
+          "additional_attempt_rate": 0.1,
+          "base_logical_requests": 208320,
+          "base_within_normal_envelope": true,
+          "days": 31,
+          "headroom_to_250000_ceiling": 20848.0,
+          "headroom_to_normal_envelope_max": -19152.0,
+          "headroom_to_normal_envelope_min": -21652.0,
+          "percentage_of_250000_ceiling": 91.6608,
+          "percentage_of_normal_envelope_max": 109.12,
+          "percentage_of_normal_envelope_min": 110.434699,
+          "projected_http_requests": 229152.0,
+          "projected_within_normal_envelope": false
+        },
+        "additional_attempt_rate": 0.1,
+        "kind": "calculation_scenario",
+        "label": "ten_percent_sensitivity"
+      }
+    ],
+    "unallocated_headroom_before_candidate": {
+      "to_ceiling_maximum": 40000,
+      "to_ceiling_minimum": 42500
+    }
+  },
+  "readiness_decision": {
+    "blockers": [
+      "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+      "STATIC_EVENT_DENSITY_NOT_ESTABLISHED",
+      "CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE",
+      "CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED"
+    ],
+    "production_activation": "NOT_APPROVED",
+    "production_cadence_approved": false,
+    "production_concurrency_approved": false,
+    "production_number_of_results_approved": false,
+    "stage_14_started": false,
+    "tiered50_activated": false
+  },
+  "record_type": "stage_13_tiered_collector_readiness_evidence",
+  "retry_and_http_attempt_evidence": {
+    "current_production_audit": {
+      "ctl_mdd_collector_run_history_present": false,
+      "must_be_resolved_before_activation": true,
+      "status": "UNAVAILABLE_CURRENT_PRODUCTION_AUDIT_EVIDENCE"
+    },
+    "legacy_historical_evidence": {
+      "additional_attempt_share_of_all_http_attempts": 0.021485574,
+      "additional_retry_attempts": 35,
+      "current_production_database_available": false,
+      "executions": 1599,
+      "http_attempts": 1629,
+      "http_failure_distribution": null,
+      "interpretation": "historical retry-count evidence only; not a current Tiered50 retry rate",
+      "source": "docs/PROJECT-STATUS.md; historical Legacy quota audit snapshot 2026-09-25",
+      "successful_first_attempt_percentage": null
+    },
+    "source_controlled_bounded_populations": [
+      {
+        "additional_attempt_rate": 0.0,
+        "http_status_distribution": {
+          "200": 10
+        },
+        "network_failures": 0,
+        "population": "Stage 3A ten-station MDD discovery",
+        "retry_count": 0,
+        "source": "stage03a-mdd-discovery.jsonl",
+        "successful_first_attempt_percentage": 100.0,
+        "timeouts": 0
+      },
+      {
+        "additional_attempt_rate": 0.0,
+        "http_status_distribution": {
+          "200": 343
+        },
+        "network_failures": 0,
+        "population": "Stage 8 one-hour Hbf pilot",
+        "retry_count": 0,
+        "source": "docs/stages/08-small-realtime-pilot-blocked.md",
+        "successful_first_attempt_percentage": 100.0,
+        "timeouts": 0
+      },
+      {
+        "additional_attempt_rate": 0.0,
+        "http_status_distribution": {
+          "200": 3
+        },
+        "network_failures": 0,
+        "population": "Stage 9 source-backed acceptance",
+        "retry_count": 0,
+        "source": "docs/stages/09-source-backed-matching-summary.json",
+        "successful_first_attempt_percentage": 100.0,
+        "timeouts": 0
+      },
+      {
+        "additional_attempt_rate": 0.0,
+        "http_status_distribution": {
+          "401": 1
+        },
+        "network_failures": 0,
+        "population": "Stage 8 latest historical authorization attempt",
+        "retry_count": 0,
+        "source": "docs/stages/08-small-realtime-pilot-blocked.md",
+        "successful_first_attempt_percentage": 0.0,
+        "timeouts": 0
+      }
+    ]
+  },
+  "sequential_vs_bounded_concurrency": {
+    "approval_state": "NOT_APPROVED_FOR_ACTIVATION",
+    "decision": "CONDITIONALLY_PREFER_BOUNDED_CONCURRENCY",
+    "exact_blocker": "CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED",
+    "option_a_fully_sequential": {
+      "estimated_seconds_for_24_due_targets_at_that_average": 252.370915,
+      "five_minute_heartbeat_seconds": 300,
+      "reason": "the observed sequential pilot cycle leaves limited margin before retries, persistence variance, or a timeout; the diagnostic 3-second slot was not a production requirement",
+      "remaining_seconds_at_observed_average": 47.629085,
+      "stage_08_observed_average_wall_seconds_per_attempt": 10.515455,
+      "status": "NOT_APPROVED_AS_PRODUCTION_GUARANTEE"
+    },
+    "option_b_small_bounded_concurrency": {
+      "justification": "two workers provide margin for 23–24 due targets while remaining bounded and isolating one slow target; no provider-safe concurrent-run evidence exists",
+      "provisional_max_concurrency": 2,
+      "risks": [
+        "provider concurrency/rate-limit behavior is unmeasured",
+        "each retry remains an additional quota-consuming HTTP request",
+        "claim/lease semantics must prevent duplicate target/bucket execution"
+      ],
+      "status": "CONDITIONAL_DESIGN_DIRECTION_ONLY"
+    },
+    "request_timeout_baseline_seconds": 30,
+    "request_timeout_status": "Stage 8 evidence baseline only; production value remains to be approved",
+    "unbounded_concurrency": "PROHIBITED"
+  },
+  "stage_12_gate": {
+    "approved_panel_version": "TIERED50_PANEL_V1",
+    "artifact_paths_found": [
+      "docs/stages/12-50-station-selection.md",
+      "docs/stages/12-50-station-selection-completion-decision.md",
+      "docs/stages/12-50-station-selection-evidence.json"
+    ],
+    "authoritative_completion_artifact_present": true,
+    "blocker": null,
+    "expected_artifact_paths": [
+      "docs/stages/12-50-station-selection.md",
+      "docs/stages/12-50-station-selection-completion-decision.md",
+      "docs/stages/12-50-station-selection-evidence.json"
+    ],
+    "panel_station_count": 50,
+    "provisional_analysis_population": {
+      "fixed_panel_version": "TIERED50_PANEL_V1",
+      "not_used_for": [
+        "station-level density",
+        "production target creation",
+        "production activation",
+        "network-wide coverage claim"
+      ],
+      "station_count": 50,
+      "station_identities_available": true,
+      "status": "PROVISIONAL_COUNT_ONLY",
+      "tier_counts": {
+        "A": 10,
+        "B": 20,
+        "C": 20
+      },
+      "used_for": [
+        "quota arithmetic",
+        "phase-count reconciliation only"
+      ]
+    }
+  },
+  "stage_13_status": "CONDITIONALLY BLOCKED — PROVIDER_MAXIMUM_NOT_ESTABLISHED; STATIC_EVENT_DENSITY_NOT_ESTABLISHED; CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE; CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED",
+  "static_event_density": {
+    "aggregate_context_not_a_density_measure": {
+      "cologne_distinct_stop_ids": 3137,
+      "cologne_scheduled_stop_events": 1144295,
+      "interpretation": "aggregate Stage 4 scope baselines only; no station/window density is inferred"
+    },
+    "blockers": [
+      "STAGE12_TIER_ASSIGNMENT_AND_FORWARD_HORIZON_NOT_RECONCILED_IN_THIS_AUDIT",
+      "APPROVED_STAGE_4_RAW_GTFS_SNAPSHOT_NOT_RETAINED"
+    ],
+    "coverage_conclusion": "NOT_ESTABLISHED; do not claim that N=20 covers the intended forward horizon",
+    "distribution": {
+      "count": 0,
+      "outliers": [],
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "p99": null
+    },
+    "row_contract": [
+      "station",
+      "tier",
+      "scheduled_event_density",
+      "forward_window",
+      "result_limit_coverage_status"
+    ],
+    "source_snapshot": {
+      "evidence_path": "docs/stages/04-cologne-scope-mode-evidence.json",
+      "feed_end_date": "20261212",
+      "feed_start_date": "20260902",
+      "feed_version": "VERSION__20260928_0042",
+      "raw_snapshot_paths_found": [],
+      "zip_sha256": "6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b"
+    },
+    "static_vs_realtime_boundary": "scheduled static density is planning evidence only and is not realtime response cardinality",
+    "station_tier_rows": [],
+    "status": "NOT_ESTABLISHED"
+  }
+}

@@ -46,6 +46,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-040 | 2026-09-29 | Stage 9 evidence-integrity correction: serialize the live in-memory match decisions losslessly in the row-level JSONL, require semantic JSONL-to-summary reconciliation before PASS, and retain the current VRS snapshot/version/hash | Bounded source-backed acceptance PASS after one corrected live run; 60 rows, 53 established service dates, 51 core matches, 51 MEDIUM / 9 UNMATCHED, row-level integrity PASS; Stage 10+ remain NOT STARTED |
 | D-041 | 2026-09-29 | Stage 10 operational-fact contract: derive one deterministic outcome per approved HIGH-confidence canonical service event and service date, preserve explicit Stage 9 run/version lineage, first/latest and NULL timing semantics, PlannedBay/EstimatedBay evidence, and non-causal Situation linkage | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED. The current checkout has no usable PostgreSQL/source-observation population and the current Stage 9 evidence contains zero HIGH rows |
 | D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
+| D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -783,3 +784,84 @@ interaction QA, and save round-trip validation. No PBIP/TMDL/PBIR/PBIX artifact,
 Power BI Desktop execution, PostgreSQL work, SQL execution, or data load was
 performed. Stage 10 retains its blocked runtime-validation status and Stage 12
 was not started.
+
+## D-043 — Stage 13 Tiered Collector Readiness Audit
+
+Stage 13 performed an offline, evidence-based readiness audit for the future
+Tiered50 collector. The historical `10/20/20` candidate reconciles to `280`
+logical requests/hour, `6,720`/day, `201,600` in a 30-day month, and `208,320`
+in a 31-day month. The full ceiling remains `250,000`, with normal planning at
+`207,500–210,000`; retries are additional HTTP requests and
+`NumberOfResults` is not a request multiplier. The candidate remains a
+calculated provisional population, not an approved production cadence.
+
+No authoritative Stage 12 completion artifact or fixed 50-station panel is
+present. The bounded N5 and N20 MDD samples reached their configured limits,
+so no production result limit was selected and
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit. The approved Stage 4
+artifact is aggregate-only in this checkout, so station/tier static density and
+forward-horizon coverage were not manufactured. Current production shared-
+credential usage and SQL Server `ctl.MddCollectorRun` history are unavailable;
+the historical Legacy snapshot's 35 additional attempts among 1,629 HTTP
+attempts are labeled historical sensitivity only.
+
+The deterministic five-minute phase design reconciles
+`24, 23, 23, 24, 23, 23` due targets, `140` per 30-minute super-cycle, and
+`280` per hour. Future execution identity is an atomic unique
+`(SamplingTargetId, LogicalDueBucket)` claim; stale/incomplete runs remain
+observable and missed historical buckets are never replayed. One failed target
+does not abort the remaining due targets. Small bounded concurrency with a
+conditional maximum of two is the design direction, but provider-safe
+concurrent behavior is not measured and production concurrency is not
+approved. Unbounded concurrency, Stage 14, and Tiered50 activation remain
+prohibited.
+
+**Final Stage 13 status:** `CONDITIONALLY BLOCKED —
+STAGE_12_PANEL_APPROVAL_REQUIRED; PROVIDER_MAXIMUM_NOT_ESTABLISHED;
+STATIC_EVENT_DENSITY_NOT_ESTABLISHED; CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE;
+CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED`.
+
+## D-044 — Stage 12 Fixed 50-Station Panel and Versioning
+
+Stage 12 re-evaluated the current validated VRS Global-ID parent-station
+population and approved the fixed panel version `TIERED50_PANEL_V1`. The current
+official snapshot is `VERSION__20260930_0053`, retrieved at
+`2026-09-30T10:42:58Z`, with ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`. It has
+864 unique Cologne `location_type=1` parent-station candidates; all 864 have
+scheduled child-stop evidence, with 1,146,295 parent-level scheduled events.
+
+The identity rule remains validated source `stop_id` beginning with
+`de:05315:`. Parent membership comes from the source `parent_station`
+hierarchy. The seven Legacy7 IDs all resolve as current parent stations with
+scheduled service and are retained unchanged. The policy combines those
+continuity anchors, current core-mode coverage, a fixed secondary geographic
+cell-spread pass, and an explicit lexicographic operational-richness key. It
+does not use passenger counts, station fame, names, operators, coordinates, or
+route labels to establish Cologne identity, and it does not use a hidden
+weighted score.
+
+All six current core modes are represented and measured. The 50-station panel
+represents 25 of 57 occupied fixed geographic cells; the largest selected cell
+contains 12 stations. Proximity review retained distinct parent identities in
+central-station, Deutz, Mülheim, and other interchange areas when their source
+IDs and scheduled services were distinct.
+
+The final panel compatibility diagnostic made 50 sequential requests to the
+approved MDD/TRIAS endpoint with one attempt per station, zero retries,
+`NumberOfResults=1`, arrival scope, realtime data, and the approved
+previous/onward-call behavior. All 50 were HTTP 200, parseable valid TRIAS
+application responses with one returned event and matching source
+`StopPointRef` evidence. No replacement was required; raw responses were not
+persisted.
+
+The versioning contract fixes membership after approval. A membership change is
+not dynamic and requires a new version recording effective date/time, reason,
+and predecessor. Legacy7 history is never deleted, future cutover preserves
+historical sampling identities where applicable, and reporting distinguishes
+panel eras. `SelectionRank` is not a production tier.
+
+This decision does not approve production cadence, tier membership,
+`NumberOfResults`, concurrency, retries, overlap claiming, a scheduler, Power
+BI, or Stage 14. Stage 13 production work remains NOT STARTED; the pre-existing
+Stage 13 readiness audit remains conditionally blocked.

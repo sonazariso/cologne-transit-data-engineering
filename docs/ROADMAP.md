@@ -290,7 +290,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design and Stage 12 and later stages remain **NOT STARTED**.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; and Stage 13 remains conditionally blocked as recorded below.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -301,8 +301,9 @@ first/latest timing, NULL handling, PlannedBay/EstimatedBay evidence,
 non-causal Situation linkage, and repeat-refresh validation. Completion remains
 blocked because this checkout has no usable PostgreSQL/source-observation
 population and the current Stage 9 source-backed artifact contains zero HIGH
-rows. Stage 11 is now closed as an approved design; Stage 12 and later stages
-remain **NOT STARTED**.
+rows. Stage 11 is now closed as an approved design; Stage 12 was not started at
+that historical Stage 9 closeout, and the later Stage 13 audit is recorded
+separately below.
 
 ## Stage 11 — Power BI Model — COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED
 
@@ -329,13 +330,26 @@ clear coverage/methodology warning. The future implementation contract is PBIP +
 TMDL + PBIR with Power BI Desktop binding and QA, but no Power BI artifact or
 Desktop execution is part of this stage.
 
-## Stage 12 — 50-Station Selection — NOT STARTED
-Re-evaluate and approve a defensible fixed monitoring panel and versioning policy.
+## Stage 12 — 50-Station Selection — COMPLETE — APPROVED FIXED 50-STATION PANEL
 
-## Stage 13 — Tiered Collector Readiness
-Audit cadence, `NumberOfResults` coverage, event density, execution duration,
-retries, quota, phase staggering, concurrency, overlap protection, and all
-active callers sharing the credential before activation.
+The [selection document](stages/12-50-station-selection.md), [completion decision](stages/12-50-station-selection-completion-decision.md), and [sanitized evidence](stages/12-50-station-selection-evidence.json) approve `TIERED50_PANEL_V1`: exactly 50 unique validated VRS parent stations, all seven Legacy7 continuity anchors, measured current core-mode representation, a fixed geographic-diversity review, and 50 successful bounded sequential MDD compatibility results. Membership is fixed after approval; later changes require a new version with effective time, reason, and predecessor.
+
+## Stage 13 — Tiered Collector Readiness — CONDITIONALLY BLOCKED
+
+The [readiness audit](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [evidence artifact](stages/13-tiered-collector-readiness-evidence.json) reconcile the provisional `10/20/20` cadence, 30/31-day quota projections, bounded retry sensitivity, separate execution-duration populations, static-density evidence boundary, deterministic `5/10/30` phase cycle, atomic target/bucket claim contract, failure isolation, and Legacy7 continuity rules.
+
+Stage 13 is not complete for production readiness and production work remains
+**NOT STARTED**. Stage 12 now has an approved fixed panel, but
+`NumberOfResults` remains blocked by
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED`; station/tier static density and forward
+horizon coverage are unavailable; current shared-credential production usage
+is unavailable; and provider-safe bounded concurrency is unmeasured. The
+conditional design direction is at most two concurrent workers subject to a
+separate validation; unbounded concurrency is prohibited. No scheduler,
+collector activation, or Stage 14 cutover is authorized.
+The existing Stage 13 evidence is a pre-Stage-12 handoff snapshot and has not
+been rerun; its former panel prerequisite is satisfied by the Stage 12
+closeout, while all other Stage 13 blockers remain.
 
 ## Stage 14 — Controlled 50-Station Cutover
 Preserve legacy history and IDs, add only approved targets, record sampling-era change, dry-run first, and do not fabricate missed snapshots.
