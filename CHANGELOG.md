@@ -11,17 +11,19 @@
 - Stage 13 forward-coverage correction: result-limit coverage now uses only
   THIS-call arrival timings at or after the requested `DepArrTime` anchor;
   historical mixed-call spans are explicitly invalid for that decision. Added
-  offline regression tests and an approval gate for exactly 24 additional MDD
-  requests (90 historical attempts would become 114; the old 100-attempt
-  ceiling is unchanged); no request was issued before explicit user approval.
-- Stage 13 corrected diagnostic result: after explicit user approval, exactly
-  24 sequential N5/N10/N20/N30 attempts were consumed, bringing cumulative
-  diagnostic accounting to 114 without changing the historical 100-attempt
-  ceiling. All 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a valid
-  HTTP response, so fixed N20, fixed N30, and A20/B30/C30 remain undecided.
-  Added the static comparison, the four actual density-ranked cadence boundary
-  changes between 10/20/20 and 8/20/22, and the user's unapproved preference
-  recommendations.
+  offline regression tests and an approval gate for exactly 24 additional
+  client-side MDD request invocations (90 historical client attempts would
+  become 114; the historical 100-attempt budget is unchanged); no request was
+  issued before explicit user approval.
+- Stage 13 corrected diagnostic accounting and transport hardening: the
+  retained run is recorded as 24 client-side invocations, 0 HTTP responses, 0
+  confirmed provider HTTP attempts, and unknown provider quota consumption, with
+  24 retained separately as conservative worst-case accounting. Safe transport
+  subtypes, a zero-request DNS preflight, and a fail-fast authenticated smoke
+  gate now protect any future explicitly approved rerun. Fixed N20, fixed N30,
+  and A20/B30/C30 remain undecided. Added the static comparison, the four actual
+  density-ranked cadence boundary changes between 10/20/20 and 8/20/22, and the
+  user's unapproved preference recommendations.
 - Stage 12 auditability correction: retained the complete sanitized 864-parent
   candidate universe for the exact approved feed snapshot and added offline
   replay verification through the authoritative selector. The approved panel

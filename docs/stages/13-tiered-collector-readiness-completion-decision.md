@@ -23,10 +23,10 @@ evidence, superseded, and not valid as final user approval.
 | Cadence | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | A/5 min, B/15 min, C/30 min; 240 logical requests/hour |
 | Quota planning | **TECHNICALLY EVALUATED OPTION — CONSERVATIVE** | 30-day nominal total 181,540; 31-day nominal total 187,588; 10% stress total 205,444 after Legacy7 and diagnostic reserves |
 | Current shared credential usage | **LIMITATION, NOT FALSE ZERO** | current Legacy audit unavailable; full documented Legacy7 reserve of 8,640/8,928 is applied |
-| Production `NumberOfResults` | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | `30` was evaluated from bounded N5/N10/N20/N30 evidence; old mixed-call spans are invalid for forward coverage |
-| Provider maximum | **LIMITATION** | `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; not required because N=30 has direct bounded support |
-| Sequential duration evidence | **PASS — HISTORICAL EVIDENCE RETAINED** | six representatives × four result limits, 24 sequential attempts; temporal-span fields invalid for forward coverage |
-| Corrected result-limit diagnostic | **EXECUTED — NO VALID LIVE RESPONSES** | exactly 24 approved sequential attempts; all sanitized as `NETWORK_OR_DNS_FAILURE`; NumberOfResults remains undecided |
+| Production `NumberOfResults` | **UNDECIDED — USER APPROVAL REQUIRED** | static P95 comparison retains 36/50 for N20 and 50/50 for N30 and A20/B30/C30; the corrected live run produced no valid response |
+| Provider maximum | **LIMITATION** | `PROVIDER_MAXIMUM_NOT_ESTABLISHED`; no provider-maximum claim is needed or made while NumberOfResults remains undecided |
+| Sequential duration evidence | **PASS — HISTORICAL EVIDENCE RETAINED** | six representatives × four result limits, 24 sequential client invocations; temporal-span fields invalid for forward coverage |
+| Corrected result-limit diagnostic | **EXECUTED — NO VALID LIVE RESPONSES** | exactly 24 approved client-side invocations; 0 HTTP responses; retained safe category `OTHER_NETWORK_FAILURE`; provider quota consumption is unknown/not confirmed; NumberOfResults remains undecided |
 | Bounded concurrency | **TECHNICALLY EVALUATED OPTION — USER APPROVAL REQUIRED** | three cap-2 pairs; six valid HTTP 200/parseable responses; no 429/5xx/timeout/transport pressure |
 | Heartbeat feasibility | **PASS** | due sequence `21/21/19/20/20/19`; max 21; cap-2 P95 estimate 10,544.501 ms |
 | Phase assignment | **PASS — DESIGN CONTRACT** | stable identity-hash assignment; exact 50 assignments recorded; no production rows created |
@@ -42,7 +42,8 @@ The retained production-readiness options for later review are:
 - Tier A: 10 density-ranked stations every 5 minutes;
 - Tier B: 20 density-ranked stations every 15 minutes;
 - Tier C: 20 density-ranked stations every 30 minutes;
-- `NumberOfResults = 30` as a technically evaluated option only;
+- N20, N30, and A20/B30/C30 remain unselected; static schedule support is not
+  realtime coverage evidence;
 - `MaxAttempts = 1`, zero automatic retries, as a technically evaluated retry option;
 - `MaximumConcurrency = 2`, as a technically evaluated bounded option;
 - six-heartbeat phase super-cycle with due counts `21/21/19/20/20/19`; and
@@ -52,11 +53,15 @@ The retained production-readiness options for later review are:
 The provider maximum remains unknown. The old forward-span algorithm was
 invalid because it mixed PreviousCall, ThisCall, OnwardCall, and departure
 timings. The user explicitly approved the corrected comparison, and exactly 24
-additional sequential MDD attempts were consumed, increasing cumulative usage
-from 90 to 114. All 24 ended in sanitized `NETWORK_OR_DNS_FAILURE` before a
-valid HTTP response, so corrected live coverage and saturation remain
-unestablished. The historical 100-attempt diagnostic ceiling is unchanged as a
-historical budget.
+sequential client-side MDD request invocations were issued, increasing
+cumulative client invocations from 90 to 114. All 24 ended before a valid HTTP
+response. The retained safe category is `OTHER_NETWORK_FAILURE` because the
+historical raw exception details were not retained; confirmed provider HTTP
+attempts are 0 and provider quota consumption is
+`UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE`. The
+historical initial diagnostic budget is 100, the explicit additional user
+authorization is 24, and the authorized cumulative client-attempt ceiling is
+114. The historical budget was not rewritten.
 
 ## Credential and quota boundary
 
@@ -65,10 +70,13 @@ external Legacy Collector / `ctl.MddCollectorRun` consumer. Current shared
 credential usage was unavailable through an established read-only audit path.
 The design therefore reserves the complete documented Legacy7 monthly
 baseline rather than fabricating zero current usage. The historical Stage 13
-diagnostic hard ceiling is 100 attempts; 90 historical attempts plus the
-explicitly approved 24-attempt correction now produce cumulative accounting of
-114 without silently changing that historical ceiling. Only sanitized evidence
-was retained.
+initial diagnostic budget is 100 client attempts; 90 historical client
+diagnostic attempts plus the explicitly approved 24 corrected client
+invocations produce a cumulative client-invocation count of 114 without
+silently changing that historical budget. The corrected run received 0 HTTP
+responses, so no provider quota count is claimed. For conservative planning,
+24 is retained separately as `conservative_quota_accounting_attempts`. Only
+sanitized evidence was retained.
 
 The technically evaluated normal and stress plans remain under the 210,000
 upper edge of the project's normal planning envelope even with the conservative
@@ -99,6 +107,28 @@ The current user recommendations are retained separately from approval:
   valid live response.
 
 No new final decision may be recorded while the gate is open.
+
+## Future live-diagnostic boundary
+
+The previous 24-invocation authorization has been exercised and is not
+authorization for another rerun. Any future live retry requires a new explicit
+approval after review of the offline correction. The execution environment must
+first pass the zero-request DNS preflight; the first authorized MDD invocation
+is then a smoke request, and the remaining matrix may proceed only after a
+usable HTTP/TRIAS response. DNS/network, TLS/proxy/connectivity, and 401/403
+failures stop immediately. Provider HTTP errors such as 429/5xx follow the
+explicit stop policy and are never relabeled as DNS/network failures.
+
+The exact network-capable local action is:
+
+```text
+python3 scripts/stage_13_tiered_collector_readiness.py --gtfs-zip /path/to/verified-stage12-vrs-global-id.zip --run-live-diagnostics --approve-live-rerun-after-network-preflight --prior-client-attempts 114
+```
+
+`MDD_API_KEY` must be supplied through the inherited environment only. A
+successful rerun authorizes at most 24 additional client-side request
+invocations; provider quota consumption remains unknown unless HTTP responses
+are actually received.
 
 ## Boundary confirmation
 

@@ -32,10 +32,11 @@ The technically evaluated cadence option is:
 | **Total** | **50** | — | **240** |
 
 The exact Stage 12 static snapshot supports this evaluated assignment and the
-evaluated cadence-window result-limit option `NumberOfResults = 30`. Bounded
-live evidence also technically evaluates `MaximumConcurrency = 2`. Neither is
-a user-approved production decision. The provider's theoretical maximum
-result limit remains intentionally unknown and is recorded as
+evaluated cadence-window comparison retains static P95 support for N20, N30,
+and A20/B30/C30. The corrected live comparison produced no valid response, so
+no `NumberOfResults` option is selected or approved. Bounded live evidence also
+technically evaluates `MaximumConcurrency = 2`. The provider's theoretical
+maximum result limit remains intentionally unknown and is recorded as
 `PROVIDER_MAXIMUM_NOT_ESTABLISHED`.
 
 ## 1. Stage 12 dependency and source boundary
@@ -142,10 +143,11 @@ tie-breaker. It does not use `SelectionRank`.
 | 49 | C | Köln Klettenbergpark | `de:05315:13221` | 4 | 9 | 14 |
 | 50 | C | Köln Thielenbruch | `de:05315:19512` | 3 | 7 | 12 |
 
-For the technically evaluated tier-cadence option, `NumberOfResults = 30` is
-above the exact-feed station-level P95 density for all 50 cadence windows. The
-machine-readable coverage check is `50/50`; this remains static planning
-evidence only and is not a user approval.
+The exact-feed static comparison shows that fixed `NumberOfResults = 30` is
+above station-level P95 density for all 50 cadence windows. Fixed N20 supports
+36/50 windows, while N30 and A20/B30/C30 each support 50/50. This remains
+static scheduled-density evidence only, is not realtime coverage evidence, and
+does not select or approve a production result limit.
 
 ## 3. Cadence and quota decision
 
@@ -184,12 +186,17 @@ Current shared-account Legacy Collector usage was not observable through an
 established read-only database mechanism. It is not reported as zero. The
 documented full Legacy7 baseline is reserved conservatively as `8,640` logical
 requests for 30 days and `8,928` for 31 days. Inactive repository diagnostics
-have no standing recurring reserve; the Stage 13 hard diagnostic budget of 100
-HTTP attempts is included in the historical conservative reconciliation above.
-The separately gated corrected comparison was explicitly approved and consumed
-24 attempts; it does not silently change that historical ceiling. Its
-sanitized result was `NETWORK_OR_DNS_FAILURE` for all 24 attempts, with no
-standing recurring reserve or valid coverage evidence created.
+have no standing recurring reserve; the Stage 13 historical initial diagnostic
+budget of 100 client attempts is included in the historical conservative
+reconciliation above. The separately gated corrected comparison was explicitly
+approved and issued 24 client-side request invocations; it does not silently
+change that historical budget. It received 0 HTTP responses and therefore
+confirms 0 provider HTTP attempts; provider quota consumption is
+`UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE`. Its
+retained safe category is `OTHER_NETWORK_FAILURE` because raw exception
+details were not retained. The 24 invocations remain separately labeled as
+`conservative_quota_accounting_attempts`, with no standing recurring reserve
+or valid coverage evidence created.
 
 Known repository callers and the external Legacy consumer are listed in the
 machine-readable `credential_consumers` section. No other normal production
@@ -229,10 +236,13 @@ PreviousCall, ThisCall, OnwardCall, and departure timings.
 All historical tested limits saturated in that bounded sample; saturation is
 retained honestly and is not treated as a provider-maximum discovery. The
 corrected diagnostic was explicitly approved and then executed as exactly 24
-additional sequential attempts across the same six representatives and four
-limits. Every corrected attempt ended with sanitized
-`NETWORK_OR_DNS_FAILURE`; there were no HTTP response statuses, returned
-results, saturations, or valid THIS-call arrivals to calculate coverage.
+additional sequential client-side request invocations across the same six
+representatives and four limits. Every corrected invocation ended before an
+HTTP response and is retained with the safe category
+`OTHER_NETWORK_FAILURE`; there were 0 HTTP responses, 0 confirmed provider HTTP
+attempts, no returned results, no saturations, and no valid THIS-call arrivals
+from which to calculate coverage. Provider quota consumption is not inferred
+from the client invocation count.
 
 The corrected metric uses only each returned `StopEventResult`'s ThisCall
 arrival timing:
@@ -245,24 +255,37 @@ the anchor are counted separately and cannot inflate forward coverage.
 
 The corrected run used one fixed comparable anchor,
 `2026-09-30T11:54:56Z`, zero diagnostic retries, `MaxAttempts = 1`, no raw
-payload persistence, and the immediate 401/403 stop rule. Its cumulative
-accounting is 90 historical attempts + 24 approved attempts = 114. The
-historical 100-attempt ceiling remains unchanged as a historical budget; the
-separate approved extension is recorded explicitly.
+payload persistence, and the immediate 401/403 stop rule. Its explicit
+accounting is:
+
+| Concept | Value |
+|---|---:|
+| Historical initial diagnostic budget | 100 |
+| Historical client diagnostic attempts | 90 |
+| Explicit additional user authorization | 24 client invocations |
+| Corrected client request attempts issued | 24 |
+| Cumulative client request invocations | 114 |
+| Corrected HTTP responses received | 0 |
+| Corrected confirmed provider HTTP attempts | 0 |
+| Corrected provider quota consumption | unknown/not confirmed before HTTP response |
+| Conservative quota accounting attempts | 24 |
+
+The historical budget was not rewritten, and the superseded HTTP-attempt
+wording is not used in the current machine-readable Stage 13 contract.
 
 ### Corrected NumberOfResults comparison
 
 | Policy | Exact-feed static P95 support | Corrected live evidence | Decision |
 |---|---:|---|---|
-| Fixed N=20 | 36/50 cadence windows | 0/24 valid responses; no coverage or saturation | **UNDECIDED** |
-| Fixed N=30 | 50/50 cadence windows | 0/24 valid responses; no coverage or saturation | **UNDECIDED** |
-| Tier-specific A=20, B=30, C=30 | 50/50 cadence windows | N20/N30 probes had 0/24 valid responses | **UNDECIDED** |
+| Fixed N=20 | 36/50 cadence windows | 0/24 valid HTTP responses; no coverage or saturation | **UNDECIDED** |
+| Fixed N=30 | 50/50 cadence windows | 0/24 valid HTTP responses; no coverage or saturation | **UNDECIDED** |
+| Tier-specific A=20, B=30, C=30 | 50/50 cadence windows | N20/N30 probes had 0/24 valid HTTP responses | **UNDECIDED** |
 
-The tier-specific A20/B30/C30 policy is the simpler static candidate supported
-by the exact-feed density evidence, but it is not supported by corrected live
-evidence because the diagnostic received no valid response. No clearly superior
-alternative can be selected from this run. NumberOfResults remains undecided;
-N=30 is not finalized and no provider-maximum claim is made.
+The tier-specific A20/B30/C30 policy is retained as a static comparison only;
+it is not supported by corrected live evidence because the diagnostic received
+no valid response. No clearly superior alternative can be selected from this
+run. NumberOfResults remains undecided; N20, N30, and A20/B30/C30 are not
+finalized and no provider-maximum claim is made.
 
 ### Cadence boundary review
 
@@ -285,11 +308,31 @@ Provider status remains `PROVIDER_MAXIMUM_NOT_ESTABLISHED`. The design does not
 claim guaranteed full realtime coverage from static schedules or a bounded
 sample.
 
-Stage 13 has consumed 114 cumulative MDD HTTP/transport attempts: 90
-historical attempts plus exactly 24 approved corrected attempts. The current
-corrected run has no valid live response evidence. The final evidence retains
-sanitized historical and corrected records only; no raw payload, request
-header, or credential was persisted.
+Stage 13 records 114 cumulative client request invocations: 90 historical
+client diagnostic attempts plus exactly 24 corrected invocations. This is not a
+claim that 114 provider HTTP requests or quota units were consumed. The current
+corrected run has no valid live response evidence; its provider HTTP attempt
+count is 0 and quota consumption is unknown. The final evidence retains the
+timestamp, requested matrix, client-attempt count, zero-response result, safe
+transport category, and zero raw-response retention; no request header or
+credential was persisted.
+
+### Network preflight and fail-fast smoke gate
+
+Any future approved live batch must first resolve the configured host locally
+with a zero-request DNS/network preflight. The result is sanitized to
+`DNS_RESOLUTION_OK` or `DNS_RESOLUTION_FAILED` and contains no API key, headers,
+proxy secret, or unrestricted exception text. A failed preflight issues zero
+MDD HTTP requests and stops the diagnostic as unsuitable for the execution
+environment.
+
+After a successful preflight, the first authorized matrix invocation is the
+smoke request and counts inside the new 24-invocation maximum. Only a usable
+HTTP/TRIAS response permits the remaining matrix. DNS/network, TLS/proxy/
+connectivity, and 401/403 failures stop immediately. Provider HTTP errors such
+as 429/5xx follow the explicit provider-error stop policy and are not silently
+classified as DNS/network failures. The previous 24-invocation authorization
+is exhausted; another run needs a new explicit user approval.
 
 ## 5. Bounded concurrency and heartbeat feasibility
 

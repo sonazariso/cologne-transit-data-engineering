@@ -1,5 +1,5 @@
 {
-  "artifact_version": "stage-13-tiered-collector-readiness-evidence-3.0",
+  "artifact_version": "stage-13-tiered-collector-readiness-evidence-4.0",
   "cadence_boundary_review": {
     "a_to_b_boundary_stations": [
       {
@@ -920,7 +920,18 @@
       "error_metadata"
     ]
   },
-  "generated_at_utc": "2026-09-30T12:08:51Z",
+  "future_live_diagnostic_execution_boundary": {
+    "api_key_requirement": "provide MDD_API_KEY through the inherited environment only; never put the key in command text or evidence",
+    "approval_request": "The prior 24-invocation authorization has been exercised. After reviewing the offline network-preflight and fail-fast changes, do you explicitly approve one new corrected diagnostic with at most 24 client-side MDD request invocations?",
+    "expected_max_additional_client_request_attempts_for_successful_rerun": 24,
+    "network_capable_local_action": "python3 scripts/stage_13_tiered_collector_readiness.py --gtfs-zip /path/to/verified-stage12-vrs-global-id.zip --run-live-diagnostics --approve-live-rerun-after-network-preflight --prior-client-attempts 114",
+    "new_explicit_user_approval_required": true,
+    "preflight_required_before_any_mdd_http_request": true,
+    "previous_24_invocation_authorization_exhausted": true,
+    "provider_quota_consumption_for_rerun": "UNKNOWN_UNTIL_HTTP_RESPONSES_ARE_RECEIVED; DO NOT INFER FROM CLIENT INVOCATIONS",
+    "smoke_request_required_before_remaining_matrix": true
+  },
+  "generated_at_utc": "2026-09-30T13:04:23Z",
   "heartbeat_feasibility": {
     "cap2_pair_batch_duration_statistics_ms": {
       "count": 3,
@@ -974,40 +985,58 @@
   },
   "number_of_results": {
     "additional_request_gate": {
-      "additional_requests_issued": 24,
-      "approval_request": "The corrected NumberOfResults coverage diagnostic requires 24 additional MDD requests, increasing cumulative Stage 13 diagnostic attempts from 90 to 114. Do you approve these 24 additional requests?",
+      "additional_client_request_attempts_issued": 24,
+      "approval_request": "The corrected NumberOfResults coverage diagnostic requires 24 additional client-side MDD request invocations. They are separately authorized from the historical 100-attempt budget; provider quota consumption will not be inferred if an invocation fails before an HTTP response. Do you approve these 24 invocations?",
       "approved": true,
+      "authorization_basis": "HISTORICAL_APPROVAL_ALREADY_EXERCISED; NOT AUTHORIZATION FOR ANOTHER RERUN",
+      "authorized_cumulative_client_attempt_ceiling": 114,
       "corrected_diagnostic_scope": "six deterministic representatives × N=5/N=10/N=20/N=30; sequential only",
       "corrected_live_diagnostic_issued": true,
-      "cumulative_attempts_if_approved": 114,
-      "historical_ceiling_changed": false,
-      "historical_diagnostic_hard_ceiling": 100,
-      "prior_attempts_consumed": 90,
+      "explicit_additional_user_authorization": 24,
+      "historical_budget_rewritten": false,
+      "historical_client_diagnostic_attempts": 90,
+      "historical_initial_diagnostic_budget": 100,
+      "prior_cumulative_client_request_invocations": 90,
       "raw_responses_persisted": false,
-      "requested_additional_http_attempts": 24,
+      "requested_additional_client_request_attempts": 24,
       "required": true
     },
     "application_validation_ranges_are_not_provider_evidence": true,
     "bounded_live_diagnostic": {
       "additional_request_gate": {
-        "additional_requests_issued": 24,
-        "approval_request": "The corrected NumberOfResults coverage diagnostic requires 24 additional MDD requests, increasing cumulative Stage 13 diagnostic attempts from 90 to 114. Do you approve these 24 additional requests?",
+        "additional_client_request_attempts_issued": 24,
+        "approval_request": "The corrected NumberOfResults coverage diagnostic requires 24 additional client-side MDD request invocations. They are separately authorized from the historical 100-attempt budget; provider quota consumption will not be inferred if an invocation fails before an HTTP response. Do you approve these 24 invocations?",
         "approved": true,
+        "authorization_basis": "HISTORICAL_APPROVAL_ALREADY_EXERCISED; NOT AUTHORIZATION FOR ANOTHER RERUN",
+        "authorized_cumulative_client_attempt_ceiling": 114,
         "corrected_diagnostic_scope": "six deterministic representatives × N=5/N=10/N=20/N=30; sequential only",
         "corrected_live_diagnostic_issued": true,
-        "cumulative_attempts_if_approved": 114,
-        "historical_ceiling_changed": false,
-        "historical_diagnostic_hard_ceiling": 100,
-        "prior_attempts_consumed": 90,
+        "explicit_additional_user_authorization": 24,
+        "historical_budget_rewritten": false,
+        "historical_client_diagnostic_attempts": 90,
+        "historical_initial_diagnostic_budget": 100,
+        "prior_cumulative_client_request_invocations": 90,
         "raw_responses_persisted": false,
-        "requested_additional_http_attempts": 24,
+        "requested_additional_client_request_attempts": 24,
         "required": true
       },
-      "current_run_http_attempts_consumed": 24,
+      "authorized_cumulative_client_attempt_ceiling": 114,
+      "client_request_attempts_issued": 24,
+      "confirmed_provider_http_attempts": 0,
+      "conservative_quota_accounting_attempts": 24,
+      "corrected_client_request_attempts": 24,
+      "cumulative_client_request_invocations": 114,
       "diagnostic_anchor_dep_arr_time": "2026-09-30T11:54:56Z",
-      "http_attempts_consumed": 114,
-      "max_http_attempts": 100,
-      "prior_attempts_consumed": 90,
+      "explicit_additional_user_authorization": 24,
+      "historical_client_diagnostic_attempts": 90,
+      "historical_initial_diagnostic_budget": 100,
+      "http_responses_received": 0,
+      "network_preflight": {
+        "reason": "zero-request DNS/network preflight was added after this run",
+        "status": "NOT_PERFORMED_HISTORICAL_RUN"
+      },
+      "prior_cumulative_client_request_invocations": 90,
+      "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
       "representatives": [
         {
           "density_rank": 1,
@@ -1174,7 +1203,7 @@
             "attempt_count": 1,
             "duration_ms": 26.87,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1184,6 +1213,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1196,14 +1226,15 @@
             "source_parent_station_id": "de:05315:19211",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Mülheim Wiener Platz",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.534,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1213,6 +1244,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1225,14 +1257,15 @@
             "source_parent_station_id": "de:05315:19211",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Mülheim Wiener Platz",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.467,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1242,6 +1275,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1254,14 +1288,15 @@
             "source_parent_station_id": "de:05315:19211",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Mülheim Wiener Platz",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.844,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1271,6 +1306,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1283,14 +1319,15 @@
             "source_parent_station_id": "de:05315:19211",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Mülheim Wiener Platz",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.369,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1300,6 +1337,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1312,14 +1350,15 @@
             "source_parent_station_id": "de:05315:11110",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Heumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.545,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1329,6 +1368,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1341,14 +1381,15 @@
             "source_parent_station_id": "de:05315:11110",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Heumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 21.776,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1358,6 +1399,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1370,14 +1412,15 @@
             "source_parent_station_id": "de:05315:11110",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Heumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.199,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1387,6 +1430,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1399,14 +1443,15 @@
             "source_parent_station_id": "de:05315:11110",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Heumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.714,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1416,6 +1461,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1428,14 +1474,15 @@
             "source_parent_station_id": "de:05315:15011",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neusser Str./Gürtel",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.578,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1445,6 +1492,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1457,14 +1505,15 @@
             "source_parent_station_id": "de:05315:15011",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neusser Str./Gürtel",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.905,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1474,6 +1523,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1486,14 +1536,15 @@
             "source_parent_station_id": "de:05315:15011",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neusser Str./Gürtel",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.39,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1503,6 +1554,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1515,14 +1567,15 @@
             "source_parent_station_id": "de:05315:15011",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neusser Str./Gürtel",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.89,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1532,6 +1585,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1544,14 +1598,15 @@
             "source_parent_station_id": "de:05315:19512",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Thielenbruch",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.112,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1561,6 +1616,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1573,14 +1629,15 @@
             "source_parent_station_id": "de:05315:19512",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Thielenbruch",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.873,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1590,6 +1647,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1602,14 +1660,15 @@
             "source_parent_station_id": "de:05315:19512",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Thielenbruch",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.355,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1619,6 +1678,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1631,14 +1691,15 @@
             "source_parent_station_id": "de:05315:19512",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Thielenbruch",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.035,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1648,6 +1709,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1660,14 +1722,15 @@
             "source_parent_station_id": "de:05315:19201",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Bf Mülheim",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 33.535,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1677,6 +1740,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1689,14 +1753,15 @@
             "source_parent_station_id": "de:05315:19201",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Bf Mülheim",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.189,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1706,6 +1771,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1718,14 +1784,15 @@
             "source_parent_station_id": "de:05315:19201",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Bf Mülheim",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.366,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1735,6 +1802,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1747,14 +1815,15 @@
             "source_parent_station_id": "de:05315:19201",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Bf Mülheim",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.198,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1764,6 +1833,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1776,14 +1846,15 @@
             "source_parent_station_id": "de:05315:11111",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.124,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1793,6 +1864,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1805,14 +1877,15 @@
             "source_parent_station_id": "de:05315:11111",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 10.223,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1822,6 +1895,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1834,14 +1908,15 @@
             "source_parent_station_id": "de:05315:11111",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           },
           {
             "attempt_count": 1,
             "duration_ms": 11.133,
             "earliest_thiscall_arrival": null,
-            "error_classification": "NETWORK_OR_DNS_FAILURE",
+            "error_classification": "OTHER_NETWORK_FAILURE",
             "events_at_or_after_anchor_count": 0,
             "events_before_anchor_count": 0,
             "execution_mode": "sequential_result_limit_comparison",
@@ -1851,6 +1926,7 @@
             "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
             "http_status": null,
             "latest_thiscall_arrival": null,
+            "legacy_transport_failure_label": "NETWORK_OR_DNS_FAILURE",
             "pair_id": null,
             "parser_success": false,
             "raw_payload_persisted": false,
@@ -1863,10 +1939,19 @@
             "source_parent_station_id": "de:05315:11111",
             "source_stop_point_ref_consistency": "NOT_EVALUATED",
             "station": "Köln Neumarkt",
-            "transport_failure": "NETWORK_OR_DNS_FAILURE",
+            "transport_failure": "OTHER_NETWORK_FAILURE",
+            "transport_failure_category": "OTHER_NETWORK_FAILURE",
             "valid_trias_application_response": false
           }
         ],
+        "smoke_gate": {
+          "client_request_attempts_issued": 0,
+          "counts_inside_authorized_budget": true,
+          "http_responses_received": 0,
+          "policy": "smoke gate added after this historical run; no retroactive request was issued",
+          "provider_http_error_policy": "STOP_ON_FIRST_PROVIDER_HTTP_ERROR; retain HTTP status and do not classify it as transport failure",
+          "status": "NOT_PERFORMED_HISTORICAL_RUN"
+        },
         "static_cadence_window_support_by_result_limit": {
           "10": {
             "all_station_p95_supported": false,
@@ -3507,6 +3592,8 @@
         },
         "summary_by_result_limit": {
           "10": {
+            "client_request_attempts_issued": 6,
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 33.535,
@@ -3544,6 +3631,7 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
@@ -3558,7 +3646,6 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
-            "request_count": 6,
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3581,9 +3668,14 @@
             "source_ref_consistency_distribution": {
               "NOT_EVALUATED": 6
             },
+            "transport_failure_category_distribution": {
+              "OTHER_NETWORK_FAILURE": 6
+            },
             "valid_trias_response_count": 0
           },
           "20": {
+            "client_request_attempts_issued": 6,
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 21.776,
@@ -3621,6 +3713,7 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
@@ -3635,7 +3728,6 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
-            "request_count": 6,
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3658,9 +3750,14 @@
             "source_ref_consistency_distribution": {
               "NOT_EVALUATED": 6
             },
+            "transport_failure_category_distribution": {
+              "OTHER_NETWORK_FAILURE": 6
+            },
             "valid_trias_response_count": 0
           },
           "30": {
+            "client_request_attempts_issued": 6,
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 11.355,
@@ -3698,6 +3795,7 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
@@ -3712,7 +3810,6 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
-            "request_count": 6,
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3735,9 +3832,14 @@
             "source_ref_consistency_distribution": {
               "NOT_EVALUATED": 6
             },
+            "transport_failure_category_distribution": {
+              "OTHER_NETWORK_FAILURE": 6
+            },
             "valid_trias_response_count": 0
           },
           "5": {
+            "client_request_attempts_issued": 6,
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 26.87,
@@ -3775,6 +3877,7 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
@@ -3789,7 +3892,6 @@
             },
             "legacy_forward_temporal_span_status": "NOT_PRESENT",
             "parser_success_count": 0,
-            "request_count": 6,
             "returned_event_count_statistics": {
               "count": 6,
               "max": 0.0,
@@ -3812,15 +3914,114 @@
             "source_ref_consistency_distribution": {
               "NOT_EVALUATED": 6
             },
+            "transport_failure_category_distribution": {
+              "OTHER_NETWORK_FAILURE": 6
+            },
             "valid_trias_response_count": 0
           }
         }
       },
-      "status": "CONDITIONALLY_BLOCKED",
-      "stop_reason": null
+      "status": "COMPLETED_NO_VALID_HTTP_RESPONSES",
+      "stop_reason": "HISTORICAL_RUN_COMPLETED_WITHOUT_VALID_HTTP_RESPONSES"
     },
-    "corrected_metric_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+    "corrected_metric_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
     "decision": "NOT_ESTABLISHED",
+    "failed_corrected_diagnostic_audit": {
+      "client_request_attempts_issued": 24,
+      "confirmed_provider_http_attempts": 0,
+      "conservative_quota_accounting_attempts": 24,
+      "http_responses_received": 0,
+      "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
+      "raw_response_retention": "ZERO_RAW_RESPONSES_RETAINED",
+      "requested_station_result_limit_matrix": {
+        "expected_client_request_attempts": 24,
+        "representatives": [
+          {
+            "density_rank": 1,
+            "production_tier": "A",
+            "representative_role": "high_density",
+            "source_parent_station_id": "de:05315:19211",
+            "station": "Köln Mülheim Wiener Platz",
+            "transport_modes": [
+              "Regional / Other Bus",
+              "Stadtbahn / Tram",
+              "Urban / KVB Bus"
+            ]
+          },
+          {
+            "density_rank": 3,
+            "production_tier": "A",
+            "representative_role": "high_density_legacy7",
+            "source_parent_station_id": "de:05315:11110",
+            "station": "Köln Heumarkt",
+            "transport_modes": [
+              "Regional / Other Bus",
+              "Stadtbahn / Tram",
+              "Urban / KVB Bus"
+            ]
+          },
+          {
+            "density_rank": 24,
+            "production_tier": "B",
+            "representative_role": "middle_density",
+            "source_parent_station_id": "de:05315:15011",
+            "station": "Köln Neusser Str./Gürtel",
+            "transport_modes": [
+              "Stadtbahn / Tram",
+              "Urban / KVB Bus"
+            ]
+          },
+          {
+            "density_rank": 50,
+            "production_tier": "C",
+            "representative_role": "low_density",
+            "source_parent_station_id": "de:05315:19512",
+            "station": "Köln Thielenbruch",
+            "transport_modes": [
+              "Stadtbahn / Tram"
+            ]
+          },
+          {
+            "density_rank": 4,
+            "production_tier": "A",
+            "representative_role": "interchange_mode_diversity",
+            "source_parent_station_id": "de:05315:19201",
+            "station": "Köln Bf Mülheim",
+            "transport_modes": [
+              "Regional / Other Bus",
+              "Regional Bahn (RB)",
+              "Regional Express (RE)",
+              "S-Bahn",
+              "Stadtbahn / Tram",
+              "Urban / KVB Bus"
+            ]
+          },
+          {
+            "density_rank": 2,
+            "production_tier": "A",
+            "representative_role": "urban_bus_tram_diversity",
+            "source_parent_station_id": "de:05315:11111",
+            "station": "Köln Neumarkt",
+            "transport_modes": [
+              "Stadtbahn / Tram",
+              "Urban / KVB Bus"
+            ]
+          }
+        ],
+        "requested_result_limits": [
+          5,
+          10,
+          20,
+          30
+        ]
+      },
+      "status": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
+      "timestamp_basis": "retained artifact generated_at_utc; per-request timestamps were not retained",
+      "timestamp_utc": "2026-09-30T12:55:49Z",
+      "transport_failure_category_distribution": {
+        "OTHER_NETWORK_FAILURE": 24
+      }
+    },
     "historical_invalidated_sequential_records": [
       {
         "attempt_count": 1,
@@ -4835,7 +5036,7 @@
     },
     "production_number_of_results": null,
     "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
-    "selection_limitation": "N=30 remains undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses because all 24 attempts ended with NETWORK_OR_DNS_FAILURE.",
+    "selection_limitation": "N=20, N=30, and A20/B30/C30 remain undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses. Static scheduled-density evidence is planning evidence only and is not realtime coverage evidence.",
     "source_controlled_historical_samples": [
       {
         "coverage_interpretation": "all observed responses reached N=5; N=5 is not sufficient production evidence",
@@ -4882,10 +5083,12 @@
     "technically_evaluated_number_of_results": null
   },
   "number_of_results_comparison": {
-    "corrected_diagnostic_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+    "corrected_diagnostic_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
     "fixed_n20": {
       "corrected_live": {
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+        "client_request_attempts_issued": 6,
+        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+        "confirmed_provider_http_attempts": 0,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 21.776,
@@ -4904,10 +5107,10 @@
           "p95": null,
           "p99": null
         },
+        "http_responses_received": 0,
         "http_status_distribution": {
           "None": 6
         },
-        "request_count": 6,
         "requested_result_limit": 20,
         "returned_event_count_statistics": {
           "count": 6,
@@ -4930,7 +5133,9 @@
     },
     "fixed_n30": {
       "corrected_live": {
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+        "client_request_attempts_issued": 6,
+        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+        "confirmed_provider_http_attempts": 0,
         "duration_statistics_ms": {
           "count": 6,
           "max_ms": 11.355,
@@ -4949,10 +5154,10 @@
           "p95": null,
           "p99": null
         },
+        "http_responses_received": 0,
         "http_status_distribution": {
           "None": 6
         },
-        "request_count": 6,
         "requested_result_limit": 30,
         "returned_event_count_statistics": {
           "count": 6,
@@ -4978,7 +5183,7 @@
     "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
     "simpler_alternative": {
       "candidate": "A=20, B=30, C=30",
-      "corrected_live_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+      "corrected_live_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
       "recommendation": "NO_SELECTION_UNTIL_VALID_CORRECTED_LIVE_RESPONSES_EXIST",
       "static_cadence_window_fit": {
         "all_station_p95_supported": true,
@@ -5012,11 +5217,15 @@
         "station_p95_supported_count": 50
       }
     },
+    "static_evidence_boundary": "static scheduled-density evidence is planning evidence only; it is not realtime response coverage",
+    "static_scheduled_density_is_not_realtime_coverage": true,
     "tier_specific_a20_b30_c30": {
       "corrected_live": {
         "available_result_limit_probes": {
           "N20": {
-            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+            "client_request_attempts_issued": 6,
+            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 21.776,
@@ -5035,10 +5244,10 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
-            "request_count": 6,
             "requested_result_limit": 20,
             "returned_event_count_statistics": {
               "count": 6,
@@ -5053,7 +5262,9 @@
             "valid_trias_response_count": 0
           },
           "N30": {
-            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+            "client_request_attempts_issued": 6,
+            "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
+            "confirmed_provider_http_attempts": 0,
             "duration_statistics_ms": {
               "count": 6,
               "max_ms": 11.355,
@@ -5072,10 +5283,10 @@
               "p95": null,
               "p99": null
             },
+            "http_responses_received": 0,
             "http_status_distribution": {
               "None": 6
             },
-            "request_count": 6,
             "requested_result_limit": 30,
             "returned_event_count_statistics": {
               "count": 6,
@@ -5090,7 +5301,7 @@
             "valid_trias_response_count": 0
           }
         },
-        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+        "comparison_status": "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
         "source_result_limits": {
           "A": 20,
           "B": 30,
@@ -5988,8 +6199,10 @@
       }
     ],
     "technically_evaluated_option": {
-      "diagnostic_reserved_http_attempts": 100,
+      "corrected_diagnostic_conservative_quota_accounting_attempts": 24,
+      "corrected_diagnostic_provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
       "evidence_supported_retry_allowance": 0,
+      "historical_diagnostic_reserved_attempts": 100,
       "historical_legacy_retry_sensitivity": 0.021485574,
       "legacy_current_usage_observed": false,
       "legacy_reserved_conservatively": {
@@ -6016,7 +6229,7 @@
       "CURRENT_SHARED_CREDENTIAL_USAGE_NOT_OBSERVED; FULL_DOCUMENTED_LEGACY7_CADENCE_RESERVED_CONSERVATIVELY",
       "STATIC_DENSITY_IS_PLANNING_EVIDENCE_ONLY_NOT_REALTIME_RESPONSE_COVERAGE",
       "USER_DESIGN_APPROVAL_REQUIRED_FOR_NUMBER_OF_RESULTS_CADENCE_CONCURRENCY_AND_RETRY_POLICY",
-      "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE"
+      "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE"
     ],
     "power_bi_modified": false,
     "production_activation": "NOT_STARTED",
@@ -6077,10 +6290,18 @@
       }
     ],
     "stage13_live_diagnostic": {
-      "current_run_http_attempts_consumed": 24,
-      "http_attempts_consumed": 114,
-      "max_http_attempts": 100,
-      "prior_attempts_consumed": 90,
+      "authorized_cumulative_client_attempt_ceiling": 114,
+      "client_request_attempts_issued": 24,
+      "confirmed_provider_http_attempts": 0,
+      "conservative_quota_accounting_attempts": 24,
+      "corrected_client_request_attempts": 24,
+      "cumulative_client_request_invocations": 114,
+      "explicit_additional_user_authorization": 24,
+      "historical_client_diagnostic_attempts": 90,
+      "historical_initial_diagnostic_budget": 100,
+      "http_responses_received": 0,
+      "prior_cumulative_client_request_invocations": 90,
+      "provider_quota_consumption_status": "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE",
       "raw_payloads_persisted": false,
       "retries": 0
     }
@@ -6321,7 +6542,8 @@
     "maximum_concurrency": null,
     "provider_scope_limit": "cap-2 result is a bounded sample decision, not a provider-wide rate-limit claim",
     "sequential_live_diagnostic": {
-      "request_count": 24,
+      "client_request_attempts_issued": 24,
+      "http_responses_received": null,
       "request_duration_statistics_ms": {
         "count": 24,
         "max_ms": 1251.639,

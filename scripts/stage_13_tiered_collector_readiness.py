@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import json
 import math
 import os
 import re
+import socket
 import time
 import zipfile
 from collections import Counter, defaultdict
@@ -39,9 +41,11 @@ STAGE12_ZIP_SHA256 = "288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910
 STAGE12_SOURCE_URL = "https://download.vrs.de/gtfs/google_transit_goR.zip"
 
 ENDPOINT = "https://mdd.gorheinland.com/delfi"
+MDD_HOSTNAME = "mdd.gorheinland.com"
+MDD_PORT = 443
 REQUESTOR_REF = "CologneTransitIntelligence"
 MDD_DIAGNOSTIC_POLICY = "STAGE13_TIERED_READINESS_DIAGNOSTIC_V1"
-MDD_HTTP_ATTEMPT_HARD_MAX = 100
+HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET = 100
 MDD_RESULT_LIMITS = (5, 10, 20, 30)
 # This remains a technically evaluated option.  It is not a user-approved
 # production setting until the Stage 13 decision gate is explicitly closed.
@@ -49,12 +53,39 @@ MDD_CONCURRENCY_CAP = 2
 PRODUCTION_MAX_ATTEMPTS_CANDIDATE = 1
 ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS = 24
 PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS = 90
+AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING = (
+    PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+)
+PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE = (
+    "UNKNOWN_NOT_CONFIRMED_BECAUSE_FAILURE_OCCURRED_BEFORE_HTTP_RESPONSE"
+)
+PROVIDER_QUOTA_NOT_INFERRED_FROM_RESPONSE_COUNT = (
+    "NOT_INFERRED_FROM_HTTP_RESPONSE_COUNT"
+)
+SAFE_TRANSPORT_FAILURE_CATEGORIES = frozenset(
+    {
+        "DNS_RESOLUTION_FAILED",
+        "NETWORK_UNREACHABLE",
+        "CONNECTION_REFUSED",
+        "TLS_FAILURE",
+        "PROXY_OR_ENVIRONMENT_FAILURE",
+        "TIMEOUT",
+        "OTHER_NETWORK_FAILURE",
+    }
+)
+LEGACY_BROAD_TRANSPORT_FAILURE = "NETWORK_OR_DNS_FAILURE"
 ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST = (
-    "The corrected NumberOfResults coverage diagnostic requires 24 additional MDD requests, "
-    "increasing cumulative Stage 13 diagnostic attempts from 90 to 114. "
-    "Do you approve these 24 additional requests?"
+    "The corrected NumberOfResults coverage diagnostic requires 24 additional client-side "
+    "MDD request invocations. They are separately authorized from the historical 100-attempt "
+    "budget; provider quota consumption will not be inferred if an invocation fails before "
+    "an HTTP response. Do you approve these 24 invocations?"
 )
 CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE = "six deterministic representatives × N=5/N=10/N=20/N=30; sequential only"
+LIVE_RERUN_APPROVAL_REQUEST = (
+    "The prior 24-invocation authorization has been exercised. After reviewing the offline "
+    "network-preflight and fail-fast changes, do you explicitly approve one new corrected "
+    "diagnostic with at most 24 client-side MDD request invocations?"
+)
 
 MONTHLY_CEILING = 250_000
 NORMAL_ENVELOPE_MIN = 207_500
@@ -66,7 +97,7 @@ LEGACY_HTTP_ATTEMPTS = 1_629
 LEGACY_ADDITIONAL_RETRY_ATTEMPTS = 35
 LEGACY_ADDITIONAL_ATTEMPT_SHARE = LEGACY_ADDITIONAL_RETRY_ATTEMPTS / LEGACY_HTTP_ATTEMPTS
 LEGACY7_RESERVED_MONTHLY_REQUESTS = {30: 8_640, 31: 8_928}
-DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS = MDD_HTTP_ATTEMPT_HARD_MAX
+DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS = HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET
 FORWARD_WINDOWS_MINUTES = (5, 10, 15, 30)
 # This remains a technically evaluated option.  It must not be serialized as
 # an approved production decision before explicit user approval.
@@ -1143,6 +1174,132 @@ def _forward_coverage_metrics(
     return metrics
 
 
+def _safe_transport_failure_category(value: Any) -> str | None:
+    """Return an allow-listed transport category without retaining details."""
+
+    if value is None:
+        return None
+    text = str(value)
+    if text in SAFE_TRANSPORT_FAILURE_CATEGORIES:
+        return text
+    # The earlier 24-attempt artifact retained only this broad label.  Its raw
+    # exception details were intentionally not retained, so it cannot now be
+    # safely narrowed to DNS, TLS, proxy, or another subtype.
+    if text == LEGACY_BROAD_TRANSPORT_FAILURE:
+        return "OTHER_NETWORK_FAILURE"
+    return "OTHER_NETWORK_FAILURE"
+
+
+def _network_dns_preflight(endpoint: str = ENDPOINT) -> dict[str, Any]:
+    """Resolve the MDD host locally without creating an HTTP request.
+
+    Only non-secret facts are returned.  In particular, no API key, headers,
+    proxy configuration, exception text, or resolved address is retained.
+    """
+
+    del endpoint  # The Stage 13 endpoint is fixed by the request contract.
+    hostname = MDD_HOSTNAME
+    port = MDD_PORT
+    try:
+        addresses = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        families = sorted(
+            {
+                "IPv4" if family == socket.AF_INET else "IPv6" if family == socket.AF_INET6 else "OTHER"
+                for family, _socktype, _proto, _canonname, _sockaddr in addresses
+            }
+        )
+    except socket.gaierror:
+        return {
+            "status": "DNS_RESOLUTION_FAILED",
+            "hostname": hostname,
+            "port": port,
+            "resolved_address_count": 0,
+            "address_families": [],
+            "safe_failure_category": "DNS_RESOLUTION_FAILED",
+        }
+    except OSError as error:
+        # The resolver did not provide a usable result.  Keep the public
+        # preflight status deterministic and expose only the safe category.
+        category = "OTHER_NETWORK_FAILURE"
+        if getattr(error, "errno", None) in {errno.ENETUNREACH, errno.EHOSTUNREACH}:
+            category = "NETWORK_UNREACHABLE"
+        return {
+            "status": "DNS_RESOLUTION_FAILED",
+            "hostname": hostname,
+            "port": port,
+            "resolved_address_count": 0,
+            "address_families": [],
+            "safe_failure_category": category,
+        }
+    if not addresses:
+        return {
+            "status": "DNS_RESOLUTION_FAILED",
+            "hostname": hostname,
+            "port": port,
+            "resolved_address_count": 0,
+            "address_families": [],
+            "safe_failure_category": "DNS_RESOLUTION_FAILED",
+        }
+    return {
+        "status": "DNS_RESOLUTION_OK",
+        "hostname": hostname,
+        "port": port,
+        "resolved_address_count": len(addresses),
+        "address_families": families,
+        "safe_failure_category": None,
+    }
+
+
+def _request_accounting(
+    client_request_attempts_issued: int,
+    http_responses_received: int,
+    *,
+    conservative_quota_accounting_attempts: int | None = None,
+) -> dict[str, Any]:
+    """Separate client invocation, response, and quota-accounting concepts."""
+
+    client_attempts = int(client_request_attempts_issued)
+    responses = int(http_responses_received)
+    if client_attempts < 0 or responses < 0 or responses > client_attempts:
+        raise ValueError("request accounting counts are inconsistent")
+    conservative = client_attempts if conservative_quota_accounting_attempts is None else int(
+        conservative_quota_accounting_attempts
+    )
+    if conservative < 0:
+        raise ValueError("conservative quota accounting count must be non-negative")
+    return {
+        "client_request_attempts_issued": client_attempts,
+        "http_responses_received": responses,
+        "confirmed_provider_http_attempts": responses,
+        "provider_quota_consumption_status": (
+            PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE
+            if responses == 0 and client_attempts > 0
+            else PROVIDER_QUOTA_NOT_INFERRED_FROM_RESPONSE_COUNT
+            if client_attempts > 0
+            else "NO_CLIENT_REQUEST_INVOCATIONS_ISSUED"
+        ),
+        "conservative_quota_accounting_attempts": conservative,
+    }
+
+
+def _normalize_transport_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Upgrade a retained sanitized record to the safe transport taxonomy."""
+
+    updated = dict(record)
+    existing = updated.get("transport_failure")
+    category = _safe_transport_failure_category(existing)
+    if category is not None:
+        updated["transport_failure"] = category
+        updated["transport_failure_category"] = category
+        if existing == LEGACY_BROAD_TRANSPORT_FAILURE:
+            updated["legacy_transport_failure_label"] = LEGACY_BROAD_TRANSPORT_FAILURE
+        if updated.get("error_classification") == LEGACY_BROAD_TRANSPORT_FAILURE:
+            updated["error_classification"] = category
+    elif "transport_failure_category" not in updated:
+        updated["transport_failure_category"] = None
+    return updated
+
+
 def _probe_record(
     stage8: Any,
     result: Any,
@@ -1178,7 +1335,8 @@ def _probe_record(
         "forward_temporal_span_status": "RETIRED_NOT_USED_FOR_FORWARD_COVERAGE",
         "source_stop_point_ref_consistency": "NOT_EVALUATED",
         "duration_ms": _round(float(result.elapsed_ms), 3),
-        "transport_failure": result.failure,
+        "transport_failure": _safe_transport_failure_category(result.failure),
+        "transport_failure_category": _safe_transport_failure_category(result.failure),
         "error_classification": None,
         "attempt_count": 1,
         "raw_payload_persisted": False,
@@ -1193,7 +1351,7 @@ def _probe_record(
         record["error_classification"] = "HTTP_5XX_PROVIDER_FAILURE"
         return record
     if result.failure:
-        record["error_classification"] = str(result.failure)
+        record["error_classification"] = _safe_transport_failure_category(result.failure)
         return record
     try:
         stage8.raw_payload_secret_check(result.body, os.environ.get("MDD_API_KEY", ""))
@@ -1303,7 +1461,9 @@ def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         if row.get("forward_temporal_span_seconds") is not None
     ]
     return {
-        "request_count": len(records),
+        "client_request_attempts_issued": len(records),
+        "http_responses_received": sum(row.get("http_status") is not None for row in records),
+        "confirmed_provider_http_attempts": sum(row.get("http_status") is not None for row in records),
         "http_status_distribution": dict(sorted(Counter(str(row.get("http_status")) for row in records).items())),
         "parser_success_count": sum(bool(row.get("parser_success")) for row in records),
         "valid_trias_response_count": sum(bool(row.get("valid_trias_application_response")) for row in records),
@@ -1328,6 +1488,15 @@ def _summary_for_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         "source_ref_consistency_distribution": dict(
             sorted(Counter(str(row.get("source_stop_point_ref_consistency")) for row in records).items())
         ),
+        "transport_failure_category_distribution": dict(
+            sorted(
+                Counter(
+                    str(row.get("transport_failure_category"))
+                    for row in records
+                    if row.get("transport_failure_category") is not None
+                ).items()
+            )
+        ),
     }
 
 
@@ -1338,27 +1507,22 @@ def _run_live_diagnostics(
     include_concurrency_probe: bool = True,
     attempt_budget: int | None = None,
 ) -> dict[str, Any]:
-    """Run a sanitized diagnostic without persisting raw response payloads.
-
-    The historical full diagnostic path includes the cap-2 sample.  The
-    corrected rerun passes ``include_concurrency_probe=False`` and a budget of
-    exactly 24 attempts so it cannot silently repeat the already-valid
-    concurrency evidence or consume the old 100-attempt budget again.
-    """
+    """Run a sanitized diagnostic with zero-request preflight and fail-fast smoke."""
 
     if attempt_budget is None:
-        attempt_budget = MDD_HTTP_ATTEMPT_HARD_MAX
+        attempt_budget = HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET
     if attempt_budget <= 0:
         raise ValueError("attempt_budget must be positive")
 
+    empty_accounting = _request_accounting(0, 0, conservative_quota_accounting_attempts=0)
     try:
         import stage_08_mdd_realtime_pilot as stage8
     except Exception as exc:  # pragma: no cover - import failure is environment-specific
         return {
             "status": "BLOCKED_RUNTIME_IMPORT_FAILURE",
             "credential_preflight": "NOT_EVALUATED",
-            "http_attempts_consumed": 0,
-            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "network_preflight": {"status": "NOT_EVALUATED"},
+            **empty_accounting,
             "current_run_attempt_budget": attempt_budget,
             "error_type": type(exc).__name__,
             "raw_payloads_persisted": False,
@@ -1375,8 +1539,8 @@ def _run_live_diagnostics(
         return {
             "status": "NOT_RUN_API_KEY_MISSING" if preflight_label == "MISSING" else "NOT_RUN_INVALID_API_KEY_FORMAT",
             "credential_preflight": preflight_label,
-            "http_attempts_consumed": 0,
-            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "network_preflight": {"status": "NOT_EVALUATED"},
+            **empty_accounting,
             "current_run_attempt_budget": attempt_budget,
             "stop_reason": "zero MDD requests issued because the inherited credential was not usable",
             "raw_payloads_persisted": False,
@@ -1399,15 +1563,88 @@ def _run_live_diagnostics(
             }
         )
 
+    network_preflight = _network_dns_preflight()
+    static_support = {str(number): _static_limit_support(station_rows, number) for number in MDD_RESULT_LIMITS}
+    empty_summaries = {
+        str(number): _summary_for_records([]) for number in MDD_RESULT_LIMITS
+    }
+    smoke_gate: dict[str, Any] = {
+        "status": "NOT_RUN",
+        "counts_inside_authorized_budget": True,
+        "policy": "first authorized request is a smoke request; only a valid HTTP/TRIAS response permits the remaining matrix",
+        "provider_http_error_policy": "STOP_ON_FIRST_PROVIDER_HTTP_ERROR; retain HTTP status and do not classify it as transport failure",
+        "client_request_attempts_issued": 0,
+        "http_responses_received": 0,
+    }
+    if network_preflight.get("status") != "DNS_RESOLUTION_OK":
+        return {
+            "status": "NOT_RUN_NETWORK_PREFLIGHT_FAILED",
+            "credential_preflight": preflight_label,
+            "network_preflight": network_preflight,
+            "execution_environment_suitable_for_live_diagnostic": False,
+            "representatives": representatives,
+            "result_limit_probe": {
+                "requested_result_limits": list(MDD_RESULT_LIMITS),
+                "sequential_records": [],
+                "summary_by_result_limit": empty_summaries,
+                "static_cadence_window_support_by_result_limit": static_support,
+                "smoke_gate": smoke_gate,
+                "production_selection": {
+                    "decision": "NOT_ESTABLISHED",
+                    "technically_evaluated_number_of_results": None,
+                    "production_number_of_results": None,
+                    "user_approved_design": False,
+                    "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+                },
+            },
+            **empty_accounting,
+            "current_run_attempt_budget": attempt_budget,
+            "stop_reason": "DNS_RESOLUTION_FAILED_ZERO_MDD_REQUESTS_ISSUED",
+            "diagnostic_validity": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
+            "raw_payloads_persisted": False,
+            "request_headers_persisted": False,
+            "api_key_persisted": False,
+        }
+
+    if not candidates:
+        return {
+            "status": "NOT_RUN_NO_DIAGNOSTIC_REPRESENTATIVES",
+            "credential_preflight": preflight_label,
+            "network_preflight": network_preflight,
+            "execution_environment_suitable_for_live_diagnostic": True,
+            "representatives": representatives,
+            "result_limit_probe": {
+                "requested_result_limits": list(MDD_RESULT_LIMITS),
+                "sequential_records": [],
+                "summary_by_result_limit": empty_summaries,
+                "static_cadence_window_support_by_result_limit": static_support,
+                "smoke_gate": smoke_gate,
+                "production_selection": {
+                    "decision": "NOT_ESTABLISHED",
+                    "technically_evaluated_number_of_results": None,
+                    "production_number_of_results": None,
+                    "user_approved_design": False,
+                    "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
+                },
+            },
+            **empty_accounting,
+            "current_run_attempt_budget": attempt_budget,
+            "stop_reason": "no deterministic diagnostic representatives available",
+            "diagnostic_validity": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
+            "raw_payloads_persisted": False,
+            "request_headers_persisted": False,
+            "api_key_persisted": False,
+        }
+
     anchor = stage8.trias_utc(stage8.utc_now())
     attempts = 0
     stopped = False
     stop_reason: str | None = None
 
     def execute(candidate: Mapping[str, Any], number_of_results: int) -> Any | None:
-        nonlocal attempts, stopped, stop_reason
+        nonlocal attempts, stop_reason
         if stopped or attempts >= attempt_budget:
-            stop_reason = stop_reason or "CURRENT_RUN_ATTEMPT_BUDGET_REACHED"
+            stop_reason = stop_reason or "CURRENT_RUN_CLIENT_ATTEMPT_BUDGET_REACHED"
             return None
         runtime_config = stage8.Stage8RuntimeConfig(
             station=str(candidate["station_name"]),
@@ -1421,14 +1658,36 @@ def _run_live_diagnostics(
             runtime_config=runtime_config,
         )
         attempts += 1
-        if result.http_status in {401, 403}:
-            stopped = True
-            stop_reason = "HTTP_401_OR_403_STOPPED_ALL_FURTHER_STAGE13_PROBING"
         return result
 
+    def stop_reason_for_record(record: Mapping[str, Any], *, smoke: bool) -> str | None:
+        phase = "SMOKE_GATE" if smoke else "MATRIX"
+        category = record.get("transport_failure_category") or record.get("transport_failure")
+        if category in SAFE_TRANSPORT_FAILURE_CATEGORIES:
+            return f"{phase}_STOPPED_ENVIRONMENT_FAILURE_{category}"
+        if record.get("http_status") in {401, 403}:
+            return f"{phase}_STOPPED_HTTP_401_OR_403"
+        if record.get("http_status") == 429:
+            return f"{phase}_STOPPED_PROVIDER_HTTP_429_EXPLICIT_POLICY"
+        if isinstance(record.get("http_status"), int) and record["http_status"] >= 500:
+            return f"{phase}_STOPPED_PROVIDER_HTTP_5XX_EXPLICIT_POLICY"
+        if record.get("error_classification") == "RESPONSE_SECRET_DETECTED_NOT_PERSISTED":
+            return f"{phase}_STOPPED_SECRET_DETECTED_NOT_PERSISTED"
+        if smoke and not (
+            record.get("http_status") is not None
+            and 200 <= int(record["http_status"]) < 300
+            and record.get("parser_success")
+            and record.get("valid_trias_application_response")
+        ):
+            return "SMOKE_GATE_STOPPED_INVALID_HTTP_OR_TRIAS_RESPONSE"
+        if record.get("http_status") is not None and not 200 <= int(record["http_status"]) < 300:
+            return f"{phase}_STOPPED_PROVIDER_HTTP_ERROR_EXPLICIT_POLICY"
+        return None
+
     sequential_records: list[dict[str, Any]] = []
-    for candidate in candidates:
-        for number_of_results in MDD_RESULT_LIMITS:
+    for candidate_index, candidate in enumerate(candidates):
+        for result_limit_index, number_of_results in enumerate(MDD_RESULT_LIMITS):
+            is_smoke = candidate_index == 0 and result_limit_index == 0
             result = execute(candidate, number_of_results)
             if result is None:
                 break
@@ -1438,13 +1697,26 @@ def _run_live_diagnostics(
                 candidate,
                 number_of_results=number_of_results,
                 dep_arr_time=anchor,
-                execution_mode="sequential_result_limit_comparison",
+                execution_mode="smoke_gate" if is_smoke else "sequential_result_limit_comparison",
             )
             record["representative_role"] = candidate["representative_role"]
             sequential_records.append(record)
-            if record["error_classification"] == "RESPONSE_SECRET_DETECTED_NOT_PERSISTED":
+            if is_smoke:
+                smoke_gate.update(
+                    {
+                        "status": "PASSED" if stop_reason_for_record(record, smoke=True) is None else "FAILED",
+                        "station": candidate["station_name"],
+                        "source_parent_station_id": candidate["source_parent_station_id"],
+                        "requested_result_limit": number_of_results,
+                        "client_request_attempts_issued": 1,
+                        "http_responses_received": int(record.get("http_status") is not None),
+                        "usable_http_trias_response": stop_reason_for_record(record, smoke=True) is None,
+                    }
+                )
+            reason = stop_reason_for_record(record, smoke=is_smoke)
+            if reason is not None:
                 stopped = True
-                stop_reason = "SECRET_DETECTED_IN_RESPONSE_NOT_PERSISTED"
+                stop_reason = reason
             if stopped:
                 break
         if stopped:
@@ -1459,7 +1731,7 @@ def _run_live_diagnostics(
     )
     for pair_index, pair in enumerate(pairs, start=1):
         if stopped or attempts + len(pair) > attempt_budget:
-            stop_reason = stop_reason or "CURRENT_RUN_ATTEMPT_BUDGET_REACHED"
+            stop_reason = stop_reason or "CURRENT_RUN_CLIENT_ATTEMPT_BUDGET_REACHED"
             break
         started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=MDD_CONCURRENCY_CAP) as executor:
@@ -1482,9 +1754,12 @@ def _run_live_diagnostics(
             record["representative_role"] = candidate["representative_role"]
             record["pair_batch_duration_ms"] = _round(batch_elapsed_ms, 3)
             concurrency_records.append(record)
-            if record["error_classification"] == "RESPONSE_SECRET_DETECTED_NOT_PERSISTED":
+            reason = stop_reason_for_record(record, smoke=False)
+            if reason is not None:
                 stopped = True
-                stop_reason = "SECRET_DETECTED_IN_RESPONSE_NOT_PERSISTED"
+                stop_reason = reason
+        if stopped:
+            break
 
     result_limit_summary = {
         str(number): _summary_for_records(
@@ -1497,7 +1772,7 @@ def _run_live_diagnostics(
     provider_pressure_signal = any(
         row.get("http_status") == 429
         or (isinstance(row.get("http_status"), int) and row["http_status"] >= 500)
-        or row.get("transport_failure") in {"TIMEOUT", "NETWORK_OR_DNS_FAILURE"}
+        or row.get("transport_failure_category") in SAFE_TRANSPORT_FAILURE_CATEGORIES
         for row in pressure_rows
     )
     cap2_complete = include_concurrency_probe and (
@@ -1506,7 +1781,6 @@ def _run_live_diagnostics(
         and not provider_pressure_signal
         and not any(row.get("http_status") in {401, 403} for row in concurrency_records)
     )
-    static_support = {str(number): _static_limit_support(station_rows, number) for number in MDD_RESULT_LIMITS}
     n30_records = [row for row in sequential_records if row["requested_result_limit"] == 30]
     n30_supported = (
         len(n30_records) == len(candidates)
@@ -1519,14 +1793,27 @@ def _run_live_diagnostics(
         and static_support["30"]["all_station_p95_supported"]
     )
     number_limit_decision = "TECHNICALLY_EVALUATED_OPTION_N30_REQUIRES_USER_APPROVAL" if n30_supported else "NOT_ESTABLISHED"
-    diagnostic_status = (
-        "COMPLETE_TECHNICAL_RESULT_LIMIT_COMPARISON"
-        if n30_supported and (cap2_complete or not include_concurrency_probe) and not stopped
-        else "CONDITIONALLY_BLOCKED"
+    if attempts > 0 and not any(row.get("http_status") is not None for row in sequential_records + concurrency_records):
+        diagnostic_status = "COMPLETED_NO_VALID_HTTP_RESPONSES"
+    else:
+        diagnostic_status = (
+            "COMPLETE_TECHNICAL_RESULT_LIMIT_COMPARISON"
+            if n30_supported and (cap2_complete or not include_concurrency_probe) and not stopped
+            else "CONDITIONALLY_BLOCKED"
+        )
+    http_responses_received = sum(
+        row.get("http_status") is not None for row in sequential_records + concurrency_records
+    )
+    accounting = _request_accounting(
+        attempts,
+        http_responses_received,
+        conservative_quota_accounting_attempts=attempts,
     )
     return {
         "status": diagnostic_status,
         "credential_preflight": preflight_label,
+        "network_preflight": network_preflight,
+        "execution_environment_suitable_for_live_diagnostic": True,
         "endpoint": ENDPOINT,
         "request_contract": {
             "requestor_ref": REQUESTOR_REF,
@@ -1547,6 +1834,7 @@ def _run_live_diagnostics(
             "sequential_records": sequential_records,
             "summary_by_result_limit": result_limit_summary,
             "static_cadence_window_support_by_result_limit": static_support,
+            "smoke_gate": smoke_gate,
             "production_selection": {
                 "decision": number_limit_decision,
                 "technically_evaluated_number_of_results": 30 if n30_supported else None,
@@ -1579,14 +1867,19 @@ def _run_live_diagnostics(
             "request_duration_statistics_ms": duration_statistics(
                 [float(row["duration_ms"]) for row in sequential_records if row.get("duration_ms") is not None]
             ),
-            "request_count": len(sequential_records),
+            "client_request_attempts_issued": len(sequential_records),
+            "http_responses_received": sum(row.get("http_status") is not None for row in sequential_records),
             "retries": 0,
         },
-        "http_attempts_consumed": attempts,
-        "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+        **accounting,
         "current_run_attempt_budget": attempt_budget,
-        "stopped_on_auth_failure": stopped and stop_reason == "HTTP_401_OR_403_STOPPED_ALL_FURTHER_STAGE13_PROBING",
+        "stopped_on_auth_failure": any(row.get("http_status") in {401, 403} for row in sequential_records),
         "stop_reason": stop_reason,
+        "diagnostic_validity": (
+            "INVALID_FOR_NUMBER_OF_RESULTS_DECISION"
+            if not n30_supported
+            else "VALID_TECHNICAL_RESULT_LIMIT_EVIDENCE"
+        ),
         "raw_payloads_persisted": False,
         "request_headers_persisted": False,
         "api_key_persisted": False,
@@ -1599,43 +1892,55 @@ def _run_corrected_result_limit_diagnostic(
     prior_attempts: int,
     additional_requests_approved: bool,
     api_key: str | None = None,
+    live_rerun_approved: bool = False,
 ) -> dict[str, Any]:
     """Run only the corrected six-station × four-limit comparison.
 
-    This path is intentionally closed until the user approves the additional
-    requests.  It does not repeat the cap-2 diagnostic.  The historical
-    100-attempt ceiling remains unchanged; the explicit approval gate records
-    the separately authorized cumulative total of 90 + 24 = 114 attempts.
+    The previously exercised 24-invocation authorization is never reused for a
+    new live run.  A future rerun must carry a separate explicit approval after
+    the network-preflight changes have been reviewed.
     """
 
     gate = {
         "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
         "required": True,
         "approved": bool(additional_requests_approved),
+        "authorization_basis": "NEW_EXPLICIT_APPROVAL_REQUIRED_FOR_ANY_FUTURE_LIVE_RERUN",
         "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
-        "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "prior_attempts_consumed": prior_attempts,
-        "cumulative_attempts_if_approved": prior_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
-        "historical_ceiling_changed": False,
-        "additional_requests_issued": 0,
+        "requested_additional_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_client_diagnostic_attempts": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+        "prior_cumulative_client_request_invocations": prior_attempts,
+        "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+        "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "authorized_cumulative_client_attempt_ceiling": prior_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_budget_rewritten": False,
+        "additional_client_request_attempts_issued": 0,
         "corrected_live_diagnostic_issued": False,
         "raw_responses_persisted": False,
     }
-    if not additional_requests_approved:
+    if not additional_requests_approved or not live_rerun_approved:
         return {
-            "status": "NOT_RUN_USER_APPROVAL_REQUIRED",
+            "status": "NOT_RUN_NEW_LIVE_RERUN_APPROVAL_REQUIRED"
+            if additional_requests_approved and not live_rerun_approved
+            else "NOT_RUN_USER_APPROVAL_REQUIRED",
             "credential_preflight": "NOT_EVALUATED",
-            "http_attempts_consumed": 0,
-            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+            "network_preflight": {"status": "NOT_EVALUATED"},
+            **_request_accounting(0, 0, conservative_quota_accounting_attempts=0),
             "current_run_attempt_budget": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
             "additional_request_gate": gate,
-            "stop_reason": "explicit approval is required before any corrected MDD request",
+            "stop_reason": (
+                "the previous 24-invocation authorization is exhausted; explicit new live-rerun approval is required"
+                if additional_requests_approved and not live_rerun_approved
+                else "explicit approval is required before any corrected MDD request invocation"
+            ),
             "raw_payloads_persisted": False,
         }
-    if prior_attempts != PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS:
+    if prior_attempts not in {
+        PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+        AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
+    }:
         raise Stage13Blocked(
-            "corrected result-limit diagnostic requires prior_attempts=90 so cumulative usage is auditable"
+            "corrected result-limit diagnostic requires prior_attempts=90 for the historical authorization or 114 for a separately approved rerun"
         )
     live = _run_live_diagnostics(
         station_rows,
@@ -1644,11 +1949,16 @@ def _run_corrected_result_limit_diagnostic(
         attempt_budget=ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
     )
     live["additional_request_gate"] = gate
-    gate["additional_requests_issued"] = int(live.get("http_attempts_consumed", 0))
-    gate["corrected_live_diagnostic_issued"] = gate["additional_requests_issued"] > 0
-    live["http_attempts_consumed_total"] = prior_attempts + int(live.get("http_attempts_consumed", 0))
-    live["historical_diagnostic_hard_ceiling"] = MDD_HTTP_ATTEMPT_HARD_MAX
-    live["historical_ceiling_changed"] = False
+    gate["additional_client_request_attempts_issued"] = int(live.get("client_request_attempts_issued", 0))
+    gate["corrected_live_diagnostic_issued"] = gate["additional_client_request_attempts_issued"] > 0
+    live["historical_client_diagnostic_attempts"] = PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS
+    live["prior_cumulative_client_request_invocations"] = prior_attempts
+    live["corrected_client_request_attempts"] = int(live.get("client_request_attempts_issued", 0))
+    live["cumulative_client_request_invocations"] = prior_attempts + int(live.get("client_request_attempts_issued", 0))
+    live["historical_initial_diagnostic_budget"] = HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET
+    live["explicit_additional_user_authorization"] = ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+    live["authorized_cumulative_client_attempt_ceiling"] = prior_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+    live["historical_budget_rewritten"] = False
     live["concurrency_rerun"] = False
     return live
 
@@ -1792,8 +2102,16 @@ def _corrected_diagnostic_metric_status(live_diagnostics: Mapping[str, Any]) -> 
         return "NOT_RECONSTRUCTABLE_FROM_SANITIZED_AGGREGATES"
     if any(row.get("forward_coverage_status") == "VALID_THIS_CALL_ARRIVAL_ONLY" for row in records):
         return "CORRECTED_ANCHOR_BASED_THIS_CALL_METRIC_AVAILABLE"
-    if all(row.get("transport_failure") == "NETWORK_OR_DNS_FAILURE" for row in records):
-        return "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE"
+    transport_categories = {
+        row.get("transport_failure_category") or _safe_transport_failure_category(row.get("transport_failure"))
+        for row in records
+        if row.get("http_status") is None
+    }
+    if records and all(row.get("http_status") is None for row in records) and transport_categories:
+        if len(transport_categories) == 1:
+            category = next(iter(transport_categories))
+            return f"CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_{category}"
+        return "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_TRANSPORT_FAILURE"
     if all(row.get("http_status") in {401, 403} for row in records):
         return "CORRECTED_DIAGNOSTIC_STOPPED_AUTHORIZATION_FAILURE"
     return "CORRECTED_DIAGNOSTIC_COMPLETED_WITHOUT_USABLE_FORWARD_COVERAGE"
@@ -1813,7 +2131,9 @@ def _result_limit_comparison(
         summary = dict(summaries.get(str(number), {}))
         return {
             "requested_result_limit": number,
-            "request_count": summary.get("request_count", 0),
+            "client_request_attempts_issued": summary.get("client_request_attempts_issued", 0),
+            "http_responses_received": summary.get("http_responses_received", 0),
+            "confirmed_provider_http_attempts": summary.get("confirmed_provider_http_attempts", 0),
             "http_status_distribution": summary.get("http_status_distribution", {}),
             "valid_trias_response_count": summary.get("valid_trias_response_count", 0),
             "returned_event_count_statistics": summary.get("returned_event_count_statistics", {}),
@@ -1841,6 +2161,8 @@ def _result_limit_comparison(
     return {
         "corrected_diagnostic_status": corrected_status,
         "forward_coverage_metric_basis": "latest THIS-call arrival at or after requested DepArrTime minus requested DepArrTime",
+        "static_scheduled_density_is_not_realtime_coverage": True,
+        "static_evidence_boundary": "static scheduled-density evidence is planning evidence only; it is not realtime response coverage",
         "fixed_n20": {
             "static_cadence_window_fit": fixed_n20,
             "corrected_live": live_n20,
@@ -1982,20 +2304,45 @@ def _reuse_existing_live_diagnostics(
     existing = json.loads(path.read_text(encoding="utf-8"))
     old_bounded = existing.get("number_of_results", {}).get("bounded_live_diagnostic", {})
     old_concurrency = existing.get("sequential_vs_bounded_concurrency", {}).get("bounded_live_diagnostic", {})
-    old_sequential = existing.get("sequential_vs_bounded_concurrency", {}).get("sequential_live_diagnostic", {})
+    old_sequential = _normalize_duration_evidence(
+        existing.get("sequential_vs_bounded_concurrency", {}).get("sequential_live_diagnostic", {})
+    )
     old_probe = old_bounded.get("result_limit_probe")
     if not isinstance(old_probe, Mapping) or not old_probe.get("sequential_records"):
         return None
     existing_gate = old_bounded.get("additional_request_gate", {})
     corrected_records = list(old_probe.get("sequential_records", []))
+    old_issued = existing_gate.get(
+        "additional_client_request_attempts_issued",
+        existing_gate.get("additional_requests_issued", 0),
+    )
     if (
         existing_gate.get("approved") is True
-        and existing_gate.get("additional_requests_issued") == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+        and old_issued == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
         and len(corrected_records) == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
         and all(row.get("forward_temporal_span_seconds") is None for row in corrected_records)
     ):
         probe = dict(old_probe)
         probe["representatives"] = _select_diagnostic_representatives(station_rows)
+        probe["sequential_records"] = [_normalize_transport_record(row) for row in corrected_records]
+        probe["summary_by_result_limit"] = {
+            str(number): _summary_for_records(
+                [
+                    row
+                    for row in probe["sequential_records"]
+                    if row.get("requested_result_limit") == number
+                ]
+            )
+            for number in MDD_RESULT_LIMITS
+        }
+        probe["smoke_gate"] = {
+            "status": "NOT_PERFORMED_HISTORICAL_RUN",
+            "counts_inside_authorized_budget": True,
+            "policy": "smoke gate added after this historical run; no retroactive request was issued",
+            "provider_http_error_policy": "STOP_ON_FIRST_PROVIDER_HTTP_ERROR; retain HTTP status and do not classify it as transport failure",
+            "client_request_attempts_issued": 0,
+            "http_responses_received": 0,
+        }
         production_selection = dict(probe.get("production_selection", {}))
         production_selection["technically_evaluated_number_of_results"] = production_selection.get(
             "technically_evaluated_number_of_results"
@@ -2016,25 +2363,61 @@ def _reuse_existing_live_diagnostics(
         if old_concurrency.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2":
             old_concurrency["decision"] = "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2"
         old_concurrency["user_approved_design"] = False
+        gate = {
+            "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
+            "required": True,
+            "approved": True,
+            "authorization_basis": "HISTORICAL_APPROVAL_ALREADY_EXERCISED; NOT AUTHORIZATION FOR ANOTHER RERUN",
+            "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
+            "requested_additional_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "historical_client_diagnostic_attempts": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+            "prior_cumulative_client_request_invocations": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+            "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+            "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "authorized_cumulative_client_attempt_ceiling": AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
+            "historical_budget_rewritten": False,
+            "additional_client_request_attempts_issued": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "corrected_live_diagnostic_issued": True,
+            "raw_responses_persisted": False,
+        }
+        accounting = _request_accounting(
+            len(probe["sequential_records"]),
+            sum(row.get("http_status") is not None for row in probe["sequential_records"]),
+            conservative_quota_accounting_attempts=ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        )
         return {
-            "status": old_bounded.get("status", "CONDITIONALLY_BLOCKED"),
+            "status": "COMPLETED_NO_VALID_HTTP_RESPONSES",
             "credential_preflight": old_bounded.get("credential_preflight", "PRESENT"),
+            "network_preflight": {
+                "status": "NOT_PERFORMED_HISTORICAL_RUN",
+                "reason": "zero-request DNS/network preflight was added after this run",
+            },
+            "execution_environment_suitable_for_live_diagnostic": "NOT_EVALUATED_HISTORICAL_RUN",
             "diagnostic_anchor_dep_arr_time": old_bounded.get("diagnostic_anchor_dep_arr_time"),
+            "diagnostic_run_timestamp_utc": existing.get("generated_at_utc"),
+            "diagnostic_run_timestamp_basis": "retained artifact generated_at_utc; per-request timestamps were not retained",
             "representatives": probe.get("representatives", []),
             "result_limit_probe": probe,
             "bounded_concurrency_probe": old_concurrency,
             "sequential_duration_evidence": old_sequential,
-            "http_attempts_consumed": old_bounded.get("current_run_http_attempts_consumed", 0),
-            "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
-            "prior_attempts_consumed": old_bounded.get("prior_attempts_consumed", PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS),
-            "additional_request_gate": existing_gate,
+            **accounting,
+            "historical_client_diagnostic_attempts": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+            "corrected_client_request_attempts": len(probe["sequential_records"]),
+            "prior_cumulative_client_request_invocations": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+            "cumulative_client_request_invocations": AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
+            "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+            "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "authorized_cumulative_client_attempt_ceiling": AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
+            "historical_budget_rewritten": False,
+            "additional_request_gate": gate,
             "historical_invalidated_sequential_records": existing.get("number_of_results", {}).get(
                 "historical_invalidated_sequential_records", []
             ),
             "historical_invalidated_sequential_summary_by_result_limit": existing.get("number_of_results", {}).get(
                 "historical_invalidated_sequential_summary_by_result_limit", {}
             ),
-            "stop_reason": old_bounded.get("stop_reason"),
+            "stop_reason": old_bounded.get("stop_reason") or "HISTORICAL_RUN_COMPLETED_WITHOUT_VALID_HTTP_RESPONSES",
+            "diagnostic_validity": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
             "raw_payloads_persisted": False,
             "request_headers_persisted": False,
             "api_key_persisted": False,
@@ -2042,12 +2425,20 @@ def _reuse_existing_live_diagnostics(
     probe = dict(old_probe)
     probe["representatives"] = _select_diagnostic_representatives(station_rows)
     probe["sequential_records"] = [
-        _mark_legacy_forward_span_invalid(record)
+        _mark_legacy_forward_span_invalid(_normalize_transport_record(record))
         for record in probe.get("sequential_records", [])
     ]
     probe["summary_by_result_limit"] = {
-        str(number): _mark_legacy_summary_invalid(summary)
-        for number, summary in probe.get("summary_by_result_limit", {}).items()
+        str(number): _mark_legacy_summary_invalid(
+            _summary_for_records(
+                [
+                    row
+                    for row in probe["sequential_records"]
+                    if row.get("requested_result_limit") == number
+                ]
+            )
+        )
+        for number in MDD_RESULT_LIMITS
     }
     production_selection = dict(probe.get("production_selection", {}))
     production_selection["decision"] = "TECHNICALLY_EVALUATED_OPTION_REQUIRES_USER_APPROVAL"
@@ -2060,16 +2451,28 @@ def _reuse_existing_live_diagnostics(
     probe["production_selection"] = production_selection
     old_concurrency = dict(old_concurrency)
     old_concurrency["records"] = [
-        _mark_legacy_forward_span_invalid(record)
+        _mark_legacy_forward_span_invalid(_normalize_transport_record(record))
         for record in old_concurrency.get("records", [])
     ]
     if old_concurrency.get("decision") == "APPROVED_MAXIMUM_CONCURRENCY_2":
         old_concurrency["decision"] = "TECHNICALLY_EVALUATED_OPTION_MAXIMUM_CONCURRENCY_2"
     old_concurrency["user_approved_design"] = False
     first_record = probe["sequential_records"][0]
+    accounting = _request_accounting(
+        len(probe["sequential_records"]),
+        sum(row.get("http_status") is not None for row in probe["sequential_records"]),
+        conservative_quota_accounting_attempts=len(probe["sequential_records"]),
+    )
     return {
         "status": "HISTORICAL_SANITIZED_EVIDENCE_RETAINED; FORWARD_COVERAGE_INVALIDATED",
         "credential_preflight": "PRESENT",
+        "network_preflight": {
+            "status": "NOT_PERFORMED_HISTORICAL_RUN",
+            "reason": "zero-request DNS/network preflight was added after this run",
+        },
+        "execution_environment_suitable_for_live_diagnostic": "NOT_EVALUATED_HISTORICAL_RUN",
+        "diagnostic_run_timestamp_utc": existing.get("generated_at_utc"),
+        "diagnostic_run_timestamp_basis": "retained artifact generated_at_utc; per-request timestamps were not retained",
         "diagnostic_anchor_dep_arr_time": first_record.get("requested_dep_arr_time"),
         "representatives": probe["representatives"],
         "result_limit_probe": probe,
@@ -2077,8 +2480,8 @@ def _reuse_existing_live_diagnostics(
         "historical_invalidated_sequential_summary_by_result_limit": probe.get("summary_by_result_limit", {}),
         "bounded_concurrency_probe": old_concurrency,
         "sequential_duration_evidence": old_sequential,
-        "http_attempts_consumed": 0,
-        "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+        **accounting,
+        "diagnostic_validity": "INVALID_FOR_NUMBER_OF_RESULTS_DECISION",
         "raw_payloads_persisted": False,
         "request_headers_persisted": False,
         "api_key_persisted": False,
@@ -2117,6 +2520,70 @@ def _mark_legacy_summary_invalid(summary: Mapping[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _normalize_additional_request_gate(
+    raw_gate: Mapping[str, Any] | None,
+    *,
+    historical_attempts: int,
+    current_attempts: int,
+) -> dict[str, Any]:
+    """Normalize old HTTP-worded gate fields to client-invocation accounting."""
+
+    raw = dict(raw_gate or {})
+    historical = int(
+        raw.get(
+            "historical_client_diagnostic_attempts",
+            raw.get("prior_attempts_consumed", historical_attempts or PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS),
+        )
+    )
+    issued = int(
+        raw.get(
+            "additional_client_request_attempts_issued",
+            raw.get("additional_requests_issued", current_attempts),
+        )
+    )
+    approved = bool(raw.get("approved", issued > 0))
+    if not approved:
+        issued = 0
+    prior_cumulative = int(
+        raw.get("prior_cumulative_client_request_invocations", historical)
+    )
+    authorization_basis = raw.get("authorization_basis") or (
+        "HISTORICAL_APPROVAL_ALREADY_EXERCISED; NOT AUTHORIZATION FOR ANOTHER RERUN"
+        if approved and issued > 0
+        else "NEW_EXPLICIT_APPROVAL_REQUIRED_FOR_ANY_FUTURE_LIVE_RERUN"
+    )
+    return {
+        "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
+        "required": True,
+        "approved": approved,
+        "authorization_basis": authorization_basis,
+        "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
+        "requested_additional_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_client_diagnostic_attempts": historical,
+        "prior_cumulative_client_request_invocations": prior_cumulative,
+        "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+        "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "authorized_cumulative_client_attempt_ceiling": prior_cumulative + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_budget_rewritten": False,
+        "additional_client_request_attempts_issued": issued,
+        "corrected_live_diagnostic_issued": bool(
+            raw.get("corrected_live_diagnostic_issued", issued > 0)
+        ),
+        "raw_responses_persisted": False,
+    }
+
+
+def _normalize_duration_evidence(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Remove the old ambiguous request-count label from retained evidence."""
+
+    normalized = dict(value or {})
+    if "request_count" in normalized:
+        normalized["client_request_attempts_issued"] = normalized.pop("request_count")
+    if "http_responses_received" not in normalized:
+        normalized["http_responses_received"] = None
+    return normalized
+
+
 def build_evidence(
     root: Path = REPOSITORY_ROOT,
     *,
@@ -2127,6 +2594,7 @@ def build_evidence(
     prior_live_attempts: int = 0,
     reuse_existing_live: bool = False,
     additional_mdd_requests_approved: bool = False,
+    live_rerun_approved: bool = False,
 ) -> dict[str, Any]:
     stage4_path = root / "docs" / "stages" / "04-cologne-scope-mode-evidence.json"
     stage4 = json.loads(stage4_path.read_text(encoding="utf-8")) if stage4_path.exists() else {}
@@ -2157,14 +2625,15 @@ def build_evidence(
     phase["phase_assignments"] = phase_assignments
     if live_diagnostics is None:
         if run_live_diagnostics and len(station_rows) == 50:
-            if not additional_mdd_requests_approved:
+            if not live_rerun_approved:
                 raise Stage13Blocked(
-                    "corrected NumberOfResults diagnostic requires explicit approval for 24 additional MDD requests"
+                    "the previous 24-invocation authorization is exhausted; a new explicit live-rerun approval is required"
                 )
             live = _run_corrected_result_limit_diagnostic(
                 station_rows,
                 prior_attempts=prior_live_attempts,
                 additional_requests_approved=True,
+                live_rerun_approved=True,
             )
             previous_live = _reuse_existing_live_diagnostics(root, station_rows)
             if previous_live:
@@ -2180,23 +2649,70 @@ def build_evidence(
             live = _reuse_existing_live_diagnostics(root, station_rows) or {
                 "status": "NOT_RUN",
                 "credential_preflight": "NOT_EVALUATED",
-                "http_attempts_consumed": 0,
-                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "network_preflight": {"status": "NOT_EVALUATED"},
+                **_request_accounting(0, 0, conservative_quota_accounting_attempts=0),
                 "raw_payloads_persisted": False,
             }
         else:
             live = {
                 "status": "NOT_RUN",
                 "credential_preflight": "NOT_EVALUATED",
-                "http_attempts_consumed": 0,
-                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "network_preflight": {"status": "NOT_EVALUATED"},
+                **_request_accounting(0, 0, conservative_quota_accounting_attempts=0),
                 "raw_payloads_persisted": False,
             }
     else:
         live = dict(live_diagnostics)
-    live["prior_attempts_consumed"] = int(prior_live_attempts)
-    live["current_run_http_attempts_consumed"] = int(live.get("http_attempts_consumed", 0))
-    live["http_attempts_consumed_total"] = int(prior_live_attempts) + int(live.get("http_attempts_consumed", 0))
+    historical_client_attempts = int(
+        live.get("historical_client_diagnostic_attempts", 0)
+        or PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS
+    )
+    prior_cumulative_client_attempts = int(
+        live.get("prior_cumulative_client_request_invocations", 0)
+        or prior_live_attempts
+        or historical_client_attempts
+    )
+    current_client_attempts = int(
+        live.get(
+            "client_request_attempts_issued",
+            live.get("current_run_http_attempts_consumed", live.get("http_attempts_consumed", 0)),
+        )
+    )
+    http_responses_received = int(
+        live.get(
+            "http_responses_received",
+            sum(
+                row.get("http_status") is not None
+                for row in live.get("result_limit_probe", {}).get("sequential_records", [])
+            ),
+        )
+    )
+    conservative_attempts = int(
+        live.get("conservative_quota_accounting_attempts", current_client_attempts)
+    )
+    live.update(
+        _request_accounting(
+            current_client_attempts,
+            http_responses_received,
+            conservative_quota_accounting_attempts=conservative_attempts,
+        )
+    )
+    live["historical_client_diagnostic_attempts"] = historical_client_attempts
+    live["corrected_client_request_attempts"] = current_client_attempts
+    live["prior_cumulative_client_request_invocations"] = prior_cumulative_client_attempts
+    live["cumulative_client_request_invocations"] = prior_cumulative_client_attempts + current_client_attempts
+    live["historical_initial_diagnostic_budget"] = HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET
+    live["explicit_additional_user_authorization"] = ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+    live["authorized_cumulative_client_attempt_ceiling"] = prior_cumulative_client_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS
+    live["historical_budget_rewritten"] = False
+    for obsolete_key in (
+        "http_attempts_consumed",
+        "current_run_http_attempts_consumed",
+        "prior_attempts_consumed",
+        "http_attempts_consumed_total",
+        "max_http_attempts",
+    ):
+        live.pop(obsolete_key, None)
 
     number_limit_probe = live.get("result_limit_probe", {})
     production_selection = number_limit_probe.get("production_selection", {}) if isinstance(number_limit_probe, Mapping) else {}
@@ -2248,24 +2764,12 @@ def build_evidence(
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     result_limit_evidence = _historical_result_limit_evidence(root)
-    additional_request_gate = live.get(
-        "additional_request_gate",
-        {
-            "approval_request": ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST,
-            "required": True,
-            "approved": False,
-            "corrected_diagnostic_scope": CORRECTED_RESULT_LIMIT_DIAGNOSTIC_SCOPE,
-            "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-            "prior_attempts_consumed": live.get("http_attempts_consumed_total", 0),
-            "cumulative_attempts_if_approved": int(live.get("http_attempts_consumed_total", 0))
-            + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-            "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
-            "historical_ceiling_changed": False,
-            "additional_requests_issued": 0,
-            "corrected_live_diagnostic_issued": False,
-            "raw_responses_persisted": False,
-        },
+    additional_request_gate = _normalize_additional_request_gate(
+        live.get("additional_request_gate"),
+        historical_attempts=historical_client_attempts,
+        current_attempts=current_client_attempts,
     )
+    live["additional_request_gate"] = additional_request_gate
     result_limit_evidence.update(
         {
             "decision": (
@@ -2278,19 +2782,63 @@ def build_evidence(
             "provider_maximum_status": "PROVIDER_MAXIMUM_NOT_ESTABLISHED",
             "additional_request_gate": additional_request_gate,
             "corrected_metric_status": corrected_metric_status,
+            "failed_corrected_diagnostic_audit": {
+                "status": (
+                    "INVALID_FOR_NUMBER_OF_RESULTS_DECISION"
+                    if current_client_attempts > 0 and http_responses_received == 0
+                    else "NOT_AVAILABLE"
+                ),
+                "timestamp_utc": live.get("diagnostic_run_timestamp_utc", generated_at_utc),
+                "timestamp_basis": live.get(
+                    "diagnostic_run_timestamp_basis",
+                    "artifact generated timestamp when a precise run timestamp was not retained",
+                ),
+                "requested_station_result_limit_matrix": {
+                    "representatives": live.get("representatives", []),
+                    "requested_result_limits": list(MDD_RESULT_LIMITS),
+                    "expected_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+                },
+                "client_request_attempts_issued": current_client_attempts,
+                "http_responses_received": http_responses_received,
+                "confirmed_provider_http_attempts": live.get("confirmed_provider_http_attempts", 0),
+                "provider_quota_consumption_status": live.get("provider_quota_consumption_status"),
+                "conservative_quota_accounting_attempts": conservative_attempts,
+                "transport_failure_category_distribution": {
+                    str(key): value
+                    for key, value in sorted(
+                        Counter(
+                            row.get("transport_failure_category")
+                            or _safe_transport_failure_category(row.get("transport_failure"))
+                            for row in number_limit_probe.get("sequential_records", [])
+                            if row.get("http_status") is None
+                        ).items()
+                    )
+                    if key != "None"
+                },
+                "raw_response_retention": "ZERO_RAW_RESPONSES_RETAINED",
+            },
             "bounded_live_diagnostic": {
                 "status": live.get("status"),
-                "http_attempts_consumed": live.get("http_attempts_consumed_total", 0),
-                "current_run_http_attempts_consumed": live.get("current_run_http_attempts_consumed", 0),
-                "prior_attempts_consumed": live.get("prior_attempts_consumed", 0),
-                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "historical_client_diagnostic_attempts": historical_client_attempts,
+                "corrected_client_request_attempts": current_client_attempts,
+                "prior_cumulative_client_request_invocations": prior_cumulative_client_attempts,
+                "cumulative_client_request_invocations": prior_cumulative_client_attempts + current_client_attempts,
+                "client_request_attempts_issued": current_client_attempts,
+                "http_responses_received": http_responses_received,
+                "confirmed_provider_http_attempts": live.get("confirmed_provider_http_attempts", 0),
+                "provider_quota_consumption_status": live.get("provider_quota_consumption_status"),
+                "conservative_quota_accounting_attempts": conservative_attempts,
+                "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+                "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+                "authorized_cumulative_client_attempt_ceiling": prior_cumulative_client_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
                 "stop_reason": live.get("stop_reason"),
+                "network_preflight": live.get("network_preflight", {"status": "NOT_EVALUATED"}),
                 "diagnostic_anchor_dep_arr_time": live.get("diagnostic_anchor_dep_arr_time"),
                 "representatives": live.get("representatives", []),
                 "result_limit_probe": number_limit_probe,
                 "additional_request_gate": additional_request_gate,
             },
-            "selection_limitation": "N=30 remains undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses because all 24 attempts ended with NETWORK_OR_DNS_FAILURE.",
+            "selection_limitation": "N=20, N=30, and A20/B30/C30 remain undecided; the provider theoretical maximum remains unknown and the corrected diagnostic produced no valid live responses. Static scheduled-density evidence is planning evidence only and is not realtime coverage evidence.",
         }
     )
     if live.get("historical_invalidated_sequential_records"):
@@ -2353,7 +2901,7 @@ def build_evidence(
         ],
     }
     return {
-        "artifact_version": "stage-13-tiered-collector-readiness-evidence-3.0",
+        "artifact_version": "stage-13-tiered-collector-readiness-evidence-4.0",
         "record_type": "stage_13_tiered_collector_readiness_evidence",
         "generated_at_utc": generated_at_utc,
         "stage_13_status": status,
@@ -2394,6 +2942,23 @@ def build_evidence(
         },
         "cadence_boundary_review": cadence_boundary_review,
         "number_of_results_comparison": number_of_results_comparison,
+        "future_live_diagnostic_execution_boundary": {
+            "previous_24_invocation_authorization_exhausted": True,
+            "new_explicit_user_approval_required": True,
+            "approval_request": LIVE_RERUN_APPROVAL_REQUEST,
+            "preflight_required_before_any_mdd_http_request": True,
+            "smoke_request_required_before_remaining_matrix": True,
+            "expected_max_additional_client_request_attempts_for_successful_rerun": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+            "provider_quota_consumption_for_rerun": "UNKNOWN_UNTIL_HTTP_RESPONSES_ARE_RECEIVED; DO NOT INFER FROM CLIENT INVOCATIONS",
+            "network_capable_local_action": (
+                "python3 scripts/stage_13_tiered_collector_readiness.py "
+                "--gtfs-zip /path/to/verified-stage12-vrs-global-id.zip "
+                "--run-live-diagnostics "
+                "--approve-live-rerun-after-network-preflight "
+                "--prior-client-attempts 114"
+            ),
+            "api_key_requirement": "provide MDD_API_KEY through the inherited environment only; never put the key in command text or evidence",
+        },
         "user_review_preferences": {
             "source": "explicit current user recommendation; not a final approval",
             "preferred_cadence_candidate": "8/20/22 @ 5/15/30",
@@ -2416,7 +2981,11 @@ def build_evidence(
                 "historical_legacy_retry_sensitivity": _round(LEGACY_ADDITIONAL_ATTEMPT_SHARE, 9),
                 "legacy_current_usage_observed": False,
                 "legacy_reserved_conservatively": dict(LEGACY7_RESERVED_MONTHLY_REQUESTS),
-                "diagnostic_reserved_http_attempts": DIAGNOSTIC_RESERVE_HTTP_ATTEMPTS,
+                "historical_diagnostic_reserved_attempts": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+                "corrected_diagnostic_conservative_quota_accounting_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+                "corrected_diagnostic_provider_quota_consumption_status": live.get(
+                    "provider_quota_consumption_status"
+                ),
                 "thirty_day_nominal_conservative_total": quota["projections"][0]["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
                 "thirty_one_day_nominal_conservative_total": quota["projections"][0]["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
                 "thirty_one_day_ten_percent_stress_total": ten_percent_projection["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
@@ -2469,10 +3038,18 @@ def build_evidence(
                 "must_be_resolved_before_activation": True,
             },
             "stage13_live_diagnostic": {
-                "http_attempts_consumed": live.get("http_attempts_consumed_total", 0),
-                "current_run_http_attempts_consumed": live.get("current_run_http_attempts_consumed", 0),
-                "prior_attempts_consumed": live.get("prior_attempts_consumed", 0),
-                "max_http_attempts": MDD_HTTP_ATTEMPT_HARD_MAX,
+                "historical_client_diagnostic_attempts": historical_client_attempts,
+                "corrected_client_request_attempts": current_client_attempts,
+                "prior_cumulative_client_request_invocations": prior_cumulative_client_attempts,
+                "cumulative_client_request_invocations": prior_cumulative_client_attempts + current_client_attempts,
+                "client_request_attempts_issued": current_client_attempts,
+                "http_responses_received": http_responses_received,
+                "confirmed_provider_http_attempts": live.get("confirmed_provider_http_attempts", 0),
+                "provider_quota_consumption_status": live.get("provider_quota_consumption_status"),
+                "conservative_quota_accounting_attempts": conservative_attempts,
+                "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+                "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+                "authorized_cumulative_client_attempt_ceiling": prior_cumulative_client_attempts + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
                 "retries": 0,
                 "raw_payloads_persisted": False,
             },
@@ -2610,22 +3187,66 @@ def validate_evidence(evidence: Mapping[str, Any]) -> None:
         raise ValueError("Stage 13 must remain in the reopened user-approval state")
     additional_gate = evidence["number_of_results"].get("additional_request_gate", {})
     if additional_gate.get("approval_request") != ADDITIONAL_RESULT_LIMIT_APPROVAL_REQUEST or {
-        "requested_additional_http_attempts": additional_gate.get("requested_additional_http_attempts"),
-        "prior_attempts_consumed": additional_gate.get("prior_attempts_consumed"),
-        "cumulative_attempts_if_approved": additional_gate.get("cumulative_attempts_if_approved"),
-        "historical_diagnostic_hard_ceiling": additional_gate.get("historical_diagnostic_hard_ceiling"),
+        "requested_additional_client_request_attempts": additional_gate.get("requested_additional_client_request_attempts"),
+        "historical_client_diagnostic_attempts": additional_gate.get("historical_client_diagnostic_attempts"),
+        "prior_cumulative_client_request_invocations": additional_gate.get("prior_cumulative_client_request_invocations"),
+        "historical_initial_diagnostic_budget": additional_gate.get("historical_initial_diagnostic_budget"),
+        "explicit_additional_user_authorization": additional_gate.get("explicit_additional_user_authorization"),
+        "authorized_cumulative_client_attempt_ceiling": additional_gate.get("authorized_cumulative_client_attempt_ceiling"),
     } != {
-        "requested_additional_http_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "prior_attempts_consumed": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
-        "cumulative_attempts_if_approved": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
-        "historical_diagnostic_hard_ceiling": MDD_HTTP_ATTEMPT_HARD_MAX,
+        "requested_additional_client_request_attempts": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "historical_client_diagnostic_attempts": PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+        "prior_cumulative_client_request_invocations": additional_gate.get("prior_cumulative_client_request_invocations"),
+        "historical_initial_diagnostic_budget": HISTORICAL_INITIAL_DIAGNOSTIC_BUDGET,
+        "explicit_additional_user_authorization": ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
+        "authorized_cumulative_client_attempt_ceiling": additional_gate.get("prior_cumulative_client_request_invocations", PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS)
+        + ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS,
     }:
         raise ValueError("corrected Stage 13 NumberOfResults request gate is not preserved")
-    issued = additional_gate.get("additional_requests_issued")
+    prior_cumulative = additional_gate.get(
+        "prior_cumulative_client_request_invocations",
+        PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+    )
+    if prior_cumulative not in {
+        PRIOR_STAGE13_DIAGNOSTIC_ATTEMPTS,
+        AUTHORIZED_CUMULATIVE_CLIENT_ATTEMPT_CEILING,
+    }:
+        raise ValueError("Stage 13 prior cumulative client-invocation count is not auditable")
+    issued = additional_gate.get("additional_client_request_attempts_issued")
     if not isinstance(issued, int) or not 0 <= issued <= ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
         raise ValueError("corrected Stage 13 additional request count is outside the explicit gate")
     if additional_gate.get("approved") is False and (issued != 0 or additional_gate.get("corrected_live_diagnostic_issued") is not False):
         raise ValueError("corrected Stage 13 requests were issued without approval")
+    bounded_live = evidence["number_of_results"].get("bounded_live_diagnostic", {})
+    accounting_fields = {
+        "client_request_attempts_issued",
+        "http_responses_received",
+        "confirmed_provider_http_attempts",
+        "provider_quota_consumption_status",
+        "conservative_quota_accounting_attempts",
+    }
+    if not accounting_fields <= set(bounded_live):
+        raise ValueError("Stage 13 live diagnostic accounting fields are incomplete")
+    if any(
+        obsolete in bounded_live
+        for obsolete in (
+            "http_attempts_consumed",
+            "current_run_http_attempts_consumed",
+            "prior_attempts_consumed",
+            "max_http_attempts",
+        )
+    ):
+        raise ValueError("ambiguous HTTP-attempt accounting field remains in Stage 13 evidence")
+    audit = evidence["number_of_results"].get("failed_corrected_diagnostic_audit", {})
+    if audit.get("client_request_attempts_issued") == ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
+        if audit.get("http_responses_received") != 0:
+            raise ValueError("failed corrected diagnostic must retain zero HTTP responses")
+        if audit.get("confirmed_provider_http_attempts") != 0:
+            raise ValueError("failed corrected diagnostic cannot confirm provider HTTP attempts")
+        if audit.get("provider_quota_consumption_status") != PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE:
+            raise ValueError("failed corrected diagnostic provider quota status is not conservative/unknown")
+        if audit.get("conservative_quota_accounting_attempts") != ADDITIONAL_RESULT_LIMIT_DIAGNOSTIC_ATTEMPTS:
+            raise ValueError("conservative quota accounting must be separately labeled as 24 attempts")
     readiness = evidence["readiness_decision"]
     for flag in required_gate_flags:
         if readiness.get(flag) is not False:
@@ -2648,35 +3269,43 @@ def main() -> int:
     parser.add_argument(
         "--run-live-diagnostics",
         action="store_true",
-        help="run only the corrected 24-request result-limit diagnostic after explicit approval",
+        help="run a newly approved corrected result-limit diagnostic with zero-request DNS preflight and a fail-fast smoke gate",
     )
     parser.add_argument(
         "--approve-additional-mdd-requests",
         action="store_true",
-        help="explicitly approve the separately gated 24 additional MDD requests",
+        help="legacy compatibility flag; it does not authorize a new live rerun",
     )
     parser.add_argument(
+        "--prior-client-attempts",
         "--prior-http-attempts",
+        dest="prior_client_attempts",
         type=int,
         default=0,
-        help="Stage 13 attempts already consumed by a prior bounded diagnostic run",
+        help="prior cumulative Stage 13 client invocations (legacy alias: --prior-http-attempts)",
     )
     parser.add_argument(
         "--reuse-existing-live-evidence",
         action="store_true",
         help="reuse the current sanitized live diagnostic without issuing new MDD requests",
     )
+    parser.add_argument(
+        "--approve-live-rerun-after-network-preflight",
+        action="store_true",
+        help="explicitly approve a new live rerun after reviewing the offline preflight/fail-fast correction; the previous 24-invocation approval is not reused",
+    )
     args = parser.parse_args()
-    if args.prior_http_attempts < 0:
-        parser.error("--prior-http-attempts must be non-negative")
-    if args.run_live_diagnostics and not args.approve_additional_mdd_requests:
-        parser.error("--run-live-diagnostics requires --approve-additional-mdd-requests")
+    if args.prior_client_attempts < 0:
+        parser.error("--prior-client-attempts must be non-negative")
+    if args.run_live_diagnostics and not args.approve_live_rerun_after_network_preflight:
+        parser.error("--run-live-diagnostics requires --approve-live-rerun-after-network-preflight")
     evidence = build_evidence(
         gtfs_zip=args.gtfs_zip,
         run_live_diagnostics=args.run_live_diagnostics,
-        prior_live_attempts=args.prior_http_attempts,
+        prior_live_attempts=args.prior_client_attempts,
         reuse_existing_live=args.reuse_existing_live_evidence,
         additional_mdd_requests_approved=args.approve_additional_mdd_requests,
+        live_rerun_approved=args.approve_live_rerun_after_network_preflight,
     )
     validate_evidence(evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)

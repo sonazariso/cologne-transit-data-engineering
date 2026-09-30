@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
 import stage_13_tiered_collector_readiness as stage13  # noqa: E402
+import stage_08_mdd_realtime_pilot as stage8  # noqa: E402
 
 
 class Stage13TieredCollectorReadinessTests(unittest.TestCase):
@@ -118,28 +124,54 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(result_limit["decision"], "NOT_ESTABLISHED")
         self.assertEqual(
             result_limit["corrected_metric_status"],
-            "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_NETWORK_OR_DNS_FAILURE",
+            "CORRECTED_DIAGNOSTIC_COMPLETED_NO_VALID_RESPONSES_OTHER_NETWORK_FAILURE",
         )
         live = result_limit["bounded_live_diagnostic"]
-        self.assertEqual(live["http_attempts_consumed"], 114)
-        self.assertEqual(live["current_run_http_attempts_consumed"], 24)
-        self.assertEqual(live["prior_attempts_consumed"], 90)
+        self.assertEqual(live["historical_client_diagnostic_attempts"], 90)
+        self.assertEqual(live["corrected_client_request_attempts"], 24)
+        self.assertEqual(live["cumulative_client_request_invocations"], 114)
+        self.assertEqual(live["client_request_attempts_issued"], 24)
+        self.assertEqual(live["http_responses_received"], 0)
+        self.assertEqual(live["confirmed_provider_http_attempts"], 0)
+        self.assertEqual(
+            live["provider_quota_consumption_status"],
+            stage13.PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        )
+        self.assertEqual(live["conservative_quota_accounting_attempts"], 24)
+        self.assertEqual(live["historical_initial_diagnostic_budget"], 100)
+        self.assertEqual(live["explicit_additional_user_authorization"], 24)
+        self.assertEqual(live["authorized_cumulative_client_attempt_ceiling"], 114)
         gate = result_limit["additional_request_gate"]
         self.assertTrue(gate["approved"])
-        self.assertEqual(gate["requested_additional_http_attempts"], 24)
-        self.assertEqual(gate["cumulative_attempts_if_approved"], 114)
-        self.assertEqual(gate["historical_diagnostic_hard_ceiling"], 100)
-        self.assertFalse(gate["historical_ceiling_changed"])
-        self.assertEqual(gate["additional_requests_issued"], 24)
+        self.assertEqual(gate["requested_additional_client_request_attempts"], 24)
+        self.assertEqual(gate["authorized_cumulative_client_attempt_ceiling"], 114)
+        self.assertEqual(gate["historical_initial_diagnostic_budget"], 100)
+        self.assertEqual(gate["explicit_additional_user_authorization"], 24)
+        self.assertFalse(gate["historical_budget_rewritten"])
+        self.assertEqual(gate["additional_client_request_attempts_issued"], 24)
         self.assertTrue(gate["corrected_live_diagnostic_issued"])
         self.assertEqual(live["result_limit_probe"]["requested_result_limits"], [5, 10, 20, 30])
         for summary in live["result_limit_probe"]["summary_by_result_limit"].values():
-            self.assertEqual(summary["request_count"], 6)
+            self.assertEqual(summary["client_request_attempts_issued"], 6)
+            self.assertEqual(summary["http_responses_received"], 0)
+            self.assertEqual(summary["confirmed_provider_http_attempts"], 0)
             self.assertEqual(summary["http_status_distribution"], {"None": 6})
             self.assertEqual(summary["parser_success_count"], 0)
             self.assertEqual(summary["valid_trias_response_count"], 0)
             self.assertEqual(summary["legacy_forward_temporal_span_status"], "NOT_PRESENT")
             self.assertEqual(summary["forward_coverage_statistics_seconds"]["count"], 0)
+            self.assertEqual(summary["transport_failure_category_distribution"], {"OTHER_NETWORK_FAILURE": 6})
+        audit = result_limit["failed_corrected_diagnostic_audit"]
+        self.assertEqual(audit["status"], "INVALID_FOR_NUMBER_OF_RESULTS_DECISION")
+        self.assertEqual(audit["client_request_attempts_issued"], 24)
+        self.assertEqual(audit["http_responses_received"], 0)
+        self.assertEqual(audit["confirmed_provider_http_attempts"], 0)
+        self.assertEqual(
+            audit["provider_quota_consumption_status"],
+            stage13.PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        )
+        self.assertEqual(audit["conservative_quota_accounting_attempts"], 24)
+        self.assertEqual(audit["transport_failure_category_distribution"], {"OTHER_NETWORK_FAILURE": 24})
         self.assertEqual(len(result_limit["historical_invalidated_sequential_records"]), 24)
         self.assertTrue(
             all(
@@ -150,7 +182,8 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
         self.assertEqual(len(live["result_limit_probe"]["sequential_records"]), 24)
         self.assertTrue(
             all(
-                row["transport_failure"] == "NETWORK_OR_DNS_FAILURE"
+                row["transport_failure"] == "OTHER_NETWORK_FAILURE"
+                and row["transport_failure_category"] == "OTHER_NETWORK_FAILURE"
                 and row["raw_payload_persisted"] is False
                 for row in live["result_limit_probe"]["sequential_records"]
             )
@@ -288,7 +321,210 @@ class Stage13TieredCollectorReadinessTests(unittest.TestCase):
             additional_requests_approved=False,
         )
         self.assertEqual(result["status"], "NOT_RUN_USER_APPROVAL_REQUIRED")
-        self.assertEqual(result["http_attempts_consumed"], 0)
+        self.assertEqual(result["client_request_attempts_issued"], 0)
+        self.assertEqual(result["http_responses_received"], 0)
+
+    def test_request_accounting_does_not_infer_provider_quota_from_client_invocations(self) -> None:
+        accounting = stage13._request_accounting(
+            24,
+            0,
+            conservative_quota_accounting_attempts=24,
+        )
+        self.assertEqual(accounting["client_request_attempts_issued"], 24)
+        self.assertEqual(accounting["http_responses_received"], 0)
+        self.assertEqual(accounting["confirmed_provider_http_attempts"], 0)
+        self.assertEqual(
+            accounting["provider_quota_consumption_status"],
+            stage13.PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        )
+        self.assertEqual(accounting["conservative_quota_accounting_attempts"], 24)
+
+    def test_zero_request_dns_preflight_stops_before_transport(self) -> None:
+        failed_preflight = {
+            "status": "DNS_RESOLUTION_FAILED",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 0,
+            "address_families": [],
+            "safe_failure_category": "DNS_RESOLUTION_FAILED",
+        }
+        with patch.object(stage13, "_network_dns_preflight", return_value=failed_preflight), patch.object(
+            stage8,
+            "perform_http_request",
+            side_effect=AssertionError("MDD HTTP request issued after failed preflight"),
+        ):
+            result = stage13._run_live_diagnostics(
+                [],
+                api_key="offline-test-key-123",
+                include_concurrency_probe=False,
+                attempt_budget=24,
+            )
+        self.assertEqual(result["network_preflight"]["status"], "DNS_RESOLUTION_FAILED")
+        self.assertEqual(result["client_request_attempts_issued"], 0)
+        self.assertEqual(result["http_responses_received"], 0)
+        self.assertEqual(result["stop_reason"], "DNS_RESOLUTION_FAILED_ZERO_MDD_REQUESTS_ISSUED")
+
+    def test_transport_classification_is_allow_listed_and_secret_free(self) -> None:
+        self.assertEqual(
+            stage8.classify_transport_failure(socket.gaierror("private host detail")),
+            "DNS_RESOLUTION_FAILED",
+        )
+        self.assertEqual(
+            stage8.classify_transport_failure(ConnectionRefusedError("private proxy detail")),
+            "CONNECTION_REFUSED",
+        )
+        self.assertEqual(
+            stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"),
+            "OTHER_NETWORK_FAILURE",
+        )
+        self.assertIn(
+            stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"),
+            stage13.SAFE_TRANSPORT_FAILURE_CATEGORIES,
+        )
+
+    def test_smoke_gate_stops_after_first_environment_failure(self) -> None:
+        rows = self.evidence["static_event_density"]["station_tier_rows"]
+        calls: list[object] = []
+        failed_result = stage8.HTTPResult(
+            request_timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+            request_timestamp_utc="2026-09-30T00:00:00Z",
+            http_status=None,
+            content_type=None,
+            body=b"",
+            elapsed_ms=1.0,
+            request_started_mono=1.0,
+            request_ended_mono=2.0,
+            failure="DNS_RESOLUTION_FAILED",
+            failure_detail="not persisted",
+        )
+
+        def fake_request(*_args: object, **_kwargs: object) -> stage8.HTTPResult:
+            calls.append(object())
+            return failed_result
+
+        preflight = {
+            "status": "DNS_RESOLUTION_OK",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 1,
+            "address_families": ["IPv4"],
+            "safe_failure_category": None,
+        }
+        with patch.object(stage13, "_network_dns_preflight", return_value=preflight), patch.object(
+            stage8, "perform_http_request", side_effect=fake_request
+        ):
+            result = stage13._run_live_diagnostics(
+                rows,
+                api_key="offline-test-key-123",
+                include_concurrency_probe=False,
+                attempt_budget=24,
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(24 - len(calls), 23)
+        self.assertEqual(result["client_request_attempts_issued"], 1)
+        self.assertEqual(
+            result["stop_reason"],
+            "SMOKE_GATE_STOPPED_ENVIRONMENT_FAILURE_DNS_RESOLUTION_FAILED",
+        )
+        self.assertEqual(result["result_limit_probe"]["smoke_gate"]["status"], "FAILED")
+
+    def test_smoke_gate_stops_on_401_and_403_without_spending_remaining_budget(self) -> None:
+        rows = self.evidence["static_event_density"]["station_tier_rows"]
+        preflight = {
+            "status": "DNS_RESOLUTION_OK",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 1,
+            "address_families": ["IPv4"],
+            "safe_failure_category": None,
+        }
+        for status in (401, 403):
+            with self.subTest(status=status):
+                calls: list[object] = []
+                auth_result = stage8.HTTPResult(
+                    request_timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+                    request_timestamp_utc="2026-09-30T00:00:00Z",
+                    http_status=status,
+                    content_type="application/xml",
+                    body=b"",
+                    elapsed_ms=1.0,
+                    request_started_mono=1.0,
+                    request_ended_mono=2.0,
+                    failure=None,
+                    failure_detail=f"HTTP_{status}",
+                )
+
+                def fake_request(*_args: object, **_kwargs: object) -> stage8.HTTPResult:
+                    calls.append(object())
+                    return auth_result
+
+                with patch.object(stage13, "_network_dns_preflight", return_value=preflight), patch.object(
+                    stage8, "perform_http_request", side_effect=fake_request
+                ):
+                    result = stage13._run_live_diagnostics(
+                        rows,
+                        api_key="offline-test-key-123",
+                        include_concurrency_probe=False,
+                        attempt_budget=24,
+                    )
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(24 - len(calls), 23)
+                self.assertEqual(result["client_request_attempts_issued"], 1)
+                self.assertEqual(result["http_responses_received"], 1)
+                self.assertEqual(result["stop_reason"], "SMOKE_GATE_STOPPED_HTTP_401_OR_403")
+                self.assertEqual(result["result_limit_probe"]["smoke_gate"]["status"], "FAILED")
+                self.assertEqual(
+                    result["result_limit_probe"]["sequential_records"][0]["error_classification"],
+                    "HTTP_AUTHORIZATION_FAILURE",
+                )
+
+    def test_transport_failure_details_are_category_only_and_never_log_api_key(self) -> None:
+        api_key = "offline-secret-api-key-123"
+
+        class FailingOpener:
+            def open(self, *_args: object, **_kwargs: object) -> object:
+                raise stage8.URLError(f"proxy credentials {api_key} leaked")
+
+        captured_stdout = StringIO()
+        captured_stderr = StringIO()
+        with patch.object(stage8, "build_opener", return_value=FailingOpener()), redirect_stdout(
+            captured_stdout
+        ), redirect_stderr(captured_stderr):
+            result = stage8.perform_http_request(
+                api_key,
+                pilot_anchor_dep_arr_time="2026-09-30T00:00:00Z",
+            )
+
+        self.assertEqual(result.failure, "PROXY_OR_ENVIRONMENT_FAILURE")
+        self.assertEqual(result.failure_detail, "PROXY_OR_ENVIRONMENT_FAILURE")
+        self.assertNotIn(api_key, repr(result))
+        self.assertNotIn(api_key, captured_stdout.getvalue())
+        self.assertNotIn(api_key, captured_stderr.getvalue())
+        self.assertNotIn(
+            api_key,
+            repr(stage8.classify_transport_failure(OSError(f"proxy password {api_key}"))),
+        )
+
+    def test_historical_budget_and_cumulative_client_accounting_are_explicit(self) -> None:
+        gate = self.evidence["number_of_results"]["additional_request_gate"]
+        live = self.evidence["number_of_results"]["bounded_live_diagnostic"]
+        self.assertEqual(gate["historical_initial_diagnostic_budget"], 100)
+        self.assertEqual(gate["explicit_additional_user_authorization"], 24)
+        self.assertEqual(gate["prior_cumulative_client_request_invocations"], 90)
+        self.assertEqual(gate["authorized_cumulative_client_attempt_ceiling"], 114)
+        self.assertEqual(live["historical_client_diagnostic_attempts"], 90)
+        self.assertEqual(live["corrected_client_request_attempts"], 24)
+        self.assertEqual(live["cumulative_client_request_invocations"], 114)
+        self.assertFalse(gate["historical_budget_rewritten"])
+        for key in (
+            "http_attempts_consumed",
+            "current_run_http_attempts_consumed",
+            "prior_attempts_consumed",
+            "http_attempts_consumed_total",
+            "max_http_attempts",
+        ):
+            self.assertNotIn(key, live)
+            self.assertNotIn(key, gate)
 
     def test_no_secret_or_raw_payload_persistence(self) -> None:
         rendered = self.evidence_path.read_text(encoding="utf-8").lower()
