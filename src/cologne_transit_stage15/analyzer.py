@@ -348,13 +348,19 @@ def _timing_reporting_projection(
                 "LatestSourceRecordedAtTimeObservedAt": latest.get("observed_at_utc"),
                 "LatestSourceRecordedAtTimeSnapshotId": latest.get("snapshot_id"),
                 "LatestSourceRecordedAtTimeAuditId": latest.get("audit_id"),
-                "LatestSourceRecordedAtTimeSourcePath": latest.get("source_path"),
+                "LatestSourceRecordedAtTimeSourcePath": (
+                    latest.get("recorded_at_time_source_path")
+                    if latest.get("recorded_at_time") is not None
+                    else None
+                ),
                 "LatestSourceRecordedAtTimeObservationId": latest.get("timing_observation_id"),
                 "LastObservedRecordedAtTime": value(last_nonnull, "recorded_at_time"),
                 "LastObservedRecordedAtTimeObservedAt": value(last_nonnull, "observed_at_utc"),
                 "LastObservedRecordedAtTimeSnapshotId": value(last_nonnull, "snapshot_id"),
                 "LastObservedRecordedAtTimeAuditId": value(last_nonnull, "audit_id"),
-                "LastObservedRecordedAtTimeSourcePath": value(last_nonnull, "source_path"),
+                "LastObservedRecordedAtTimeSourcePath": value(
+                    last_nonnull, "recorded_at_time_source_path"
+                ),
                 "LastObservedRecordedAtTimeObservationId": value(
                     last_nonnull, "timing_observation_id"
                 ),
@@ -363,7 +369,9 @@ def _timing_reporting_projection(
                 "FirstObservedRecordedAtTimeObservedAt": value(first_nonnull, "observed_at_utc"),
                 "FirstObservedRecordedAtTimeSnapshotId": value(first_nonnull, "snapshot_id"),
                 "FirstObservedRecordedAtTimeAuditId": value(first_nonnull, "audit_id"),
-                "FirstObservedRecordedAtTimeSourcePath": value(first_nonnull, "source_path"),
+                "FirstObservedRecordedAtTimeSourcePath": value(
+                    first_nonnull, "recorded_at_time_source_path"
+                ),
                 "FirstObservedRecordedAtTimeObservationId": value(
                     first_nonnull, "timing_observation_id"
                 ),

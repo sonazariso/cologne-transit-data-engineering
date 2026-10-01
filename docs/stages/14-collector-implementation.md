@@ -240,10 +240,13 @@ non-NULL observation. `recorded_at_time_evidence` remains the append-only
 non-NULL source-evidence table; the timing reporting view is a derived helper
 over the normalized rows and is not a second evidence count.
 
-The MDD-local source-event identity uses only stable source context: operating
-day, journey, stop point, timetabled time, and arrival/departure context, with
-source disambiguators when present. It excludes `ResultId`, estimated/recorded
-values, and observation timestamps. Missing required context is explicitly
+The `MDD_SOURCE_EVENT_V2` hash is defined only by the required core:
+`OperatingDayRef`, `JourneyRef`, `StopPointRef`, `TimetabledTime`, and
+arrival/departure context. Optional source fields such as line, direction,
+operator, vehicle-journey, and stop-sequence values are retained only as
+lineage/disambiguation evidence; they never alter the hash. `ResultId`,
+estimated/recorded values, and observation timestamps are also outside the
+identity. Missing required context is explicitly
 `SOURCE_EVENT_IDENTITY_INSUFFICIENT` and is never guessed or merged with
 another event. The reporting projection exposes `LatestSourceRecordedAtTime`,
 `LastObservedRecordedAtTime`, first/last non-NULL lineage, snapshot/audit/path
@@ -253,9 +256,10 @@ The first-gap audit is recorded in
 [14-live-research-first-gap-audit.md](14-live-research-first-gap-audit.md) and
 [its JSON artifact](14-live-research-first-gap-audit.json). The historical S78
 count is 121: 21 structural-container occurrences and 100 ServiceSection field
-occurrences across 20 source sections. S80 now retains those ServiceSection
-values explicitly at source occurrence grain with source paths and bounded
-representations; unknown
+occurrences across 20 source sections. Those 100 fields were not retained in
+the original S78 normalized snapshot; S80 reconstructed them from retained
+sanitized raw evidence and now retains them explicitly at source occurrence
+grain with source paths and bounded representations. Unknown
 relevant future ServiceSection extensions remain parser-gap evidence.
 
 ### S80 identity, ServiceSection, migration, and window corrections
@@ -282,6 +286,23 @@ Stage 15 historical analysis filters raw timing observations to the requested
 logical bucket and observation window before grouping. The global SQLite
 reporting view remains available for current-state inspection only and cannot
 leak future observations into a historical window.
+
+### S81 reporting-lineage and migration hardening
+
+The schema-5 SQLite reporting view uses the exact
+`recorded_at_time_source_path` leaf for `LatestSourceRecordedAtTimeSourcePath`,
+`LastObservedRecordedAtTimeSourcePath`, and
+`FirstObservedRecordedAtTimeSourcePath`. A latest NULL `RecordedAtTime` keeps
+the latest path NULL; a historical non-NULL value uses the leaf from its own
+observation. The Stage 15 in-memory projection applies the same rule.
+
+The existing live file was migrated offline from schema `4` to `5` at
+`2026-10-01T15:15:16.410851Z`. The four required table counts were unchanged:
+1 parsed snapshot, 995 timing observations, 0 RecordedAtTime evidence rows,
+and 20 ServiceSection rows. Integrity/quick checks, reconciliation, corrected
+view validation, and the refreshed current-day backup passed; the temporary
+safety backup was removed only after validation. Opening schema 5 preserves
+`last_schema_migration_at_utc`.
 
 Parsed snapshots are separate from transport and persistence. Ordinary
 successful live responses do not retain raw bodies. The `LIVE_RESEARCH` raw

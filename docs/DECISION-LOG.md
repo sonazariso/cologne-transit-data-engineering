@@ -60,6 +60,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-055 | 2026-10-01 | S77 Stage 15A post-cutover validation readiness: add a versioned validation contract, backend-neutral read-only analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality diagnostics, and offline regression coverage without starting live Stage 15 | Stage 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage 15 live NOT STARTED — AWAITS TIERED50 CUTOVER |
 | D-056 | 2026-10-01 | S78 Single-Station Live SQLite Research Pilot: `SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.` Use durable `LIVE_RESEARCH` SQLite for the bounded `LIVE_RESEARCH_SINGLE_1` Köln Heumarkt pilot; retain parsed evidence, bound raw forensics to 24 hours, and keep three validated daily backups without starting Tiered50 production or Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; collector implementation COMPLETE; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 | D-057 | 2026-10-01 | S79 timing-history and first-gap correction: append normalized source timing observations with deterministic MDD-local identity and reporting lineage; preserve the existing `recorded_at_time_evidence`; audit the actual S78 Heumarkt database read-only; correct only clear structural parser gaps; keep ambiguous ServiceSection fields under review; measure timing history in Stage 15A without starting Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-059 | 2026-10-01 | S81 reporting-lineage and migration correction: use `recorded_at_time_source_path` for all RecordedAtTime reporting paths, replace schema-4 reporting views through an explicit schema-5 migration, add genuine schema-v2/schema-v4 regressions, and correct the ServiceSection evidence wording without rewriting historical source facts | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1444,3 +1445,30 @@ removed the temporary safety backup only after validation. No MDD request, DNS
 activity, live-network attempt, scheduler, PostgreSQL, Power BI, or cutover
 activity occurred. Stage 15 historical analysis now filters raw timing rows by
 window before grouping; the global reporting view remains current-state only.
+
+## D-059 — S81 Reporting Lineage and Migration Correction
+
+S81 corrects the S80 reporting implementation without changing the accepted
+source-event identity, timing-history, ServiceSection, raw-retention, backup,
+or Stage 15 semantics. The `MDD_SOURCE_EVENT_V2` hash remains defined only by
+OperatingDayRef, JourneyRef, StopPointRef, TimetabledTime, and timing context;
+optional source fields remain lineage/disambiguation evidence and never alter
+that hash.
+
+The current SQLite reporting projections now expose the exact
+`recorded_at_time_source_path` for latest, last-observed, and first-observed
+RecordedAtTime values. A latest NULL value exposes a NULL latest source path;
+no earlier path is borrowed. Schema 4 to schema 5 explicitly replaces only the
+two affected reporting views in a transaction, preserves all table data, and
+keeps the migration timestamp stable on subsequent schema-5 opens. Deterministic
+schema-v2 and schema-v4 fixtures cover backfill, snapshot preservation,
+idempotency, integrity, and view replacement. The historical S78/S80 facts are
+unchanged: the original snapshot JSON was not rewritten, and ServiceSection
+fields reconstructed from retained raw evidence are documented as such.
+
+The actual live file was migrated offline from schema `4` to `5` at
+`2026-10-01T15:15:16.410851Z`. Counts remained unchanged at 1 parsed snapshot,
+995 timing observations, 0 RecordedAtTime evidence rows, and 20 ServiceSection
+rows; integrity/quick checks, reconciliation, and corrected reporting-view
+validation passed. The current-day backup was refreshed and the temporary
+safety backup was removed only after validation.

@@ -6,6 +6,16 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- Stage 14 S81 final offline correction: corrected SQLite and Stage 15
+  RecordedAtTime reporting to use the exact leaf source path, preserved NULL
+  latest-path semantics, added explicit schema-4-to-5 reporting-view
+  replacement, and added genuine schema-v2 migration and schema-v4 view
+  regressions. The S80 identity hash and source-event ambiguity behavior remain
+  unchanged; ServiceSection audit wording now distinguishes original S78
+  retention from S80 reconstruction. The actual LIVE_RESEARCH file migrated
+  offline from schema 4 to 5 with all required row counts unchanged,
+  integrity/reconciliation/view checks passing, and the validated daily backup
+  refreshed.
 - Stage 14 S80 correction and offline live-database migration: versioned the
   stable timing identity around the required source core, explicitly marked
   same-snapshot core collisions as ambiguous, added idempotent timing

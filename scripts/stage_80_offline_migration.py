@@ -78,6 +78,81 @@ def _read_only_summary(path: Path) -> dict[str, Any]:
         connection.close()
 
 
+def _verify_corrected_reporting_view(path: Path) -> dict[str, Any]:
+    """Verify the schema-5 view uses exact RecordedAtTime leaf lineage."""
+
+    connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        definitions = {
+            str(row["name"]): str(row["sql"] or "")
+            for row in connection.execute(
+                """
+                SELECT name, sql
+                FROM sqlite_master
+                WHERE type = 'view'
+                  AND name IN ('timing_recorded_at_time_reporting', 'recorded_at_time_reporting')
+                """
+            )
+        }
+        required = {"timing_recorded_at_time_reporting", "recorded_at_time_reporting"}
+        if set(definitions) != required:
+            raise RuntimeError("schema-5 RecordedAtTime reporting views are incomplete")
+        if "timing_recorded_at_time_reporting" not in definitions[
+            "recorded_at_time_reporting"
+        ]:
+            raise RuntimeError("RecordedAtTime compatibility alias is not linked to the current view")
+        timing_sql = definitions["timing_recorded_at_time_reporting"]
+        for required_text in (
+            "recorded_at_time_source_path",
+            "LatestSourceRecordedAtTimeSourcePath",
+            "LastObservedRecordedAtTimeSourcePath",
+            "FirstObservedRecordedAtTimeSourcePath",
+        ):
+            if required_text not in timing_sql:
+                raise RuntimeError(
+                    f"corrected reporting view does not expose {required_text}"
+                )
+
+        timing_rows = {
+            int(row["timing_observation_id"]): row
+            for row in connection.execute("SELECT * FROM timing_observations")
+        }
+        reporting_rows = connection.execute(
+            "SELECT * FROM timing_recorded_at_time_reporting"
+        ).fetchall()
+        path_checks = (
+            ("LatestSourceRecordedAtTimeObservationId", "LatestSourceRecordedAtTimeSourcePath"),
+            ("LastObservedRecordedAtTimeObservationId", "LastObservedRecordedAtTimeSourcePath"),
+            ("FirstObservedRecordedAtTimeObservationId", "FirstObservedRecordedAtTimeSourcePath"),
+        )
+        for report in reporting_rows:
+            for observation_id_field, source_path_field in path_checks:
+                observation_id = report[observation_id_field]
+                if observation_id is None:
+                    expected_path = None
+                else:
+                    observation = timing_rows.get(int(observation_id))
+                    if observation is None:
+                        raise RuntimeError(
+                            f"reporting view references missing timing observation {observation_id}"
+                        )
+                    expected_path = observation["recorded_at_time_source_path"]
+                    if source_path_field.startswith("Latest") and observation["recorded_at_time"] is None:
+                        expected_path = None
+                if report[source_path_field] != expected_path:
+                    raise RuntimeError(
+                        f"{source_path_field} does not match recorded_at_time_source_path"
+                    )
+        return {
+            "status": "PASS",
+            "reporting_row_count": len(reporting_rows),
+            "view_names": sorted(definitions),
+        }
+    finally:
+        connection.close()
+
+
 def _ensure_no_live_collector_process() -> None:
     try:
         completed = subprocess.run(
@@ -198,8 +273,38 @@ def migrate(path: Path) -> dict[str, Any]:
         if backup_integrity.casefold() != "ok":
             raise RuntimeError("refreshed daily backup failed integrity check")
         post = _read_only_summary(path)
+        required_count_tables = (
+            "parsed_snapshots",
+            "timing_observations",
+            "recorded_at_time_evidence",
+            "service_section_observations",
+        )
+        count_comparison = {
+            table: {
+                "before": pre["counts"].get(table),
+                "after": post["counts"].get(table),
+                "unchanged": pre["counts"].get(table) == post["counts"].get(table),
+            }
+            for table in required_count_tables
+        }
+        missing_counts = [
+            table
+            for table, values in count_comparison.items()
+            if values["before"] is None or values["after"] is None
+        ]
+        changed_counts = [
+            table
+            for table, values in count_comparison.items()
+            if not values["unchanged"]
+        ]
+        if missing_counts or changed_counts:
+            raise RuntimeError(
+                "required durable row counts changed or were unavailable: "
+                + json.dumps(count_comparison, sort_keys=True)
+            )
         if reconciliation.get("status") != "PASS":
             raise RuntimeError("RecordedAtTime reconciliation failed")
+        reporting_view = _verify_corrected_reporting_view(path)
         result = {
             "status": "COMPLETE",
             "database_path": str(path),
@@ -207,7 +312,9 @@ def migrate(path: Path) -> dict[str, Any]:
             "post_migration": post,
             "schema_version_expected": SCHEMA_VERSION,
             "backfill": backfill,
+            "required_row_counts": count_comparison,
             "recorded_at_time_reconciliation": reconciliation,
+            "corrected_reporting_view": reporting_view,
             "post_migration_integrity_check": post_integrity,
             "refreshed_daily_backup": {
                 "path": str(backup_path),

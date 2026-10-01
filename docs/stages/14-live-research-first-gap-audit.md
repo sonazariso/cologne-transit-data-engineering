@@ -27,10 +27,23 @@ Summary:
 
 - `parallelservice`: 20, structural STOP_EVENT container; excluded from future parser-gap emission.
 - `situations`: 1, structural RESPONSE_CONTEXT container; excluded from future parser-gap emission.
-- `directionref`, `lineref`, `mode`, `operatorref`, `publishedlinename`: 100 historical ServiceSection field occurrences across 20 source sections, now retained explicitly at ServiceSection grain with source paths and bounded source representations. They are not promoted to timing identity.
+- `directionref`, `lineref`, `mode`, `operatorref`, `publishedlinename`: 100 historical ServiceSection field occurrences across 20 source sections. They were not retained in the original S78 normalized snapshot; S80 reconstructed them from retained sanitized raw evidence and retained them in the S80 ServiceSection projection at source occurrence grain with source paths and bounded source representations. They are not promoted to timing identity.
 - The corrected parser emits zero gaps for this retained response shape. Unknown relevant future ServiceSection extensions remain parser-gap evidence.
 
 `recorded_at_time_evidence` remains separate source evidence, while the timing
 reporting view is a derived current-state projection over normalized timing
 observations. The S80 changes do not start Tiered50 production sampling or
 Stage 15B.
+
+S81 corrected the reporting lineage without rewriting timing observations: the
+schema-5 SQLite projections use `recorded_at_time_source_path` for the latest,
+last-observed, and first-observed RecordedAtTime path columns. The schema-4
+view definitions are replaced transactionally, and the compatibility alias is
+recreated with the same semantics.
+
+The actual live file was migrated offline from schema `4` to `5` at
+`2026-10-01T15:15:16.410851Z`. Counts remained unchanged at 1 parsed snapshot,
+995 timing observations, 0 RecordedAtTime evidence rows, and 20 ServiceSection
+rows. Integrity/quick checks, reconciliation, corrected reporting-view
+validation, and the refreshed current-day backup passed; the temporary safety
+backup was removed only after validation.

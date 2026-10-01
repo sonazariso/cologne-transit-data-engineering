@@ -78,7 +78,7 @@ def _safe_error_category(value: Any) -> str | None:
     return text if text in allowed else "SANITIZED_ERROR"
 
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 DEFAULT_COLLECTION_CONTEXT = "OFFLINE_DEVELOPMENT"
 UNKNOWN_SHARED_QUOTA_SOURCE = "UNKNOWN_SHARED_PROVIDER_BASELINE"
 RAW_RETENTION_HOURS = 24
@@ -86,6 +86,118 @@ _BACKUP_NAME = re.compile(r"^collector-(?P<date>\d{4}-\d{2}-\d{2})\.sqlite3$")
 _BACKUP_TEMP_NAME = re.compile(
     r"^\.collector-\d{4}-\d{2}-\d{2}-[0-9a-f]{32}\.tmp(?:-(?:wal|shm|journal))?$"
 )
+
+
+_RECORDED_AT_TIME_REPORTING_SELECT = """
+WITH base AS (
+    SELECT
+        timing_observation_id,
+        source_event_identity,
+        source_event_identity_status,
+        CASE
+            WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
+                 AND source_event_identity IS NOT NULL
+            THEN source_event_identity
+            ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
+        END AS source_event_identity_group,
+        recorded_at_time,
+        observed_at_utc,
+        snapshot_id,
+        audit_id,
+        source_path,
+        recorded_at_time_source_path,
+        panel_version,
+        source_parent_station_id,
+        logical_due_bucket,
+        collection_context,
+        event_ordinal,
+        result_id,
+        call_scope,
+        call_ordinal,
+        timing_context,
+        timetabled_time,
+        estimated_time,
+        estimated_time_low,
+        estimated_time_high,
+        ROW_NUMBER() OVER (
+            PARTITION BY CASE
+                WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
+                     AND source_event_identity IS NOT NULL
+                THEN source_event_identity
+                ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
+            END
+            ORDER BY observed_at_utc DESC, timing_observation_id DESC
+        ) AS latest_rank
+    FROM timing_observations
+), nonnull AS (
+    SELECT
+        base.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY source_event_identity_group
+            ORDER BY observed_at_utc DESC, timing_observation_id DESC
+        ) AS last_nonnull_rank,
+        ROW_NUMBER() OVER (
+            PARTITION BY source_event_identity_group
+            ORDER BY observed_at_utc ASC, timing_observation_id ASC
+        ) AS first_nonnull_rank
+    FROM base
+    WHERE recorded_at_time IS NOT NULL
+), counts AS (
+    SELECT source_event_identity_group, COUNT(*) AS nonnull_count
+    FROM nonnull
+    GROUP BY source_event_identity_group
+)
+SELECT
+    latest.source_event_identity AS SourceEventIdentity,
+    latest.source_event_identity_status AS SourceEventIdentityStatus,
+    latest.source_event_identity_group AS SourceEventIdentityGroup,
+    latest.panel_version AS PanelVersion,
+    latest.source_parent_station_id AS SourceParentStationId,
+    latest.logical_due_bucket AS LogicalDueBucket,
+    latest.collection_context AS CollectionContext,
+    latest.event_ordinal AS EventOrdinal,
+    latest.result_id AS ResultId,
+    latest.call_scope AS CallScope,
+    latest.call_ordinal AS CallOrdinal,
+    latest.timing_context AS TimingContext,
+    latest.timetabled_time AS LatestTimetabledTime,
+    latest.estimated_time AS LatestEstimatedTime,
+    latest.estimated_time_low AS LatestEstimatedTimeLow,
+    latest.estimated_time_high AS LatestEstimatedTimeHigh,
+    latest.recorded_at_time AS LatestSourceRecordedAtTime,
+    latest.observed_at_utc AS LatestSourceRecordedAtTimeObservedAt,
+    latest.snapshot_id AS LatestSourceRecordedAtTimeSnapshotId,
+    latest.audit_id AS LatestSourceRecordedAtTimeAuditId,
+    CASE
+        WHEN latest.recorded_at_time IS NOT NULL
+        THEN latest.recorded_at_time_source_path
+        ELSE NULL
+    END AS LatestSourceRecordedAtTimeSourcePath,
+    latest.timing_observation_id AS LatestSourceRecordedAtTimeObservationId,
+    last_nonnull.recorded_at_time AS LastObservedRecordedAtTime,
+    last_nonnull.observed_at_utc AS LastObservedRecordedAtTimeObservedAt,
+    last_nonnull.snapshot_id AS LastObservedRecordedAtTimeSnapshotId,
+    last_nonnull.audit_id AS LastObservedRecordedAtTimeAuditId,
+    last_nonnull.recorded_at_time_source_path AS LastObservedRecordedAtTimeSourcePath,
+    last_nonnull.timing_observation_id AS LastObservedRecordedAtTimeObservationId,
+    COALESCE(counts.nonnull_count, 0) AS RecordedAtTimeNonNullObservationCount,
+    first_nonnull.recorded_at_time AS FirstObservedRecordedAtTime,
+    first_nonnull.observed_at_utc AS FirstObservedRecordedAtTimeObservedAt,
+    first_nonnull.snapshot_id AS FirstObservedRecordedAtTimeSnapshotId,
+    first_nonnull.audit_id AS FirstObservedRecordedAtTimeAuditId,
+    first_nonnull.recorded_at_time_source_path AS FirstObservedRecordedAtTimeSourcePath,
+    first_nonnull.timing_observation_id AS FirstObservedRecordedAtTimeObservationId
+FROM base AS latest
+LEFT JOIN nonnull AS last_nonnull
+    ON last_nonnull.source_event_identity_group = latest.source_event_identity_group
+   AND last_nonnull.last_nonnull_rank = 1
+LEFT JOIN nonnull AS first_nonnull
+    ON first_nonnull.source_event_identity_group = latest.source_event_identity_group
+   AND first_nonnull.first_nonnull_rank = 1
+LEFT JOIN counts
+    ON counts.source_event_identity_group = latest.source_event_identity_group
+WHERE latest.latest_rank = 1
+"""
 
 
 class LiveResearchSafetyError(ValueError):
@@ -542,121 +654,6 @@ class SQLitePersistence:
                 ON service_section_observations (snapshot_id, service_section_observation_id);
             CREATE UNIQUE INDEX IF NOT EXISTS uq_service_section_observations_snapshot_grain
                 ON service_section_observations (snapshot_id, event_ordinal, section_ordinal, source_path);
-            CREATE VIEW IF NOT EXISTS timing_recorded_at_time_reporting AS
-            WITH base AS (
-                SELECT
-                    timing_observation_id,
-                    source_event_identity,
-                    source_event_identity_status,
-                    CASE
-                        WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
-                             AND source_event_identity IS NOT NULL
-                        THEN source_event_identity
-                        ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
-                    END AS source_event_identity_group,
-                    recorded_at_time,
-                    observed_at_utc,
-                    snapshot_id,
-                    audit_id,
-                    source_path,
-                    panel_version,
-                    source_parent_station_id,
-                    logical_due_bucket,
-                    collection_context,
-                    event_ordinal,
-                    result_id,
-                    call_scope,
-                    call_ordinal,
-                    timing_context,
-                    timetabled_time,
-                    estimated_time,
-                    estimated_time_low,
-                    estimated_time_high,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CASE
-                            WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
-                                 AND source_event_identity IS NOT NULL
-                            THEN source_event_identity
-                            ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
-                        END
-                        ORDER BY observed_at_utc DESC, timing_observation_id DESC
-                    ) AS latest_rank,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CASE
-                            WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
-                                 AND source_event_identity IS NOT NULL
-                            THEN source_event_identity
-                            ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
-                        END
-                        ORDER BY observed_at_utc ASC, timing_observation_id ASC
-                    ) AS first_rank
-                FROM timing_observations
-            ), nonnull AS (
-                SELECT
-                    base.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY source_event_identity_group
-                        ORDER BY observed_at_utc DESC, timing_observation_id DESC
-                    ) AS last_nonnull_rank,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY source_event_identity_group
-                        ORDER BY observed_at_utc ASC, timing_observation_id ASC
-                    ) AS first_nonnull_rank
-                FROM base
-                WHERE recorded_at_time IS NOT NULL
-            ), counts AS (
-                SELECT source_event_identity_group, COUNT(*) AS nonnull_count
-                FROM nonnull
-                GROUP BY source_event_identity_group
-            )
-            SELECT
-                latest.source_event_identity AS SourceEventIdentity,
-                latest.source_event_identity_status AS SourceEventIdentityStatus,
-                latest.source_event_identity_group AS SourceEventIdentityGroup,
-                latest.panel_version AS PanelVersion,
-                latest.source_parent_station_id AS SourceParentStationId,
-                latest.logical_due_bucket AS LogicalDueBucket,
-                latest.collection_context AS CollectionContext,
-                latest.event_ordinal AS EventOrdinal,
-                latest.result_id AS ResultId,
-                latest.call_scope AS CallScope,
-                latest.call_ordinal AS CallOrdinal,
-                latest.timing_context AS TimingContext,
-                latest.timetabled_time AS LatestTimetabledTime,
-                latest.estimated_time AS LatestEstimatedTime,
-                latest.estimated_time_low AS LatestEstimatedTimeLow,
-                latest.estimated_time_high AS LatestEstimatedTimeHigh,
-                latest.recorded_at_time AS LatestSourceRecordedAtTime,
-                latest.observed_at_utc AS LatestSourceRecordedAtTimeObservedAt,
-                latest.snapshot_id AS LatestSourceRecordedAtTimeSnapshotId,
-                latest.audit_id AS LatestSourceRecordedAtTimeAuditId,
-                latest.source_path AS LatestSourceRecordedAtTimeSourcePath,
-                latest.timing_observation_id AS LatestSourceRecordedAtTimeObservationId,
-                last_nonnull.recorded_at_time AS LastObservedRecordedAtTime,
-                last_nonnull.observed_at_utc AS LastObservedRecordedAtTimeObservedAt,
-                last_nonnull.snapshot_id AS LastObservedRecordedAtTimeSnapshotId,
-                last_nonnull.audit_id AS LastObservedRecordedAtTimeAuditId,
-                last_nonnull.source_path AS LastObservedRecordedAtTimeSourcePath,
-                last_nonnull.timing_observation_id AS LastObservedRecordedAtTimeObservationId,
-                COALESCE(counts.nonnull_count, 0) AS RecordedAtTimeNonNullObservationCount,
-                first_nonnull.recorded_at_time AS FirstObservedRecordedAtTime,
-                first_nonnull.observed_at_utc AS FirstObservedRecordedAtTimeObservedAt,
-                first_nonnull.snapshot_id AS FirstObservedRecordedAtTimeSnapshotId,
-                first_nonnull.audit_id AS FirstObservedRecordedAtTimeAuditId,
-                first_nonnull.source_path AS FirstObservedRecordedAtTimeSourcePath,
-                first_nonnull.timing_observation_id AS FirstObservedRecordedAtTimeObservationId
-            FROM base AS latest
-            LEFT JOIN nonnull AS last_nonnull
-                ON last_nonnull.source_event_identity_group = latest.source_event_identity_group
-               AND last_nonnull.last_nonnull_rank = 1
-            LEFT JOIN nonnull AS first_nonnull
-                ON first_nonnull.source_event_identity_group = latest.source_event_identity_group
-               AND first_nonnull.first_nonnull_rank = 1
-            LEFT JOIN counts
-                ON counts.source_event_identity_group = latest.source_event_identity_group
-            WHERE latest.latest_rank = 1;
-            CREATE VIEW IF NOT EXISTS recorded_at_time_reporting AS
-                SELECT * FROM timing_recorded_at_time_reporting;
             CREATE TABLE IF NOT EXISTS shared_usage (
                 month_key TEXT PRIMARY KEY,
                 confirmed_provider_attempts INTEGER NOT NULL DEFAULT 0,
@@ -730,8 +727,87 @@ class SQLitePersistence:
             "UPDATE quota_permits SET status = ? WHERE status = 'PENDING'",
             (PENDING_AUTHORIZATION,),
         )
-        self._initialize_metadata()
+
+        # Schema objects are additive, but reporting views are definitions and
+        # therefore need an explicit replacement path.  Read the old metadata
+        # before updating it so a v2/v3/v4 database can run its idempotent
+        # projection backfill exactly once as part of opening the database.
         self._connection.commit()
+        existing = {
+            str(row[0]): str(row[1])
+            for row in self._connection.execute(
+                "SELECT metadata_key, metadata_value FROM database_metadata"
+            ).fetchall()
+        }
+        previous_schema_version = existing.get("schema_version")
+        if previous_schema_version is not None:
+            try:
+                if int(previous_schema_version) > int(SCHEMA_VERSION):
+                    raise LiveResearchSafetyError(
+                        f"SQLite schema version {previous_schema_version} is newer than supported {SCHEMA_VERSION}"
+                    )
+            except ValueError as exc:
+                raise LiveResearchSafetyError(
+                    f"SQLite schema version is not numeric: {previous_schema_version}"
+                ) from exc
+
+        schema_version_changed = previous_schema_version != SCHEMA_VERSION
+        reporting_views_need_replacement = not self._reporting_views_are_current()
+        if schema_version_changed or reporting_views_need_replacement:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._recreate_reporting_views()
+                self._initialize_metadata()
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+        else:
+            self._initialize_metadata()
+            self._connection.commit()
+
+        if previous_schema_version in {"2", "3", "4"}:
+            # The v2 contract predates timing_observations; v3/v4 may have
+            # partial projections.  The same unique grains make this safe for
+            # all three historical states and preserve snapshot JSON exactly.
+            self.backfill_existing_snapshots()
+
+    def _reporting_views_are_current(self) -> bool:
+        rows = self._connection.execute(
+            """
+            SELECT name, sql
+            FROM sqlite_master
+            WHERE type = 'view'
+              AND name IN ('timing_recorded_at_time_reporting', 'recorded_at_time_reporting')
+            """
+        ).fetchall()
+        definitions = {str(row[0]): str(row[1] or "") for row in rows}
+        timing_sql = definitions.get("timing_recorded_at_time_reporting", "")
+        alias_sql = definitions.get("recorded_at_time_reporting", "")
+        return (
+            bool(timing_sql)
+            and bool(alias_sql)
+            and "timing_recorded_at_time_reporting" in alias_sql
+            and "recorded_at_time_source_path" in timing_sql
+            and "WHEN latest.recorded_at_time IS NOT NULL" in timing_sql
+            and "LatestSourceRecordedAtTimeSourcePath" in timing_sql
+            and "LastObservedRecordedAtTimeSourcePath" in timing_sql
+            and "FirstObservedRecordedAtTimeSourcePath" in timing_sql
+        )
+
+    def _recreate_reporting_views(self) -> None:
+        """Replace both current-state reporting views in the caller's transaction."""
+
+        self._connection.execute("DROP VIEW IF EXISTS recorded_at_time_reporting")
+        self._connection.execute("DROP VIEW IF EXISTS timing_recorded_at_time_reporting")
+        self._connection.execute(
+            "CREATE VIEW timing_recorded_at_time_reporting AS "
+            + _RECORDED_AT_TIME_REPORTING_SELECT
+        )
+        self._connection.execute(
+            "CREATE VIEW recorded_at_time_reporting AS "
+            "SELECT * FROM timing_recorded_at_time_reporting"
+        )
 
     def _initialize_metadata(self) -> None:
         now = _iso(datetime.now(timezone.utc))
