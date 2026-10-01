@@ -1,13 +1,17 @@
 {
   "artifact": "stage14-live-research-first-gap-audit",
-  "artifact_version": "1.0",
+  "artifact_version": "2.0",
   "stage": "14",
   "audit_scope": "S78 Heumarkt LIVE_RESEARCH SQLite evidence and its retained sanitized raw response",
-  "read_only": true,
+  "read_only": false,
+  "initial_s78_audit_read_only": true,
+  "s80_offline_migration_applied": true,
+  "s80_migration_at_utc": "2026-10-01T13:07:28.867592Z",
   "network_requests_issued": 0,
   "database_path": "~/cologne-transit-data/live-research/collector.sqlite3",
   "database_role": "LIVE_RESEARCH",
   "database_schema_version_observed": "2",
+  "database_schema_version_after_s80": "4",
   "collection_context": "LIVE_RESEARCH_SINGLE_1",
   "target": {
     "source_parent_station_id": "de:05315:11110",
@@ -30,11 +34,13 @@
     "sanitized_read_only_inspection": true
   },
   "gap_summary": {
+    "original_s78_parser_gap_count": 121,
     "observed_parser_gap_count": 121,
     "structural_container_count": 21,
-    "remaining_semantic_review_count": 100,
-    "future_parser_gap_count_after_clear_structural_exclusions": 100,
-    "note": "The live S78 database was not rewritten. The structural correction applies to subsequent parser output; ambiguous ServiceSection fields remain gaps."
+    "service_section_evidence_field_occurrence_count": 100,
+    "remaining_true_relevant_gap_count_after_s80_mapping": 0,
+    "future_parser_gap_count_after_s80_mapping": 0,
+    "note": "The historical S78 count remains 121. S80 adds explicit source-faithful ServiceSection evidence and the corrected parser emits zero gaps for this retained response shape; this does not suppress unknown future ServiceSection extensions."
   },
   "classifications": [
     {
@@ -46,10 +52,10 @@
       "call_scope": null,
       "parent_or_context": "SERVICE / ServiceSection",
       "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
-      "retained_elsewhere_in_normalized_snapshot": false,
+      "retained_elsewhere_in_normalized_snapshot": true,
       "available_in_retained_sanitized_raw": true,
-      "classification": "NEEDS_SEMANTIC_REVIEW",
-      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+      "classification": "ALREADY_RETAINED_FALSE_POSITIVE_GAP",
+      "parser_action": "Retain independently in service_section_evidence with the exact source path; do not promote it to the timing identity hash."
     },
     {
       "normalized_field_name": "lineref",
@@ -60,10 +66,10 @@
       "call_scope": null,
       "parent_or_context": "SERVICE / ServiceSection",
       "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
-      "retained_elsewhere_in_normalized_snapshot": false,
+      "retained_elsewhere_in_normalized_snapshot": true,
       "available_in_retained_sanitized_raw": true,
-      "classification": "NEEDS_SEMANTIC_REVIEW",
-      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+      "classification": "ALREADY_RETAINED_FALSE_POSITIVE_GAP",
+      "parser_action": "Retain independently in service_section_evidence with the exact source path; do not promote it to the timing identity hash."
     },
     {
       "normalized_field_name": "mode",
@@ -77,10 +83,10 @@
         "kind": "object",
         "keys_observed": ["busSubmode", "description", "name", "ptMode", "shortName", "tramSubmode"]
       },
-      "retained_elsewhere_in_normalized_snapshot": false,
+      "retained_elsewhere_in_normalized_snapshot": true,
       "available_in_retained_sanitized_raw": true,
-      "classification": "NEEDS_SEMANTIC_REVIEW",
-      "parser_action": "Keep as a gap; retain the bounded source shape but do not infer event-level mode semantics."
+      "classification": "ALREADY_RETAINED_FALSE_POSITIVE_GAP",
+      "parser_action": "Retain the complete bounded Mode representation and explicit PtMode/submode source paths in service_section_evidence; do not invent a generic source value."
     },
     {
       "normalized_field_name": "operatorref",
@@ -91,10 +97,10 @@
       "call_scope": null,
       "parent_or_context": "SERVICE / ServiceSection",
       "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
-      "retained_elsewhere_in_normalized_snapshot": false,
+      "retained_elsewhere_in_normalized_snapshot": true,
       "available_in_retained_sanitized_raw": true,
-      "classification": "NEEDS_SEMANTIC_REVIEW",
-      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+      "classification": "ALREADY_RETAINED_FALSE_POSITIVE_GAP",
+      "parser_action": "Retain independently in service_section_evidence with the exact source path; do not promote it to the timing identity hash."
     },
     {
       "normalized_field_name": "parallelservice",
@@ -119,10 +125,10 @@
       "call_scope": null,
       "parent_or_context": "SERVICE / ServiceSection",
       "sanitized_value_shape": {"kind": "list"},
-      "retained_elsewhere_in_normalized_snapshot": false,
+      "retained_elsewhere_in_normalized_snapshot": true,
       "available_in_retained_sanitized_raw": true,
-      "classification": "NEEDS_SEMANTIC_REVIEW",
-      "parser_action": "Keep as a gap; do not promote a ServiceSection list to event identity without source-semantic proof."
+      "classification": "ALREADY_RETAINED_FALSE_POSITIVE_GAP",
+      "parser_action": "Retain the source list/text representation and all source paths in service_section_evidence; do not flatten it into event identity."
     },
     {
       "normalized_field_name": "situations",
@@ -142,7 +148,27 @@
   "s79_parser_changes": [
     "parallelservice is now classified as structural in the parser-gap vocabulary.",
     "situations is now classified as structural in the parser-gap vocabulary.",
-    "directionref, lineref, mode, operatorref, and publishedlinename remain explicit semantic-review gaps."
+    "directionref, lineref, mode, operatorref, and publishedlinename were left as explicit semantic-review gaps before the S80 source-faithful mapping."
+  ],
+  "s80_correction_reconciliation": {
+    "original_s78_parser_gap_count": 121,
+    "parallelservice_structural_occurrences": 20,
+    "situations_structural_occurrences": 1,
+    "service_section_field_occurrences_now_explicitly_retained": 100,
+    "remaining_true_relevant_gap_count": 0,
+    "service_section_rows_backfilled": 20,
+    "timing_observation_rows_backfilled": 995,
+    "sqlite_integrity_check": "ok",
+    "sqlite_quick_check": "ok",
+    "recorded_at_time_reconciliation": "PASS",
+    "service_section_grain": "one ServiceSection occurrence for one source event in one persisted snapshot",
+    "unknown_relevant_service_section_extensions_remain_gaps": true,
+    "historical_snapshot_json_rewritten": false
+  },
+  "s80_parser_changes": [
+    "ServiceSection fields are explicitly retained independently with source paths and bounded source representations.",
+    "The corrected parser retains multiple ServiceSection values at list grain and emits an unknown relevant extension as parser-gap evidence.",
+    "parallelservice and situations remain structural containers."
   ],
   "storage_decision": "LIVE_RESEARCH remains durable SQLite outside the repository; PostgreSQL/cutover remains deferred until repeated evidence is stable."
 }

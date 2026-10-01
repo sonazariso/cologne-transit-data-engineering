@@ -267,6 +267,111 @@ def _row_in_window(row: Mapping[str, Any], window: AnalysisWindow | None) -> boo
     return bucket in window.bucket_indexes
 
 
+def _timing_row_in_window(row: Mapping[str, Any], window: AnalysisWindow | None) -> bool:
+    """Apply the requested window before deriving any timing lifecycle state."""
+
+    if not _row_in_window(row, window):
+        return False
+    if window is None:
+        return True
+    observed = _timing_observed_at(row)
+    if observed is None:
+        return True
+    return window.start_utc <= observed < window.end_utc
+
+
+def _timing_observed_at(row: Mapping[str, Any]) -> datetime | None:
+    for field in ("observed_at_utc", "captured_at_utc"):
+        parsed = _parse_datetime(row.get(field))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _timing_reporting_projection(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build latest/last-observed state from already-window-filtered rows.
+
+    ``timing_recorded_at_time_reporting`` remains the global current-state
+    SQLite view.  This pure projection is intentionally separate so a future
+    observation cannot leak into an earlier Stage 15 analysis window.
+    """
+
+    groups: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for index, row in enumerate(rows):
+        identity = row.get("source_event_identity")
+        status = str(row.get("source_event_identity_status", ""))
+        if identity and status == "SOURCE_EVENT_IDENTITY_ESTABLISHED":
+            group = str(identity)
+        else:
+            observation_id = row.get("timing_observation_id", index)
+            group = f"{status or 'SOURCE_EVENT_IDENTITY_INSUFFICIENT'}:{observation_id}"
+        groups[group].append(row)
+
+    def order_key(row: Mapping[str, Any]) -> tuple[datetime, int]:
+        observed = _timing_observed_at(row)
+        return observed or datetime.min.replace(tzinfo=timezone.utc), _int(
+            row.get("timing_observation_id"), 0
+        )
+
+    report: list[dict[str, Any]] = []
+    for group, group_rows in groups.items():
+        ordered = sorted(group_rows, key=order_key)
+        latest = ordered[-1]
+        nonnull = [row for row in ordered if row.get("recorded_at_time") is not None]
+        last_nonnull = nonnull[-1] if nonnull else None
+        first_nonnull = nonnull[0] if nonnull else None
+
+        def value(row: Mapping[str, Any] | None, key: str) -> Any:
+            return row.get(key) if row is not None else None
+
+        report.append(
+            {
+                "SourceEventIdentity": latest.get("source_event_identity"),
+                "SourceEventIdentityStatus": latest.get("source_event_identity_status"),
+                "SourceEventIdentityGroup": group,
+                "PanelVersion": latest.get("panel_version"),
+                "SourceParentStationId": latest.get("source_parent_station_id"),
+                "LogicalDueBucket": latest.get("logical_due_bucket"),
+                "CollectionContext": latest.get("collection_context"),
+                "EventOrdinal": latest.get("event_ordinal"),
+                "ResultId": latest.get("result_id"),
+                "CallScope": latest.get("call_scope"),
+                "CallOrdinal": latest.get("call_ordinal"),
+                "TimingContext": latest.get("timing_context"),
+                "LatestTimetabledTime": latest.get("timetabled_time"),
+                "LatestEstimatedTime": latest.get("estimated_time"),
+                "LatestEstimatedTimeLow": latest.get("estimated_time_low"),
+                "LatestEstimatedTimeHigh": latest.get("estimated_time_high"),
+                "LatestSourceRecordedAtTime": latest.get("recorded_at_time"),
+                "LatestSourceRecordedAtTimeObservedAt": latest.get("observed_at_utc"),
+                "LatestSourceRecordedAtTimeSnapshotId": latest.get("snapshot_id"),
+                "LatestSourceRecordedAtTimeAuditId": latest.get("audit_id"),
+                "LatestSourceRecordedAtTimeSourcePath": latest.get("source_path"),
+                "LatestSourceRecordedAtTimeObservationId": latest.get("timing_observation_id"),
+                "LastObservedRecordedAtTime": value(last_nonnull, "recorded_at_time"),
+                "LastObservedRecordedAtTimeObservedAt": value(last_nonnull, "observed_at_utc"),
+                "LastObservedRecordedAtTimeSnapshotId": value(last_nonnull, "snapshot_id"),
+                "LastObservedRecordedAtTimeAuditId": value(last_nonnull, "audit_id"),
+                "LastObservedRecordedAtTimeSourcePath": value(last_nonnull, "source_path"),
+                "LastObservedRecordedAtTimeObservationId": value(
+                    last_nonnull, "timing_observation_id"
+                ),
+                "RecordedAtTimeNonNullObservationCount": len(nonnull),
+                "FirstObservedRecordedAtTime": value(first_nonnull, "recorded_at_time"),
+                "FirstObservedRecordedAtTimeObservedAt": value(first_nonnull, "observed_at_utc"),
+                "FirstObservedRecordedAtTimeSnapshotId": value(first_nonnull, "snapshot_id"),
+                "FirstObservedRecordedAtTimeAuditId": value(first_nonnull, "audit_id"),
+                "FirstObservedRecordedAtTimeSourcePath": value(first_nonnull, "source_path"),
+                "FirstObservedRecordedAtTimeObservationId": value(
+                    first_nonnull, "timing_observation_id"
+                ),
+            }
+        )
+    return sorted(report, key=lambda row: str(row["SourceEventIdentityGroup"]))
+
+
 def _result(
     *,
     validation_id: str,
@@ -1605,22 +1710,27 @@ class Stage15Analyzer:
         attempts = [row for row in evidence.http_attempts if _int(row.get("audit_id")) in audit_ids]
         snapshots = [row for row in evidence.parsed_snapshots if _row_in_window(row, window)]
         timing_observations = [
-            row for row in evidence.timing_observations if _row_in_window(row, window)
+            row for row in evidence.timing_observations if _timing_row_in_window(row, window)
         ]
-        timing_reporting = [
-            row
-            for row in evidence.timing_recorded_at_time_reporting
-            if _row_in_window(row, window)
-        ]
+        # The SQLite view is intentionally a global/current-state projection.
+        # Recompute this reporting shape from the already-windowed source rows
+        # so rows after window_end_utc cannot affect historical results.
+        timing_reporting = _timing_reporting_projection(timing_observations)
         recorded_evidence = [
             row
             for row in evidence.recorded_at_time_evidence
-            if _row_in_window(row, window)
+            if _timing_row_in_window(row, window)
         ]
         established_estimates: dict[str, set[str]] = defaultdict(set)
+        ambiguous_identity_observation_count = 0
+        insufficient_identity_observation_count = 0
         for row in timing_observations:
             identity = row.get("source_event_identity")
             status = str(row.get("source_event_identity_status", ""))
+            if status == "SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE":
+                ambiguous_identity_observation_count += 1
+            elif status != "SOURCE_EVENT_IDENTITY_ESTABLISHED":
+                insufficient_identity_observation_count += 1
             estimate = row.get("estimated_time")
             if identity and status == "SOURCE_EVENT_IDENTITY_ESTABLISHED" and estimate is not None:
                 established_estimates[str(identity)].add(str(estimate))
@@ -1631,8 +1741,16 @@ class Stage15Analyzer:
             ),
             "nonnull_recorded_at_time_evidence_count": sum(
                 row.get("recorded_at_time") is not None
-                for row in recorded_evidence
+                for row in timing_observations
             ),
+            "recorded_at_time_evidence_row_count": len(recorded_evidence),
+            "ambiguous_identity_observation_count": ambiguous_identity_observation_count,
+            "insufficient_identity_observation_count": insufficient_identity_observation_count,
+            "timing_observation_nonnull_recorded_at_time_count": sum(
+                row.get("recorded_at_time") is not None
+                for row in timing_observations
+            ),
+            "reporting_projection": timing_reporting,
             "events_with_last_observed_recorded_at_time": sum(
                 row.get("LastObservedRecordedAtTime") is not None
                 for row in timing_reporting

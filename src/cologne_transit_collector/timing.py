@@ -16,6 +16,8 @@ from typing import Any
 
 SOURCE_EVENT_IDENTITY_ESTABLISHED = "SOURCE_EVENT_IDENTITY_ESTABLISHED"
 SOURCE_EVENT_IDENTITY_INSUFFICIENT = "SOURCE_EVENT_IDENTITY_INSUFFICIENT"
+SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE = "SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE"
+SOURCE_EVENT_IDENTITY_VERSION = "MDD_SOURCE_EVENT_V2"
 SOURCE_EVENT_IDENTITY_NAMESPACE = "MDD_SOURCE_EVENT"
 TIMING_CONTEXTS = ("ARRIVAL", "DEPARTURE")
 TIMING_FIELDS = (
@@ -94,6 +96,7 @@ def source_event_identity(
     timing = call.get(context.casefold())
     timing = timing if isinstance(timing, Mapping) else {}
     basis: dict[str, Any] = {
+        "identity_version": SOURCE_EVENT_IDENTITY_VERSION,
         "identity_namespace": SOURCE_EVENT_IDENTITY_NAMESPACE,
         "operating_day_ref": _source_scalar(event.get("operating_day_ref")),
         "journey_ref": _source_scalar(event.get("journey_ref")),
@@ -115,14 +118,20 @@ def source_event_identity(
     if missing:
         return {
             "source_event_identity": None,
+            "source_event_identity_version": SOURCE_EVENT_IDENTITY_VERSION,
             "source_event_identity_status": SOURCE_EVENT_IDENTITY_INSUFFICIENT,
             "source_event_identity_basis": basis,
             "source_event_identity_missing_fields": missing,
         }
 
+    # Optional source fields are deliberately retained in ``basis`` as
+    # lineage evidence, but they never enter the deterministic identity.  A
+    # field that appears in a later source snapshot must not split the same
+    # source event into a new lifecycle group.
     canonical_basis = {
+        "identity_version": SOURCE_EVENT_IDENTITY_VERSION,
+        "identity_namespace": SOURCE_EVENT_IDENTITY_NAMESPACE,
         **{field: basis[field] for field in _REQUIRED_IDENTITY_FIELDS},
-        "disambiguating_source_fields": disambiguating,
     }
     encoded = json.dumps(
         canonical_basis,
@@ -133,7 +142,8 @@ def source_event_identity(
     ).encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()
     return {
-        "source_event_identity": f"{SOURCE_EVENT_IDENTITY_NAMESPACE}|{digest}",
+        "source_event_identity": f"{SOURCE_EVENT_IDENTITY_VERSION}|{digest}",
+        "source_event_identity_version": SOURCE_EVENT_IDENTITY_VERSION,
         "source_event_identity_status": SOURCE_EVENT_IDENTITY_ESTABLISHED,
         "source_event_identity_basis": basis,
         "source_event_identity_missing_fields": [],
@@ -375,6 +385,44 @@ def iter_timing_observations(parsed_snapshot: Mapping[str, Any]) -> list[dict[st
                 **identity,
             }
         )
+    # A stable core can still occur more than once in one snapshot.  The
+    # optional fields above are not safe tie-breakers because they can appear
+    # or disappear between snapshots.  Keep every row append-only, but make
+    # the lifecycle status explicit so reporting cannot aggregate the rows.
+    core_groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if (
+            row.get("source_event_identity_status") == SOURCE_EVENT_IDENTITY_ESTABLISHED
+            and row.get("source_event_identity")
+        ):
+            core_groups.setdefault(str(row["source_event_identity"]), []).append(row)
+    for identity, group in core_groups.items():
+        occurrence_keys = {
+            (
+                row.get("event_ordinal"),
+                str(row.get("call_scope", "")),
+                row.get("call_ordinal"),
+                str(row.get("timing_context", "")).upper(),
+            )
+            for row in group
+        }
+        if len(occurrence_keys) <= 1:
+            continue
+        ambiguity = {
+            "status": SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE,
+            "identity_version": SOURCE_EVENT_IDENTITY_VERSION,
+            "source_event_identity": identity,
+            "same_core_occurrence_count": len(occurrence_keys),
+            "occurrence_keys": [list(key) for key in sorted(occurrence_keys, key=str)],
+            "reason": (
+                "More than one distinct timing occurrence in one snapshot shares "
+                "the required MDD-local core; optional source fields are not used "
+                "as a hash tie-breaker."
+            ),
+        }
+        for row in group:
+            row["source_event_identity_status"] = SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE
+            row["source_event_identity_ambiguity"] = ambiguity
     return rows
 
 

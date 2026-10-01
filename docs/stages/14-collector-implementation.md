@@ -251,10 +251,37 @@ identifiers, and the non-NULL observation count.
 
 The first-gap audit is recorded in
 [14-live-research-first-gap-audit.md](14-live-research-first-gap-audit.md) and
-[its JSON artifact](14-live-research-first-gap-audit.json). It groups the 121
-observed S78 gaps into 21 clear structural-container occurrences and 100
-ServiceSection fields that remain `NEEDS_SEMANTIC_REVIEW`; the parser is not
-forced to report zero gaps.
+[its JSON artifact](14-live-research-first-gap-audit.json). The historical S78
+count is 121: 21 structural-container occurrences and 100 ServiceSection field
+occurrences across 20 source sections. S80 now retains those ServiceSection
+values explicitly at source occurrence grain with source paths and bounded
+representations; unknown
+relevant future ServiceSection extensions remain parser-gap evidence.
+
+### S80 identity, ServiceSection, migration, and window corrections
+
+S80 makes the timing identity versioned and stable: the hash uses only
+OperatingDayRef, JourneyRef, StopPointRef, TimetabledTime, and timing context.
+ResultId, mutable estimates/recorded values, observation timestamps, and
+optional lineage fields remain outside the core. If one snapshot contains
+multiple rows with the same stable core, each row is explicitly marked
+`SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE` and excluded from reporting-group
+aggregation rather than merged.
+
+Existing parsed snapshots are backfillable without rewriting their stored JSON.
+The live-research migration is idempotent, enforces the timing uniqueness grain,
+reconciles non-NULL RecordedAtTime evidence, and stores multiple
+ServiceSection occurrences in `service_section_observations`. The actual S78
+file was migrated offline from schema `2` to `4`: 995 timing rows and 20
+ServiceSection rows were inserted; integrity/quick checks and reconciliation
+passed; and the validated daily backup was refreshed. `created_at_utc` is
+preserved, and `last_schema_migration_at_utc` changes only for a real schema
+version change.
+
+Stage 15 historical analysis filters raw timing observations to the requested
+logical bucket and observation window before grouping. The global SQLite
+reporting view remains available for current-state inspection only and cannot
+leak future observations into a historical window.
 
 Parsed snapshots are separate from transport and persistence. Ordinary
 successful live responses do not retain raw bodies. The `LIVE_RESEARCH` raw
@@ -309,7 +336,7 @@ target IDs.
 
 ## Offline closeout validation
 
-The complete repository suite passed in five consecutive runs, with 148 tests
+The complete repository suite passed in five consecutive runs, with 154 tests
 reported in each run. The suite was also run with `ResourceWarning` promoted to
 an error; no SQLite resource warning was emitted. The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
@@ -333,10 +360,10 @@ deployment, Tiered50 target materialization, Power BI change, or production
 cutover was performed. The one authorized S78 research heartbeat used the
 `LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
 `de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
-recorded one provider attempt without retry, and retained 121 parser-gap fields
-with sanitized raw evidence. The read-only first-gap audit is source-controlled
-as a sanitized artifact; the live database itself was not rewritten. It remains
-excluded from Stage 15B.
+recorded one provider attempt without retry, and retained 121 historical
+parser-gap fields with sanitized raw evidence. The S80 offline migration then
+updated only the additive schema/evidence tables; the stored snapshot JSON was
+not rewritten. It remains excluded from Stage 15B.
 
 ## Deferred work required for real Stage 14 completion
 

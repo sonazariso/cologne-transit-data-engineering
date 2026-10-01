@@ -46,6 +46,7 @@ class EvidenceData:
     recorded_at_time_evidence: tuple[Mapping[str, Any], ...] = ()
     timing_observations: tuple[Mapping[str, Any], ...] = ()
     timing_recorded_at_time_reporting: tuple[Mapping[str, Any], ...] = ()
+    service_section_observations: tuple[Mapping[str, Any], ...] = ()
     raw_evidence: tuple[Mapping[str, Any], ...] = ()
     database_metadata: tuple[Mapping[str, Any], ...] = ()
 
@@ -98,6 +99,7 @@ class SQLiteEvidenceAdapter:
         "recorded_at_time_evidence",
         "timing_observations",
         "timing_recorded_at_time_reporting",
+        "service_section_observations",
         "raw_evidence",
         "database_metadata",
     )
@@ -167,6 +169,7 @@ class SQLiteEvidenceAdapter:
             recorded_at_time_evidence=values.get("recorded_at_time_evidence", ()),
             timing_observations=values.get("timing_observations", ()),
             timing_recorded_at_time_reporting=values.get("timing_recorded_at_time_reporting", ()),
+            service_section_observations=values.get("service_section_observations", ()),
             raw_evidence=values.get("raw_evidence", ()),
             database_metadata=values.get("database_metadata", ()),
         )
@@ -220,6 +223,7 @@ def evidence_from_mappings(
         "recorded_at_time_evidence",
         "timing_observations",
         "timing_recorded_at_time_reporting",
+        "service_section_observations",
         "raw_evidence",
         "database_metadata",
     }

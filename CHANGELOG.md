@@ -6,6 +6,17 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- Stage 14 S80 correction and offline live-database migration: versioned the
+  stable timing identity around the required source core, explicitly marked
+  same-snapshot core collisions as ambiguous, added idempotent timing
+  backfill/uniqueness and RecordedAtTime reconciliation, retained multiple
+  source-faithful ServiceSection occurrences in parser and durable evidence,
+  and corrected Stage 15 historical-window filtering. The existing
+  `LIVE_RESEARCH` SQLite file was migrated offline from schema 2 to 4 without
+  rewriting snapshot JSON; 995 timing rows and 20 ServiceSection rows were
+  backfilled, integrity/backup checks passed, and no network activity occurred.
+  Stage 14 remains in progress, Stage 15A remains in progress, and Stage 15B
+  remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 - Stage 14 S79 timing-history and first-gap correction: added append-only
   normalized `timing_observations`, deterministic MDD-local source-event
   identity with explicit insufficient status, latest/last-observed timing

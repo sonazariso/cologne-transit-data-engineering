@@ -384,11 +384,15 @@ CUTOVER**; Stage 15A readiness is in progress below.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,
-`EstimatedTime`, `RecordedAtTime`, and collection observation time. The
-read-only S78 first-gap audit is recorded in
-[the Stage 14 audit artifact](stages/14-live-research-first-gap-audit.md);
-structural containers are corrected only where clear, while ambiguous
-ServiceSection fields remain measured gaps.
+`EstimatedTime`, `RecordedAtTime`, and collection observation time. S80
+versioned the stable timing identity, marks same-snapshot core collisions
+explicitly, adds source-faithful multi-section `service_section_evidence` and
+`service_section_observations`, and makes Stage 15 historical windows consume
+filtered raw observations rather than a future-leaking global projection.
+The existing S78 file was migrated offline from schema 2 to 4 with 995 timing
+rows and 20 ServiceSection rows, without rewriting snapshot JSON; integrity,
+backup, and RecordedAtTime reconciliation passed. The historical first-gap
+audit is recorded in [the Stage 14 audit artifact](stages/14-live-research-first-gap-audit.md).
 
 ## Stage 15 — Post-Cutover Validation
 

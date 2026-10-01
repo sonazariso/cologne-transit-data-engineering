@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 
-PARSER_VERSION = "stage14-trias-parser-2.1"
+PARSER_VERSION = "stage14-trias-parser-2.2"
 SUCCESS_STATUSES = {"ok", "success", "successful", "completed", "true", ""}
 CALL_SCOPES = ("PREVIOUS", "THIS", "ONWARD")
 TIMING_CONTEXTS = ("ARRIVAL", "DEPARTURE")
@@ -282,6 +282,15 @@ class ParsedSnapshot:
                     values.append(evidence)
         return tuple(values)
 
+    @property
+    def service_section_evidence(self) -> tuple[Mapping[str, Any], ...]:
+        values: list[Mapping[str, Any]] = []
+        for event in self.events:
+            for evidence in event.get("service_section_evidence", []) or []:
+                if isinstance(evidence, Mapping):
+                    values.append(evidence)
+        return tuple(values)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "parser_version": self.parser_version,
@@ -297,6 +306,9 @@ class ParsedSnapshot:
             ],
             "service_attribute_evidence": [
                 dict(evidence) for evidence in self.service_attribute_evidence
+            ],
+            "service_section_evidence": [
+                dict(evidence) for evidence in self.service_section_evidence
             ],
             "raw_payload_persisted": False,
         }
@@ -1174,6 +1186,225 @@ def _parse_service_context_evidence(
     return evidence
 
 
+def _section_scalar_field(
+    section: Mapping[str, Any],
+    section_path: str,
+    names: set[str],
+    retained_paths: dict[str, bool] | None = None,
+) -> tuple[Any, str | None, Any, str | None]:
+    """Return a bounded scalar plus both leaf and container source paths."""
+
+    found, key, raw_value = _direct_entry(section, names)
+    if not found or key is None:
+        return None, None, None, None
+    container_path = _path_for_key(section_path, key)
+    _mark_retained_path(retained_paths, container_path, subtree=True)
+    leaf_path, scalar_value = _source_value_at_path(raw_value, container_path)
+    return scalar_value, leaf_path, raw_value, container_path
+
+
+def _section_mode_field(
+    mode: Mapping[str, Any],
+    mode_path: str,
+    names: set[str],
+) -> tuple[Any, str | None, Any, str | None]:
+    found, key, raw_value = _direct_entry(mode, names)
+    if not found or key is None:
+        return None, None, None, None
+    container_path = _path_for_key(mode_path, key)
+    leaf_path, scalar_value = _source_value_at_path(raw_value, container_path)
+    return scalar_value, leaf_path, raw_value, container_path
+
+
+def _parse_service_section_evidence(
+    service: Mapping[str, Any],
+    service_path: str | None,
+    result_id: Any,
+    result_path: str,
+    event_path: str,
+    event_ordinal: int,
+    retained_paths: dict[str, bool] | None = None,
+) -> list[Mapping[str, Any]]:
+    """Retain each source ServiceSection at its source occurrence grain.
+
+    These fields are source-contract evidence, not replacements for the
+    existing Service-scope convenience fields and never participate in the
+    MDD-local timing identity.
+    """
+
+    if service_path is None:
+        return []
+    found, section_key, raw_sections = _direct_entry(service, {"servicesection"})
+    if not found or section_key is None:
+        return []
+    sections_path = _path_for_key(service_path, section_key)
+    _mark_retained_path(retained_paths, sections_path, subtree=False)
+    occurrences = _as_occurrences(raw_sections, sections_path)
+    evidence: list[Mapping[str, Any]] = []
+    for section_ordinal, (section_path, raw_section) in enumerate(occurrences):
+        section = _as_object(raw_section)
+        _mark_retained_path(retained_paths, section_path, subtree=False)
+
+        scalar_fields: dict[str, Any] = {}
+        scalar_paths: dict[str, str | None] = {}
+        scalar_representations: dict[str, Any] = {}
+        field_container_paths: dict[str, str | None] = {}
+        for output_name, names in (
+            ("line_ref", {"lineref"}),
+            ("direction_ref", {"directionref"}),
+            ("operator_ref", {"operatorref"}),
+            ("name", {"name"}),
+            ("short_name", {"shortname"}),
+            ("description", {"description"}),
+            ("route_description", {"routedescription"}),
+            ("via", {"via"}),
+        ):
+            value, value_path, raw_value, container_path = _section_scalar_field(
+                section,
+                section_path,
+                names,
+                retained_paths,
+            )
+            scalar_fields[output_name] = value
+            scalar_paths[output_name] = value_path
+            scalar_representations[output_name] = _sanitize_parser_gap_value(raw_value)
+            field_container_paths[output_name] = container_path
+
+        found_mode, mode_key, raw_mode = _direct_entry(section, {"mode"})
+        mode_path = _path_for_key(section_path, mode_key) if found_mode and mode_key else None
+        mode_object = _as_object(raw_mode)
+        if mode_path is not None:
+            # Retain the Mode container itself, while leaving unknown nested
+            # provider extensions visible to the parser-gap audit.
+            _mark_retained_path(retained_paths, mode_path, subtree=False)
+
+        mode_values: dict[str, Any] = {}
+        mode_paths: dict[str, str | None] = {}
+        mode_representations: dict[str, Any] = {}
+        for output_name, names in (
+            ("pt_mode", {"ptmode"}),
+            ("rail_submode", {"railsubmode"}),
+            ("bus_submode", {"bussubmode"}),
+            ("tram_submode", {"tramsubmode"}),
+            ("name", {"name"}),
+            ("short_name", {"shortname"}),
+            ("description", {"description"}),
+        ):
+            value, value_path, raw_value, container_path = _section_mode_field(
+                mode_object,
+                mode_path or section_path,
+                names,
+            )
+            if container_path is not None:
+                _mark_retained_path(retained_paths, container_path, subtree=True)
+            mode_values[output_name] = value
+            mode_paths[output_name] = value_path
+            mode_representations[output_name] = _sanitize_parser_gap_value(raw_value)
+
+        found_published, published_key, raw_published = _direct_entry(
+            section, {"publishedlinename"}
+        )
+        published_path = (
+            _path_for_key(section_path, published_key)
+            if found_published and published_key
+            else None
+        )
+        if published_path is not None:
+            _mark_retained_path(retained_paths, published_path, subtree=False)
+        published_entries = (
+            _named_source_entries(raw_published, {"text", "value", "name"}, published_path or section_path)
+            if raw_published is not None
+            else []
+        )
+        published_text_values = [value for _path, value in published_entries]
+        published_text_paths = [path for path, _value in published_entries]
+        for published_text_path in published_text_paths:
+            _mark_retained_path(retained_paths, published_text_path, subtree=True)
+        published_leaf_path, published_leaf = _source_value_at_path(
+            raw_published,
+            published_path or section_path,
+        )
+        if published_leaf is None and published_text_values:
+            published_leaf = (
+                published_text_values[0]
+                if len(published_text_values) == 1
+                else published_text_values
+            )
+        source_paths = {
+            **{key: value for key, value in scalar_paths.items()},
+            **{f"{key}_container": value for key, value in field_container_paths.items()},
+            "mode": mode_path,
+            "published_line_name": published_leaf_path if raw_published is not None else None,
+            "published_line_name_container": published_path,
+            **{f"mode_{key}": value for key, value in mode_paths.items()},
+        }
+        evidence.append(
+            {
+                "evidence_type": "SERVICE_SECTION",
+                "source_scope": "SERVICE_SECTION",
+                "section_ordinal": section_ordinal,
+                "source_path": section_path,
+                "result_id": result_id,
+                "result_source_path": result_path,
+                "result_ordinal": event_ordinal,
+                "event_ordinal": event_ordinal,
+                "event_source_path": event_path,
+                "service_source_path": service_path,
+                "line_ref": scalar_fields["line_ref"],
+                "line_ref_source_path": scalar_paths["line_ref"],
+                "line_ref_source_representation": scalar_representations["line_ref"],
+                "direction_ref": scalar_fields["direction_ref"],
+                "direction_ref_source_path": scalar_paths["direction_ref"],
+                "direction_ref_source_representation": scalar_representations["direction_ref"],
+                "operator_ref": scalar_fields["operator_ref"],
+                "operator_ref_source_path": scalar_paths["operator_ref"],
+                "operator_ref_source_representation": scalar_representations["operator_ref"],
+                "mode": _sanitize_parser_gap_value(raw_mode),
+                "mode_source_path": mode_path,
+                "mode_source_representation": _sanitize_parser_gap_value(raw_mode),
+                "mode_source_paths": mode_paths,
+                "mode_source_representations": mode_representations,
+                "pt_mode": mode_values["pt_mode"],
+                "pt_mode_source_path": mode_paths["pt_mode"],
+                "rail_submode": mode_values["rail_submode"],
+                "rail_submode_source_path": mode_paths["rail_submode"],
+                "bus_submode": mode_values["bus_submode"],
+                "bus_submode_source_path": mode_paths["bus_submode"],
+                "tram_submode": mode_values["tram_submode"],
+                "tram_submode_source_path": mode_paths["tram_submode"],
+                "name": scalar_fields["name"],
+                "name_source_path": scalar_paths["name"],
+                "name_source_representation": scalar_representations["name"],
+                "short_name": scalar_fields["short_name"],
+                "short_name_source_path": scalar_paths["short_name"],
+                "short_name_source_representation": scalar_representations["short_name"],
+                "description": scalar_fields["description"],
+                "description_source_path": scalar_paths["description"],
+                "description_source_representation": scalar_representations["description"],
+                "route_description": scalar_fields["route_description"],
+                "route_description_source_path": scalar_paths["route_description"],
+                "route_description_source_representation": scalar_representations["route_description"],
+                "via": scalar_fields["via"],
+                "via_source_path": scalar_paths["via"],
+                "via_source_representation": scalar_representations["via"],
+                "published_line_name": _sanitize_parser_gap_value(raw_published),
+                "published_line_name_source_path": published_leaf_path if raw_published is not None else None,
+                "published_line_name_source_representation": _sanitize_parser_gap_value(raw_published),
+                "published_line_name_text": (
+                    published_text_values[0]
+                    if len(published_text_values) == 1
+                    else published_text_values or published_leaf
+                ),
+                "published_line_name_text_source_paths": published_text_paths,
+                "source_paths": source_paths,
+                "source_field_names": [str(key) for key in section],
+                "source_representation": _sanitize_parser_gap_value(section),
+                "semantic_role": "SERVICE_SECTION_SOURCE_EVIDENCE_ONLY",
+            }
+        )
+    return evidence
+
+
 def _parse_errors(
     root: Mapping[str, Any],
     result_entries: list[tuple[str, Mapping[str, Any]]],
@@ -1527,6 +1758,15 @@ def _parse_event(
     service_context_evidence = _parse_service_context_evidence(
         service, service_path, retained_paths
     )
+    service_section_evidence = _parse_service_section_evidence(
+        service,
+        service_path,
+        result_id,
+        result_path,
+        event_path,
+        ordinal,
+        retained_paths,
+    )
     service_attribute_evidence = _parse_service_attribute_evidence(
         result_obj,
         result_path,
@@ -1585,6 +1825,7 @@ def _parse_event(
         "situation_references": situation_references,
         "situation_evidence": situation_evidence,
         "service_context_evidence": service_context_evidence,
+        "service_section_evidence": service_section_evidence,
         "service_attribute_evidence": service_attribute_evidence,
         "operational_event_fields": {
             "cancelled": _flag(cancelled),
@@ -1641,6 +1882,33 @@ def parse_trias_response(body: bytes, content_type: str | None = None) -> Parsed
     # structured snapshot. The collector records it as a deterministic failure
     # without losing ErrorMessage/ErrorCode/Situation evidence.
     return snapshot
+
+
+def iter_service_section_observations(
+    parsed_snapshot: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return the normalized ServiceSection projection rows in source order."""
+
+    rows: list[dict[str, Any]] = []
+    for event_index, event in enumerate(parsed_snapshot.get("events", ()) or ()):
+        if not isinstance(event, Mapping):
+            continue
+        sections = event.get("service_section_evidence", ())
+        if not isinstance(sections, list):
+            continue
+        for section_index, section in enumerate(sections):
+            if not isinstance(section, Mapping):
+                continue
+            row = dict(section)
+            row.setdefault(
+                "event_ordinal",
+                event.get("event_ordinal", event.get("result_ordinal", event_index)),
+            )
+            row.setdefault("result_ordinal", row.get("event_ordinal"))
+            row.setdefault("result_id", event.get("result_id"))
+            row.setdefault("section_ordinal", section_index)
+            rows.append(row)
+    return rows
 
 
 parse_response = parse_trias_response

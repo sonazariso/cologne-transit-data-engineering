@@ -108,6 +108,12 @@ acceptance threshold or a semantic timing interpretation. The analyzer keeps
 projection as a derived helper, so the same source occurrence is not counted
 twice.
 
+S80 makes the historical-window boundary explicit: raw timing observations are
+filtered by logical due bucket and by observed/captured timestamp before any
+reporting grouping. The SQLite reporting view remains a global current-state
+projection and is not used as historical input. Ambiguous same-snapshot stable
+identity rows are retained as evidence but excluded from aggregate grouping.
+
 Every measured policy metric remains `POLICY_PENDING` until a user-approved
 threshold exists. Missing evidence is represented as `INSUFFICIENT_EVIDENCE`
 with `policy_state: POLICY_PENDING`. A parser gap is evidence to measure, not

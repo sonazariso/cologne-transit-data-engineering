@@ -1415,3 +1415,32 @@ LIVE_RESEARCH SQLite remains durable outside the repository with indefinite
 parsed history, raw evidence bounded to 24 hours, and three validated daily
 backups. Final storage selection remains deferred until repeated evidence is
 stable, and PostgreSQL is not an active Stage 14 completion gate.
+
+## D-058 — S80 Identity, ServiceSection, Backfill, and Historical-Window Correction
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 14 collector implementation COMPLETE; Stage 15A IN PROGRESS;
+Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S80 corrects the S79 implementation without changing the approved Tiered50
+panel, production boundary, or storage direction. The timing identity version
+is `MDD_SOURCE_EVENT_V2` and hashes only OperatingDayRef, JourneyRef,
+StopPointRef, TimetabledTime, and timing context. Optional lineage remains
+available for evidence and same-snapshot core collisions receive an explicit
+`SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE` status rather than being merged.
+
+`ServiceSection` is now an explicit parser representation and durable evidence
+grain. Multiple sections are retained with exact source paths, source
+representations, field-level values, and event/result lineage; an unknown
+relevant extension remains a parser gap. Existing parsed snapshots are
+backfilled idempotently without changing their JSON, with a uniqueness
+constraint at the timing observation grain and explicit RecordedAtTime
+reconciliation.
+
+The existing LIVE_RESEARCH database was migrated offline from schema 2 to 4.
+The migration inserted 995 timing rows and 20 ServiceSection rows, passed
+SQLite integrity/quick checks, refreshed the validated current-day backup, and
+removed the temporary safety backup only after validation. No MDD request, DNS
+activity, live-network attempt, scheduler, PostgreSQL, Power BI, or cutover
+activity occurred. Stage 15 historical analysis now filters raw timing rows by
+window before grouping; the global reporting view remains current-state only.

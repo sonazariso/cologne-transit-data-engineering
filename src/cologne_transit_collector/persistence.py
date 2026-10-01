@@ -26,6 +26,7 @@ from .domain import (
     LIVE_RESEARCH_COLLECTION_CONTEXT,
     MAX_ATTEMPTS,
     PersistenceProfile,
+    SamplingEra,
     Target,
     TransportFailure,
 )
@@ -37,6 +38,7 @@ from .quota import (
     UsageSnapshot,
 )
 from .timing import iter_timing_observations
+from .trias import iter_service_section_observations, parse_trias_response
 
 
 def _iso(value: datetime) -> str:
@@ -76,7 +78,7 @@ def _safe_error_category(value: Any) -> str | None:
     return text if text in allowed else "SANITIZED_ERROR"
 
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 DEFAULT_COLLECTION_CONTEXT = "OFFLINE_DEVELOPMENT"
 UNKNOWN_SHARED_QUOTA_SOURCE = "UNKNOWN_SHARED_PROVIDER_BASELINE"
 RAW_RETENTION_HOURS = 24
@@ -430,9 +432,11 @@ class SQLitePersistence:
                 event_ordinal INTEGER,
                 result_id TEXT,
                 source_event_identity TEXT,
+                source_event_identity_version TEXT,
                 source_event_identity_status TEXT NOT NULL,
                 source_event_identity_basis_json TEXT,
                 source_event_identity_missing_fields_json TEXT,
+                source_event_identity_ambiguity_json TEXT,
                 call_scope TEXT NOT NULL,
                 call_ordinal INTEGER NOT NULL,
                 timing_context TEXT NOT NULL,
@@ -464,10 +468,80 @@ class SQLitePersistence:
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
                 FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
             );
+            CREATE TABLE IF NOT EXISTS service_section_observations (
+                service_section_observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                audit_id INTEGER NOT NULL,
+                collector_run_id TEXT,
+                panel_version TEXT NOT NULL,
+                source_parent_station_id TEXT NOT NULL,
+                logical_due_bucket INTEGER NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
+                event_ordinal INTEGER,
+                result_ordinal INTEGER,
+                result_id TEXT,
+                result_source_path TEXT,
+                event_source_path TEXT,
+                service_source_path TEXT,
+                section_ordinal INTEGER NOT NULL,
+                source_path TEXT NOT NULL,
+                line_ref TEXT,
+                line_ref_source_path TEXT,
+                line_ref_source_representation_json TEXT,
+                direction_ref TEXT,
+                direction_ref_source_path TEXT,
+                direction_ref_source_representation_json TEXT,
+                operator_ref TEXT,
+                operator_ref_source_path TEXT,
+                operator_ref_source_representation_json TEXT,
+                mode_source_path TEXT,
+                mode_source_representation_json TEXT,
+                mode_source_paths_json TEXT,
+                mode_source_representations_json TEXT,
+                pt_mode TEXT,
+                pt_mode_source_path TEXT,
+                rail_submode TEXT,
+                rail_submode_source_path TEXT,
+                bus_submode TEXT,
+                bus_submode_source_path TEXT,
+                tram_submode TEXT,
+                tram_submode_source_path TEXT,
+                name TEXT,
+                name_source_path TEXT,
+                name_source_representation_json TEXT,
+                short_name TEXT,
+                short_name_source_path TEXT,
+                short_name_source_representation_json TEXT,
+                description TEXT,
+                description_source_path TEXT,
+                description_source_representation_json TEXT,
+                route_description TEXT,
+                route_description_source_path TEXT,
+                route_description_source_representation_json TEXT,
+                via TEXT,
+                via_source_path TEXT,
+                via_source_representation_json TEXT,
+                published_line_name_json TEXT,
+                published_line_name_source_path TEXT,
+                published_line_name_source_representation_json TEXT,
+                published_line_name_text_json TEXT,
+                published_line_name_text_source_paths_json TEXT,
+                source_paths_json TEXT,
+                source_field_names_json TEXT,
+                source_representation_json TEXT,
+                FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
+                FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_timing_observations_identity_observed
                 ON timing_observations (source_event_identity, observed_at_utc, timing_observation_id);
             CREATE INDEX IF NOT EXISTS idx_timing_observations_snapshot
                 ON timing_observations (snapshot_id, timing_observation_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_timing_observations_snapshot_grain
+                ON timing_observations (snapshot_id, event_ordinal, call_scope, call_ordinal, timing_context);
+            CREATE INDEX IF NOT EXISTS idx_service_section_observations_snapshot
+                ON service_section_observations (snapshot_id, service_section_observation_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_service_section_observations_snapshot_grain
+                ON service_section_observations (snapshot_id, event_ordinal, section_ordinal, source_path);
             CREATE VIEW IF NOT EXISTS timing_recorded_at_time_reporting AS
             WITH base AS (
                 SELECT
@@ -650,6 +724,8 @@ class SQLitePersistence:
         self._ensure_column("parsed_snapshots", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._ensure_column("quota_audit", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._ensure_column("recorded_at_time_evidence", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("timing_observations", "source_event_identity_version", "TEXT")
+        self._ensure_column("timing_observations", "source_event_identity_ambiguity_json", "TEXT")
         self._connection.execute(
             "UPDATE quota_permits SET status = ? WHERE status = 'PENDING'",
             (PENDING_AUTHORIZATION,),
@@ -672,11 +748,18 @@ class SQLitePersistence:
                 raise LiveResearchSafetyError(
                     f"SQLite database role is {role}, not the requested {expected} profile"
                 )
+        previous_schema_version = existing.get("schema_version")
+        schema_version_changed = previous_schema_version != SCHEMA_VERSION
+        previous_migration_at = existing.get("last_schema_migration_at_utc")
         values = {
             "database_role": self.profile.value,
             "schema_version": SCHEMA_VERSION,
             "created_at_utc": existing.get("created_at_utc", now),
-            "last_schema_migration_at_utc": now,
+            # This timestamp describes a real schema-version transition (or
+            # initial durable schema creation), not an ordinary database open.
+            "last_schema_migration_at_utc": (
+                now if schema_version_changed else (previous_migration_at or now)
+            ),
             "collection_context": self.collection_context,
         }
         for key, value in values.items():
@@ -1135,6 +1218,15 @@ class SQLitePersistence:
                     observed_at=persisted_at,
                     collection_context=context,
                 )
+                self._persist_service_section_observations(
+                    audit_id=audit_id,
+                    snapshot_id=snapshot_id,
+                    collector_run_id=collector_run_id,
+                    target=target,
+                    logical_due_bucket=logical_due_bucket,
+                    parsed_snapshot=snapshot,
+                    collection_context=context,
+                )
                 self._connection.execute(
                     "UPDATE target_audits SET persistence_outcome = ?, stop_event_result_count = ? WHERE audit_id = ?",
                     ("PERSISTED_PARSED_SNAPSHOT", len(snapshot.get("events", [])), audit_id),
@@ -1160,6 +1252,33 @@ class SQLitePersistence:
         for row in rows:
             if row.get("recorded_at_time") is None:
                 continue
+            source_path = row.get("recorded_at_time_source_path") or row.get("source_path")
+            lineage = (
+                snapshot_id,
+                row.get("event_ordinal"),
+                str(row.get("call_scope", "")),
+                int(row.get("call_ordinal", 0)),
+                str(row.get("timing_context", "")),
+                str(row["recorded_at_time"]),
+                source_path,
+            )
+            already_present = self._connection.execute(
+                """
+                SELECT 1
+                FROM recorded_at_time_evidence
+                WHERE snapshot_id = ?
+                  AND event_ordinal IS ?
+                  AND call_scope = ?
+                  AND call_ordinal = ?
+                  AND timing_context = ?
+                  AND recorded_at_time = ?
+                  AND source_path IS ?
+                LIMIT 1
+                """,
+                lineage,
+            ).fetchone()
+            if already_present is not None:
+                continue
             self._connection.execute(
                 """
                 INSERT INTO recorded_at_time_evidence
@@ -1181,7 +1300,7 @@ class SQLitePersistence:
                     int(row.get("call_ordinal", 0)),
                     str(row.get("timing_context", "")),
                     str(row["recorded_at_time"]),
-                    row.get("recorded_at_time_source_path") or row.get("source_path"),
+                    source_path,
                     _iso(observed_at),
                     collection_context,
                 ),
@@ -1198,17 +1317,19 @@ class SQLitePersistence:
         timing_rows: list[Mapping[str, Any]],
         observed_at: datetime,
         collection_context: str,
-    ) -> None:
+    ) -> int:
         observed_at_text = _iso(observed_at)
+        inserted = 0
         for row in timing_rows:
-            self._connection.execute(
+            cursor = self._connection.execute(
                 """
-                INSERT INTO timing_observations
+                INSERT OR IGNORE INTO timing_observations
                 (snapshot_id, audit_id, collector_run_id, panel_version,
                  source_parent_station_id, logical_due_bucket, collection_context,
                  event_ordinal, result_id, source_event_identity,
-                 source_event_identity_status, source_event_identity_basis_json,
-                 source_event_identity_missing_fields_json, call_scope,
+                 source_event_identity_version, source_event_identity_status,
+                 source_event_identity_basis_json, source_event_identity_missing_fields_json,
+                 source_event_identity_ambiguity_json, call_scope,
                  call_ordinal, timing_context, operating_day_ref, journey_ref,
                  vehicle_journey_ref, dated_vehicle_journey_ref, line_ref,
                  direction_ref, operator_ref, stop_point_ref, stop_seq_number,
@@ -1221,7 +1342,7 @@ class SQLitePersistence:
                  source_paths_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?)
+                        ?, ?, ?)
                 """,
                 (
                     snapshot_id,
@@ -1234,6 +1355,7 @@ class SQLitePersistence:
                     row.get("event_ordinal"),
                     row.get("result_id"),
                     row.get("source_event_identity"),
+                    row.get("source_event_identity_version"),
                     str(row.get("source_event_identity_status", "SOURCE_EVENT_IDENTITY_INSUFFICIENT")),
                     json.dumps(
                         row.get("source_event_identity_basis", {}),
@@ -1243,6 +1365,12 @@ class SQLitePersistence:
                     ),
                     json.dumps(
                         row.get("source_event_identity_missing_fields", []),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        allow_nan=False,
+                    ),
+                    json.dumps(
+                        row.get("source_event_identity_ambiguity", {}),
                         ensure_ascii=False,
                         sort_keys=True,
                         allow_nan=False,
@@ -1282,9 +1410,407 @@ class SQLitePersistence:
                     ),
                 ),
             )
+            inserted += int(cursor.rowcount > 0)
+        return inserted
+
+    @staticmethod
+    def _json_or_none(value: Any) -> str | None:
+        if value is None:
+            return None
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False, default=str)
+
+    @classmethod
+    def _source_text_or_none(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, (Mapping, list, tuple)):
+            return cls._json_or_none(value)
+        return str(value)
+
+    def _persist_service_section_observations(
+        self,
+        *,
+        audit_id: int,
+        snapshot_id: int,
+        collector_run_id: str | None,
+        target: Target,
+        logical_due_bucket: int,
+        parsed_snapshot: Mapping[str, Any],
+        collection_context: str,
+        service_rows: list[Mapping[str, Any]] | None = None,
+    ) -> int:
+        rows = (
+            service_rows
+            if service_rows is not None
+            else iter_service_section_observations(parsed_snapshot)
+        )
+        inserted = 0
+        for row in rows:
+            cursor = self._connection.execute(
+                """
+                INSERT OR IGNORE INTO service_section_observations
+                (snapshot_id, audit_id, collector_run_id, panel_version,
+                 source_parent_station_id, logical_due_bucket, collection_context,
+                 event_ordinal, result_ordinal, result_id, result_source_path,
+                 event_source_path, service_source_path, section_ordinal, source_path,
+                 line_ref, line_ref_source_path, line_ref_source_representation_json,
+                 direction_ref, direction_ref_source_path,
+                 direction_ref_source_representation_json, operator_ref,
+                 operator_ref_source_path, operator_ref_source_representation_json,
+                 mode_source_path, mode_source_representation_json,
+                 mode_source_paths_json, mode_source_representations_json,
+                 pt_mode, pt_mode_source_path, rail_submode, rail_submode_source_path,
+                 bus_submode, bus_submode_source_path, tram_submode,
+                 tram_submode_source_path, name, name_source_path,
+                 name_source_representation_json, short_name, short_name_source_path,
+                 short_name_source_representation_json, description,
+                 description_source_path, description_source_representation_json,
+                 route_description, route_description_source_path,
+                 route_description_source_representation_json, via, via_source_path,
+                 via_source_representation_json, published_line_name_json,
+                 published_line_name_source_path,
+                 published_line_name_source_representation_json,
+                 published_line_name_text_json,
+                 published_line_name_text_source_paths_json, source_paths_json,
+                 source_field_names_json, source_representation_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_id,
+                    audit_id,
+                    collector_run_id,
+                    target.panel_version,
+                    target.source_parent_station_id,
+                    int(logical_due_bucket),
+                    collection_context,
+                    row.get("event_ordinal"),
+                    row.get("result_ordinal", row.get("event_ordinal")),
+                    row.get("result_id"),
+                    row.get("result_source_path"),
+                    row.get("event_source_path"),
+                    row.get("service_source_path"),
+                    int(row.get("section_ordinal", 0)),
+                    str(row.get("source_path", "")),
+                    self._source_text_or_none(row.get("line_ref")),
+                    row.get("line_ref_source_path"),
+                    self._json_or_none(row.get("line_ref_source_representation")),
+                    self._source_text_or_none(row.get("direction_ref")),
+                    row.get("direction_ref_source_path"),
+                    self._json_or_none(row.get("direction_ref_source_representation")),
+                    self._source_text_or_none(row.get("operator_ref")),
+                    row.get("operator_ref_source_path"),
+                    self._json_or_none(row.get("operator_ref_source_representation")),
+                    row.get("mode_source_path"),
+                    self._json_or_none(row.get("mode_source_representation", row.get("mode"))),
+                    self._json_or_none(row.get("mode_source_paths", {})),
+                    self._json_or_none(row.get("mode_source_representations", {})),
+                    self._source_text_or_none(row.get("pt_mode")),
+                    row.get("pt_mode_source_path"),
+                    self._source_text_or_none(row.get("rail_submode")),
+                    row.get("rail_submode_source_path"),
+                    self._source_text_or_none(row.get("bus_submode")),
+                    row.get("bus_submode_source_path"),
+                    self._source_text_or_none(row.get("tram_submode")),
+                    row.get("tram_submode_source_path"),
+                    self._source_text_or_none(row.get("name")),
+                    row.get("name_source_path"),
+                    self._json_or_none(row.get("name_source_representation")),
+                    self._source_text_or_none(row.get("short_name")),
+                    row.get("short_name_source_path"),
+                    self._json_or_none(row.get("short_name_source_representation")),
+                    self._source_text_or_none(row.get("description")),
+                    row.get("description_source_path"),
+                    self._json_or_none(row.get("description_source_representation")),
+                    self._source_text_or_none(row.get("route_description")),
+                    row.get("route_description_source_path"),
+                    self._json_or_none(row.get("route_description_source_representation")),
+                    self._source_text_or_none(row.get("via")),
+                    row.get("via_source_path"),
+                    self._json_or_none(row.get("via_source_representation")),
+                    self._json_or_none(row.get("published_line_name")),
+                    row.get("published_line_name_source_path"),
+                    self._json_or_none(row.get("published_line_name_source_representation")),
+                    self._json_or_none(row.get("published_line_name_text")),
+                    self._json_or_none(row.get("published_line_name_text_source_paths", [])),
+                    self._json_or_none(row.get("source_paths", {})),
+                    self._json_or_none(row.get("source_field_names", [])),
+                    self._json_or_none(row.get("source_representation", {})),
+                ),
+            )
+            inserted += int(cursor.rowcount > 0)
+        return inserted
 
     def persist_parsed_snapshot(self, **kwargs: Any) -> None:
         self.persist_snapshot(**kwargs)
+
+    def _target_for_snapshot_lineage(self, row: Mapping[str, Any]) -> Target:
+        row = dict(row)
+        manifest_row = self._connection.execute(
+            """
+            SELECT * FROM manifest_targets
+            WHERE panel_version = ? AND source_parent_station_id = ?
+            LIMIT 1
+            """,
+            (row.get("panel_version"), row.get("source_parent_station_id")),
+        ).fetchone()
+        source = dict(manifest_row) if manifest_row is not None else {}
+        try:
+            sampling_era = SamplingEra(str(row.get("sampling_era") or source.get("sampling_era")))
+        except ValueError:
+            sampling_era = SamplingEra.TIERED50
+        return Target(
+            panel_version=str(row.get("panel_version") or ""),
+            source_parent_station_id=str(row.get("source_parent_station_id") or ""),
+            station_name=str(row.get("station_name") or ""),
+            tier=str(row.get("tier") or source.get("tier") or ""),
+            cadence_minutes=int(source.get("cadence_minutes") or 0),
+            number_of_results=int(row.get("number_of_results") or source.get("number_of_results") or 0),
+            phase_index=int(row.get("phase_index") or source.get("phase_index") or 0),
+            phase_count=int(row.get("phase_count") or source.get("phase_count") or 0),
+            continuity_classification=str(
+                row.get("continuity_classification")
+                or source.get("continuity_classification")
+                or ""
+            ),
+            sampling_era=sampling_era,
+            production_sampling_target_id=source.get("production_sampling_target_id"),
+            legacy_sampling_target_id=source.get("legacy_sampling_target_id"),
+        )
+
+    def _raw_service_sections_for_snapshot(
+        self,
+        *,
+        audit_id: int,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Reconstruct ServiceSection rows from still-retained sanitized raw."""
+
+        raw_rows = self._connection.execute(
+            """
+            SELECT file_path, content_type
+            FROM raw_evidence
+            WHERE audit_id = ? AND status = 'RETAINED' AND file_path IS NOT NULL
+            ORDER BY raw_evidence_id
+            """,
+            (audit_id,),
+        ).fetchall()
+        for raw_row in raw_rows:
+            file_path = Path(str(raw_row[0]))
+            try:
+                body = file_path.read_bytes()
+                parsed = parse_trias_response(body, str(raw_row[1] or ""))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                return [], f"retained raw ServiceSection reconstruction failed: {type(exc).__name__}"
+            rows = iter_service_section_observations(parsed.to_dict())
+            if rows:
+                return rows, None
+        return [], "no retained sanitized raw response was available for ServiceSection reconstruction"
+
+    def backfill_existing_snapshots(self) -> Mapping[str, Any]:
+        """Add missing normalized projections without rewriting source snapshots.
+
+        The operation is deliberately idempotent.  Snapshot-local unique
+        grains make a repeated run a no-op while the RecordedAtTime evidence
+        reconciliation remains able to fill a missing evidence row.
+        """
+
+        with self._lock:
+            snapshot_rows = self._connection.execute(
+                """
+                SELECT parsed_snapshots.*, target_audits.collector_run_id,
+                       target_audits.station_name, target_audits.tier,
+                       target_audits.phase_index,
+                       target_audits.sampling_era,
+                       target_audits.continuity_classification,
+                       target_audits.number_of_results
+                FROM parsed_snapshots
+                JOIN target_audits ON target_audits.audit_id = parsed_snapshots.audit_id
+                ORDER BY parsed_snapshots.snapshot_id
+                """
+            ).fetchall()
+            report: dict[str, Any] = {
+                "status": "COMPLETE",
+                "snapshots_considered": len(snapshot_rows),
+                "snapshots_with_missing_timing_rows": 0,
+                "timing_rows_inserted": 0,
+                "timing_rows_already_present": 0,
+                "service_section_snapshots_considered": 0,
+                "service_section_rows_inserted": 0,
+                "service_section_rows_already_present": 0,
+                "service_section_rows_reconstructed_from_raw": 0,
+                "service_section_reconstruction_limitations": [],
+                "invalid_snapshot_count": 0,
+                "original_snapshot_json_unchanged": True,
+            }
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                for snapshot_row in snapshot_rows:
+                    snapshot = json.loads(str(snapshot_row["snapshot_json"]))
+                    if not isinstance(snapshot, Mapping):
+                        raise ValueError("persisted snapshot JSON is not an object")
+                    timing_rows = iter_timing_observations(snapshot)
+                    existing_timing = int(
+                        self._connection.execute(
+                            "SELECT COUNT(*) FROM timing_observations WHERE snapshot_id = ?",
+                            (int(snapshot_row["snapshot_id"]),),
+                        ).fetchone()[0]
+                    )
+                    target = self._target_for_snapshot_lineage(snapshot_row)
+                    collection_context = str(
+                        snapshot_row["collection_context"] or self.collection_context
+                    )
+                    if existing_timing < len(timing_rows):
+                        report["snapshots_with_missing_timing_rows"] += 1
+                    timing_rows_inserted = self._persist_timing_observations(
+                        audit_id=int(snapshot_row["audit_id"]),
+                        snapshot_id=int(snapshot_row["snapshot_id"]),
+                        collector_run_id=(
+                            str(snapshot_row["collector_run_id"])
+                            if snapshot_row["collector_run_id"] is not None
+                            else None
+                        ),
+                        target=target,
+                        logical_due_bucket=int(snapshot_row["logical_due_bucket"]),
+                        timing_rows=timing_rows,
+                        observed_at=datetime.fromisoformat(
+                            str(snapshot_row["persisted_at_utc"]).replace("Z", "+00:00")
+                        ),
+                        collection_context=collection_context,
+                    )
+                    report["timing_rows_inserted"] += timing_rows_inserted
+                    report["timing_rows_already_present"] += max(
+                        0, len(timing_rows) - timing_rows_inserted
+                    )
+                    persisted_at = datetime.fromisoformat(
+                        str(snapshot_row["persisted_at_utc"]).replace("Z", "+00:00")
+                    )
+                    self._persist_recorded_time_evidence(
+                        audit_id=int(snapshot_row["audit_id"]),
+                        snapshot_id=int(snapshot_row["snapshot_id"]),
+                        target=target,
+                        logical_due_bucket=int(snapshot_row["logical_due_bucket"]),
+                        parsed_snapshot=snapshot,
+                        timing_rows=timing_rows,
+                        observed_at=persisted_at,
+                        collection_context=collection_context,
+                    )
+
+                    existing_sections = int(
+                        self._connection.execute(
+                            "SELECT COUNT(*) FROM service_section_observations WHERE snapshot_id = ?",
+                            (int(snapshot_row["snapshot_id"]),),
+                        ).fetchone()[0]
+                    )
+                    report["service_section_rows_already_present"] += existing_sections
+                    service_rows = iter_service_section_observations(snapshot)
+                    report["service_section_snapshots_considered"] += 1
+                    if not service_rows:
+                        service_rows, limitation = self._raw_service_sections_for_snapshot(
+                            audit_id=int(snapshot_row["audit_id"])
+                        )
+                        if service_rows:
+                            report["service_section_rows_reconstructed_from_raw"] += len(service_rows)
+                        elif limitation:
+                            report["service_section_reconstruction_limitations"].append(
+                                {
+                                    "snapshot_id": int(snapshot_row["snapshot_id"]),
+                                    "audit_id": int(snapshot_row["audit_id"]),
+                                    "limitation": limitation,
+                                }
+                            )
+                    report["service_section_rows_inserted"] += self._persist_service_section_observations(
+                        audit_id=int(snapshot_row["audit_id"]),
+                        snapshot_id=int(snapshot_row["snapshot_id"]),
+                        collector_run_id=(
+                            str(snapshot_row["collector_run_id"])
+                            if snapshot_row["collector_run_id"] is not None
+                            else None
+                        ),
+                        target=target,
+                        logical_due_bucket=int(snapshot_row["logical_due_bucket"]),
+                        parsed_snapshot=snapshot,
+                        collection_context=collection_context,
+                        service_rows=service_rows,
+                    )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                report["status"] = "FAILED"
+                raise
+            report["recorded_at_time_reconciliation"] = self.reconcile_recorded_at_time_evidence()
+            return report
+
+    def reconcile_recorded_at_time_evidence(self) -> Mapping[str, Any]:
+        """Report exact timing/evidence lineage reconciliation without mutation."""
+
+        with self._lock:
+            timing_rows = self._connection.execute(
+                """
+                SELECT snapshot_id, event_ordinal, call_scope, call_ordinal,
+                       timing_context, recorded_at_time,
+                       COALESCE(recorded_at_time_source_path, source_path) AS evidence_source_path
+                FROM timing_observations
+                WHERE recorded_at_time IS NOT NULL
+                ORDER BY timing_observation_id
+                """
+            ).fetchall()
+            unmatched = 0
+            for row in timing_rows:
+                found = self._connection.execute(
+                    """
+                    SELECT 1 FROM recorded_at_time_evidence
+                    WHERE snapshot_id = ? AND event_ordinal IS ?
+                      AND call_scope = ? AND call_ordinal = ?
+                      AND timing_context = ? AND recorded_at_time = ?
+                      AND source_path IS ?
+                    LIMIT 1
+                    """,
+                    (
+                        row["snapshot_id"],
+                        row["event_ordinal"],
+                        row["call_scope"],
+                        row["call_ordinal"],
+                        row["timing_context"],
+                        row["recorded_at_time"],
+                        row["evidence_source_path"],
+                    ),
+                ).fetchone()
+                unmatched += int(found is None)
+            duplicate_rows = int(
+                self._connection.execute(
+                    """
+                    SELECT COALESCE(SUM(duplicate_count - 1), 0)
+                    FROM (
+                        SELECT COUNT(*) AS duplicate_count
+                        FROM recorded_at_time_evidence
+                        GROUP BY snapshot_id, event_ordinal, call_scope,
+                                 call_ordinal, timing_context, recorded_at_time,
+                                 source_path
+                        HAVING COUNT(*) > 1
+                    )
+                    """
+                ).fetchone()[0]
+                or 0
+            )
+            evidence_count = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM recorded_at_time_evidence"
+                ).fetchone()[0]
+            )
+            timing_total = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM timing_observations"
+                ).fetchone()[0]
+            )
+        return {
+            "timing_rows": timing_total,
+            "timing_nonnull_recorded_at_time_rows": len(timing_rows),
+            "recorded_at_time_evidence_rows": evidence_count,
+            "unmatched_timing_rows": unmatched,
+            "duplicate_evidence_rows": duplicate_rows,
+            "status": "PASS" if unmatched == 0 and duplicate_rows == 0 else "FAIL",
+        }
 
     def complete_target_audit(self, *, audit_id: int, outcome: Mapping[str, Any], completed_at: datetime) -> None:
         status = str(outcome.get("status", "FAILED"))
@@ -2354,6 +2880,13 @@ class SQLitePersistence:
         with self._lock:
             rows = self._connection.execute(
                 "SELECT * FROM timing_observations ORDER BY timing_observation_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_service_section_observations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM service_section_observations ORDER BY service_section_observation_id"
             ).fetchall()
         return [dict(row) for row in rows]
 
