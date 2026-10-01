@@ -48,8 +48,15 @@ STRUCTURAL_SOURCE_FIELDS = frozenset(
         "incidentcall",
         "infocall",
         "serviceinformation",
+        # Observed in the S78 Heumarkt response as containers without an
+        # event-level semantic mapping.  They are retained as structural
+        # parser-gap exclusions until a source-specific mapping is justified.
+        "parallelservice",
+        "situations",
     }
 )
+
+STRUCTURAL_GAP_CONTAINER_FIELDS = frozenset({"parallelservice", "situations"})
 
 EXPLICIT_RETAINED_SOURCE_FIELDS = frozenset(
     {
@@ -1292,7 +1299,13 @@ def _parser_gap_entries(
         normalized = _normalise_name(key)
         if _path_is_retained(path, retained_paths):
             continue
-        if normalized in STRUCTURAL_SOURCE_FIELDS or normalized in SAFE_GENERIC_SOURCE_FIELDS:
+        if normalized in STRUCTURAL_SOURCE_FIELDS:
+            if normalized in STRUCTURAL_GAP_CONTAINER_FIELDS:
+                # Do not turn the members of a deliberately structural
+                # container into nested duplicates of the same gap.
+                gap_paths.append(path)
+            continue
+        if normalized in SAFE_GENERIC_SOURCE_FIELDS:
             continue
         if "extension" not in normalized and not any(
             term in normalized for term in RELEVANT_FIELD_TERMS

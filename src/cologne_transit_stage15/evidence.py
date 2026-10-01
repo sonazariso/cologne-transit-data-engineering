@@ -44,6 +44,8 @@ class EvidenceData:
     shared_usage: tuple[Mapping[str, Any], ...] = ()
     sampling_eras: tuple[Mapping[str, Any], ...] = ()
     recorded_at_time_evidence: tuple[Mapping[str, Any], ...] = ()
+    timing_observations: tuple[Mapping[str, Any], ...] = ()
+    timing_recorded_at_time_reporting: tuple[Mapping[str, Any], ...] = ()
     raw_evidence: tuple[Mapping[str, Any], ...] = ()
     database_metadata: tuple[Mapping[str, Any], ...] = ()
 
@@ -94,6 +96,8 @@ class SQLiteEvidenceAdapter:
         "shared_usage",
         "sampling_eras",
         "recorded_at_time_evidence",
+        "timing_observations",
+        "timing_recorded_at_time_reporting",
         "raw_evidence",
         "database_metadata",
     )
@@ -161,6 +165,8 @@ class SQLiteEvidenceAdapter:
             shared_usage=values.get("shared_usage", ()),
             sampling_eras=values.get("sampling_eras", ()),
             recorded_at_time_evidence=values.get("recorded_at_time_evidence", ()),
+            timing_observations=values.get("timing_observations", ()),
+            timing_recorded_at_time_reporting=values.get("timing_recorded_at_time_reporting", ()),
             raw_evidence=values.get("raw_evidence", ()),
             database_metadata=values.get("database_metadata", ()),
         )
@@ -212,6 +218,8 @@ def evidence_from_mappings(
         "shared_usage",
         "sampling_eras",
         "recorded_at_time_evidence",
+        "timing_observations",
+        "timing_recorded_at_time_reporting",
         "raw_evidence",
         "database_metadata",
     }

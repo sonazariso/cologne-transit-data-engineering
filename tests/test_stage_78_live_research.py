@@ -162,9 +162,12 @@ class Stage78LiveResearchTests(unittest.TestCase):
         usage = persistence.current_month_usage(at_utc=AT)
         self.assertFalse(usage["state_available"])
         self.assertIsNone(usage["known_total"])
-        with sqlite3.connect(persistence.path) as connection:
+        connection = sqlite3.connect(persistence.path)
+        try:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM sampling_eras WHERE is_active = 1").fetchone()[0], 0)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM target_audits").fetchone()[0], 1)
+        finally:
+            connection.close()
 
         report = Stage15Analyzer(
             self.manifest,
@@ -201,10 +204,13 @@ class Stage78LiveResearchTests(unittest.TestCase):
         usage = persistence.current_month_usage(at_utc=AT)
         self.assertFalse(usage["state_available"])
         self.assertIsNone(usage["known_total"])
-        with sqlite3.connect(persistence.path) as connection:
+        connection = sqlite3.connect(persistence.path)
+        try:
             decision_rows = connection.execute(
                 "SELECT decision_json FROM quota_audit WHERE decision_kind = 'RETRY'"
             ).fetchall()
+        finally:
+            connection.close()
         self.assertEqual(len(decision_rows), 1)
         self.assertIn("RETRY_DENIED_QUOTA_STATE_UNAVAILABLE", decision_rows[0][0])
 
@@ -308,8 +314,11 @@ class Stage78LiveResearchTests(unittest.TestCase):
             backups,
             ["collector-2026-10-02.sqlite3", "collector-2026-10-03.sqlite3", "collector-2026-10-04.sqlite3"],
         )
-        with sqlite3.connect(persistence.backup_dir / "collector-2026-10-04.sqlite3") as connection:
+        connection = sqlite3.connect(persistence.backup_dir / "collector-2026-10-04.sqlite3")
+        try:
             self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            connection.close()
         with patch("cologne_transit_collector.persistence.os.replace", side_effect=OSError("publish failure")):
             failed = persistence.backup_live_database(now_utc=AT + timedelta(days=4))
         self.assertEqual(failed["status"], "FAILED")

@@ -36,6 +36,7 @@ from .quota import (
     RELEASED_NO_NETWORK,
     UsageSnapshot,
 )
+from .timing import iter_timing_observations
 
 
 def _iso(value: datetime) -> str:
@@ -75,7 +76,7 @@ def _safe_error_category(value: Any) -> str | None:
     return text if text in allowed else "SANITIZED_ERROR"
 
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 DEFAULT_COLLECTION_CONTEXT = "OFFLINE_DEVELOPMENT"
 UNKNOWN_SHARED_QUOTA_SOURCE = "UNKNOWN_SHARED_PROVIDER_BASELINE"
 RAW_RETENTION_HOURS = 24
@@ -417,6 +418,171 @@ class SQLitePersistence:
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
                 FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
             );
+            CREATE TABLE IF NOT EXISTS timing_observations (
+                timing_observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                audit_id INTEGER NOT NULL,
+                collector_run_id TEXT,
+                panel_version TEXT NOT NULL,
+                source_parent_station_id TEXT NOT NULL,
+                logical_due_bucket INTEGER NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
+                event_ordinal INTEGER,
+                result_id TEXT,
+                source_event_identity TEXT,
+                source_event_identity_status TEXT NOT NULL,
+                source_event_identity_basis_json TEXT,
+                source_event_identity_missing_fields_json TEXT,
+                call_scope TEXT NOT NULL,
+                call_ordinal INTEGER NOT NULL,
+                timing_context TEXT NOT NULL,
+                operating_day_ref TEXT,
+                journey_ref TEXT,
+                vehicle_journey_ref TEXT,
+                dated_vehicle_journey_ref TEXT,
+                line_ref TEXT,
+                direction_ref TEXT,
+                operator_ref TEXT,
+                stop_point_ref TEXT,
+                stop_seq_number INTEGER,
+                timetabled_time TEXT,
+                estimated_time TEXT,
+                estimated_time_low TEXT,
+                estimated_time_high TEXT,
+                recorded_at_time TEXT,
+                observed_at_utc TEXT NOT NULL,
+                captured_at_utc TEXT NOT NULL,
+                source_path TEXT,
+                timetabled_time_source_path TEXT,
+                estimated_time_source_path TEXT,
+                estimated_time_low_source_path TEXT,
+                estimated_time_high_source_path TEXT,
+                recorded_at_time_source_path TEXT,
+                stop_point_ref_source_path TEXT,
+                stop_seq_number_source_path TEXT,
+                source_paths_json TEXT,
+                FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
+                FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_timing_observations_identity_observed
+                ON timing_observations (source_event_identity, observed_at_utc, timing_observation_id);
+            CREATE INDEX IF NOT EXISTS idx_timing_observations_snapshot
+                ON timing_observations (snapshot_id, timing_observation_id);
+            CREATE VIEW IF NOT EXISTS timing_recorded_at_time_reporting AS
+            WITH base AS (
+                SELECT
+                    timing_observation_id,
+                    source_event_identity,
+                    source_event_identity_status,
+                    CASE
+                        WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
+                             AND source_event_identity IS NOT NULL
+                        THEN source_event_identity
+                        ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
+                    END AS source_event_identity_group,
+                    recorded_at_time,
+                    observed_at_utc,
+                    snapshot_id,
+                    audit_id,
+                    source_path,
+                    panel_version,
+                    source_parent_station_id,
+                    logical_due_bucket,
+                    collection_context,
+                    event_ordinal,
+                    result_id,
+                    call_scope,
+                    call_ordinal,
+                    timing_context,
+                    timetabled_time,
+                    estimated_time,
+                    estimated_time_low,
+                    estimated_time_high,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY CASE
+                            WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
+                                 AND source_event_identity IS NOT NULL
+                            THEN source_event_identity
+                            ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
+                        END
+                        ORDER BY observed_at_utc DESC, timing_observation_id DESC
+                    ) AS latest_rank,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY CASE
+                            WHEN source_event_identity_status = 'SOURCE_EVENT_IDENTITY_ESTABLISHED'
+                                 AND source_event_identity IS NOT NULL
+                            THEN source_event_identity
+                            ELSE 'SOURCE_EVENT_IDENTITY_INSUFFICIENT:' || timing_observation_id
+                        END
+                        ORDER BY observed_at_utc ASC, timing_observation_id ASC
+                    ) AS first_rank
+                FROM timing_observations
+            ), nonnull AS (
+                SELECT
+                    base.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY source_event_identity_group
+                        ORDER BY observed_at_utc DESC, timing_observation_id DESC
+                    ) AS last_nonnull_rank,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY source_event_identity_group
+                        ORDER BY observed_at_utc ASC, timing_observation_id ASC
+                    ) AS first_nonnull_rank
+                FROM base
+                WHERE recorded_at_time IS NOT NULL
+            ), counts AS (
+                SELECT source_event_identity_group, COUNT(*) AS nonnull_count
+                FROM nonnull
+                GROUP BY source_event_identity_group
+            )
+            SELECT
+                latest.source_event_identity AS SourceEventIdentity,
+                latest.source_event_identity_status AS SourceEventIdentityStatus,
+                latest.source_event_identity_group AS SourceEventIdentityGroup,
+                latest.panel_version AS PanelVersion,
+                latest.source_parent_station_id AS SourceParentStationId,
+                latest.logical_due_bucket AS LogicalDueBucket,
+                latest.collection_context AS CollectionContext,
+                latest.event_ordinal AS EventOrdinal,
+                latest.result_id AS ResultId,
+                latest.call_scope AS CallScope,
+                latest.call_ordinal AS CallOrdinal,
+                latest.timing_context AS TimingContext,
+                latest.timetabled_time AS LatestTimetabledTime,
+                latest.estimated_time AS LatestEstimatedTime,
+                latest.estimated_time_low AS LatestEstimatedTimeLow,
+                latest.estimated_time_high AS LatestEstimatedTimeHigh,
+                latest.recorded_at_time AS LatestSourceRecordedAtTime,
+                latest.observed_at_utc AS LatestSourceRecordedAtTimeObservedAt,
+                latest.snapshot_id AS LatestSourceRecordedAtTimeSnapshotId,
+                latest.audit_id AS LatestSourceRecordedAtTimeAuditId,
+                latest.source_path AS LatestSourceRecordedAtTimeSourcePath,
+                latest.timing_observation_id AS LatestSourceRecordedAtTimeObservationId,
+                last_nonnull.recorded_at_time AS LastObservedRecordedAtTime,
+                last_nonnull.observed_at_utc AS LastObservedRecordedAtTimeObservedAt,
+                last_nonnull.snapshot_id AS LastObservedRecordedAtTimeSnapshotId,
+                last_nonnull.audit_id AS LastObservedRecordedAtTimeAuditId,
+                last_nonnull.source_path AS LastObservedRecordedAtTimeSourcePath,
+                last_nonnull.timing_observation_id AS LastObservedRecordedAtTimeObservationId,
+                COALESCE(counts.nonnull_count, 0) AS RecordedAtTimeNonNullObservationCount,
+                first_nonnull.recorded_at_time AS FirstObservedRecordedAtTime,
+                first_nonnull.observed_at_utc AS FirstObservedRecordedAtTimeObservedAt,
+                first_nonnull.snapshot_id AS FirstObservedRecordedAtTimeSnapshotId,
+                first_nonnull.audit_id AS FirstObservedRecordedAtTimeAuditId,
+                first_nonnull.source_path AS FirstObservedRecordedAtTimeSourcePath,
+                first_nonnull.timing_observation_id AS FirstObservedRecordedAtTimeObservationId
+            FROM base AS latest
+            LEFT JOIN nonnull AS last_nonnull
+                ON last_nonnull.source_event_identity_group = latest.source_event_identity_group
+               AND last_nonnull.last_nonnull_rank = 1
+            LEFT JOIN nonnull AS first_nonnull
+                ON first_nonnull.source_event_identity_group = latest.source_event_identity_group
+               AND first_nonnull.first_nonnull_rank = 1
+            LEFT JOIN counts
+                ON counts.source_event_identity_group = latest.source_event_identity_group
+            WHERE latest.latest_rank = 1;
+            CREATE VIEW IF NOT EXISTS recorded_at_time_reporting AS
+                SELECT * FROM timing_recorded_at_time_reporting;
             CREATE TABLE IF NOT EXISTS shared_usage (
                 month_key TEXT PRIMARY KEY,
                 confirmed_provider_attempts INTEGER NOT NULL DEFAULT 0,
@@ -939,12 +1105,33 @@ class SQLitePersistence:
                     (audit_id, target.panel_version, target.source_parent_station_id, int(logical_due_bucket), _iso(persisted_at), encoded, context),
                 )
                 snapshot_id = int(snapshot_cursor.lastrowid)
+                timing_rows = iter_timing_observations(snapshot)
+                collector_run_row = self._connection.execute(
+                    "SELECT collector_run_id FROM target_audits WHERE audit_id = ?",
+                    (audit_id,),
+                ).fetchone()
+                collector_run_id = (
+                    str(collector_run_row[0])
+                    if collector_run_row and collector_run_row[0] is not None
+                    else None
+                )
+                self._persist_timing_observations(
+                    audit_id=audit_id,
+                    snapshot_id=snapshot_id,
+                    collector_run_id=collector_run_id,
+                    target=target,
+                    logical_due_bucket=logical_due_bucket,
+                    timing_rows=timing_rows,
+                    observed_at=persisted_at,
+                    collection_context=context,
+                )
                 self._persist_recorded_time_evidence(
                     audit_id=audit_id,
                     snapshot_id=snapshot_id,
                     target=target,
                     logical_due_bucket=logical_due_bucket,
                     parsed_snapshot=snapshot,
+                    timing_rows=timing_rows,
                     observed_at=persisted_at,
                     collection_context=context,
                 )
@@ -965,44 +1152,136 @@ class SQLitePersistence:
         target: Target,
         logical_due_bucket: int,
         parsed_snapshot: Mapping[str, Any],
+        timing_rows: list[Mapping[str, Any]] | None = None,
         observed_at: datetime,
         collection_context: str,
     ) -> None:
-        for event in parsed_snapshot.get("events", []) or []:
-            if not isinstance(event, Mapping):
+        rows = timing_rows if timing_rows is not None else iter_timing_observations(parsed_snapshot)
+        for row in rows:
+            if row.get("recorded_at_time") is None:
                 continue
-            event_ordinal = event.get("event_ordinal", event.get("result_ordinal"))
-            result_id = event.get("result_id")
-            occurrences = event.get("recorded_at_time_occurrences", []) or []
-            for occurrence in occurrences:
-                if not isinstance(occurrence, Mapping) or occurrence.get("recorded_at_time") is None:
-                    continue
-                self._connection.execute(
-                    """
-                    INSERT INTO recorded_at_time_evidence
-                    (audit_id, snapshot_id, panel_version, source_parent_station_id,
-                     logical_due_bucket, event_ordinal, result_id, call_scope,
-                     call_ordinal, timing_context, recorded_at_time, source_path,
-                     observed_at_utc, collection_context)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        audit_id,
-                        snapshot_id,
-                        target.panel_version,
-                        target.source_parent_station_id,
-                        int(logical_due_bucket),
-                        event_ordinal,
-                        str(occurrence.get("result_id", result_id)) if occurrence.get("result_id", result_id) is not None else None,
-                        str(occurrence.get("call_scope", "")),
-                        int(occurrence.get("call_ordinal", 0)),
-                        str(occurrence.get("timing_context", "")),
-                        str(occurrence["recorded_at_time"]),
-                        occurrence.get("source_path"),
-                        _iso(observed_at),
-                        collection_context,
+            self._connection.execute(
+                """
+                INSERT INTO recorded_at_time_evidence
+                (audit_id, snapshot_id, panel_version, source_parent_station_id,
+                 logical_due_bucket, event_ordinal, result_id, call_scope,
+                 call_ordinal, timing_context, recorded_at_time, source_path,
+                 observed_at_utc, collection_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_id,
+                    snapshot_id,
+                    target.panel_version,
+                    target.source_parent_station_id,
+                    int(logical_due_bucket),
+                    row.get("event_ordinal"),
+                    row.get("result_id"),
+                    str(row.get("call_scope", "")),
+                    int(row.get("call_ordinal", 0)),
+                    str(row.get("timing_context", "")),
+                    str(row["recorded_at_time"]),
+                    row.get("recorded_at_time_source_path") or row.get("source_path"),
+                    _iso(observed_at),
+                    collection_context,
+                ),
+            )
+
+    def _persist_timing_observations(
+        self,
+        *,
+        audit_id: int,
+        snapshot_id: int,
+        collector_run_id: str | None,
+        target: Target,
+        logical_due_bucket: int,
+        timing_rows: list[Mapping[str, Any]],
+        observed_at: datetime,
+        collection_context: str,
+    ) -> None:
+        observed_at_text = _iso(observed_at)
+        for row in timing_rows:
+            self._connection.execute(
+                """
+                INSERT INTO timing_observations
+                (snapshot_id, audit_id, collector_run_id, panel_version,
+                 source_parent_station_id, logical_due_bucket, collection_context,
+                 event_ordinal, result_id, source_event_identity,
+                 source_event_identity_status, source_event_identity_basis_json,
+                 source_event_identity_missing_fields_json, call_scope,
+                 call_ordinal, timing_context, operating_day_ref, journey_ref,
+                 vehicle_journey_ref, dated_vehicle_journey_ref, line_ref,
+                 direction_ref, operator_ref, stop_point_ref, stop_seq_number,
+                 timetabled_time, estimated_time, estimated_time_low,
+                 estimated_time_high, recorded_at_time, observed_at_utc,
+                 captured_at_utc, source_path, timetabled_time_source_path,
+                 estimated_time_source_path, estimated_time_low_source_path,
+                 estimated_time_high_source_path, recorded_at_time_source_path,
+                 stop_point_ref_source_path, stop_seq_number_source_path,
+                 source_paths_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?)
+                """,
+                (
+                    snapshot_id,
+                    audit_id,
+                    collector_run_id,
+                    target.panel_version,
+                    target.source_parent_station_id,
+                    int(logical_due_bucket),
+                    collection_context,
+                    row.get("event_ordinal"),
+                    row.get("result_id"),
+                    row.get("source_event_identity"),
+                    str(row.get("source_event_identity_status", "SOURCE_EVENT_IDENTITY_INSUFFICIENT")),
+                    json.dumps(
+                        row.get("source_event_identity_basis", {}),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        allow_nan=False,
                     ),
-                )
+                    json.dumps(
+                        row.get("source_event_identity_missing_fields", []),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        allow_nan=False,
+                    ),
+                    str(row.get("call_scope", "")),
+                    int(row.get("call_ordinal", 0)),
+                    str(row.get("timing_context", "")),
+                    row.get("operating_day_ref"),
+                    row.get("journey_ref"),
+                    row.get("vehicle_journey_ref"),
+                    row.get("dated_vehicle_journey_ref"),
+                    row.get("line_ref"),
+                    row.get("direction_ref"),
+                    row.get("operator_ref"),
+                    row.get("stop_point_ref"),
+                    row.get("stop_seq_number"),
+                    row.get("timetabled_time"),
+                    row.get("estimated_time"),
+                    row.get("estimated_time_low"),
+                    row.get("estimated_time_high"),
+                    row.get("recorded_at_time"),
+                    observed_at_text,
+                    observed_at_text,
+                    row.get("source_path"),
+                    row.get("timetabled_time_source_path"),
+                    row.get("estimated_time_source_path"),
+                    row.get("estimated_time_low_source_path"),
+                    row.get("estimated_time_high_source_path"),
+                    row.get("recorded_at_time_source_path"),
+                    row.get("stop_point_ref_source_path"),
+                    row.get("stop_seq_number_source_path"),
+                    json.dumps(
+                        row.get("source_paths", {}),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        allow_nan=False,
+                    ),
+                ),
+            )
 
     def persist_parsed_snapshot(self, **kwargs: Any) -> None:
         self.persist_snapshot(**kwargs)
@@ -1590,6 +1869,18 @@ class SQLitePersistence:
                 """,
                 (run_id, panel_version, int(logical_due_bucket)),
             ).fetchall()
+            timing = self._connection.execute(
+                """
+                SELECT timing_observations.*
+                FROM timing_observations
+                JOIN target_audits ON target_audits.audit_id = timing_observations.audit_id
+                WHERE target_audits.collector_run_id = ?
+                  AND target_audits.panel_version = ?
+                  AND target_audits.logical_due_bucket = ?
+                ORDER BY timing_observations.timing_observation_id
+                """,
+                (run_id, panel_version, int(logical_due_bucket)),
+            ).fetchall()
             recorded = self._connection.execute(
                 """
                 SELECT recorded_at_time_evidence.*
@@ -1609,6 +1900,7 @@ class SQLitePersistence:
         audit_rows = [dict(row) for row in audits]
         attempt_rows = [dict(row) for row in attempts]
         snapshot_rows = [dict(row) for row in snapshots]
+        timing_rows = [dict(row) for row in timing]
         recorded_rows = [dict(row) for row in recorded]
         run_row = dict(run) if run is not None else None
         exact_audit = len(audit_rows) == 1 and audit_rows[0].get("source_parent_station_id") == target_id
@@ -1622,6 +1914,11 @@ class SQLitePersistence:
         parse_success = bool(audit and audit.get("parser_outcome") == "PARSED")
         expected_recorded_count = len(
             parsed_snapshot.get("recorded_at_time_occurrences", ())
+            if isinstance(parsed_snapshot, Mapping)
+            else ()
+        )
+        expected_timing_count = len(
+            iter_timing_observations(parsed_snapshot)
             if isinstance(parsed_snapshot, Mapping)
             else ()
         )
@@ -1643,6 +1940,7 @@ class SQLitePersistence:
                 ([run_row] if run_row else [])
                 + audit_rows
                 + snapshot_rows
+                + timing_rows
                 + recorded_rows
             )
             if row.get("collection_context") is not None
@@ -1657,6 +1955,10 @@ class SQLitePersistence:
             ),
             "parsed_snapshot_exists_if_successful_parse": (not parse_success) or bool(snapshot_rows),
             "recorded_at_time_reconciled": expected_recorded_count == len(recorded_rows),
+            "timing_observations_reconciled": (not snapshot_rows) or expected_timing_count == len(timing_rows),
+            "nonnull_timing_rows_have_recorded_evidence": sum(
+                row.get("recorded_at_time") is not None for row in timing_rows
+            ) == len(recorded_rows),
             "source_evidence_fields_present": (not snapshot_rows) or evidence_fields_present,
             "no_second_target_executed": len({str(row.get("source_parent_station_id")) for row in audit_rows}) <= 1,
             "no_active_tiered50_cutover_row": int(active_tiered50["count"] if active_tiered50 else 0) == 0,
@@ -1676,6 +1978,10 @@ class SQLitePersistence:
             "snapshot_count": len(snapshot_rows),
             "recorded_at_time_occurrence_count": expected_recorded_count,
             "recorded_at_time_evidence_count": len(recorded_rows),
+            "timing_observation_count": len(timing_rows),
+            "timing_observation_nonnull_recorded_at_time_count": sum(
+                row.get("recorded_at_time") is not None for row in timing_rows
+            ),
             "parser_gap_count": len(parsed_snapshot.get("parser_gaps", ())) if isinstance(parsed_snapshot, Mapping) else 0,
             "attribute_evidence_count": sum(
                 len(event.get("service_attribute_evidence", ()))
@@ -2043,6 +2349,25 @@ class SQLitePersistence:
                 "SELECT * FROM recorded_at_time_evidence ORDER BY evidence_id"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def fetch_timing_observations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM timing_observations ORDER BY timing_observation_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_timing_recorded_at_time_reporting(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM timing_recorded_at_time_reporting ORDER BY SourceEventIdentityGroup"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    # Explicit aliases keep the projection vocabulary stable for a future
+    # read-only adapter without making the evidence table itself mutable.
+    fetch_recorded_at_time_reporting = fetch_timing_recorded_at_time_reporting
+    timing_recorded_at_time_reporting = fetch_timing_recorded_at_time_reporting
 
     def fetch_quota_permits(self) -> list[dict[str, Any]]:
         with self._lock:

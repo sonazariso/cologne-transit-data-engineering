@@ -58,7 +58,7 @@ The implementation is under `src/cologne_transit_collector/`:
 | `transport.py` | Explicitly opted-in standard-library HTTP client plus fake/fixture clients |
 | `trias.py` | Source-faithful JSON/XML parser separated from transport and persistence |
 | `quota.py` | Shared-credential policy and durable permit lifecycle |
-| `persistence.py` | Explicit DEVELOPMENT/LIVE_RESEARCH SQLite durability, claims, audit, snapshots, raw-evidence index, backups, and usage accounting |
+| `persistence.py` | Explicit DEVELOPMENT/LIVE_RESEARCH SQLite durability, claims, audit, snapshots, append-only timing observations/reporting, raw-evidence index, backups, and usage accounting |
 | `collector.py` | One-heartbeat dispatcher, cap-2 execution, retry/deadline/failure isolation |
 | `simulation.py` | Deterministic fault-injection scenarios |
 | `cli.py` | Thin offline-safe command-line routing |
@@ -227,6 +227,35 @@ context and field paths. Parser-gap coverage is path-based: recognized names
 are not silently suppressed, explicit evidence is not duplicated, and
 unrelated envelope fields remain ignored. It does not derive `RecordedAtTime`,
 actual physical delay, cancellation, or platform state.
+
+### S79 timing observation history
+
+Each parsed source timing context is appended to `timing_observations` with
+nullable `TimetabledTime`, `EstimatedTime`, estimate bounds, and
+`RecordedAtTime`, plus independent `ObservedAt`/`CapturedAt` collection
+lineage and source paths. `TimetabledTime`, `EstimatedTime`,
+`RecordedAtTime`, and collector observation time are never collapsed into a
+derived source-time field, and a later NULL source value never overwrites an earlier
+non-NULL observation. `recorded_at_time_evidence` remains the append-only
+non-NULL source-evidence table; the timing reporting view is a derived helper
+over the normalized rows and is not a second evidence count.
+
+The MDD-local source-event identity uses only stable source context: operating
+day, journey, stop point, timetabled time, and arrival/departure context, with
+source disambiguators when present. It excludes `ResultId`, estimated/recorded
+values, and observation timestamps. Missing required context is explicitly
+`SOURCE_EVENT_IDENTITY_INSUFFICIENT` and is never guessed or merged with
+another event. The reporting projection exposes `LatestSourceRecordedAtTime`,
+`LastObservedRecordedAtTime`, first/last non-NULL lineage, snapshot/audit/path
+identifiers, and the non-NULL observation count.
+
+The first-gap audit is recorded in
+[14-live-research-first-gap-audit.md](14-live-research-first-gap-audit.md) and
+[its JSON artifact](14-live-research-first-gap-audit.json). It groups the 121
+observed S78 gaps into 21 clear structural-container occurrences and 100
+ServiceSection fields that remain `NEEDS_SEMANTIC_REVIEW`; the parser is not
+forced to report zero gaps.
+
 Parsed snapshots are separate from transport and persistence. Ordinary
 successful live responses do not retain raw bodies. The `LIVE_RESEARCH` raw
 hook retains only sanitized forensic evidence for RecordedAtTime, parser gaps,
@@ -280,7 +309,7 @@ target IDs.
 
 ## Offline closeout validation
 
-The complete repository suite passed in five consecutive runs, with 144 tests
+The complete repository suite passed in five consecutive runs, with 148 tests
 reported in each run. The suite was also run with `ResourceWarning` promoted to
 an error; no SQLite resource warning was emitted. The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
@@ -305,7 +334,9 @@ cutover was performed. The one authorized S78 research heartbeat used the
 `LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
 `de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
 recorded one provider attempt without retry, and retained 121 parser-gap fields
-with sanitized raw evidence. It remains excluded from Stage 15B.
+with sanitized raw evidence. The read-only first-gap audit is source-controlled
+as a sanitized artifact; the live database itself was not rewritten. It remains
+excluded from Stage 15B.
 
 ## Deferred work required for real Stage 14 completion
 

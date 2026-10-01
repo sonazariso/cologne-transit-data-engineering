@@ -1,0 +1,148 @@
+{
+  "artifact": "stage14-live-research-first-gap-audit",
+  "artifact_version": "1.0",
+  "stage": "14",
+  "audit_scope": "S78 Heumarkt LIVE_RESEARCH SQLite evidence and its retained sanitized raw response",
+  "read_only": true,
+  "network_requests_issued": 0,
+  "database_path": "~/cologne-transit-data/live-research/collector.sqlite3",
+  "database_role": "LIVE_RESEARCH",
+  "database_schema_version_observed": "2",
+  "collection_context": "LIVE_RESEARCH_SINGLE_1",
+  "target": {
+    "source_parent_station_id": "de:05315:11110",
+    "station_name": "Köln Heumarkt",
+    "panel_version": "TIERED50_PANEL_V1",
+    "successful_snapshot_id": 1,
+    "successful_audit_id": 2,
+    "event_count": 20,
+    "http_status": 200,
+    "parser_outcome": "PARSED",
+    "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT"
+  },
+  "raw_evidence": {
+    "status": "RETAINED",
+    "content_type": "application/json;charset=UTF-8",
+    "byte_length": 233031,
+    "delete_after_utc": "2026-10-02T11:30:58.508390Z",
+    "retention_maximum_hours": 24,
+    "body_copied_into_audit_artifact": false,
+    "sanitized_read_only_inspection": true
+  },
+  "gap_summary": {
+    "observed_parser_gap_count": 121,
+    "structural_container_count": 21,
+    "remaining_semantic_review_count": 100,
+    "future_parser_gap_count_after_clear_structural_exclusions": 100,
+    "note": "The live S78 database was not rewritten. The structural correction applies to subsequent parser output; ambiguous ServiceSection fields remain gaps."
+  },
+  "classifications": [
+    {
+      "normalized_field_name": "directionref",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.service.servicesection[*].directionref",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "SERVICE / ServiceSection",
+      "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "NEEDS_SEMANTIC_REVIEW",
+      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+    },
+    {
+      "normalized_field_name": "lineref",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.service.servicesection[*].lineref",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "SERVICE / ServiceSection",
+      "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "NEEDS_SEMANTIC_REVIEW",
+      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+    },
+    {
+      "normalized_field_name": "mode",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.service.servicesection[*].mode",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "SERVICE / ServiceSection",
+      "sanitized_value_shape": {
+        "kind": "object",
+        "keys_observed": ["busSubmode", "description", "name", "ptMode", "shortName", "tramSubmode"]
+      },
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "NEEDS_SEMANTIC_REVIEW",
+      "parser_action": "Keep as a gap; retain the bounded source shape but do not infer event-level mode semantics."
+    },
+    {
+      "normalized_field_name": "operatorref",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.service.servicesection[*].operatorref",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "SERVICE / ServiceSection",
+      "sanitized_value_shape": {"kind": "object", "keys": ["value"]},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "NEEDS_SEMANTIC_REVIEW",
+      "parser_action": "Keep as a gap; do not promote a ServiceSection field to event identity without source-semantic proof."
+    },
+    {
+      "normalized_field_name": "parallelservice",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.parallelservice",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "STOP_EVENT / structural container",
+      "sanitized_value_shape": {"kind": "list"},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "STRUCTURAL_CONTAINER",
+      "parser_action": "Exclude from future parser-gap emission as a structural container; do not invent a normalized meaning."
+    },
+    {
+      "normalized_field_name": "publishedlinename",
+      "count": 20,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresult[*].stopevent.service.servicesection[*].publishedlinename",
+      "event_ordinals": "0-19",
+      "result_ids_affected": 20,
+      "call_scope": null,
+      "parent_or_context": "SERVICE / ServiceSection",
+      "sanitized_value_shape": {"kind": "list"},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "NEEDS_SEMANTIC_REVIEW",
+      "parser_action": "Keep as a gap; do not promote a ServiceSection list to event identity without source-semantic proof."
+    },
+    {
+      "normalized_field_name": "situations",
+      "count": 1,
+      "source_path_pattern": "$.servicedelivery.deliverypayload.stopeventresponse.stopeventresponsecontext.situations",
+      "event_ordinals": null,
+      "result_ids_affected": 0,
+      "call_scope": null,
+      "parent_or_context": "RESPONSE_CONTEXT / structural container",
+      "sanitized_value_shape": {"kind": "object", "keys": ["ptSituation", "roadSituation"]},
+      "retained_elsewhere_in_normalized_snapshot": false,
+      "available_in_retained_sanitized_raw": true,
+      "classification": "STRUCTURAL_CONTAINER",
+      "parser_action": "Exclude from future parser-gap emission as a structural container; retain response-context situation evidence only when a clear mapping exists."
+    }
+  ],
+  "s79_parser_changes": [
+    "parallelservice is now classified as structural in the parser-gap vocabulary.",
+    "situations is now classified as structural in the parser-gap vocabulary.",
+    "directionref, lineref, mode, operatorref, and publishedlinename remain explicit semantic-review gaps."
+  ],
+  "storage_decision": "LIVE_RESEARCH remains durable SQLite outside the repository; PostgreSQL/cutover remains deferred until repeated evidence is stable."
+}

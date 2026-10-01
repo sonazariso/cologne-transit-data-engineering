@@ -59,6 +59,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-054 | 2026-10-01 | S76 Stage 14 final source-contract retention correction: separate JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction, retain candidate identity extensions and service-scoped identity/display fields with lineage, preserve Attribute/GeneralAttribute and affected-entity evidence, and close recognized-but-unmapped parser-gap loss | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-055 | 2026-10-01 | S77 Stage 15A post-cutover validation readiness: add a versioned validation contract, backend-neutral read-only analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality diagnostics, and offline regression coverage without starting live Stage 15 | Stage 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage 15 live NOT STARTED — AWAITS TIERED50 CUTOVER |
 | D-056 | 2026-10-01 | S78 Single-Station Live SQLite Research Pilot: `SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.` Use durable `LIVE_RESEARCH` SQLite for the bounded `LIVE_RESEARCH_SINGLE_1` Köln Heumarkt pilot; retain parsed evidence, bound raw forensics to 24 hours, and keep three validated daily backups without starting Tiered50 production or Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; collector implementation COMPLETE; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-057 | 2026-10-01 | S79 timing-history and first-gap correction: append normalized source timing observations with deterministic MDD-local identity and reporting lineage; preserve the existing `recorded_at_time_evidence`; audit the actual S78 Heumarkt database read-only; correct only clear structural parser gaps; keep ambiguous ServiceSection fields under review; measure timing history in Stage 15A without starting Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1375,3 +1376,42 @@ evidence was retained under the bounded forensic policy. The resulting SQLite
 backup passed integrity validation. Shared provider quota remained explicitly
 unknown; the run therefore made no retry claim. This evidence is read-only
 Stage 15A input and does not start Stage 15B or create a Tiered50 cutover.
+
+## D-057 — S79 Timing History and First-Gap Correction
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50
+CUTOVER
+
+S79 preserves the source timing distinction among `TimetabledTime`,
+`EstimatedTime`, `RecordedAtTime`, and collection observation time. The
+collector now appends one normalized timing row per source timing context per
+snapshot to `timing_observations`, with nullable values, source paths, audit /
+snapshot / run lineage, and collection context. A later NULL `RecordedAtTime`
+does not erase an earlier non-NULL row. The source-event identity is
+deterministic and MDD-local, excludes `ResultId` and mutable timing or
+observation values, and returns an explicit insufficient status rather than
+guessing when required context is absent.
+
+The derived reporting projection exposes latest snapshot value and lineage as
+`LatestSourceRecordedAtTime`, the latest historical non-NULL value and lineage
+as `LastObservedRecordedAtTime`, first-observed lineage, and the non-NULL
+observation count. `recorded_at_time_evidence` remains the append-only source
+evidence table; the projection is not counted as a second source occurrence.
+Stage 15A reports timing-observation count, estimate-revision history,
+non-NULL source-evidence count, events with a last observed value, and
+latest-NULL/history-non-NULL count as measurement-only values. Stage 15B keeps
+the exact status `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+
+The actual S78 Heumarkt SQLite database and its retained sanitized raw
+artifact were inspected read-only without a new request. The first-gap audit
+is recorded in [the Markdown summary](stages/14-live-research-first-gap-audit.md)
+and [the machine-readable artifact](stages/14-live-research-first-gap-audit.json).
+Of 121 observed gaps, 21 clear structural-container occurrences are corrected
+for future parser output and 100 ServiceSection fields remain
+`NEEDS_SEMANTIC_REVIEW`; the live S78 database was not rewritten and the parser
+was not forced to report zero gaps. DEVELOPMENT SQLite remains disposable;
+LIVE_RESEARCH SQLite remains durable outside the repository with indefinite
+parsed history, raw evidence bounded to 24 hours, and three validated daily
+backups. Final storage selection remains deferred until repeated evidence is
+stable, and PostgreSQL is not an active Stage 14 completion gate.

@@ -98,6 +98,16 @@ The analyzer reports, without inventing acceptance criteria:
   P90, P95, P99, and max;
 - per-station and per-tier coverage.
 
+S79 also adds a read-only timing-history vocabulary: normalized timing
+observation count, events with estimate revision history, non-NULL
+`RecordedAtTime` evidence count, events with `LastObservedRecordedAtTime`, and
+the count whose latest snapshot value is NULL while historical non-NULL source
+evidence remains. These values are measurement-only and do not establish an
+acceptance threshold or a semantic timing interpretation. The analyzer keeps
+`recorded_at_time_evidence` as source evidence and reads the timing reporting
+projection as a derived helper, so the same source occurrence is not counted
+twice.
+
 Every measured policy metric remains `POLICY_PENDING` until a user-approved
 threshold exists. Missing evidence is represented as `INSUFFICIENT_EVIDENCE`
 with `policy_state: POLICY_PENDING`. A parser gap is evidence to measure, not

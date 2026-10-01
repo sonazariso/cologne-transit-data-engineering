@@ -260,7 +260,10 @@ def _audit_key(row: Mapping[str, Any]) -> tuple[str, str, int]:
 def _row_in_window(row: Mapping[str, Any], window: AnalysisWindow | None) -> bool:
     if window is None:
         return True
-    bucket = _int(row.get("logical_due_bucket"), -1)
+    bucket = _int(
+        row.get("logical_due_bucket", row.get("LogicalDueBucket")),
+        -1,
+    )
     return bucket in window.bucket_indexes
 
 
@@ -364,7 +367,12 @@ class Stage15Analyzer:
             claims = {"checks": [], "rows": []}
             attempts = {"checks": [], "rows": []}
             quota = self._empty_quota_reconciliation()
-            quality = {"metrics": {}, "parser_outcomes": {}, "persistence_outcomes": {}}
+            quality = {
+                "metrics": {},
+                "parser_outcomes": {},
+                "persistence_outcomes": {},
+                "timing_history": {},
+            }
             durations = self._empty_duration_report()
         else:
             results.extend(self._read_only_check(evidence, window))
@@ -1596,6 +1604,46 @@ class Stage15Analyzer:
         audit_ids = {_int(row.get("audit_id")) for row in audits}
         attempts = [row for row in evidence.http_attempts if _int(row.get("audit_id")) in audit_ids]
         snapshots = [row for row in evidence.parsed_snapshots if _row_in_window(row, window)]
+        timing_observations = [
+            row for row in evidence.timing_observations if _row_in_window(row, window)
+        ]
+        timing_reporting = [
+            row
+            for row in evidence.timing_recorded_at_time_reporting
+            if _row_in_window(row, window)
+        ]
+        recorded_evidence = [
+            row
+            for row in evidence.recorded_at_time_evidence
+            if _row_in_window(row, window)
+        ]
+        established_estimates: dict[str, set[str]] = defaultdict(set)
+        for row in timing_observations:
+            identity = row.get("source_event_identity")
+            status = str(row.get("source_event_identity_status", ""))
+            estimate = row.get("estimated_time")
+            if identity and status == "SOURCE_EVENT_IDENTITY_ESTABLISHED" and estimate is not None:
+                established_estimates[str(identity)].add(str(estimate))
+        timing_history = {
+            "timing_observation_count": len(timing_observations),
+            "events_with_estimate_revision_history": sum(
+                len(values) >= 2 for values in established_estimates.values()
+            ),
+            "nonnull_recorded_at_time_evidence_count": sum(
+                row.get("recorded_at_time") is not None
+                for row in recorded_evidence
+            ),
+            "events_with_last_observed_recorded_at_time": sum(
+                row.get("LastObservedRecordedAtTime") is not None
+                for row in timing_reporting
+            ),
+            "latest_null_history_nonnull_count": sum(
+                row.get("LatestSourceRecordedAtTime") is None
+                and row.get("LastObservedRecordedAtTime") is not None
+                for row in timing_reporting
+            ),
+            "reporting_event_count": len(timing_reporting),
+        }
         parser_outcomes = Counter(str(row.get("parser_outcome")) for row in audits if row.get("parser_outcome") not in (None, ""))
         persistence_outcomes = Counter(str(row.get("persistence_outcome")) for row in audits if row.get("persistence_outcome") not in (None, ""))
         error_categories = Counter()
@@ -1652,6 +1700,11 @@ class Stage15Analyzer:
             "quality.per_station_coverage": {"values": {row.get("target_id"): row.get("measured_coverage_percent") for row in station_rows}},
             "quality.per_tier_coverage": {"values": {row.get("tier"): row.get("measured_coverage_percent") for row in coverage.get("tiers", [])}},
             "quality.per_error_category_frequency": {"counts": dict(sorted(error_categories.items())), "denominator": len(audits) + len(attempts)},
+            "quality.timing_observation_count": {"value": timing_history["timing_observation_count"], "unit": "rows"},
+            "quality.events_with_estimate_revision_history": {"value": timing_history["events_with_estimate_revision_history"], "unit": "source events"},
+            "quality.nonnull_recorded_at_time_evidence_count": {"value": timing_history["nonnull_recorded_at_time_evidence_count"], "unit": "evidence rows"},
+            "quality.events_with_last_observed_recorded_at_time": {"value": timing_history["events_with_last_observed_recorded_at_time"], "unit": "source events"},
+            "quality.latest_null_history_nonnull_count": {"value": timing_history["latest_null_history_nonnull_count"], "unit": "source events"},
         }
         results: list[dict[str, Any]] = []
         for validation_id in POLICY_METRIC_IDS:
@@ -1676,6 +1729,34 @@ class Stage15Analyzer:
                 window=window,
                 unit="percent / count",
             ))
+        # These three inputs describe overlapping views of the same source
+        # lineage.  Evidence count therefore uses the largest available
+        # representation rather than summing rows across representations.
+        timing_evidence_count = max(
+            len(timing_observations),
+            len(recorded_evidence),
+            len(timing_reporting),
+        )
+        results.append(_result(
+            validation_id="timing.history_measurements",
+            category="TIMING_HISTORY",
+            grain="source-event/window",
+            expected_value="report source-faithful timing history without an acceptance threshold",
+            actual_value=timing_history,
+            status="POLICY_PENDING" if timing_evidence_count else "INSUFFICIENT_EVIDENCE",
+            policy_state="MEASUREMENT_ONLY",
+            evidence_count=timing_evidence_count,
+            reason=(
+                "Timing history is reported for measurement only; no threshold or operational interpretation is assigned."
+                if timing_evidence_count
+                else "No normalized timing-history or RecordedAtTime evidence is available."
+            ),
+            limitations=(
+                "LatestSourceRecordedAtTime is the latest snapshot value; LastObservedRecordedAtTime is the latest non-null historical value."
+            ),
+            window=window,
+            unit="rows / source events",
+        ))
         return {
             "metrics": metric_values,
             "parser_outcomes": dict(sorted(parser_outcomes.items())),
@@ -1687,6 +1768,7 @@ class Stage15Analyzer:
             "snapshot_json_read_failures": parse_snapshot_failures,
             "successful_parse_without_persisted_snapshot": successful_without_snapshot,
             "error_category_frequency": dict(sorted(error_categories.items())),
+            "timing_history": timing_history,
         }, results
 
     def _durations(self, evidence: EvidenceData, window: AnalysisWindow | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:

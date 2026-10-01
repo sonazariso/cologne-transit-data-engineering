@@ -6,6 +6,17 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- Stage 14 S79 timing-history and first-gap correction: added append-only
+  normalized `timing_observations`, deterministic MDD-local source-event
+  identity with explicit insufficient status, latest/last-observed timing
+  reporting lineage, and Stage 15A measurement-only timing vocabulary;
+  preserved `recorded_at_time_evidence`, audited the actual S78 Heumarkt
+  SQLite evidence read-only, corrected only clear structural parser gaps, and
+  kept ambiguous ServiceSection fields as review gaps. DEVELOPMENT SQLite
+  remains disposable; LIVE_RESEARCH SQLite remains durable outside the
+  repository with indefinite parsed history, 24-hour raw retention, and three
+  validated daily backups. No MDD/DNS/PostgreSQL/cutover/Power BI activity was
+  performed.
 - Stage 15A post-cutover validation readiness: added the version-controlled
   validation contract, read-only backend-neutral analyzer, SQLite evidence
   adapter, expected-vs-actual target/bucket reconciliation, dispatcher and

@@ -375,11 +375,20 @@ status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
 source-contract corrections and S78 live-research safety controls. SQLite live
 research is the active storage direction; the final durable-storage decision
 is deferred until stable repeated collector evidence exists. PostgreSQL work is
-not currently planned or authorized. Production SamplingTargetId
+not currently planned or authorized, and PostgreSQL host/runtime/adapter choice
+is not an active Stage 14 completion gate. Production SamplingTargetId
 materialization, a real sampling-era cutover timestamp, deployment/scheduler
 activation, Tiered50 activation, and post-activation validation remain
 deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50
 CUTOVER**; Stage 15A readiness is in progress below.
+
+S79 adds append-only `timing_observations` history and a read-only reporting
+projection that preserves the distinction between `TimetabledTime`,
+`EstimatedTime`, `RecordedAtTime`, and collection observation time. The
+read-only S78 first-gap audit is recorded in
+[the Stage 14 audit artifact](stages/14-live-research-first-gap-audit.md);
+structural containers are corrected only where clear, while ambiguous
+ServiceSection fields remain measured gaps.
 
 ## Stage 15 — Post-Cutover Validation
 

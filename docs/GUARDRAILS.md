@@ -378,11 +378,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's authoritative overall status is `IN PROGRESS — PRODUCTION
-     CUTOVER DEFERRED`; its implementation status is `STAGE 14 COLLECTOR
-     IMPLEMENTATION COMPLETE`. This is an offline implementation closeout,
-     not a completed production cutover. Stage 15A readiness is in progress;
-     Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+116. Stage 14's authoritative overall status is `IN PROGRESS — LIVE SQLITE
+     RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`; its implementation status is
+     `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. This is a bounded research
+     profile, not a completed production cutover. Stage 15A readiness is in
+     progress; Stage 15B live validation remains `NOT STARTED — AWAITS
+     TIERED50 CUTOVER`.
 117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
      collector package. Its core must not import PostgreSQL/SQL-driver modules,
      platform-specific APIs, shell orchestration, or hardcoded platform paths.
@@ -402,20 +403,24 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      from UTC wall-clock time, executes only that bucket, and never replays
      missed buckets or fabricates missed snapshots. It must not become a
      permanent internal scheduler loop.
-121. SQLite is permitted only as disposable local development/test durability
-     for claims, audit, quota simulation, parsed snapshots, and restart/crash
-     visibility. It is not PostgreSQL, not a production cutover, and not a
-     reason to install or configure a database server during Stage 14.
+121. SQLite has two explicit active profiles: `DEVELOPMENT` is disposable
+     local development/test state, while `LIVE_RESEARCH` is durable,
+     non-disposable evidence outside the repository. `LIVE_RESEARCH` retains
+     parsed history indefinitely, bounds sanitized raw forensic evidence to at
+     most 24 hours, and preserves three validated daily backups. It is not a
+     Tiered50 production cutover and does not authorize a database server or
+     PostgreSQL adapter during Stage 14.
 122. The real MDD client must be POST/TRIAS 1.2, arrival-scoped, per-target
      result-limited, 30-second per-attempt, environment-secret-only, and
      explicitly opted in. Importing or initializing the client must not issue
      network traffic. Default plan/dry-run/simulate validation must remain
      offline-safe.
-123. Raw production MDD payload retention remains disabled by the approved
-     source-retention contract. Offline sanitized fixtures and parsed
-     source-faithful snapshots are permitted; secrets, authorization headers,
-     unrestricted exceptions, and raw live payloads must not enter logs or
-     durable development audit.
+123. Ordinary successful live MDD payloads are not retained. The bounded
+     `LIVE_RESEARCH` exception may retain only sanitized forensic raw evidence
+     outside the repository for at most 24 hours, with an indexed expiry and
+     cleanup; parsed source-faithful history remains durable. Secrets,
+     authorization headers, unrestricted exceptions, and unsanitized raw live
+     payloads must not enter logs or durable evidence.
 124. Every authorized quota permit must move from `PENDING_AUTHORIZATION` to
      exactly one terminal state: `RELEASED_NO_NETWORK`,
      `CONSERVATIVE_LIVE_ATTEMPT`, or `HTTP_PROVIDER_ATTEMPT_CONFIRMED`.
@@ -431,10 +436,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      fault injection, restart/crash visibility, failure isolation, and
      whitespace/diff review. No validation step may consume MDD quota or issue
      DNS activity.
-126. The production cutover remains gated on final PostgreSQL host/runtime and
-     adapter selection, production target-ID materialization, real sampling-era
-     timestamp, final heartbeat safety margin, deployment platform, authorized
-     live dry-run, Tiered50 activation, and post-activation smoke validation.
+126. The production cutover remains gated on repeated stable live-research
+     evidence followed by a separate durable-storage decision, production
+     target-ID materialization, real sampling-era timestamp, final heartbeat
+     safety margin, deployment platform, authorized live dry-run, Tiered50
+     activation, and post-activation smoke validation. PostgreSQL host/runtime
+     and adapter selection are not an active Stage 14 completion gate.
 
 ## Stage 15A validation-readiness guardrails
 
