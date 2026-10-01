@@ -22,6 +22,19 @@ from .domain import (
 from .ports import UsageProvider
 
 
+PENDING_AUTHORIZATION = "PENDING_AUTHORIZATION"
+RELEASED_NO_NETWORK = "RELEASED_NO_NETWORK"
+CONSERVATIVE_LIVE_ATTEMPT = "CONSERVATIVE_LIVE_ATTEMPT"
+HTTP_PROVIDER_ATTEMPT_CONFIRMED = "HTTP_PROVIDER_ATTEMPT_CONFIRMED"
+
+# Longer names make the lifecycle readable to adapters and tests while the
+# short constants above keep persisted values manageable.
+PERMIT_PENDING_AUTHORIZATION = PENDING_AUTHORIZATION
+PERMIT_RELEASED_NO_NETWORK = RELEASED_NO_NETWORK
+PERMIT_CONSERVATIVE_LIVE_ATTEMPT = CONSERVATIVE_LIVE_ATTEMPT
+PERMIT_HTTP_PROVIDER_ATTEMPT_CONFIRMED = HTTP_PROVIDER_ATTEMPT_CONFIRMED
+
+
 @dataclass(frozen=True)
 class UsageSnapshot:
     """Known shared-credential usage for the current calendar month."""
@@ -29,6 +42,10 @@ class UsageSnapshot:
     confirmed_provider_attempts: int = 0
     reserved_shared_usage: int = 0
     projected_non_retry_attempts: int = 0
+    conservative_live_attempts: int = 0
+    live_client_invocations: int = 0
+    http_responses_received: int = 0
+    provider_quota_unknown_attempts: int = 0
     state_available: bool = True
     source: str = "injected"
     actual_attempts: int | None = None
@@ -42,6 +59,15 @@ class UsageSnapshot:
             confirmed = int(self.actual_attempts)
         object.__setattr__(self, "confirmed_provider_attempts", confirmed)
         object.__setattr__(self, "actual_attempts", confirmed)
+        for field_name in (
+            "reserved_shared_usage",
+            "projected_non_retry_attempts",
+            "conservative_live_attempts",
+            "live_client_invocations",
+            "http_responses_received",
+            "provider_quota_unknown_attempts",
+        ):
+            object.__setattr__(self, field_name, int(getattr(self, field_name)))
 
     @property
     def known_total(self) -> int:
@@ -49,6 +75,7 @@ class UsageSnapshot:
             self.confirmed_provider_attempts
             + self.reserved_shared_usage
             + self.projected_non_retry_attempts
+            + self.conservative_live_attempts
         )
 
     @classmethod
@@ -57,13 +84,25 @@ class UsageSnapshot:
             confirmed_provider_attempts=int(
                 value.get(
                     "confirmed_provider_attempts",
-                    value.get("actual_attempts", value.get("actual_http_attempts", 0)),
+                    value.get(
+                        "confirmed_provider_http_attempts",
+                        value.get("actual_attempts", value.get("actual_http_attempts", 0)),
+                    ),
                 )
             ),
             reserved_shared_usage=int(value.get("reserved_shared_usage", value.get("reserved_attempts", 0))),
             projected_non_retry_attempts=int(
                 value.get("projected_non_retry_attempts", value.get("projected_attempts", 0))
             ),
+            conservative_live_attempts=int(
+                value.get(
+                    "conservative_live_attempts",
+                    value.get("conservative_attempts", 0),
+                )
+            ),
+            live_client_invocations=int(value.get("live_client_invocations", 0)),
+            http_responses_received=int(value.get("http_responses_received", 0)),
+            provider_quota_unknown_attempts=int(value.get("provider_quota_unknown_attempts", 0)),
             state_available=bool(value.get("state_available", True)),
             source=str(value.get("source", "injected")),
         )
@@ -91,22 +130,42 @@ class QuotaDecision:
         }
 
 
+@dataclass
+class _Permit:
+    scope: str
+    amount: int
+    decision_kind: str
+    boundary: int
+    status: str = PENDING_AUTHORIZATION
+
+
 class InMemoryUsageProvider:
     """Explicitly injected usage state with an atomic permit implementation."""
 
     def __init__(self, snapshot: UsageSnapshot | None = None) -> None:
         self.snapshot = snapshot or UsageSnapshot()
         self._lock = threading.Lock()
-        self._permits: dict[str, tuple[str, int]] = {}
+        self._permits: dict[str, _Permit] = {}
 
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
         with self._lock:
-            active_reserved = sum(amount for _scope, amount in self._permits.values())
+            active_reserved = sum(
+                permit.amount
+                for permit in self._permits.values()
+                if permit.status == PENDING_AUTHORIZATION
+            )
             return {
                 "confirmed_provider_attempts": self.snapshot.confirmed_provider_attempts,
+                "confirmed_provider_http_attempts": self.snapshot.confirmed_provider_attempts,
                 "actual_attempts": self.snapshot.confirmed_provider_attempts,
                 "reserved_shared_usage": self.snapshot.reserved_shared_usage + active_reserved,
                 "projected_non_retry_attempts": self.snapshot.projected_non_retry_attempts,
+                "conservative_live_attempts": self.snapshot.conservative_live_attempts,
+                "conservative_quota_attempts": self.snapshot.conservative_live_attempts,
+                "live_client_invocations": self.snapshot.live_client_invocations,
+                "http_responses_received": self.snapshot.http_responses_received,
+                "provider_quota_unknown_attempts": self.snapshot.provider_quota_unknown_attempts,
+                "provider_quota_consumption_unknown": self.snapshot.provider_quota_unknown_attempts,
                 "simulated_transport_attempts": 0,
                 "state_available": self.snapshot.state_available,
                 "source": self.snapshot.source,
@@ -122,28 +181,47 @@ class InMemoryUsageProvider:
         reservation_scope: str = "LIVE_PROVIDER",
     ) -> Mapping[str, Any]:
         amount = int(proposed_attempts)
+        if amount <= 0:
+            raise ValueError("proposed_attempts must be positive")
         with self._lock:
             if not self.snapshot.state_available:
+                if decision_kind != "INITIAL":
+                    return {
+                        "allowed": False,
+                        "decision": "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": int(boundary),
+                        "reason": "safe shared-credential state is unavailable",
+                        "permit_id": None,
+                    }
+                # An initial request remains eligible under the established
+                # fail-open policy, but it still needs a durable lifecycle so
+                # a later live result cannot silently escape accounting.
+                permit_id = str(uuid.uuid4())
+                self._permits[permit_id] = _Permit(
+                    scope=reservation_scope,
+                    amount=amount,
+                    decision_kind=decision_kind,
+                    boundary=int(boundary),
+                )
                 return {
-                    "allowed": decision_kind == "INITIAL",
-                    "decision": (
-                        "INITIAL_ALLOWED_WITHOUT_RETRY_STATE"
-                        if decision_kind == "INITIAL"
-                        else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
-                    ),
+                    "allowed": True,
+                    "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
                     "proposed_attempts": amount,
                     "known_total": None,
                     "boundary": int(boundary),
                     "reason": "shared-credential state is unavailable",
-                    "permit_id": None,
+                    "permit_id": permit_id,
                 }
             active = sum(
-                permit_amount
-                for scope, permit_amount in self._permits.values()
-                if scope == reservation_scope
+                permit.amount
+                for permit in self._permits.values()
+                if permit.scope == reservation_scope and permit.status == PENDING_AUTHORIZATION
             )
             known_total = self.snapshot.known_total + active
             projected = known_total + amount
+            permit_id: str | None = None
             if projected > int(boundary):
                 return {
                     "allowed": False,
@@ -159,7 +237,12 @@ class InMemoryUsageProvider:
                     "permit_id": None,
                 }
             permit_id = str(uuid.uuid4())
-            self._permits[permit_id] = (reservation_scope, amount)
+            self._permits[permit_id] = _Permit(
+                scope=reservation_scope,
+                amount=amount,
+                decision_kind=decision_kind,
+                boundary=int(boundary),
+            )
             return {
                 "allowed": True,
                 "decision": "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
@@ -170,11 +253,102 @@ class InMemoryUsageProvider:
                 "permit_id": permit_id,
             }
 
-    def release_quota_attempt(self, *, permit_id: Any) -> None:
+    def _finalize(
+        self,
+        *,
+        permit_id: Any,
+        status: str,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
         if permit_id is None:
-            return
+            return {"applied": False, "status": status, "permit_id": None}
         with self._lock:
-            self._permits.pop(str(permit_id), None)
+            key = str(permit_id)
+            permit = self._permits.get(key)
+            if permit is None:
+                return {"applied": False, "status": "UNKNOWN_PERMIT", "permit_id": key}
+            if permit.status != PENDING_AUTHORIZATION:
+                return {"applied": False, "status": permit.status, "permit_id": key}
+            if status == CONSERVATIVE_LIVE_ATTEMPT:
+                self.snapshot = UsageSnapshot(
+                    confirmed_provider_attempts=self.snapshot.confirmed_provider_attempts,
+                    reserved_shared_usage=self.snapshot.reserved_shared_usage,
+                    projected_non_retry_attempts=self.snapshot.projected_non_retry_attempts,
+                    conservative_live_attempts=self.snapshot.conservative_live_attempts + permit.amount,
+                    live_client_invocations=self.snapshot.live_client_invocations + permit.amount,
+                    http_responses_received=self.snapshot.http_responses_received,
+                    provider_quota_unknown_attempts=self.snapshot.provider_quota_unknown_attempts + permit.amount,
+                    state_available=self.snapshot.state_available,
+                    source=self.snapshot.source,
+                )
+            elif status == HTTP_PROVIDER_ATTEMPT_CONFIRMED:
+                self.snapshot = UsageSnapshot(
+                    confirmed_provider_attempts=self.snapshot.confirmed_provider_attempts + permit.amount,
+                    reserved_shared_usage=self.snapshot.reserved_shared_usage,
+                    projected_non_retry_attempts=self.snapshot.projected_non_retry_attempts,
+                    conservative_live_attempts=self.snapshot.conservative_live_attempts,
+                    live_client_invocations=self.snapshot.live_client_invocations + permit.amount,
+                    http_responses_received=self.snapshot.http_responses_received + permit.amount,
+                    provider_quota_unknown_attempts=self.snapshot.provider_quota_unknown_attempts,
+                    state_available=self.snapshot.state_available,
+                    source=self.snapshot.source,
+                )
+            elif status == RELEASED_NO_NETWORK and live_client_invocation:
+                self.snapshot = UsageSnapshot(
+                    confirmed_provider_attempts=self.snapshot.confirmed_provider_attempts,
+                    reserved_shared_usage=self.snapshot.reserved_shared_usage,
+                    projected_non_retry_attempts=self.snapshot.projected_non_retry_attempts,
+                    conservative_live_attempts=self.snapshot.conservative_live_attempts,
+                    live_client_invocations=self.snapshot.live_client_invocations + permit.amount,
+                    http_responses_received=self.snapshot.http_responses_received,
+                    provider_quota_unknown_attempts=self.snapshot.provider_quota_unknown_attempts,
+                    state_available=self.snapshot.state_available,
+                    source=self.snapshot.source,
+                )
+            permit.status = status
+            return {"applied": True, "status": status, "permit_id": key, "amount": permit.amount}
+
+    def finalize_quota_permit_no_network(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            permit_id=permit_id,
+            status=RELEASED_NO_NETWORK,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_quota_permit_conservative(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            permit_id=permit_id,
+            status=CONSERVATIVE_LIVE_ATTEMPT,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_quota_permit_http_response(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            permit_id=permit_id,
+            status=HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def release_quota_attempt(self, *, permit_id: Any) -> None:
+        self.finalize_quota_permit_no_network(permit_id=permit_id)
 
     authorize_attempt = reserve_quota_attempt
 
@@ -186,6 +360,10 @@ class InMemoryUsageProvider:
                 confirmed_provider_attempts=self.snapshot.confirmed_provider_attempts + int(count),
                 reserved_shared_usage=self.snapshot.reserved_shared_usage,
                 projected_non_retry_attempts=self.snapshot.projected_non_retry_attempts,
+                conservative_live_attempts=self.snapshot.conservative_live_attempts,
+                live_client_invocations=self.snapshot.live_client_invocations,
+                http_responses_received=self.snapshot.http_responses_received,
+                provider_quota_unknown_attempts=self.snapshot.provider_quota_unknown_attempts,
                 state_available=self.snapshot.state_available,
                 source=self.snapshot.source,
             )
@@ -220,6 +398,10 @@ class QuotaGuard:
             snapshot.confirmed_provider_attempts,
             snapshot.reserved_shared_usage,
             snapshot.projected_non_retry_attempts,
+            snapshot.conservative_live_attempts,
+            snapshot.live_client_invocations,
+            snapshot.http_responses_received,
+            snapshot.provider_quota_unknown_attempts,
         ) < 0:
             return None
         return snapshot
@@ -329,10 +511,66 @@ class QuotaGuard:
         )
 
     def release(self, decision: QuotaDecision | None) -> None:
+        self.finalize_no_network(decision)
+
+    def _finalize(
+        self,
+        decision: QuotaDecision | None,
+        method_name: str,
+        *,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
         if decision is None or decision.permit_id is None:
-            return
-        release = getattr(self.usage_provider, "release_quota_attempt", None)
-        if callable(release):
-            release(permit_id=decision.permit_id)
+            return {"applied": False, "status": "NO_PERMIT", "permit_id": None}
+        finalize = getattr(self.usage_provider, method_name, None)
+        if callable(finalize):
+            return finalize(
+                permit_id=decision.permit_id,
+                live_client_invocation=live_client_invocation,
+            )
+        if method_name == "finalize_quota_permit_no_network":
+            release = getattr(self.usage_provider, "release_quota_attempt", None)
+            if callable(release):
+                release(permit_id=decision.permit_id)
+                return {"applied": True, "status": RELEASED_NO_NETWORK, "permit_id": decision.permit_id}
+        # A provider that cannot finalize a live permit must not be treated as
+        # released.  Its conservative reservation remains the safe fallback.
+        return {"applied": False, "status": "FINALIZATION_UNAVAILABLE", "permit_id": decision.permit_id}
+
+    def finalize_no_network(
+        self,
+        decision: QuotaDecision | None,
+        *,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            decision,
+            "finalize_quota_permit_no_network",
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_conservative(
+        self,
+        decision: QuotaDecision | None,
+        *,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            decision,
+            "finalize_quota_permit_conservative",
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_http_response(
+        self,
+        decision: QuotaDecision | None,
+        *,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize(
+            decision,
+            "finalize_quota_permit_http_response",
+            live_client_invocation=live_client_invocation,
+        )
 
     retry_allowed = allow_retry

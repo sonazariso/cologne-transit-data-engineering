@@ -40,6 +40,33 @@ class UsageProvider(Protocol):
     def release_quota_attempt(self, *, permit_id: Any) -> None:
         ...
 
+    def finalize_quota_permit_no_network(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
+        ...
+
+    def finalize_quota_permit_conservative(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        ...
+
+    def finalize_quota_permit_http_response(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        ...
+
 
 class PersistencePort(Protocol):
     """Behavioral persistence contract for a future production adapter."""
@@ -74,7 +101,14 @@ class PersistencePort(Protocol):
         retry_decision: str | None = None,
         retry_after_seconds: float | None = None,
         transport_kind: str = "UNKNOWN",
+        quota_permit_id: Any = None,
+        quota_finalization: str | None = None,
+        live_client_invocation: bool | None = None,
     ) -> None:
+        ...
+
+    def record_http_attempt_and_finalize_quota(self, **kwargs: Any) -> None:
+        """Record an attempt and finalize its permit in one transaction."""
         ...
 
     def persist_snapshot(self, *, audit_id: Any, target: Target, logical_due_bucket: int, parsed_snapshot: Mapping[str, Any], persisted_at: datetime) -> None:

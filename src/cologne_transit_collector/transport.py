@@ -9,6 +9,7 @@ import ssl
 import threading
 import time
 from collections import defaultdict, deque
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -24,6 +25,8 @@ RESPONSE_SIZE_EXCEEDED = "RESPONSE_SIZE_EXCEEDED"
 CREDENTIAL_MISSING = "CREDENTIAL_MISSING"
 CREDENTIAL_FORMAT_INVALID = "CREDENTIAL_FORMAT_INVALID"
 REQUEST_CONTRACT_FAILURE = "REQUEST_CONTRACT_FAILURE"
+LIVE_TRANSPORT_KIND = "LIVE_CLIENT"
+SIMULATED_TRANSPORT_KIND = "SIMULATED_TRANSPORT"
 
 
 class MddCredentialError(RuntimeError):
@@ -141,6 +144,7 @@ class LiveMddClient:
     """Real POST client; network use occurs only when ``fetch`` is called."""
 
     live_network = True
+    offline_safe = False
 
     def __init__(
         self,
@@ -172,7 +176,14 @@ class LiveMddClient:
         api_key = os.environ.get(MDD_API_KEY_ENV)
         credential_status = validate_api_key_format(api_key)
         if credential_status != "VALID":
-            return TransportFailure(credential_status, "credential preflight failed")
+            return TransportFailure(
+                credential_status,
+                "credential preflight failed",
+                network_attempted=False,
+                http_response_received=False,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
         try:
             body = build_request_body(
                 target,
@@ -190,7 +201,14 @@ class LiveMddClient:
                 },
             )
         except Exception:
-            return TransportFailure(REQUEST_CONTRACT_FAILURE, "request contract preflight failed")
+            return TransportFailure(
+                REQUEST_CONTRACT_FAILURE,
+                "request contract preflight failed",
+                network_attempted=False,
+                http_response_received=False,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
         started = time.monotonic()
         try:
             if self._urlopen is not None:
@@ -203,7 +221,16 @@ class LiveMddClient:
             try:
                 content = _read_bounded(response, self.max_response_bytes)
                 status = int(getattr(response, "status", getattr(response, "code", 200)))
-                return HttpResponse(status, content, _headers(response), time.monotonic() - started)
+                return HttpResponse(
+                    status,
+                    content,
+                    _headers(response),
+                    time.monotonic() - started,
+                    network_attempted=True,
+                    http_response_received=True,
+                    transport_kind=LIVE_TRANSPORT_KIND,
+                    live_client_invocation=True,
+                )
             finally:
                 close = getattr(response, "close", None)
                 if callable(close):
@@ -212,22 +239,60 @@ class LiveMddClient:
             try:
                 content = _read_bounded(error, self.max_response_bytes)
             except ResponseTooLarge:
-                return TransportFailure(RESPONSE_SIZE_EXCEEDED, "bounded response failure")
+                return TransportFailure(
+                    RESPONSE_SIZE_EXCEEDED,
+                    "bounded response failure",
+                    network_attempted=True,
+                    http_response_received=True,
+                    transport_kind=LIVE_TRANSPORT_KIND,
+                    live_client_invocation=True,
+                )
             except Exception:
                 content = b""
-            return HttpResponse(int(error.code), content, _headers(error), time.monotonic() - started)
+            return HttpResponse(
+                int(error.code),
+                content,
+                _headers(error),
+                time.monotonic() - started,
+                network_attempted=True,
+                http_response_received=True,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
         except ResponseTooLarge:
-            return TransportFailure(RESPONSE_SIZE_EXCEEDED, "bounded response failure")
+            return TransportFailure(
+                RESPONSE_SIZE_EXCEEDED,
+                "bounded response failure",
+                network_attempted=True,
+                http_response_received=True,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
         except ValueError:
-            return TransportFailure(REQUEST_CONTRACT_FAILURE, "request contract failure")
+            return TransportFailure(
+                REQUEST_CONTRACT_FAILURE,
+                "request contract failure",
+                network_attempted=True,
+                http_response_received=False,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
         except (OSError, URLError, TimeoutError) as error:
-            return TransportFailure(_transport_category(error), "transport failure")
+            return TransportFailure(
+                _transport_category(error),
+                "transport failure",
+                network_attempted=True,
+                http_response_received=False,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+            )
 
 
 class FakeMddClient:
     """Thread-safe scripted client used by dry-run and simulation modes."""
 
     live_network = False
+    offline_safe = True
 
     def __init__(
         self,
@@ -261,6 +326,22 @@ class FakeMddClient:
             action = script.popleft() if script else self.default_response
         if isinstance(action, BaseException):
             raise action
+        if isinstance(action, HttpResponse):
+            return replace(
+                action,
+                network_attempted=False,
+                http_response_received=True,
+                transport_kind=SIMULATED_TRANSPORT_KIND,
+                live_client_invocation=False,
+            )
+        if isinstance(action, TransportFailure):
+            return replace(
+                action,
+                network_attempted=False,
+                http_response_received=False,
+                transport_kind=SIMULATED_TRANSPORT_KIND,
+                live_client_invocation=False,
+            )
         return action
 
     def call_count(self, source_parent_station_id: str | None = None) -> int:

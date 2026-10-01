@@ -32,7 +32,13 @@ from .domain import (
 )
 from .manifest import RuntimeManifest
 from .ports import MddClient, PersistencePort
-from .quota import QuotaGuard
+from .quota import (
+    CONSERVATIVE_LIVE_ATTEMPT,
+    HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+    RELEASED_NO_NETWORK,
+    QuotaDecision,
+    QuotaGuard,
+)
 from .schedule import bucket_for, plan_for
 from .trias import TriasApplicationError, TriasParserError, parse_trias_response
 
@@ -124,6 +130,26 @@ def _error_category_for_response(response: HttpResponse) -> str | None:
     return "HTTP_ERROR"
 
 
+def _transport_metadata(result: HttpResponse | TransportFailure) -> tuple[bool, bool, str, bool]:
+    """Read explicit transport metadata without inspecting the client class."""
+
+    return (
+        bool(getattr(result, "network_attempted", False)),
+        bool(getattr(result, "http_response_received", False)),
+        str(getattr(result, "transport_kind", "UNKNOWN") or "UNKNOWN"),
+        bool(getattr(result, "live_client_invocation", False)),
+    )
+
+
+def _quota_finalization_for_result(result: HttpResponse | TransportFailure) -> str:
+    network_attempted, http_response_received, _transport_kind, _live_client_invocation = _transport_metadata(result)
+    if network_attempted and http_response_received:
+        return HTTP_PROVIDER_ATTEMPT_CONFIRMED
+    if network_attempted:
+        return CONSERVATIVE_LIVE_ATTEMPT
+    return RELEASED_NO_NETWORK
+
+
 class Collector:
     """Orchestrates exactly one current heartbeat."""
 
@@ -183,7 +209,7 @@ class Collector:
             raise LiveModeBlocked(
                 "live mode is blocked in Stage 14 implementation: production persistence and cutover are deferred"
             )
-        if getattr(self.mdd_client, "live_network", False):
+        if getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
         now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -289,7 +315,7 @@ class Collector:
                             )
                         )
                         continue
-                    future = executor.submit(self._execute_target, identifier, target, plan.bucket.index, budget)
+                    future = executor.submit(self._execute_target, identifier, target, plan.bucket.index, budget, now)
                     futures[future] = target
                 if self.shutdown_event.is_set():
                     for target in pending:
@@ -332,7 +358,7 @@ class Collector:
             outcomes=tuple(outcomes),
             status=status,
             max_observed_concurrency=self._max_observed_concurrency,
-            live_network_used=False,
+            live_network_used=any(item.live_network_calls > 0 for item in outcomes),
             dispatcher_claim_won=True,
             dispatcher_claim_status="CLAIMED",
         )
@@ -385,7 +411,14 @@ class Collector:
             self._active_count -= 1
         self._worker_slots.release()
 
-    def _execute_target(self, run_id: str, target: Target, bucket_index: int, budget: HeartbeatBudget) -> TargetOutcome:
+    def _execute_target(
+        self,
+        run_id: str,
+        target: Target,
+        bucket_index: int,
+        budget: HeartbeatBudget,
+        quota_at_utc: datetime,
+    ) -> TargetOutcome:
         self._enter_worker()
         started = datetime.now(timezone.utc)
         audit_id: Any = None
@@ -400,6 +433,7 @@ class Collector:
         pending_retry_after = 0.0
         simulated_transport_calls = 0
         live_network_calls = 0
+        live_client_invocations = 0
         try:
             audit_id = self.persistence.start_target_audit(
                 run_id=run_id, target=target, logical_due_bucket=bucket_index, started_at=started
@@ -428,7 +462,10 @@ class Collector:
                             self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
                             return outcome
 
-                decision_at = datetime.now(timezone.utc)
+                # Quota month selection follows the logical heartbeat time so
+                # deterministic offline runs cannot cross a calendar-month
+                # boundary merely because the test executes later.
+                decision_at = quota_at_utc
                 quota_decision = (
                     self.quota_guard.allow_retry(at_utc=decision_at)
                     if retrying
@@ -493,22 +530,37 @@ class Collector:
                         attempt_number=attempts,
                     )
                 except Exception as exc:
-                    response_or_failure = TransportFailure("OTHER_NETWORK_FAILURE", "transport failure")
+                    # A client that raises instead of returning a structured
+                    # result provides no evidence that its opener was
+                    # reached. Do not infer network activity from the client
+                    # class; the standard live client returns explicit
+                    # metadata for expected transport failures.
+                    response_or_failure = TransportFailure(
+                        "OTHER_NETWORK_FAILURE",
+                        "transport failure",
+                        network_attempted=False,
+                        http_response_received=False,
+                        transport_kind="UNKNOWN",
+                    )
                     if isinstance(exc, TimeoutError):
-                        response_or_failure = TransportFailure("TIMEOUT", "transport failure")
-                finally:
-                    # Simulated permits are released after the local fake
-                    # invocation; they are not provider consumption.
-                    self.quota_guard.release(quota_decision)
+                        response_or_failure = TransportFailure(
+                            "TIMEOUT",
+                            "transport failure",
+                            network_attempted=False,
+                            http_response_received=False,
+                            transport_kind="UNKNOWN",
+                        )
                 attempt_completed = datetime.now(timezone.utc)
-                transport_kind = "LIVE_CLIENT" if getattr(self.mdd_client, "live_network", False) else "SIMULATED_TRANSPORT"
-                if transport_kind == "LIVE_CLIENT":
+                network_attempted, _http_response_received, transport_kind, live_client_invocation = _transport_metadata(response_or_failure)
+                if network_attempted:
                     live_network_calls += 1
-                else:
+                if live_client_invocation:
+                    live_client_invocations += 1
+                elif transport_kind == "SIMULATED_TRANSPORT":
                     simulated_transport_calls += 1
                 if isinstance(response_or_failure, TransportFailure):
                     error_category = response_or_failure.category
-                    self.persistence.record_http_attempt(
+                    self._record_attempt_with_permit(
                         audit_id=audit_id,
                         attempt_number=attempts,
                         started_at=attempt_started,
@@ -516,6 +568,8 @@ class Collector:
                         transport_failure=response_or_failure,
                         retry_decision="RETRY_CANDIDATE" if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts else "NO_RETRY",
                         transport_kind=transport_kind,
+                        live_client_invocation=live_client_invocation,
+                        quota_decision=quota_decision,
                     )
                     if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts:
                         retry_decision = "RETRY_CANDIDATE"
@@ -528,7 +582,7 @@ class Collector:
                 retry_after = _retry_after_seconds(response)
                 pending_retry_after = retry_after
                 can_retry = retry_eligible(response=response) and attempts < self.max_attempts
-                self.persistence.record_http_attempt(
+                self._record_attempt_with_permit(
                     audit_id=audit_id,
                     attempt_number=attempts,
                     started_at=attempt_started,
@@ -537,6 +591,8 @@ class Collector:
                     retry_decision="RETRY_CANDIDATE" if can_retry else "NO_RETRY",
                     retry_after_seconds=retry_after or None,
                     transport_kind=transport_kind,
+                    live_client_invocation=live_client_invocation,
+                    quota_decision=quota_decision,
                 )
                 if response.status_code is None or not 200 <= response.status_code < 300:
                     error_category = _error_category_for_response(response)
@@ -600,6 +656,7 @@ class Collector:
                 skip_reason=retry_outcome if status == "SKIPPED" else None,
                 simulated_transport_calls=simulated_transport_calls,
                 live_network_calls=live_network_calls,
+                live_client_invocations=live_client_invocations,
             )
             self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
             return outcome
@@ -609,9 +666,76 @@ class Collector:
                     self.persistence.complete_target_audit(audit_id=audit_id, outcome={"status": "FAILED", "http_attempts": attempts, "error_category": "SANITIZED_ERROR", "persistence_outcome": "PERSISTENCE_FAILURE"}, completed_at=datetime.now(timezone.utc))
                 except BaseException:
                     pass
-            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls)
+            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls, live_client_invocations=live_client_invocations)
         finally:
             self._leave_worker()
+
+    def _record_attempt_with_permit(
+        self,
+        *,
+        audit_id: Any,
+        attempt_number: int,
+        started_at: datetime,
+        completed_at: datetime,
+        response: HttpResponse | None = None,
+        transport_failure: TransportFailure | None = None,
+        retry_decision: str | None = None,
+        retry_after_seconds: float | None = None,
+        transport_kind: str = "UNKNOWN",
+        live_client_invocation: bool = False,
+        quota_decision: QuotaDecision | None,
+    ) -> None:
+        result = response if response is not None else transport_failure
+        if result is None:
+            finalization = RELEASED_NO_NETWORK
+        else:
+            finalization = _quota_finalization_for_result(result)
+        kwargs: dict[str, Any] = {
+            "audit_id": audit_id,
+            "attempt_number": attempt_number,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "response": response,
+            "transport_failure": transport_failure,
+            "retry_decision": retry_decision,
+            "retry_after_seconds": retry_after_seconds,
+            "transport_kind": transport_kind,
+            "live_client_invocation": live_client_invocation,
+        }
+        atomic_recorder = getattr(self.persistence, "record_http_attempt_and_finalize_quota", None)
+        atomic_supported = bool(
+            getattr(self.persistence, "supports_atomic_quota_finalization", False)
+            or self.quota_guard.usage_provider is self.persistence
+        )
+        if callable(atomic_recorder) and atomic_supported:
+            atomic_recorder(
+                **kwargs,
+                quota_permit_id=quota_decision.permit_id if quota_decision else None,
+                quota_finalization=finalization,
+                finalized_at=completed_at,
+            )
+            return
+
+        # An adapter with separate usage and persistence ports must retain the
+        # pending permit until the attempt row is durable. If the process dies
+        # here, the permit remains conservatively unavailable rather than
+        # being returned to the headroom pool.
+        self.persistence.record_http_attempt(**kwargs)
+        if finalization == HTTP_PROVIDER_ATTEMPT_CONFIRMED:
+            self.quota_guard.finalize_http_response(
+                quota_decision,
+                live_client_invocation=live_client_invocation,
+            )
+        elif finalization == CONSERVATIVE_LIVE_ATTEMPT:
+            self.quota_guard.finalize_conservative(
+                quota_decision,
+                live_client_invocation=live_client_invocation,
+            )
+        else:
+            self.quota_guard.finalize_no_network(
+                quota_decision,
+                live_client_invocation=live_client_invocation,
+            )
 
     @staticmethod
     def _content_type(response: HttpResponse) -> str | None:

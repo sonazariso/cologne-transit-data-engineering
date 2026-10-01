@@ -379,10 +379,9 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 ## Stage 14 implementation guardrails
 
 116. Stage 14's authoritative overall status is `IN PROGRESS — PRODUCTION
-     CUTOVER DEFERRED`; its implementation status is `COLLECTOR
-     IMPLEMENTATION — CORRECTIONS REQUIRED`. The implementation closeout must
-     not be reported as a completed production cutover, and Stage 15 remains
-     `NOT STARTED`.
+     CUTOVER DEFERRED`; its implementation status is `STAGE 14 COLLECTOR
+     IMPLEMENTATION COMPLETE`. This is an offline implementation closeout,
+     not a completed production cutover, and Stage 15 remains `NOT STARTED`.
 117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
      collector package. Its core must not import PostgreSQL/SQL-driver modules,
      platform-specific APIs, shell orchestration, or hardcoded platform paths.
@@ -416,13 +415,22 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      source-faithful snapshots are permitted; secrets, authorization headers,
      unrestricted exceptions, and raw live payloads must not enter logs or
      durable development audit.
-124. Stage 14 implementation validation must include a no-network check,
+124. Every authorized quota permit must move from `PENDING_AUTHORIZATION` to
+     exactly one terminal state: `RELEASED_NO_NETWORK`,
+     `CONSERVATIVE_LIVE_ATTEMPT`, or `HTTP_PROVIDER_ATTEMPT_CONFIRMED`.
+     A live permit must not be reusable between transport invocation and
+     durable attempt accounting. Confirmed provider attempts, HTTP responses,
+     client-side live invocations, provider-quota-unknown failures, and
+     conservative live-attempt protection remain separate accounting concepts;
+     simulation and credential/request-contract preflight failures do not
+     consume provider or conservative live headroom.
+125. Stage 14 implementation validation must include a no-network check,
      manifest reconciliation, full repository tests, syntax checks, static
      architecture checks, duplicate-claim behavior, retry/deadline/quota
      fault injection, restart/crash visibility, failure isolation, and
      whitespace/diff review. No validation step may consume MDD quota or issue
      DNS activity.
-125. The production cutover remains gated on final PostgreSQL host/runtime and
+126. The production cutover remains gated on final PostgreSQL host/runtime and
      adapter selection, production target-ID materialization, real sampling-era
      timestamp, final heartbeat safety margin, deployment platform, authorized
      live dry-run, Tiered50 activation, and post-activation smoke validation.

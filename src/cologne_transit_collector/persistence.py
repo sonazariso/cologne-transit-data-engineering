@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .domain import HttpResponse, Target, TransportFailure
-from .quota import UsageSnapshot
+from .quota import (
+    CONSERVATIVE_LIVE_ATTEMPT,
+    HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+    PENDING_AUTHORIZATION,
+    RELEASED_NO_NETWORK,
+    UsageSnapshot,
+)
 
 
 def _iso(value: datetime) -> str:
@@ -75,6 +81,7 @@ class SQLitePersistence:
 
     is_production_ready = False
     is_disposable_development_backend = True
+    supports_atomic_quota_finalization = True
     claim_identity_kind = "development dispatcher identity: (panel_version, logical_due_bucket); target identity adds source_parent_station_id"
 
     def __init__(self, path: str | Path) -> None:
@@ -199,6 +206,11 @@ class SQLitePersistence:
                 retry_after_seconds REAL,
                 duration_ms REAL NOT NULL,
                 transport_kind TEXT NOT NULL DEFAULT 'UNKNOWN',
+                network_attempted INTEGER NOT NULL DEFAULT 0,
+                http_response_received INTEGER NOT NULL DEFAULT 0,
+                live_client_invocation INTEGER NOT NULL DEFAULT 0,
+                conservative_quota_accounted INTEGER NOT NULL DEFAULT 0,
+                provider_quota_status TEXT NOT NULL DEFAULT 'NOT_CONSUMED',
                 provider_attempt_confirmed INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id)
             );
@@ -231,6 +243,8 @@ class SQLitePersistence:
                 boundary INTEGER NOT NULL,
                 reserved_at_utc TEXT NOT NULL,
                 released_at_utc TEXT,
+                finalized_at_utc TEXT,
+                finalization_reason TEXT,
                 status TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS recorded_at_time_evidence (
@@ -256,6 +270,10 @@ class SQLitePersistence:
                 confirmed_provider_attempts INTEGER NOT NULL DEFAULT 0,
                 reserved_shared_usage INTEGER NOT NULL DEFAULT 0,
                 projected_non_retry_attempts INTEGER NOT NULL DEFAULT 0,
+                conservative_live_attempts INTEGER NOT NULL DEFAULT 0,
+                live_client_invocations INTEGER NOT NULL DEFAULT 0,
+                http_responses_received INTEGER NOT NULL DEFAULT 0,
+                provider_quota_unknown_attempts INTEGER NOT NULL DEFAULT 0,
                 state_available INTEGER NOT NULL DEFAULT 1,
                 source TEXT NOT NULL DEFAULT 'sqlite-development'
             );
@@ -274,8 +292,23 @@ class SQLitePersistence:
         # readable while giving new state the corrected columns.
         self._ensure_column("manifest_targets", "legacy_sampling_target_id", "INTEGER")
         self._ensure_column("http_attempts", "transport_kind", "TEXT NOT NULL DEFAULT 'UNKNOWN'")
+        self._ensure_column("http_attempts", "network_attempted", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("http_attempts", "http_response_received", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("http_attempts", "live_client_invocation", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("http_attempts", "conservative_quota_accounted", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("http_attempts", "provider_quota_status", "TEXT NOT NULL DEFAULT 'NOT_CONSUMED'")
         self._ensure_column("http_attempts", "provider_attempt_confirmed", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("quota_permits", "finalized_at_utc", "TEXT")
+        self._ensure_column("quota_permits", "finalization_reason", "TEXT")
         self._ensure_column("shared_usage", "confirmed_provider_attempts", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("shared_usage", "conservative_live_attempts", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("shared_usage", "live_client_invocations", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("shared_usage", "http_responses_received", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("shared_usage", "provider_quota_unknown_attempts", "INTEGER NOT NULL DEFAULT 0")
+        self._connection.execute(
+            "UPDATE quota_permits SET status = ? WHERE status = 'PENDING'",
+            (PENDING_AUTHORIZATION,),
+        )
         self._connection.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
@@ -533,50 +566,111 @@ class SQLitePersistence:
         retry_decision: str | None = None,
         retry_after_seconds: float | None = None,
         transport_kind: str = "UNKNOWN",
+        quota_permit_id: Any = None,
+        quota_finalization: str | None = None,
+        finalized_at: datetime | None = None,
+        live_client_invocation: bool | None = None,
     ) -> None:
         if response is not None:
             http_status = response.status_code
             category = None
             outcome = "HTTP_RESPONSE"
             duration = float(response.elapsed_seconds or (completed_at - started_at).total_seconds())
+            network_attempted = bool(response.network_attempted)
+            http_response_received = bool(response.http_response_received)
+            result_transport_kind = str(response.transport_kind or transport_kind)
+            result_live_client_invocation = bool(response.live_client_invocation)
         elif transport_failure is not None:
             http_status = None
             category = _safe_error_category(transport_failure.category)
             outcome = "TRANSPORT_FAILURE"
             duration = (completed_at - started_at).total_seconds()
+            network_attempted = bool(transport_failure.network_attempted)
+            http_response_received = bool(transport_failure.http_response_received)
+            result_transport_kind = str(transport_failure.transport_kind or transport_kind)
+            result_live_client_invocation = bool(transport_failure.live_client_invocation)
         else:
             http_status = None
             category = "SANITIZED_ERROR"
             outcome = "UNKNOWN_ATTEMPT"
             duration = (completed_at - started_at).total_seconds()
+            network_attempted = False
+            http_response_received = False
+            result_transport_kind = str(transport_kind)
+            result_live_client_invocation = False
+        if result_transport_kind == "UNKNOWN" and transport_kind != "UNKNOWN":
+            result_transport_kind = str(transport_kind)
+        if live_client_invocation is not None:
+            result_live_client_invocation = bool(live_client_invocation)
+        provider_attempt_confirmed = network_attempted and http_response_received
+        conservative_quota_accounted = network_attempted and not http_response_received
+        provider_quota_status = (
+            "CONFIRMED"
+            if provider_attempt_confirmed
+            else "UNKNOWN"
+            if conservative_quota_accounted
+            else "NOT_CONSUMED"
+        )
+        live_client_invocation = result_live_client_invocation
         with self._lock:
-            self._connection.execute(
-                """
-                INSERT INTO http_attempts
-                (audit_id, attempt_number, started_at_utc, completed_at_utc, http_status,
-                 transport_failure_category, outcome, retry_decision, retry_after_seconds,
-                 duration_ms, transport_kind, provider_attempt_confirmed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-                """,
-                (
-                    audit_id,
-                    int(attempt_number),
-                    _iso(started_at),
-                    _iso(completed_at),
-                    http_status,
-                    category,
-                    outcome,
-                    retry_decision,
-                    retry_after_seconds,
-                    duration * 1000,
-                    str(transport_kind),
-                ),
-            )
-            self._connection.execute(
-                "UPDATE target_audits SET http_attempts = http_attempts + 1, http_status = COALESCE(?, http_status) WHERE audit_id = ?",
-                (http_status, audit_id),
-            )
-            self._connection.commit()
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._connection.execute(
+                    """
+                    INSERT INTO http_attempts
+                    (audit_id, attempt_number, started_at_utc, completed_at_utc, http_status,
+                     transport_failure_category, outcome, retry_decision, retry_after_seconds,
+                     duration_ms, transport_kind, network_attempted, http_response_received,
+                     live_client_invocation, conservative_quota_accounted,
+                     provider_quota_status, provider_attempt_confirmed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        audit_id,
+                        int(attempt_number),
+                        _iso(started_at),
+                        _iso(completed_at),
+                        http_status,
+                        category,
+                        outcome,
+                        retry_decision,
+                        retry_after_seconds,
+                        duration * 1000,
+                        result_transport_kind,
+                        int(network_attempted),
+                        int(http_response_received),
+                        int(live_client_invocation),
+                        int(conservative_quota_accounted),
+                        provider_quota_status,
+                        int(provider_attempt_confirmed),
+                    ),
+                )
+                self._connection.execute(
+                    "UPDATE target_audits SET http_attempts = http_attempts + 1, http_status = COALESCE(?, http_status) WHERE audit_id = ?",
+                    (http_status, audit_id),
+                )
+                if quota_permit_id is not None and quota_finalization is not None:
+                    self._finalize_quota_permit_locked(
+                        permit_id=quota_permit_id,
+                        finalization=quota_finalization,
+                        finalized_at=finalized_at or completed_at,
+                        live_client_invocation=live_client_invocation,
+                    )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    def record_http_attempt_and_finalize_quota(self, **kwargs: Any) -> None:
+        """Atomically persist an attempt and transition its quota permit.
+
+        A future production adapter must provide the same transaction
+        boundary. Keeping the operation on the persistence port prevents a
+        live permit from becoming reusable between transport invocation and
+        durable attempt accounting.
+        """
+
+        self.record_http_attempt(**kwargs)
 
     def record_attempt(self, **kwargs: Any) -> None:
         """Backend-neutral alias used by the persistence port."""
@@ -692,6 +786,87 @@ class SQLitePersistence:
             )
             self._connection.commit()
 
+    def _finalize_quota_permit_locked(
+        self,
+        *,
+        permit_id: Any,
+        finalization: str,
+        finalized_at: datetime,
+        live_client_invocation: bool = False,
+    ) -> None:
+        """Finalize one pending permit; caller owns the SQLite transaction."""
+
+        permit = self._connection.execute(
+            "SELECT permit_id, month_key, amount, status FROM quota_permits WHERE permit_id = ?",
+            (str(permit_id),),
+        ).fetchone()
+        if permit is None:
+            raise KeyError(f"unknown quota permit: {permit_id}")
+        if str(permit["status"]) != PENDING_AUTHORIZATION:
+            # Idempotent finalization is safe for recovery/replay paths. A
+            # terminal state is never converted into another accounting type.
+            return
+        if finalization not in {
+            RELEASED_NO_NETWORK,
+            CONSERVATIVE_LIVE_ATTEMPT,
+            HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+        }:
+            raise ValueError(f"unknown quota finalization: {finalization}")
+
+        month_key = str(permit["month_key"])
+        amount = int(permit["amount"])
+        timestamp = _iso(finalized_at)
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO shared_usage
+            (month_key, confirmed_provider_attempts, reserved_shared_usage,
+             projected_non_retry_attempts, conservative_live_attempts,
+             live_client_invocations, http_responses_received,
+             provider_quota_unknown_attempts, state_available, source)
+            VALUES (?, 0, 0, 0, 0, 0, 0, 0, 1, 'sqlite-development')
+            """,
+            (month_key,),
+        )
+        if finalization == CONSERVATIVE_LIVE_ATTEMPT:
+            self._connection.execute(
+                """
+                UPDATE shared_usage
+                SET conservative_live_attempts = conservative_live_attempts + ?,
+                    live_client_invocations = live_client_invocations + ?,
+                    provider_quota_unknown_attempts = provider_quota_unknown_attempts + ?
+                WHERE month_key = ?
+                """,
+                (amount, amount, amount, month_key),
+            )
+        elif finalization == HTTP_PROVIDER_ATTEMPT_CONFIRMED:
+            self._connection.execute(
+                """
+                UPDATE shared_usage
+                SET confirmed_provider_attempts = confirmed_provider_attempts + ?,
+                    live_client_invocations = live_client_invocations + ?,
+                    http_responses_received = http_responses_received + ?
+                WHERE month_key = ?
+                """,
+                (amount, amount, amount, month_key),
+            )
+        elif finalization == RELEASED_NO_NETWORK and live_client_invocation:
+            self._connection.execute(
+                """
+                UPDATE shared_usage
+                SET live_client_invocations = live_client_invocations + ?
+                WHERE month_key = ?
+                """,
+                (amount, month_key),
+            )
+        self._connection.execute(
+            """
+            UPDATE quota_permits
+            SET status = ?, released_at_utc = ?, finalized_at_utc = ?, finalization_reason = ?
+            WHERE permit_id = ? AND status = ?
+            """,
+            (finalization, timestamp, timestamp, finalization, str(permit_id), PENDING_AUTHORIZATION),
+        )
+
     def reserve_quota_attempt(
         self,
         *,
@@ -711,6 +886,8 @@ class SQLitePersistence:
         at = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
         month = _month_key(at)
         amount = int(proposed_attempts)
+        if amount <= 0:
+            raise ValueError("proposed_attempts must be positive")
         scope = str(reservation_scope)
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -722,16 +899,17 @@ class SQLitePersistence:
                 confirmed = int(shared["confirmed_provider_attempts"] if shared else 0)
                 reserved = int(shared["reserved_shared_usage"] if shared else 0)
                 projected_non_retry = int(shared["projected_non_retry_attempts"] if shared else 0)
+                conservative_live = int(shared["conservative_live_attempts"] if shared else 0)
                 active = self._connection.execute(
                     """
                     SELECT COALESCE(SUM(amount), 0) AS amount
                     FROM quota_permits
-                    WHERE month_key = ? AND reservation_scope = ? AND status = 'PENDING'
+                    WHERE month_key = ? AND reservation_scope = ? AND status = ?
                     """,
-                    (month, scope),
+                    (month, scope, PENDING_AUTHORIZATION),
                 ).fetchone()
                 active_reserved = int(active["amount"] if active else 0)
-                known_total = confirmed + reserved + projected_non_retry + active_reserved
+                known_total = confirmed + reserved + projected_non_retry + conservative_live + active_reserved
                 if not state_available and decision_kind == "RETRY":
                     decision = {
                         "allowed": False,
@@ -743,6 +921,16 @@ class SQLitePersistence:
                         "permit_id": None,
                     }
                 elif not state_available:
+                    permit_id = str(uuid.uuid4())
+                    self._connection.execute(
+                        """
+                        INSERT INTO quota_permits
+                        (permit_id, month_key, decision_kind, reservation_scope, amount,
+                         boundary, reserved_at_utc, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at), PENDING_AUTHORIZATION),
+                    )
                     decision = {
                         "allowed": True,
                         "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
@@ -750,7 +938,7 @@ class SQLitePersistence:
                         "known_total": None,
                         "boundary": int(boundary),
                         "reason": "initial scheduled request is not silently converted into a retry",
-                        "permit_id": None,
+                        "permit_id": permit_id,
                     }
                 elif known_total + amount > int(boundary):
                     decision = {
@@ -773,9 +961,9 @@ class SQLitePersistence:
                         INSERT INTO quota_permits
                         (permit_id, month_key, decision_kind, reservation_scope, amount,
                          boundary, reserved_at_utc, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at)),
+                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at), PENDING_AUTHORIZATION),
                     )
                     decision = {
                         "allowed": True,
@@ -794,15 +982,87 @@ class SQLitePersistence:
 
     authorize_attempt = reserve_quota_attempt
 
-    def release_quota_attempt(self, *, permit_id: Any) -> None:
+    def _finalize_quota_permit(
+        self,
+        *,
+        permit_id: Any,
+        finalization: str,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
         if permit_id is None:
-            return
+            return {"applied": False, "status": finalization, "permit_id": None}
+        finalized_at = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
         with self._lock:
-            self._connection.execute(
-                "UPDATE quota_permits SET status = 'RELEASED', released_at_utc = ? WHERE permit_id = ? AND status = 'PENDING'",
-                (_iso(datetime.now(timezone.utc)), str(permit_id)),
-            )
-            self._connection.commit()
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT status, amount FROM quota_permits WHERE permit_id = ?",
+                    (str(permit_id),),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown quota permit: {permit_id}")
+                self._finalize_quota_permit_locked(
+                    permit_id=permit_id,
+                    finalization=finalization,
+                    finalized_at=finalized_at,
+                    live_client_invocation=live_client_invocation,
+                )
+                self._connection.commit()
+                return {
+                    "applied": str(row["status"]) == PENDING_AUTHORIZATION,
+                    "status": finalization if str(row["status"]) == PENDING_AUTHORIZATION else str(row["status"]),
+                    "permit_id": str(permit_id),
+                    "amount": int(row["amount"]),
+                }
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    def finalize_quota_permit_no_network(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = False,
+    ) -> Mapping[str, Any]:
+        return self._finalize_quota_permit(
+            permit_id=permit_id,
+            finalization=RELEASED_NO_NETWORK,
+            at_utc=at_utc,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_quota_permit_conservative(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize_quota_permit(
+            permit_id=permit_id,
+            finalization=CONSERVATIVE_LIVE_ATTEMPT,
+            at_utc=at_utc,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def finalize_quota_permit_http_response(
+        self,
+        *,
+        permit_id: Any,
+        at_utc: datetime | None = None,
+        live_client_invocation: bool = True,
+    ) -> Mapping[str, Any]:
+        return self._finalize_quota_permit(
+            permit_id=permit_id,
+            finalization=HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+            at_utc=at_utc,
+            live_client_invocation=live_client_invocation,
+        )
+
+    def release_quota_attempt(self, *, permit_id: Any) -> None:
+        self.finalize_quota_permit_no_network(permit_id=permit_id)
 
     def get_target(self, *, panel_version: str, source_parent_station_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -854,19 +1114,35 @@ class SQLitePersistence:
         actual_attempts: int | None = None,
         reserved_shared_usage: int = 0,
         projected_non_retry_attempts: int = 0,
+        conservative_live_attempts: int = 0,
+        live_client_invocations: int = 0,
+        http_responses_received: int = 0,
+        provider_quota_unknown_attempts: int = 0,
         state_available: bool = True,
         source: str = "sqlite-development",
     ) -> None:
         with self._lock:
             self._connection.execute(
-                "INSERT OR REPLACE INTO shared_usage (month_key, reserved_shared_usage, projected_non_retry_attempts, state_available, source) VALUES (?, ?, ?, ?, ?)",
-                (month_key, int(reserved_shared_usage), int(projected_non_retry_attempts), int(state_available), source),
-            )
-            if actual_attempts is not None:
-                confirmed_provider_attempts = int(actual_attempts)
-            self._connection.execute(
-                "UPDATE shared_usage SET confirmed_provider_attempts = ? WHERE month_key = ?",
-                (int(confirmed_provider_attempts), month_key),
+                """
+                INSERT OR REPLACE INTO shared_usage
+                (month_key, confirmed_provider_attempts, reserved_shared_usage,
+                 projected_non_retry_attempts, conservative_live_attempts,
+                 live_client_invocations, http_responses_received,
+                 provider_quota_unknown_attempts, state_available, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    month_key,
+                    int(actual_attempts if actual_attempts is not None else confirmed_provider_attempts),
+                    int(reserved_shared_usage),
+                    int(projected_non_retry_attempts),
+                    int(conservative_live_attempts),
+                    int(live_client_invocations),
+                    int(http_responses_received),
+                    int(provider_quota_unknown_attempts),
+                    int(state_available),
+                    source,
+                ),
             )
             self._connection.commit()
 
@@ -876,14 +1152,21 @@ class SQLitePersistence:
         with self._lock:
             shared = self._connection.execute("SELECT * FROM shared_usage WHERE month_key = ?", (month,)).fetchone()
             active = self._connection.execute(
-                "SELECT COALESCE(SUM(amount), 0) AS amount FROM quota_permits WHERE month_key = ? AND reservation_scope = 'LIVE_PROVIDER' AND status = 'PENDING'",
-                (month,),
+                "SELECT COALESCE(SUM(amount), 0) AS amount FROM quota_permits WHERE month_key = ? AND reservation_scope = 'LIVE_PROVIDER' AND status = ?",
+                (month, PENDING_AUTHORIZATION),
             ).fetchone()
         return {
             "confirmed_provider_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
+            "confirmed_provider_http_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
             "actual_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
             "reserved_shared_usage": int(shared["reserved_shared_usage"] if shared else 0) + int(active["amount"] if active else 0),
             "projected_non_retry_attempts": int(shared["projected_non_retry_attempts"] if shared else 0),
+            "conservative_live_attempts": int(shared["conservative_live_attempts"] if shared else 0),
+            "conservative_quota_attempts": int(shared["conservative_live_attempts"] if shared else 0),
+            "live_client_invocations": int(shared["live_client_invocations"] if shared else 0),
+            "http_responses_received": int(shared["http_responses_received"] if shared else 0),
+            "provider_quota_unknown_attempts": int(shared["provider_quota_unknown_attempts"] if shared else 0),
+            "provider_quota_consumption_unknown": int(shared["provider_quota_unknown_attempts"] if shared else 0),
             "state_available": bool(shared["state_available"] if shared else True),
             "source": str(shared["source"] if shared else "sqlite-development"),
         }

@@ -102,10 +102,22 @@ class LogicalBucket:
 
 @dataclass(frozen=True)
 class HttpResponse:
+    """An HTTP response plus explicit transport-boundary metadata.
+
+    ``network_attempted`` is intentionally not inferred from the client
+    implementation.  A real transport sets it to ``True``; offline fixture
+    transports set it to ``False`` while retaining ``http_response_received``
+    for parser and audit purposes.
+    """
+
     status_code: Optional[int]
     body: bytes = b""
     headers: Mapping[str, str] = field(default_factory=dict)
     elapsed_seconds: Optional[float] = None
+    network_attempted: bool = True
+    http_response_received: bool = True
+    transport_kind: str = "UNKNOWN"
+    live_client_invocation: bool = False
 
     @property
     def retry_after(self) -> Optional[str]:
@@ -117,8 +129,14 @@ class HttpResponse:
 
 @dataclass(frozen=True)
 class TransportFailure:
+    """A sanitized transport outcome with explicit network-attempt metadata."""
+
     category: str
     detail: str = ""
+    network_attempted: bool = False
+    http_response_received: bool = False
+    transport_kind: str = "UNKNOWN"
+    live_client_invocation: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,6 +160,7 @@ class TargetOutcome:
     claim_won: bool = True
     simulated_transport_calls: int = 0
     live_network_calls: int = 0
+    live_client_invocations: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -164,6 +183,7 @@ class TargetOutcome:
             "claim_won": self.claim_won,
             "simulated_transport_calls": self.simulated_transport_calls,
             "live_network_calls": self.live_network_calls,
+            "live_client_invocations": self.live_client_invocations,
         }
 
 
@@ -203,6 +223,10 @@ class CollectorRunResult:
     def live_network_calls(self) -> int:
         return sum(item.live_network_calls for item in self.outcomes)
 
+    @property
+    def live_client_invocations(self) -> int:
+        return sum(item.live_client_invocations for item in self.outcomes)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
@@ -215,6 +239,7 @@ class CollectorRunResult:
             "http_attempt_count": self.http_attempt_count,
             "simulated_transport_calls": self.simulated_transport_calls,
             "live_network_calls": self.live_network_calls,
+            "live_client_invocations": self.live_client_invocations,
             "live_network_used": self.live_network_used,
             "dispatcher_claim_won": self.dispatcher_claim_won,
             "dispatcher_claim_status": self.dispatcher_claim_status,

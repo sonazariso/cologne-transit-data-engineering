@@ -97,13 +97,31 @@ def build_simulation(
     scenario: str = "all-success",
     at_utc: datetime | None = None,
 ) -> tuple[Collector, FakeMddClient, SQLitePersistence, datetime]:
+    """Build an offline simulation and transfer persistence ownership.
+
+    Callers that use this lower-level factory must close the returned
+    ``SQLitePersistence``. Use ``run_simulation`` when the result-only helper
+    should own and close the state automatically.
+    """
+
     if scenario not in SCENARIO_NAMES:
         raise ValueError(f"unknown simulation scenario: {scenario}")
     now = (at_utc or datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)).astimezone(timezone.utc)
     client, provider = _client_for(scenario, manifest)
     persistence: SQLitePersistence = SQLitePersistence(state_path)
     persistence.materialize_manifest(manifest)
-    persistence.set_shared_usage(month_key=now.strftime("%Y-%m"))
+    persistence.set_shared_usage(
+        month_key=now.strftime("%Y-%m"),
+        confirmed_provider_attempts=provider.snapshot.confirmed_provider_attempts,
+        reserved_shared_usage=provider.snapshot.reserved_shared_usage,
+        projected_non_retry_attempts=provider.snapshot.projected_non_retry_attempts,
+        conservative_live_attempts=provider.snapshot.conservative_live_attempts,
+        live_client_invocations=provider.snapshot.live_client_invocations,
+        http_responses_received=provider.snapshot.http_responses_received,
+        provider_quota_unknown_attempts=provider.snapshot.provider_quota_unknown_attempts,
+        state_available=provider.snapshot.state_available,
+        source=provider.snapshot.source,
+    )
     effective_persistence: Any = FailingSnapshotPersistence(persistence) if scenario == "persistence-failure" else persistence
     if scenario == "heartbeat-budget-initial-skip":
         now = now.replace(minute=4, second=59, microsecond=999000)
@@ -113,7 +131,7 @@ def build_simulation(
         manifest=manifest,
         persistence=effective_persistence,
         mdd_client=client,
-        quota_guard=QuotaGuard(provider, reservation_scope="OFFLINE_SIMULATION"),
+        quota_guard=QuotaGuard(persistence, reservation_scope="OFFLINE_SIMULATION"),
         safety_margin_seconds=5.0,
         sleep_fn=lambda _seconds: None,
     )
@@ -127,7 +145,36 @@ def run_simulation(
     scenario: str = "all-success",
     at_utc: datetime | None = None,
 ) -> dict[str, Any]:
+    """Run an owned simulation and always close its SQLite state.
+
+    ``build_simulation`` intentionally transfers persistence ownership to its
+    caller for interactive/test use. This convenience function owns the
+    internally created instance and therefore closes it on success or error.
+    """
+
     collector, client, persistence, now = build_simulation(manifest, state_path, scenario=scenario, at_utc=at_utc)
+    try:
+        return _run_simulation_context(
+            manifest=manifest,
+            scenario=scenario,
+            collector=collector,
+            client=client,
+            persistence=persistence,
+            now=now,
+        )
+    finally:
+        persistence.close()
+
+
+def _run_simulation_context(
+    *,
+    manifest: RuntimeManifest,
+    scenario: str,
+    collector: Collector,
+    client: FakeMddClient,
+    persistence: SQLitePersistence,
+    now: datetime,
+) -> dict[str, Any]:
     if scenario == "duplicate-bucket":
         first = collector.run_once(mode="simulate", at_utc=now, run_id="simulation-first")
         second = collector.run_once(mode="simulate", at_utc=now, run_id="simulation-duplicate")

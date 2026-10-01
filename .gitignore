@@ -1,5 +1,6 @@
 # OS / editors
 .DS_Store
+__MACOSX/
 Thumbs.db
 .vscode/
 .idea/
@@ -43,6 +44,10 @@ raw-payloads/
 bin/
 obj/
 TestResults/
+
+# Python caches
+__pycache__/
+*.pyc
 
 # PowerShell/local state
 *.clixml

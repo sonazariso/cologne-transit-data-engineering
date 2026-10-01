@@ -291,7 +291,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — PRODUCTION CUTOVER DEFERRED; COLLECTOR IMPLEMENTATION CORRECTIONS REQUIRED**.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — PRODUCTION CUTOVER DEFERRED; STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE**.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -339,8 +339,9 @@ Stage 4 semantics were approved against `VERSION__20260928_0042`; Stage 12
 selection used the later `VERSION__20260930_0053` snapshot. Parent, child-stop,
 and event-count differences are snapshot evolution, while Stage 4 identity and
 classification semantics were re-applied to Stage 12. Stage 13 is now complete
-as an explicitly approved readiness design; Stage 14 corrections are in
-progress offline while its production cutover remains deferred.
+as an explicitly approved readiness design; the Stage 14 collector
+implementation is complete offline while its production cutover remains
+deferred.
 
 ## Stage 13 — Tiered Collector Readiness — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED
 
@@ -355,7 +356,7 @@ The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 ## Stage 14 — Collector Implementation and Offline Cutover Readiness — IN PROGRESS — PRODUCTION CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
-documents the collector-first Python architecture and current correction
+documents the collector-first Python architecture and completed hardening
 package. The fixed runtime manifest
 materializes all 50 approved Stage 13 targets and verifies every persisted
 phase index against Stage 13 evidence. Pure UTC five-minute buckets reproduce
@@ -366,8 +367,8 @@ target outcomes, and durable local claim/audit behavior.
 
 `plan`, `dry-run`, and `simulate` are offline-safe; `live` is explicitly
 blocked until production persistence and safety state exist. SQLite is
-disposable development infrastructure only. The implementation status remains
-`COLLECTOR IMPLEMENTATION — CORRECTIONS REQUIRED`. The final PostgreSQL adapter and
+disposable development infrastructure only. The implementation status is
+`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. The final PostgreSQL adapter and
 host, production SamplingTargetId materialization, real sampling-era cutover
 timestamp, deployment/scheduler activation, controlled live dry-run, actual
 Tiered50 activation, and post-activation validation are deferred. Stage 15

@@ -8,7 +8,7 @@ Overall Stage 14 status:
 
 Implementation status:
 
-`COLLECTOR IMPLEMENTATION — CORRECTIONS REQUIRED`
+`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
 The implementation closeout is deliberately narrower than a production
 cutover. The final PostgreSQL host/runtime, production persistence adapter,
@@ -17,7 +17,7 @@ platform, controlled live dry-run, Tiered50 activation, and post-activation
 validation remain open work. Stage 15 remains `NOT STARTED`.
 
 This document records the Stage 14 Python collector implementation requested
-by S73. It does not reopen the approved Stage 13 panel, tiers, cadence, result
+by S73 and hardened by S74. It does not reopen the approved Stage 13 panel, tiers, cadence, result
 limits, retry boundary, concurrency, or phase assignments.
 
 ## Strategy and boundaries
@@ -52,7 +52,7 @@ The implementation is under `src/cologne_transit_collector/`:
 | `request.py` | Approved TRIAS 1.2 arrival StopEvent XML request builder |
 | `transport.py` | Explicitly opted-in standard-library HTTP client plus fake/fixture clients |
 | `trias.py` | Source-faithful JSON/XML parser separated from transport and persistence |
-| `quota.py` | Shared-credential initial-request and automatic-retry policy |
+| `quota.py` | Shared-credential policy and durable permit lifecycle |
 | `persistence.py` | Disposable SQLite durability, claims, audit, snapshots, and usage accounting |
 | `collector.py` | One-heartbeat dispatcher, cap-2 execution, retry/deadline/failure isolation |
 | `simulation.py` | Deterministic fault-injection scenarios |
@@ -128,6 +128,24 @@ when safe shared-credential state is unavailable. The local provider can be
 in-memory or SQLite-backed for simulation; it does not assume Tiered50 is the
 only user of the credential.
 
+Each authorized attempt has an explicit permit lifecycle:
+
+1. `PENDING_AUTHORIZATION` reserves headroom before the transport boundary;
+2. `RELEASED_NO_NETWORK` records credential/request-contract or offline
+   completion before any network operation;
+3. `CONSERVATIVE_LIVE_ATTEMPT` permanently protects headroom when a live
+   network invocation occurred without an HTTP response and provider quota is
+   unknown; or
+4. `HTTP_PROVIDER_ATTEMPT_CONFIRMED` records a confirmed provider HTTP attempt
+   exactly once.
+
+SQLite finalizes the permit and records the HTTP-attempt metadata in one
+transaction. A pending live permit is never released between opener
+invocation and durable accounting. The accounting keeps client-side live
+invocations, HTTP responses, confirmed provider attempts, provider-quota
+unknown failures, and conservative live-attempt protection distinct. Fixture
+and simulation calls finalize as no-network and cannot become provider usage.
+
 ## Persistence port and local backend
 
 The backend-neutral persistence port covers target mapping, atomic dispatcher
@@ -155,6 +173,15 @@ claims each target immediately before worker submission rather than
 pre-claiming the full due set. A claimed/running row remains observable after a
 crash and is not blindly re-executed on restart. Local parsed snapshots contain
 approved source-faithful fields only; raw MDD payloads are not persisted.
+
+Transport outcomes carry explicit `network_attempted` and
+`http_response_received` metadata plus a transport kind. Credential and
+request-contract preflight failures set both flags false. Opener-invoked
+DNS/TLS/connection/timeout failures set only `network_attempted` true. A live
+HTTP response sets both true. Collector metrics use these result flags rather
+than the presence of a `live_network` client attribute. `run_simulation` owns
+and closes its internal SQLite instance in a `finally` block; callers of
+`build_simulation` own the returned persistence object and must close it.
 
 SQLite state is disposable local development state under `.local/` and is
 ignored by Git. It is not a PostgreSQL schema, production database, or
@@ -207,6 +234,22 @@ for simulations; no production timestamp is fabricated. Legacy history is
 not deleted or rewritten. Future production materialization must retain the
 seven existing target IDs once the authoritative mapping is available and add
 only the approved new targets.
+
+## Offline closeout validation
+
+The complete repository suite passed in five consecutive runs, with 115 tests
+reported in each run. The suite was also run with `ResourceWarning` promoted to
+an error; no SQLite resource warning was emitted. The Stage 14 validator
+passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
+`[19, 18, 18, 18, 19, 18]`, 220 requests/hour, zero live-network calls, and
+Stage 15 `NOT STARTED`. Python compilation, static architecture validation,
+and `git diff --check` passed. Offline plan/simulate validation produced 19
+due targets, 19 simulated transport calls, and zero live-network calls; CLI
+`live` remained blocked before transport.
+
+No MDD request, DNS lookup, live-network operation, PostgreSQL installation or
+object creation, scheduler deployment, production target materialization,
+Power BI change, or cutover was performed.
 
 ## Deferred work required for real Stage 14 completion
 

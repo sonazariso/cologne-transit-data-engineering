@@ -54,6 +54,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-049 | 2026-09-30 | Explicit final approval of Stage 13 tiered collector readiness: fixed TIERED50_PANEL_V1, density ranks 1–8/9–28/29–50, 8/20/22 at 5/15/30 minutes, A20/B30/C30, concurrency 2, MaxAttempts=2 with one approved transient retry, 10% retry reserve, exact quota guardrail, phase sequence 19/18/18/18/19/18, and atomic overlap contract | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 | D-050 | 2026-09-30 | Stage 13 post-closeout contract hardening: separate normal-observed timing from degraded heartbeat-budget feasibility, correct phase assignment to source_parent_station_id / parent StopPointRef, clarify design-time versus production phase-index materialization, and restore critical offline regressions without changing approved production values | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 | D-051 | 2026-09-30 | Stage 14 collector-first implementation: implement a Python cross-platform scheduler-neutral collector with minimal runtime dependencies, remove future architectural dependence on Windows/VM-specific execution, defer PostgreSQL host/runtime and production cutover, keep the collector persistence-neutral, and permit SQLite only as disposable local development durability | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-052 | 2026-10-01 | S73/S74 Stage 14 collector hardening: correct durable dispatcher and just-in-time target claims, preserve parser/RecordedAtTime retention, finalize quota permits atomically across no-network, conservative-live, and confirmed-provider states, add explicit transport safety metadata, preserve Legacy7 lineage, correct the final quota-attempt lifecycle, and close owned SQLite simulation resources | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1174,3 +1175,37 @@ deployment platform and final safety margin; execute an authorized live
 dry-run; activate Tiered50; and run post-activation smoke/continuity/quota
 validation. These are explicit deferrals, not defects in the offline
 implementation.
+
+## D-052 — Stage 14 Collector Hardening and Final Offline Closeout
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S73's durable dispatcher claim correction and just-in-time target claims remain
+the successful foundation: the dispatcher claim is keyed by panel version and
+logical due bucket, duplicate bucket invocations issue zero target transports,
+and target claims are made immediately before submission. D-052 preserves the
+exact 50-target manifest, Legacy7 lineage IDs 1 through 7, 43 new targets with
+null production IDs, all fixed Stage 13 phase/tier/cadence/result/concurrency
+values, and stale/incomplete claim visibility without historical replay.
+
+The parser hardening remains source-faithful and append-only. JSON and XML
+normalize equivalently, and nullable lexical `RecordedAtTime` values remain
+retained for PREVIOUS/THIS/ONWARD arrival/departure contexts without synthesis.
+
+Quota authorization now has a durable pending lifecycle followed by exactly one
+of no-network release, conservative live-attempt consumption, or confirmed
+provider HTTP-attempt confirmation. The finalization is committed with the
+attempt audit, so a live permit cannot be reused between network invocation and
+accounting. Client-side live invocation, HTTP response receipt, confirmed
+provider attempt, provider-quota-unknown transport failure, and conservative
+quota protection remain distinct. Credential/request-contract failures and
+simulation calls do not consume provider or conservative live headroom.
+
+Transport results explicitly report whether a network operation was attempted
+and whether an HTTP response was received; metrics use those facts rather than
+the client class. The owned `run_simulation` path closes SQLite in all outcomes,
+while `build_simulation` documents caller ownership. The closeout remains
+offline-only: no PostgreSQL objects, deployment, live dry-run, MDD request,
+DNS activity, production target materialization, Power BI change, or cutover
+was performed.

@@ -2,16 +2,27 @@
 
 ## Unreleased
 
+Earlier Stage 13 entries retain their historical as-of wording; the current
+Stage 14 status is recorded in the entries below.
+
 ### Added
 - Stage 14 collector-first implementation: added the cross-platform Python
   collector package, fixed `TIERED50_PANEL_V1` runtime manifest, pure UTC
   five-minute due-target engine, cap-2 dispatcher, approved retry/deadline and
   shared-credential quota policies, TRIAS client/parser ports, disposable
   SQLite claim/audit backend, restart/crash visibility, and deterministic
-  offline fault-injection harness. Overall Stage 14 remains
-  `IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER
-  DEFERRED`; no PostgreSQL, scheduler, deployment, target activation, live
+  offline fault-injection harness. Collector implementation is now
+  `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`; overall Stage 14 remains
+  `IN PROGRESS — PRODUCTION CUTOVER DEFERRED`; no PostgreSQL, scheduler, deployment, target activation, live
   MDD, or DNS activity was performed.
+- Stage 14 S74 hardening: completed the durable quota-permit lifecycle with
+  atomic attempt/finalization transactions, separated confirmed provider HTTP
+  attempts from conservative live-attempt protection and provider-quota-unknown
+  failures, added explicit transport-attempt metadata, corrected live-network
+  metrics, closed owned simulation SQLite state deterministically, and added
+  retry/initial boundary concurrency regressions. The 50-target manifest,
+  Legacy7 lineage, Stage 13 policy values, dispatcher claims, parser retention,
+  and RecordedAtTime evidence remain unchanged.
 - Stage 13 final offline contract-consistency correction: restored the explicit
   historical/evaluated 10/20/20 @ 5/15/30 plan (240/hour and 205,444 for the
   31-day 10% comparison), kept it distinct from the approved 8/20/22 plan,

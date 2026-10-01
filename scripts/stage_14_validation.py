@@ -62,6 +62,12 @@ def run_checks() -> dict[str, object]:
     manifest = load_default_manifest(ROOT)
     reconciliation = schedule_reconciliation(manifest.targets)
     errors = architecture_check()
+    if len(manifest.targets) != 50:
+        errors.append("manifest target count is not 50")
+    if len(manifest.legacy7_targets) != 7:
+        errors.append("manifest Legacy7 count is not 7")
+    if len(manifest.new_tiered50_targets) != 43:
+        errors.append("manifest new-target count is not 43")
     if reconciliation["super_cycle_counts"] != (19, 18, 18, 18, 19, 18):
         errors.append("schedule distribution differs from Stage 13")
     if reconciliation["super_cycle_total"] != 110 or reconciliation["requests_per_hour"] != 220:
@@ -80,8 +86,8 @@ def run_checks() -> dict[str, object]:
     except (OSError, ValueError) as exc:
         errors.append(f"TRIAS fixture validation failed: {type(exc).__name__}")
     stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
-    if "COLLECTOR IMPLEMENTATION — CORRECTIONS REQUIRED" not in stage14_doc:
-        errors.append("Stage 14 implementation status is not correction-required")
+    if "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE" not in stage14_doc:
+        errors.append("Stage 14 implementation status is not complete")
     if "IN PROGRESS — PRODUCTION CUTOVER DEFERRED" not in stage14_doc:
         errors.append("Stage 14 overall status is not production-cutover deferred")
     return {

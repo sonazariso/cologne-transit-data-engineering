@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import errno
+import gc
 import json
 import os
 import socket
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -20,11 +22,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cologne_transit_collector.collector import Collector
-from cologne_transit_collector.domain import HttpResponse
+from cologne_transit_collector.domain import HttpResponse, TransportFailure
 from cologne_transit_collector.manifest import LEGACY7_SAMPLING_TARGET_IDS, load_default_manifest
 from cologne_transit_collector.persistence import SQLitePersistence
-from cologne_transit_collector.quota import InMemoryUsageProvider, QuotaGuard
+from cologne_transit_collector.quota import (
+    CONSERVATIVE_LIVE_ATTEMPT,
+    HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+    RELEASED_NO_NETWORK,
+    InMemoryUsageProvider,
+    QuotaGuard,
+    UsageSnapshot,
+)
 from cologne_transit_collector.schedule import bucket_for
+from cologne_transit_collector.simulation import run_simulation
 from cologne_transit_collector.transport import (
     CREDENTIAL_FORMAT_INVALID,
     CREDENTIAL_MISSING,
@@ -361,6 +371,9 @@ class Stage14CorrectionTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             missing = client.fetch(target, request_timestamp_utc=AT, timeout_seconds=30, attempt_number=1)
         self.assertEqual(missing.category, CREDENTIAL_MISSING)
+        self.assertFalse(missing.network_attempted)
+        self.assertFalse(missing.http_response_received)
+        self.assertTrue(missing.live_client_invocation)
         self.assertEqual(len(calls), 0)
         with mock.patch.dict(os.environ, {"MDD_API_KEY": "bad\nkey"}, clear=True):
             malformed = client.fetch(target, request_timestamp_utc=AT, timeout_seconds=30, attempt_number=1)
@@ -369,6 +382,9 @@ class Stage14CorrectionTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MDD_API_KEY": "safe-test-key"}, clear=True):
             redirected = client.fetch(target, request_timestamp_utc=AT, timeout_seconds=30, attempt_number=1)
         self.assertEqual(redirected.status_code, 302)
+        self.assertTrue(redirected.network_attempted)
+        self.assertTrue(redirected.http_response_received)
+        self.assertTrue(redirected.live_client_invocation)
         self.assertEqual(len(calls), 1)
         self.assertEqual(_transport_category(URLError(socket.gaierror("no such host"))), "DNS_RESOLUTION_FAILED")
         self.assertEqual(_transport_category(URLError(ConnectionRefusedError())), "CONNECTION_REFUSED")
@@ -393,6 +409,201 @@ class Stage14CorrectionTests(unittest.TestCase):
         }
         self.assertEqual(actual, LEGACY7_SAMPLING_TARGET_IDS)
         self.assertTrue(all(target.legacy_sampling_target_id is None for target in self.manifest.new_tiered50_targets))
+
+    def test_in_memory_permits_remain_consumed_at_retry_and_initial_boundaries(self) -> None:
+        for decision_kind, starting_usage, expected_boundary in (
+            ("retry", 207_499, 207_500),
+            ("initial", 209_999, 210_000),
+        ):
+            with self.subTest(decision_kind=decision_kind):
+                provider = InMemoryUsageProvider(
+                    UsageSnapshot(confirmed_provider_attempts=starting_usage)
+                )
+                guards = [QuotaGuard(provider), QuotaGuard(provider)]
+                decisions = []
+                barrier = threading.Barrier(2)
+
+                def authorize(guard: QuotaGuard) -> None:
+                    barrier.wait()
+                    decisions.append(
+                        guard.allow_retry(at_utc=AT)
+                        if decision_kind == "retry"
+                        else guard.allow_initial(at_utc=AT)
+                    )
+
+                threads = [threading.Thread(target=authorize, args=(guard,)) for guard in guards]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                self.assertEqual(sum(decision.allowed for decision in decisions), 1)
+                permitted = next(decision for decision in decisions if decision.allowed)
+                self.assertEqual(permitted.boundary, expected_boundary)
+                QuotaGuard(provider).finalize_conservative(permitted)
+                follow_up = (
+                    QuotaGuard(provider).allow_retry(at_utc=AT)
+                    if decision_kind == "retry"
+                    else QuotaGuard(provider).allow_initial(at_utc=AT)
+                )
+                self.assertFalse(follow_up.allowed)
+                usage = provider.current_month_usage(at_utc=AT)
+                self.assertEqual(usage["confirmed_provider_attempts"], starting_usage)
+                self.assertEqual(usage["conservative_live_attempts"], 1)
+                self.assertLessEqual(
+                    usage["confirmed_provider_attempts"]
+                    + usage["conservative_live_attempts"],
+                    expected_boundary,
+                )
+
+    def test_permit_finalization_distinguishes_http_unknown_no_network_and_simulation(self) -> None:
+        provider = InMemoryUsageProvider()
+
+        confirmed = QuotaGuard(provider).allow_initial(at_utc=AT)
+        self.assertTrue(confirmed.allowed)
+        QuotaGuard(provider).finalize_http_response(confirmed)
+        QuotaGuard(provider).finalize_http_response(confirmed)
+        self.assertEqual(provider.snapshot.confirmed_provider_attempts, 1)
+        self.assertEqual(provider.snapshot.http_responses_received, 1)
+
+        unknown = QuotaGuard(provider).allow_initial(at_utc=AT)
+        self.assertTrue(unknown.allowed)
+        QuotaGuard(provider).finalize_conservative(unknown)
+        self.assertEqual(provider.snapshot.confirmed_provider_attempts, 1)
+        self.assertEqual(provider.snapshot.conservative_live_attempts, 1)
+        self.assertEqual(provider.snapshot.provider_quota_unknown_attempts, 1)
+
+        credential = QuotaGuard(provider).allow_initial(at_utc=AT)
+        self.assertTrue(credential.allowed)
+        QuotaGuard(provider).finalize_no_network(credential)
+        self.assertEqual(provider.snapshot.confirmed_provider_attempts, 1)
+        self.assertEqual(provider.snapshot.conservative_live_attempts, 1)
+        self.assertEqual(provider.current_month_usage(at_utc=AT)["reserved_shared_usage"], 0)
+
+        before = provider.current_month_usage(at_utc=AT)
+        for _ in range(3):
+            simulated = QuotaGuard(provider).allow_initial(at_utc=AT)
+            self.assertTrue(simulated.allowed)
+            QuotaGuard(provider).finalize_no_network(simulated)
+        after = provider.current_month_usage(at_utc=AT)
+        for key in (
+            "confirmed_provider_attempts",
+            "conservative_live_attempts",
+            "http_responses_received",
+            "provider_quota_unknown_attempts",
+        ):
+            self.assertEqual(after[key], before[key])
+
+    def test_sqlite_finalization_is_atomic_and_records_explicit_attempt_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            persistence = self._new_state(directory, "lifecycle.sqlite3")
+            target_rows = iter(self.manifest.targets[:4])
+
+            def record(target, result, *, run_id: str):
+                persistence.start_collector_run(
+                    run_id=run_id,
+                    panel_version=self.manifest.panel_version,
+                    logical_due_bucket=bucket_for(AT).index,
+                    mode="test",
+                    started_at=AT,
+                )
+                audit_id = persistence.start_target_audit(
+                    run_id=run_id,
+                    target=target,
+                    logical_due_bucket=bucket_for(AT).index,
+                    started_at=AT,
+                )
+                decision = QuotaGuard(persistence).allow_initial(at_utc=AT)
+                self.assertTrue(decision.allowed)
+                completed = AT
+                common = {
+                    "audit_id": audit_id,
+                    "attempt_number": 1,
+                    "started_at": AT,
+                    "completed_at": completed,
+                    "retry_decision": "NO_RETRY",
+                    "transport_kind": getattr(result, "transport_kind", "UNKNOWN"),
+                    "quota_permit_id": decision.permit_id,
+                    "quota_finalization": (
+                        HTTP_PROVIDER_ATTEMPT_CONFIRMED
+                        if result.http_response_received and result.network_attempted
+                        else CONSERVATIVE_LIVE_ATTEMPT
+                        if result.network_attempted
+                        else RELEASED_NO_NETWORK
+                    ),
+                    "finalized_at": completed,
+                }
+                if isinstance(result, HttpResponse):
+                    persistence.record_http_attempt_and_finalize_quota(response=result, **common)
+                else:
+                    persistence.record_http_attempt_and_finalize_quota(transport_failure=result, **common)
+
+            target = next(target_rows)
+            record(
+                target,
+                HttpResponse(200, b"{}", {}, network_attempted=True, http_response_received=True, transport_kind="LIVE_CLIENT", live_client_invocation=True),
+                run_id="confirmed",
+            )
+            target = next(target_rows)
+            record(
+                target,
+                TransportFailure("TIMEOUT", "sanitized", network_attempted=True, transport_kind="LIVE_CLIENT", live_client_invocation=True),
+                run_id="unknown",
+            )
+            target = next(target_rows)
+            record(
+                target,
+                TransportFailure("CREDENTIAL_MISSING", "credential preflight failed", transport_kind="LIVE_CLIENT", live_client_invocation=True),
+                run_id="credential",
+            )
+            target = next(target_rows)
+            record(
+                target,
+                HttpResponse(200, b"{}", {}, network_attempted=False, http_response_received=True, transport_kind="SIMULATED_TRANSPORT"),
+                run_id="simulation",
+            )
+
+            attempts = persistence.fetch_attempts()
+            self.assertEqual([row["provider_attempt_confirmed"] for row in attempts], [1, 0, 0, 0])
+            self.assertEqual([row["network_attempted"] for row in attempts], [1, 1, 0, 0])
+            self.assertEqual([row["http_response_received"] for row in attempts], [1, 0, 0, 1])
+            self.assertEqual([row["conservative_quota_accounted"] for row in attempts], [0, 1, 0, 0])
+            self.assertEqual([row["live_client_invocation"] for row in attempts], [1, 1, 1, 0])
+            statuses = [row["status"] for row in persistence.fetch_quota_permits()]
+            self.assertEqual(
+                sorted(statuses),
+                sorted([
+                    HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+                    CONSERVATIVE_LIVE_ATTEMPT,
+                    RELEASED_NO_NETWORK,
+                    RELEASED_NO_NETWORK,
+                ]),
+            )
+            usage = persistence.current_month_usage(at_utc=AT)
+            self.assertEqual(usage["confirmed_provider_attempts"], 1)
+            self.assertEqual(usage["http_responses_received"], 1)
+            self.assertEqual(usage["conservative_live_attempts"], 1)
+            self.assertEqual(usage["provider_quota_unknown_attempts"], 1)
+            self.assertEqual(usage["live_client_invocations"], 3)
+            self.assertEqual(usage["reserved_shared_usage"], 0)
+            persistence.close()
+
+    def test_run_simulation_closes_owned_sqlite_without_resource_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", ResourceWarning)
+                result = run_simulation(
+                    self.manifest,
+                    Path(directory) / "owned.sqlite3",
+                    scenario="all-success",
+                    at_utc=AT,
+                )
+                gc.collect()
+            self.assertEqual(result["status"], "COMPLETE")
+            self.assertEqual(
+                [warning for warning in caught if "database" in str(warning.message).lower()],
+                [],
+            )
 
 
 if __name__ == "__main__":
