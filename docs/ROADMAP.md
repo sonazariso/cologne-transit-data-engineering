@@ -374,11 +374,33 @@ scope, Attribute/GeneralAttribute and affected-entity evidence, and
 path-based parser-gap coverage. The final PostgreSQL adapter and host,
 production SamplingTargetId materialization, real sampling-era cutover
 timestamp, deployment/scheduler activation, controlled live dry-run, actual
-Tiered50 activation, and post-activation validation are deferred. Stage 15
-remains **NOT STARTED**.
+Tiered50 activation, and post-activation validation are deferred. Stage 15B
+live validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A
+readiness is in progress below.
 
 ## Stage 15 — Post-Cutover Validation
-Monitor from day one and define when the new sampling era has enough data for broader interpretation.
+
+Stage 15
+remains **NOT STARTED** as a live post-cutover stage; its pre-cutover
+readiness work is separately tracked below as Stage 15A.
+
+### Stage 15A — Post-Cutover Validation Readiness — IN PROGRESS
+
+The [Stage 15 readiness document](stages/15-post-cutover-validation-readiness.md)
+and version-controlled [validation contract](../config/stage15_validation_contract.json)
+define the offline-safe, backend-neutral analyzer that can be prepared before
+activation. It reconciles approved expected target/bucket work with actual
+read-only evidence and reports hard invariants separately from policy-pending
+metrics. The analyzer does not claim buckets, mutate collector state, finalize
+quota permits, send transport, or infer missing evidence as success.
+
+### Stage 15B — Real Post-Cutover Validation — NOT STARTED — AWAITS TIERED50 CUTOVER
+
+Stage 15B will monitor from the first real Tiered50 bucket and establish when
+the new sampling era has enough evidence for broader interpretation. It cannot
+start until Tiered50 is actually activated, real production target IDs and a
+real sampling-era transition timestamp exist, and post-cutover evidence is
+available. No live Stage 15 claim is made in Stage 15A.
 
 ## Stage 16 — Revisit Timing/Data Coverage Issues
 Re-analyse unavailable timing, `RecordedAtTime` coverage, representative

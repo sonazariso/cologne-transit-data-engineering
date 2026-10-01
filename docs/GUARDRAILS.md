@@ -381,7 +381,8 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 116. Stage 14's authoritative overall status is `IN PROGRESS — PRODUCTION
      CUTOVER DEFERRED`; its implementation status is `STAGE 14 COLLECTOR
      IMPLEMENTATION COMPLETE`. This is an offline implementation closeout,
-     not a completed production cutover, and Stage 15 remains `NOT STARTED`.
+     not a completed production cutover. Stage 15A readiness is in progress;
+     Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
      collector package. Its core must not import PostgreSQL/SQL-driver modules,
      platform-specific APIs, shell orchestration, or hardcoded platform paths.
@@ -434,3 +435,60 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      adapter selection, production target-ID materialization, real sampling-era
      timestamp, final heartbeat safety margin, deployment platform, authorized
      live dry-run, Tiered50 activation, and post-activation smoke validation.
+
+## Stage 15A validation-readiness guardrails
+
+127. Stage 15A is offline validation-framework/readiness work. The authoritative
+     statuses are Stage 14 overall `IN PROGRESS — PRODUCTION CUTOVER DEFERRED`,
+     Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15
+     readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS
+     TIERED50 CUTOVER`.
+128. Stage 15A must not start live Stage 15, issue MDD requests, perform DNS or
+     live-network activity, install/configure PostgreSQL, create production
+     database objects, materialize the 43 new production targets, create a
+     sampling-era cutover timestamp, deploy a scheduler, modify Power BI, or
+     alter Stage 12/13 evidence.
+129. The version-controlled Stage 15 validation contract may encode automatic
+     PASS/FAIL only for already approved invariants. Design-only production
+     checks are `NOT_APPLICABLE` or `INSUFFICIENT_EVIDENCE` when their evidence
+     is absent; absence is never a PASS.
+130. Stage 15 validation must use a backend-neutral read-only evidence adapter.
+     The validator must not claim buckets, mutate target or dispatcher claims,
+     finalize quota permits, write parsed snapshots, repair stale state, or
+     send transport requests. SQLite is a read-only development evidence
+     adapter, not a production database implementation.
+131. Expected target/bucket work is derived only from the approved manifest,
+     approved schedule engine, and logical bucket identity. Missing audit
+     evidence is `EXPECTED_BUT_MISSING`, not success. Duplicate dispatcher and
+     target-claim events remain explicit auditable classifications, and
+     unexpected execution remains visible as `UNEXPECTED_EXECUTION`.
+132. Dispatcher validation must preserve one durable owner per panel/bucket,
+     make duplicate invocations observable, prove zero duplicate target
+     transport when a duplicate sample exists, and keep incomplete/stale
+     claims visible. Target validation must preserve at most one winning claim
+     per target/bucket and must diagnose rather than repair stale claims.
+133. Attempt/retry validation must hard-fail attempt number greater than 2,
+     more than one automatic retry, retry after deterministic non-retryable
+     categories or 401/403, and duplicate target transport. Retry-rate
+     percentages remain policy pending and must not be given an invented
+     threshold.
+134. Quota validation must separately report scheduled logical requests, live
+     client invocations, network attempts, HTTP responses, confirmed provider
+     attempts, conservative provider-quota-unknown attempts, and active
+     reservations. Simulation/offline attempts must never count as provider
+     usage. Unavailable quota state must be explicit rather than treated as
+     zero.
+135. Stage 15 metrics may report measured rates, percentages, distributions,
+     parser gaps, zero-result frequency, error categories, and deterministic
+     duration statistics, but no failure-rate, retry-rate, timeout-rate,
+     coverage, parser-gap, or heartbeat-duration acceptance threshold may be
+     invented. The final persistence/cleanup safety margin remains deferred.
+136. A parser gap is measured evidence and is not automatically fatal. Zero
+     returned events are not automatically erroneous. `RecordedAtTime`, source
+     identity, sampling era, and Legacy7 lineage remain source-faithful and
+     nullable where evidence is absent.
+137. Stage 15B may validate a real era transition, Legacy7 history/identity
+     continuity, delete/reinsert continuity, and post-cutover Tiered50
+     attribution only after actual Tiered50 activation and a real production
+     sampling-era timestamp exist. Stage 15A must never infer or fabricate
+     either.

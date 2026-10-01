@@ -6,6 +6,15 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- Stage 15A post-cutover validation readiness: added the version-controlled
+  validation contract, read-only backend-neutral analyzer, SQLite evidence
+  adapter, expected-vs-actual target/bucket reconciliation, dispatcher and
+  claim diagnostics, structural retry/quota checks, policy-pending quality and
+  duration metrics, continuity readiness checks, offline simulation support,
+  and regression tests. Stage 15B live post-cutover validation remains
+  `NOT STARTED — AWAITS TIERED50 CUTOVER`; no MDD, DNS, live-network,
+  PostgreSQL, scheduler, target activation, sampling-era timestamp, or Power
+  BI activity was performed.
 - Stage 14 S76 final source-contract retention correction: separated
   `JourneyRef` / `VehicleJourneyRef` / `DatedVehicleJourneyRef` and
   `DirectionRef` / `Direction`, retained candidate identity extensions and

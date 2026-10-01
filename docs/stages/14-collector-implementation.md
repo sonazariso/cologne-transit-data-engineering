@@ -14,7 +14,8 @@ The implementation closeout is deliberately narrower than a production
 cutover. The final PostgreSQL host/runtime, production persistence adapter,
 real target materialization, sampling-era cutover timestamp, deployment
 platform, controlled live dry-run, Tiered50 activation, and post-activation
-validation remain open work. Stage 15 remains `NOT STARTED`.
+validation remain open work. Stage 15A readiness is now `IN PROGRESS`; Stage
+15B live post-cutover validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 
 This document records the Stage 14 Python collector implementation requested
 by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
@@ -271,7 +272,9 @@ reported in each run. The suite was also run with `ResourceWarning` promoted to
 an error; no SQLite resource warning was emitted. The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
 `[19, 18, 18, 18, 19, 18]`, 220 requests/hour, zero live-network calls, and
-Stage 15 `NOT STARTED`. Python compilation, static architecture validation,
+Stage 15B live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`; Stage 15A
+readiness is tracked in the [Stage 15 readiness document](15-post-cutover-validation-readiness.md).
+Python compilation, static architecture validation,
 and `git diff --check` passed. The parser regression coverage includes
 call-scope isolation, event/service-operational-field grain, independent
 journey/direction identity retention, service-only identity scope,

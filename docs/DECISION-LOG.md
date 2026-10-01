@@ -57,6 +57,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-052 | 2026-10-01 | S73/S74 Stage 14 collector hardening: correct durable dispatcher and just-in-time target claims, preserve parser/RecordedAtTime retention, finalize quota permits atomically across no-network, conservative-live, and confirmed-provider states, add explicit transport safety metadata, preserve Legacy7 lineage, correct the final quota-attempt lifecycle, and close owned SQLite simulation resources | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-053 | 2026-10-01 | S75 Stage 14 source-faithful parser hardening and retry safety: remove call-to-event/service fallback, separate event/service operational fields, restore identity/display and parser-gap retention, and classify unexpected client exceptions as non-retryable `CLIENT_EXECUTION_FAILURE` | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-054 | 2026-10-01 | S76 Stage 14 final source-contract retention correction: separate JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction, retain candidate identity extensions and service-scoped identity/display fields with lineage, preserve Attribute/GeneralAttribute and affected-entity evidence, and close recognized-but-unmapped parser-gap loss | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-055 | 2026-10-01 | S77 Stage 15A post-cutover validation readiness: add a versioned validation contract, backend-neutral read-only analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality diagnostics, and offline regression coverage without starting live Stage 15 | Stage 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage 15 live NOT STARTED — AWAITS TIERED50 CUTOVER |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1293,3 +1294,35 @@ times with `ResourceWarning` promoted to an error. The Stage 14 validator,
 Python compilation, static architecture checks, and whitespace validation
 pass. No MDD, DNS, live-network, PostgreSQL, scheduler deployment, production
 cutover, or Power BI activity was performed. Stage 15 remains `NOT STARTED`.
+
+## D-055 — Stage 15A Post-Cutover Validation Readiness
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage
+15 live NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S77 establishes Stage 15A as a pre-cutover readiness iteration. The authoritative
+readiness document and machine-readable contract define the distinction between
+offline framework work and the real Stage 15B post-cutover validation. The
+contract encodes only approved panel, schedule, execution, quota, and Legacy7
+continuity invariants. Failure-rate, retry-rate, timeout-rate, coverage,
+parser-gap, and heartbeat-duration thresholds remain user-approval decisions.
+
+The reusable `cologne_transit_stage15` package consumes an evidence-adapter
+protocol. Its SQLite adapter opens the disposable Stage 14 development file in
+read-only mode; a future production evidence adapter can provide the same
+evidence vocabulary without changing validation logic. The analyzer derives
+expected due targets from the approved manifest, pure schedule engine, and
+logical bucket, and classifies actual evidence as explicit success, failure,
+skip, missing, duplicate-prevented, or unexpected execution. It separately
+reports dispatcher ownership, duplicate and stale claims, target claims,
+structural retry violations, quota dimensions and boundaries, station/tier
+coverage, deterministic duration statistics, parser/persistence outcomes, and
+sampling-era continuity readiness.
+
+No validator action claims a bucket, mutates target state, repairs claims,
+finalizes a quota permit, persists a parsed snapshot, or sends transport. No
+MDD request, DNS/live-network activity, PostgreSQL activity, production object,
+production target materialization, scheduler deployment, Power BI change, or
+real cutover timestamp was performed. Because Tiered50 has not been activated,
+Stage 15B remains not started and no post-cutover production claim is made.

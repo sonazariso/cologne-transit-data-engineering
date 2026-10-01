@@ -23,7 +23,7 @@
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
 | 14 | Collector Implementation and Controlled 50-Station Cutover | IN PROGRESS — PRODUCTION CUTOVER DEFERRED |
-| 15 | Post-Cutover Validation | NOT STARTED |
+| 15 | Post-Cutover Validation | IN PROGRESS — READINESS; LIVE NOT STARTED |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
 
@@ -398,7 +398,7 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
 - The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; production phase indexes are not yet persisted and require `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.
-- Stage 14 collector implementation is complete offline-only. The real production cutover remains deferred: PostgreSQL host/adapter/schema, production target-ID materialization, sampling-era timestamp, deployment platform, live dry-run, target activation, and post-activation validation are not performed. Stage 15 remains NOT STARTED.
+- Stage 14 collector implementation is complete offline-only. The real production cutover remains deferred: PostgreSQL host/adapter/schema, production target-ID materialization, sampling-era timestamp, deployment platform, live dry-run, target activation, and post-activation validation are not performed. Stage 15A readiness is now IN PROGRESS; Stage 15B live validation remains NOT STARTED — AWAITS TIERED50 CUTOVER.
 
 ### Stage 14 collector implementation — complete offline-only; production cutover deferred
 
@@ -410,6 +410,13 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - SQLite is disposable development durability for atomic dispatcher/target claims, duplicate prevention, run/target audit, lifecycle-finalized quota permits, explicit transport-attempt metadata, parsed snapshots, append-only RecordedAtTime evidence, stale claims, crash/restart visibility, and synthetic-only sampling-era tests. It is not a PostgreSQL implementation.
 - The offline repository suite reports 120 tests per run and passed five consecutive times with `ResourceWarning` promoted to an error; the Stage 14 validator and compilation/static checks passed.
 - No MDD request, DNS preflight, provider quota consumption, database object creation, recurring scheduling, production target activation, or real cutover timestamp was performed.
+
+### Stage 15A post-cutover validation readiness — in progress; live validation not started
+
+- **Stage 15A status:** `IN PROGRESS`. The authoritative [readiness document](stages/15-post-cutover-validation-readiness.md), [machine-readable contract](../config/stage15_validation_contract.json), read-only backend-neutral analyzer under `src/cologne_transit_stage15/`, SQLite evidence adapter, and offline regression tests are source-controlled.
+- The analyzer derives expected due targets from the approved manifest, pure schedule engine, and logical bucket, then reconciles actual audit evidence. It explicitly classifies success, failure, skip, missing evidence, duplicate invocation prevention, and unexpected execution. It diagnoses dispatcher owners, duplicate/stale claims, target claims, structural retry violations, separated quota accounting, coverage, duration statistics, parser/persistence evidence, and Legacy7/cutover readiness.
+- Policy-pending metrics have no invented thresholds. Measured rates, coverage percentages, parser gaps, zero-result frequency, error categories, and duration statistics remain `POLICY_PENDING`; missing required evidence is `INSUFFICIENT_EVIDENCE`. No PASS is emitted for absent post-cutover evidence.
+- **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`. No real Tiered50 activation, production target materialization, sampling-era timestamp, PostgreSQL activity, scheduler deployment, MDD request, DNS/live-network activity, or Power BI change occurred in this iteration.
 
 ## Post-Stage-02 validation
 
