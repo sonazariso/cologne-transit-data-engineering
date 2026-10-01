@@ -4,11 +4,11 @@
 
 Overall Stage 14 status:
 
-`IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED`
+`IN PROGRESS — PRODUCTION CUTOVER DEFERRED`
 
 Implementation status:
 
-`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
+`COLLECTOR IMPLEMENTATION — CORRECTIONS REQUIRED`
 
 The implementation closeout is deliberately narrower than a production
 cutover. The final PostgreSQL host/runtime, production persistence adapter,
@@ -17,7 +17,7 @@ platform, controlled live dry-run, Tiered50 activation, and post-activation
 validation remain open work. Stage 15 remains `NOT STARTED`.
 
 This document records the Stage 14 Python collector implementation requested
-by S72. It does not reopen the approved Stage 13 panel, tiers, cadence, result
+by S73. It does not reopen the approved Stage 13 panel, tiers, cadence, result
 limits, retry boundary, concurrency, or phase assignments.
 
 ## Strategy and boundaries
@@ -34,11 +34,10 @@ iteration. PostgreSQL remains the approved future authoritative direction,
 but host and runtime selection are deferred. SQLite is only a disposable
 local development backend.
 
-The retained Stage 12/13 evidence contains the seven Legacy7 source parent
-identities but no concrete `SamplingTargetId` values. The manifest therefore
-preserves those source identities and marks production IDs unresolved. It
-does not invent IDs for the 43 new targets or substitute local SQLite keys for
-production IDs.
+The manifest preserves the approved historical Legacy7 lineage IDs 1 through 7
+as `legacy_sampling_target_id`. These are continuity metadata only, not future
+production primary keys. Production IDs remain unresolved for all targets and
+are not invented for the 43 new targets.
 
 ## Package structure
 
@@ -117,7 +116,8 @@ to the future live dry-run gate.
 ## Quota guardrail
 
 `QuotaGuard` is injected separately from the dispatcher and accepts a shared
-usage provider. Its policy understands actual current-month attempts, shared
+usage provider. Its policy understands confirmed current-month provider
+attempts, shared
 reservations, projected non-retry consumption, the 207,500 automatic-retry
 protection boundary, the 210,000 normal operational maximum, and the 250,000
 provider ceiling.
@@ -130,12 +130,17 @@ only user of the credential.
 
 ## Persistence port and local backend
 
-The backend-neutral persistence port covers target mapping, atomic bucket
-claims, collector-run start/completion/failure/skip, target audit, HTTP
-attempt accounting, parsed snapshot persistence, quota audit, current-month
-usage, sampling-era lineage, and stale-claim visibility.
+The backend-neutral persistence port covers target mapping, atomic dispatcher
+and target claims, collector-run start/completion/failure/skip, target audit,
+HTTP attempt accounting, parsed snapshot persistence, quota audit, atomic
+quota permits, current-month usage, sampling-era lineage, and stale-claim
+visibility.
 
-SQLite uses the development claim identity:
+SQLite uses two development claim identities. The dispatcher/bucket claim is:
+
+`(panel_version, logical_due_bucket)`
+
+The target claim identity is:
 
 `(panel_version, source_parent_station_id, logical_due_bucket)`
 
@@ -143,11 +148,13 @@ The future production identity remains:
 
 `(SamplingTargetId, LogicalDueBucket)`
 
-SQLite inserts claims under a transaction with a unique key. The first
-claimant wins; duplicate claims are written to `claim_events` and issue zero
-MDD requests. A claimed/running row remains observable after a crash and is
-not blindly re-executed on restart. Local parsed snapshots contain approved
-source-faithful fields only; raw MDD payloads are not persisted.
+SQLite inserts both claim types under transactions with unique keys. The first
+dispatcher claimant wins before a target pool exists; duplicate dispatcher
+invocations are audited and issue zero MDD requests. The winning dispatcher
+claims each target immediately before worker submission rather than
+pre-claiming the full due set. A claimed/running row remains observable after a
+crash and is not blindly re-executed on restart. Local parsed snapshots contain
+approved source-faithful fields only; raw MDD payloads are not persisted.
 
 SQLite state is disposable local development state under `.local/` and is
 ignored by Git. It is not a PostgreSQL schema, production database, or
@@ -164,12 +171,15 @@ client opt-in and the CLI `live` mode remains blocked because the required
 production persistence and cutover state do not exist.
 
 The parser accepts JSON and XML, preserves nullable source timing and bay/
-stop-flag values, retains THIS/PREVIOUS/ONWARD scope counts, and keeps
-Situation references source-faithful. It does not derive RecordedAtTime,
+stop-flag values for every THIS/PREVIOUS/ONWARD call occurrence, retains source
+paths and event/call ordinals, and keeps Situation and result/application error
+references source-faithful. It does not derive RecordedAtTime,
 actual physical delay, cancellation, or platform state. Parsed snapshots are
 separate from transport and persistence. The existing raw-response policy is
 unchanged: sanitized fixtures are allowed offline; production raw payload
-retention is not enabled by this implementation.
+retention is not enabled by this implementation. The backend-neutral
+`retain_raw_evidence` hook is present for the approved future-live bounded
+forensic policy and is explicitly disabled by SQLite.
 
 ## Execution modes
 

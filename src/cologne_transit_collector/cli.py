@@ -77,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
                     for target in plan.due_targets
                 ],
                 "schedule_reconciliation": schedule_reconciliation(manifest.targets),
-                "network_calls": 0,
+                "simulated_transport_calls": 0,
+                "live_network_calls": 0,
             }, ensure_ascii=False, sort_keys=True))
             return 0
 
@@ -105,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest=manifest,
                 persistence=persistence,
                 mdd_client=FixtureMddClient(fixture),
-                quota_guard=QuotaGuard(persistence),
+                quota_guard=QuotaGuard(persistence, reservation_scope="OFFLINE_DRY_RUN"),
                 safety_margin_seconds=settings.safety_margin_seconds,
             )
             previous_handlers = {}
@@ -124,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             persistence.close()
     except LiveModeBlocked as exc:
-        print(json.dumps({"status": "BLOCKED", "reason": str(exc), "network_calls": 0}), file=sys.stderr)
+        print(json.dumps({"status": "BLOCKED", "reason": str(exc), "simulated_transport_calls": 0, "live_network_calls": 0}), file=sys.stderr)
         return 2
     except (ValueError, OSError) as exc:
         print(json.dumps({"status": "ERROR", "reason": str(exc)}), file=sys.stderr)

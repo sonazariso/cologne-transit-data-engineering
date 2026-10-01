@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
 from cologne_transit_collector.schedule import schedule_reconciliation  # noqa: E402
+from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
 
 
 BANNED_IMPORTS = {
@@ -65,9 +66,28 @@ def run_checks() -> dict[str, object]:
         errors.append("schedule distribution differs from Stage 13")
     if reconciliation["super_cycle_total"] != 110 or reconciliation["requests_per_hour"] != 220:
         errors.append("schedule total differs from Stage 13")
+    json_fixture = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.json"
+    xml_fixture = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.xml"
+    try:
+        json_snapshot = parse_trias_response(json_fixture.read_bytes(), "application/json")
+        xml_snapshot = parse_trias_response(xml_fixture.read_bytes(), "application/xml")
+        if json_snapshot.result_count != xml_snapshot.result_count:
+            errors.append("JSON/XML fixture result counts do not reconcile")
+        if len(json_snapshot.recorded_at_time_occurrences) != 6:
+            errors.append("RecordedAtTime regression fixture does not cover six contexts")
+        if len(xml_snapshot.recorded_at_time_occurrences) != 6:
+            errors.append("XML RecordedAtTime regression fixture does not cover six contexts")
+    except (OSError, ValueError) as exc:
+        errors.append(f"TRIAS fixture validation failed: {type(exc).__name__}")
+    stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
+    if "COLLECTOR IMPLEMENTATION — CORRECTIONS REQUIRED" not in stage14_doc:
+        errors.append("Stage 14 implementation status is not correction-required")
+    if "IN PROGRESS — PRODUCTION CUTOVER DEFERRED" not in stage14_doc:
+        errors.append("Stage 14 overall status is not production-cutover deferred")
     return {
         "status": "PASS" if not errors else "FAIL",
-        "network_calls": 0,
+        "simulated_transport_calls": 0,
+        "live_network_calls": 0,
         "manifest_targets": len(manifest.targets),
         "legacy7_targets": len(manifest.legacy7_targets),
         "new_tiered50_targets": len(manifest.new_tiered50_targets),

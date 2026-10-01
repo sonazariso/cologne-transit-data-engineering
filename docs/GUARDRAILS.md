@@ -378,10 +378,11 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's authoritative overall status is `IN PROGRESS — COLLECTOR
-     IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED`. The implementation
-     closeout must not be reported as a completed production cutover, and Stage
-     15 remains `NOT STARTED`.
+116. Stage 14's authoritative overall status is `IN PROGRESS — PRODUCTION
+     CUTOVER DEFERRED`; its implementation status is `COLLECTOR
+     IMPLEMENTATION — CORRECTIONS REQUIRED`. The implementation closeout must
+     not be reported as a completed production cutover, and Stage 15 remains
+     `NOT STARTED`.
 117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
      collector package. Its core must not import PostgreSQL/SQL-driver modules,
      platform-specific APIs, shell orchestration, or hardcoded platform paths.

@@ -43,6 +43,11 @@ def _safe_error_category(value: Any) -> str | None:
         "QUOTA_DENIED",
         "SHUTDOWN",
         "CLAIM_DUPLICATE",
+        "CREDENTIAL_MISSING",
+        "CREDENTIAL_FORMAT_INVALID",
+        "REQUEST_CONTRACT_FAILURE",
+        "RESPONSE_SIZE_EXCEEDED",
+        "SANITIZED_ERROR",
     }
     return text if text in allowed else "SANITIZED_ERROR"
 
@@ -56,12 +61,21 @@ class ClaimResult:
     event_id: int
 
 
+@dataclass(frozen=True)
+class DispatcherClaimResult:
+    won: bool
+    claim_key: tuple[str, int]
+    existing_status: str | None
+    claim_token: str | None
+    event_id: int
+
+
 class SQLitePersistence:
     """Durable behavior test backend; not a production schema or adapter."""
 
     is_production_ready = False
     is_disposable_development_backend = True
-    claim_identity_kind = "development claim identity: (panel_version, source_parent_station_id, logical_due_bucket)"
+    claim_identity_kind = "development dispatcher identity: (panel_version, logical_due_bucket); target identity adds source_parent_station_id"
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).expanduser().resolve()
@@ -90,6 +104,7 @@ class SQLitePersistence:
                 continuity_classification TEXT NOT NULL,
                 sampling_era TEXT NOT NULL,
                 production_sampling_target_id TEXT,
+                legacy_sampling_target_id INTEGER,
                 PRIMARY KEY (panel_version, source_parent_station_id)
             );
             CREATE TABLE IF NOT EXISTS collector_runs (
@@ -101,6 +116,26 @@ class SQLitePersistence:
                 completed_at_utc TEXT,
                 status TEXT,
                 summary_json TEXT
+            );
+            CREATE TABLE IF NOT EXISTS dispatcher_claims (
+                panel_version TEXT NOT NULL,
+                logical_due_bucket INTEGER NOT NULL,
+                collector_run_id TEXT NOT NULL,
+                claim_token TEXT NOT NULL,
+                claimed_at_utc TEXT NOT NULL,
+                stale_after_utc TEXT NOT NULL,
+                completed_at_utc TEXT,
+                status TEXT NOT NULL,
+                PRIMARY KEY (panel_version, logical_due_bucket)
+            );
+            CREATE TABLE IF NOT EXISTS dispatcher_claim_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                panel_version TEXT NOT NULL,
+                logical_due_bucket INTEGER NOT NULL,
+                collector_run_id TEXT NOT NULL,
+                event_at_utc TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                existing_status TEXT
             );
             CREATE TABLE IF NOT EXISTS target_claims (
                 panel_version TEXT NOT NULL,
@@ -163,6 +198,8 @@ class SQLitePersistence:
                 retry_decision TEXT,
                 retry_after_seconds REAL,
                 duration_ms REAL NOT NULL,
+                transport_kind TEXT NOT NULL DEFAULT 'UNKNOWN',
+                provider_attempt_confirmed INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id)
             );
             CREATE TABLE IF NOT EXISTS parsed_snapshots (
@@ -185,8 +222,38 @@ class SQLitePersistence:
                 decision_json TEXT NOT NULL,
                 recorded_at_utc TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS quota_permits (
+                permit_id TEXT PRIMARY KEY,
+                month_key TEXT NOT NULL,
+                decision_kind TEXT NOT NULL,
+                reservation_scope TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                boundary INTEGER NOT NULL,
+                reserved_at_utc TEXT NOT NULL,
+                released_at_utc TEXT,
+                status TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS recorded_at_time_evidence (
+                evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_id INTEGER NOT NULL,
+                snapshot_id INTEGER NOT NULL,
+                panel_version TEXT NOT NULL,
+                source_parent_station_id TEXT NOT NULL,
+                logical_due_bucket INTEGER NOT NULL,
+                event_ordinal INTEGER,
+                result_id TEXT,
+                call_scope TEXT NOT NULL,
+                call_ordinal INTEGER NOT NULL,
+                timing_context TEXT NOT NULL,
+                recorded_at_time TEXT NOT NULL,
+                source_path TEXT,
+                observed_at_utc TEXT NOT NULL,
+                FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
+                FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
+            );
             CREATE TABLE IF NOT EXISTS shared_usage (
                 month_key TEXT PRIMARY KEY,
+                confirmed_provider_attempts INTEGER NOT NULL DEFAULT 0,
                 reserved_shared_usage INTEGER NOT NULL DEFAULT 0,
                 projected_non_retry_attempts INTEGER NOT NULL DEFAULT 0,
                 state_available INTEGER NOT NULL DEFAULT 1,
@@ -203,7 +270,21 @@ class SQLitePersistence:
             );
             """
         )
+        # Keep disposable local files created by the earlier Stage 14 version
+        # readable while giving new state the corrected columns.
+        self._ensure_column("manifest_targets", "legacy_sampling_target_id", "INTEGER")
+        self._ensure_column("http_attempts", "transport_kind", "TEXT NOT NULL DEFAULT 'UNKNOWN'")
+        self._ensure_column("http_attempts", "provider_attempt_confirmed", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("shared_usage", "confirmed_provider_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._connection.commit()
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            str(row[1])
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def materialize_manifest(self, manifest: Any) -> None:
         with self._lock:
@@ -213,8 +294,9 @@ class SQLitePersistence:
                     INSERT OR REPLACE INTO manifest_targets
                     (panel_version, source_parent_station_id, station_name, tier,
                      cadence_minutes, number_of_results, phase_index, phase_count,
-                     continuity_classification, sampling_era, production_sampling_target_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     continuity_classification, sampling_era, production_sampling_target_id,
+                     legacy_sampling_target_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         target.panel_version,
@@ -228,6 +310,7 @@ class SQLitePersistence:
                         target.continuity_classification,
                         target.sampling_era.value,
                         target.production_sampling_target_id,
+                        target.legacy_sampling_target_id,
                     ),
                 )
             self._connection.commit()
@@ -269,6 +352,10 @@ class SQLitePersistence:
                 "UPDATE collector_runs SET completed_at_utc = ?, status = ?, summary_json = ? WHERE run_id = ?",
                 (_iso(completed_at), status, json.dumps(dict(summary), sort_keys=True, default=str), run_id),
             )
+            self._connection.execute(
+                "UPDATE dispatcher_claims SET completed_at_utc = ?, status = ? WHERE collector_run_id = ?",
+                (_iso(completed_at), status, run_id),
+            )
             self._connection.commit()
 
     def fail_collector_run(self, *, run_id: str, completed_at: datetime, summary: Mapping[str, Any]) -> None:
@@ -281,6 +368,59 @@ class SQLitePersistence:
             completed_at=completed_at,
             summary={"skip_reason": str(reason)},
         )
+
+    def claim_dispatcher_bucket(
+        self,
+        *,
+        run_id: str,
+        panel_version: str,
+        logical_due_bucket: int,
+        claimed_at: datetime,
+    ) -> DispatcherClaimResult:
+        """Atomically claim one panel/bucket before any target work is submitted."""
+
+        key = (panel_version, int(logical_due_bucket))
+        token = str(uuid.uuid4())
+        stale_after = claimed_at.astimezone(timezone.utc).timestamp() + 300
+        stale_at = datetime.fromtimestamp(stale_after, tz=timezone.utc)
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self._connection.execute(
+                    """
+                    INSERT OR IGNORE INTO dispatcher_claims
+                    (panel_version, logical_due_bucket, collector_run_id, claim_token,
+                     claimed_at_utc, stale_after_utc, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (*key, run_id, token, _iso(claimed_at), _iso(stale_at), "CLAIMED"),
+                )
+                won = cursor.rowcount == 1
+                existing_status = None
+                if not won:
+                    existing = self._connection.execute(
+                        "SELECT status FROM dispatcher_claims WHERE panel_version = ? AND logical_due_bucket = ?",
+                        key,
+                    ).fetchone()
+                    existing_status = str(existing["status"]) if existing else "UNKNOWN"
+                outcome = "CLAIMED" if won else "DUPLICATE_DISPATCHER_CLAIM"
+                event = self._connection.execute(
+                    """
+                    INSERT INTO dispatcher_claim_events
+                    (panel_version, logical_due_bucket, collector_run_id,
+                     event_at_utc, outcome, existing_status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (*key, run_id, _iso(claimed_at), outcome, existing_status),
+                )
+                event_id = int(event.lastrowid)
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+        return DispatcherClaimResult(won, key, existing_status, token if won else None, event_id)
+
+    atomic_dispatcher_claim = claim_dispatcher_bucket
 
     def claim_target(self, *, run_id: str, target: Target, logical_due_bucket: int, claimed_at: datetime) -> ClaimResult:
         key = target.claim_key(logical_due_bucket)
@@ -325,6 +465,41 @@ class SQLitePersistence:
 
     atomic_claim = claim_target
 
+    def record_duplicate_target_claim_event(
+        self,
+        *,
+        panel_version: str,
+        target: Target,
+        logical_due_bucket: int,
+        run_id: str,
+        event_at: datetime,
+    ) -> int:
+        """Audit a target-level duplicate without attempting to claim it.
+
+        A losing dispatcher must not create target claims while the winning
+        dispatcher is still running. This event is only used after a terminal
+        dispatcher outcome for compatibility/readability of target audit logs.
+        """
+
+        with self._lock:
+            event = self._connection.execute(
+                """
+                INSERT INTO claim_events
+                (panel_version, source_parent_station_id, logical_due_bucket,
+                 collector_run_id, event_at_utc, outcome, existing_status)
+                VALUES (?, ?, ?, ?, ?, 'DUPLICATE_CLAIM', 'DISPATCHER_ALREADY_CLAIMED')
+                """,
+                (
+                    panel_version,
+                    target.source_parent_station_id,
+                    int(logical_due_bucket),
+                    run_id,
+                    _iso(event_at),
+                ),
+            )
+            self._connection.commit()
+            return int(event.lastrowid)
+
     def start_target_audit(self, *, run_id: str, target: Target, logical_due_bucket: int, started_at: datetime) -> int:
         with self._lock:
             cursor = self._connection.execute(
@@ -357,6 +532,7 @@ class SQLitePersistence:
         transport_failure: TransportFailure | None = None,
         retry_decision: str | None = None,
         retry_after_seconds: float | None = None,
+        transport_kind: str = "UNKNOWN",
     ) -> None:
         if response is not None:
             http_status = response.status_code
@@ -378,10 +554,23 @@ class SQLitePersistence:
                 """
                 INSERT INTO http_attempts
                 (audit_id, attempt_number, started_at_utc, completed_at_utc, http_status,
-                 transport_failure_category, outcome, retry_decision, retry_after_seconds, duration_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 transport_failure_category, outcome, retry_decision, retry_after_seconds,
+                 duration_ms, transport_kind, provider_attempt_confirmed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
-                (audit_id, int(attempt_number), _iso(started_at), _iso(completed_at), http_status, category, outcome, retry_decision, retry_after_seconds, duration * 1000),
+                (
+                    audit_id,
+                    int(attempt_number),
+                    _iso(started_at),
+                    _iso(completed_at),
+                    http_status,
+                    category,
+                    outcome,
+                    retry_decision,
+                    retry_after_seconds,
+                    duration * 1000,
+                    str(transport_kind),
+                ),
             )
             self._connection.execute(
                 "UPDATE target_audits SET http_attempts = http_attempts + 1, http_status = COALESCE(?, http_status) WHERE audit_id = ?",
@@ -403,7 +592,7 @@ class SQLitePersistence:
         snapshot["raw_payload_persisted"] = False
         encoded = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, allow_nan=False, default=str)
         with self._lock:
-            self._connection.execute(
+            snapshot_cursor = self._connection.execute(
                 """
                 INSERT INTO parsed_snapshots
                 (audit_id, panel_version, source_parent_station_id, logical_due_bucket, persisted_at_utc, snapshot_json, raw_payload_persisted)
@@ -411,11 +600,65 @@ class SQLitePersistence:
                 """,
                 (audit_id, target.panel_version, target.source_parent_station_id, int(logical_due_bucket), _iso(persisted_at), encoded),
             )
+            snapshot_id = int(snapshot_cursor.lastrowid)
+            self._persist_recorded_time_evidence(
+                audit_id=audit_id,
+                snapshot_id=snapshot_id,
+                target=target,
+                logical_due_bucket=logical_due_bucket,
+                parsed_snapshot=snapshot,
+                observed_at=persisted_at,
+            )
             self._connection.execute(
                 "UPDATE target_audits SET persistence_outcome = ?, stop_event_result_count = ? WHERE audit_id = ?",
                 ("PERSISTED_PARSED_SNAPSHOT", len(snapshot.get("events", [])), audit_id),
             )
             self._connection.commit()
+
+    def _persist_recorded_time_evidence(
+        self,
+        *,
+        audit_id: int,
+        snapshot_id: int,
+        target: Target,
+        logical_due_bucket: int,
+        parsed_snapshot: Mapping[str, Any],
+        observed_at: datetime,
+    ) -> None:
+        for event in parsed_snapshot.get("events", []) or []:
+            if not isinstance(event, Mapping):
+                continue
+            event_ordinal = event.get("event_ordinal", event.get("result_ordinal"))
+            result_id = event.get("result_id")
+            occurrences = event.get("recorded_at_time_occurrences", []) or []
+            for occurrence in occurrences:
+                if not isinstance(occurrence, Mapping) or occurrence.get("recorded_at_time") is None:
+                    continue
+                self._connection.execute(
+                    """
+                    INSERT INTO recorded_at_time_evidence
+                    (audit_id, snapshot_id, panel_version, source_parent_station_id,
+                     logical_due_bucket, event_ordinal, result_id, call_scope,
+                     call_ordinal, timing_context, recorded_at_time, source_path,
+                     observed_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        audit_id,
+                        snapshot_id,
+                        target.panel_version,
+                        target.source_parent_station_id,
+                        int(logical_due_bucket),
+                        event_ordinal,
+                        str(occurrence.get("result_id", result_id)) if occurrence.get("result_id", result_id) is not None else None,
+                        str(occurrence.get("call_scope", "")),
+                        int(occurrence.get("call_ordinal", 0)),
+                        str(occurrence.get("timing_context", "")),
+                        str(occurrence["recorded_at_time"]),
+                        occurrence.get("source_path"),
+                        _iso(observed_at),
+                    ),
+                )
 
     def persist_parsed_snapshot(self, **kwargs: Any) -> None:
         self.persist_snapshot(**kwargs)
@@ -446,6 +689,118 @@ class SQLitePersistence:
             self._connection.execute(
                 "INSERT INTO quota_audit (collector_run_id, source_parent_station_id, logical_due_bucket, decision_kind, decision_json, recorded_at_utc) VALUES (?, ?, ?, ?, ?, ?)",
                 (run_id, source_parent_station_id, logical_due_bucket, decision_kind, json.dumps(dict(decision), sort_keys=True, default=str), _iso(recorded_at)),
+            )
+            self._connection.commit()
+
+    def reserve_quota_attempt(
+        self,
+        *,
+        decision_kind: str,
+        boundary: int,
+        proposed_attempts: int = 1,
+        at_utc: datetime | None = None,
+        reservation_scope: str = "LIVE_PROVIDER",
+    ) -> Mapping[str, Any]:
+        """Atomically reserve quota headroom in SQLite.
+
+        The unique permit row and the ``BEGIN IMMEDIATE`` transaction make a
+        boundary decision safe across independent connections/processes. Local
+        simulated transport rows are intentionally absent from this equation.
+        """
+
+        at = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        month = _month_key(at)
+        amount = int(proposed_attempts)
+        scope = str(reservation_scope)
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                shared = self._connection.execute(
+                    "SELECT * FROM shared_usage WHERE month_key = ?", (month,)
+                ).fetchone()
+                state_available = bool(shared["state_available"] if shared else True)
+                confirmed = int(shared["confirmed_provider_attempts"] if shared else 0)
+                reserved = int(shared["reserved_shared_usage"] if shared else 0)
+                projected_non_retry = int(shared["projected_non_retry_attempts"] if shared else 0)
+                active = self._connection.execute(
+                    """
+                    SELECT COALESCE(SUM(amount), 0) AS amount
+                    FROM quota_permits
+                    WHERE month_key = ? AND reservation_scope = ? AND status = 'PENDING'
+                    """,
+                    (month, scope),
+                ).fetchone()
+                active_reserved = int(active["amount"] if active else 0)
+                known_total = confirmed + reserved + projected_non_retry + active_reserved
+                if not state_available and decision_kind == "RETRY":
+                    decision = {
+                        "allowed": False,
+                        "decision": "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": int(boundary),
+                        "reason": "safe shared-credential state is unavailable",
+                        "permit_id": None,
+                    }
+                elif not state_available:
+                    decision = {
+                        "allowed": True,
+                        "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": int(boundary),
+                        "reason": "initial scheduled request is not silently converted into a retry",
+                        "permit_id": None,
+                    }
+                elif known_total + amount > int(boundary):
+                    decision = {
+                        "allowed": False,
+                        "decision": (
+                            "INITIAL_DENIED_NORMAL_OPERATIONAL_MAXIMUM"
+                            if decision_kind == "INITIAL"
+                            else "RETRY_DENIED_PROTECTION_BOUNDARY"
+                        ),
+                        "proposed_attempts": amount,
+                        "known_total": known_total,
+                        "boundary": int(boundary),
+                        "reason": "quota boundary would be exceeded",
+                        "permit_id": None,
+                    }
+                else:
+                    permit_id = str(uuid.uuid4())
+                    self._connection.execute(
+                        """
+                        INSERT INTO quota_permits
+                        (permit_id, month_key, decision_kind, reservation_scope, amount,
+                         boundary, reserved_at_utc, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
+                        """,
+                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at)),
+                    )
+                    decision = {
+                        "allowed": True,
+                        "decision": "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
+                        "proposed_attempts": amount,
+                        "known_total": known_total,
+                        "boundary": int(boundary),
+                        "reason": "within atomic quota headroom",
+                        "permit_id": permit_id,
+                    }
+                self._connection.commit()
+                return decision
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    authorize_attempt = reserve_quota_attempt
+
+    def release_quota_attempt(self, *, permit_id: Any) -> None:
+        if permit_id is None:
+            return
+        with self._lock:
+            self._connection.execute(
+                "UPDATE quota_permits SET status = 'RELEASED', released_at_utc = ? WHERE permit_id = ? AND status = 'PENDING'",
+                (_iso(datetime.now(timezone.utc)), str(permit_id)),
             )
             self._connection.commit()
 
@@ -495,6 +850,8 @@ class SQLitePersistence:
         self,
         *,
         month_key: str,
+        confirmed_provider_attempts: int = 0,
+        actual_attempts: int | None = None,
         reserved_shared_usage: int = 0,
         projected_non_retry_attempts: int = 0,
         state_available: bool = True,
@@ -505,17 +862,27 @@ class SQLitePersistence:
                 "INSERT OR REPLACE INTO shared_usage (month_key, reserved_shared_usage, projected_non_retry_attempts, state_available, source) VALUES (?, ?, ?, ?, ?)",
                 (month_key, int(reserved_shared_usage), int(projected_non_retry_attempts), int(state_available), source),
             )
+            if actual_attempts is not None:
+                confirmed_provider_attempts = int(actual_attempts)
+            self._connection.execute(
+                "UPDATE shared_usage SET confirmed_provider_attempts = ? WHERE month_key = ?",
+                (int(confirmed_provider_attempts), month_key),
+            )
             self._connection.commit()
 
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
         at = at_utc or datetime.now(timezone.utc)
         month = _month_key(at)
         with self._lock:
-            row = self._connection.execute("SELECT COUNT(*) AS count FROM http_attempts WHERE completed_at_utc LIKE ?", (f"{month}-%",)).fetchone()
             shared = self._connection.execute("SELECT * FROM shared_usage WHERE month_key = ?", (month,)).fetchone()
+            active = self._connection.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS amount FROM quota_permits WHERE month_key = ? AND reservation_scope = 'LIVE_PROVIDER' AND status = 'PENDING'",
+                (month,),
+            ).fetchone()
         return {
-            "actual_attempts": int(row["count"] if row else 0),
-            "reserved_shared_usage": int(shared["reserved_shared_usage"] if shared else 0),
+            "confirmed_provider_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
+            "actual_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
+            "reserved_shared_usage": int(shared["reserved_shared_usage"] if shared else 0) + int(active["amount"] if active else 0),
             "projected_non_retry_attempts": int(shared["projected_non_retry_attempts"] if shared else 0),
             "state_available": bool(shared["state_available"] if shared else True),
             "source": str(shared["source"] if shared else "sqlite-development"),
@@ -533,6 +900,20 @@ class SQLitePersistence:
             rows = self._connection.execute("SELECT * FROM claim_events ORDER BY event_id").fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_dispatcher_claims(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM dispatcher_claims ORDER BY logical_due_bucket"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_dispatcher_claim_events(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM dispatcher_claim_events ORDER BY event_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def fetch_target_audits(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._connection.execute("SELECT * FROM target_audits ORDER BY audit_id").fetchall()
@@ -547,6 +928,25 @@ class SQLitePersistence:
         with self._lock:
             rows = self._connection.execute("SELECT * FROM parsed_snapshots ORDER BY snapshot_id").fetchall()
         return [dict(row) for row in rows]
+
+    def fetch_recorded_time_evidence(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM recorded_at_time_evidence ORDER BY evidence_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_quota_permits(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM quota_permits ORDER BY reserved_at_utc, permit_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def retain_raw_evidence(self, **kwargs: Any) -> str:
+        """Explicit future-live hook; ordinary SQLite never stores raw payloads."""
+
+        return "DISABLED_OFFLINE"
 
     # Port vocabulary aliases keep the future adapter contract explicit.
     start_run = start_collector_run

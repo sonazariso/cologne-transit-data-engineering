@@ -82,7 +82,7 @@ def _client_for(name: str, manifest: RuntimeManifest) -> tuple[FakeMddClient, In
         scripts[first.source_parent_station_id] = [HttpResponse(200, b"not-json-or-xml", {"Content-Type": "application/json"})]
     elif name == "quota-retry-denied":
         scripts[first.source_parent_station_id] = [HttpResponse(500, b"", {}), success]
-        provider = InMemoryUsageProvider(UsageSnapshot(actual_attempts=207_500))
+        provider = InMemoryUsageProvider(UsageSnapshot(confirmed_provider_attempts=207_500))
     elif name == "heartbeat-budget-retry-skip":
         scripts[first.source_parent_station_id] = [HttpResponse(429, b"", {"Retry-After": "300"}), success]
     elif name == "failure-isolation":
@@ -113,7 +113,7 @@ def build_simulation(
         manifest=manifest,
         persistence=effective_persistence,
         mdd_client=client,
-        quota_guard=QuotaGuard(provider),
+        quota_guard=QuotaGuard(provider, reservation_scope="OFFLINE_SIMULATION"),
         safety_margin_seconds=5.0,
         sleep_fn=lambda _seconds: None,
     )
@@ -161,6 +161,7 @@ def run_simulation(
         run = collector.run_once(mode="simulate", at_utc=now, run_id=f"simulation-{scenario}")
         result = run.to_dict()
     result["scenario"] = scenario
-    result["network_calls"] = len(client.calls)
+    result["simulated_transport_calls"] = len(client.calls)
+    result["live_network_calls"] = 0
     result["stale_claim_count"] = len(persistence.list_stale_claims(now_utc=now))
     return result

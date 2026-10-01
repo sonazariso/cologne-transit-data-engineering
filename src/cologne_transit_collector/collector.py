@@ -160,6 +160,7 @@ class Collector:
         self.monotonic_fn = monotonic_fn
         self.shutdown_event = shutdown_event or threading.Event()
         self._active_lock = threading.Lock()
+        self._worker_slots = threading.BoundedSemaphore(self.max_concurrency)
         self._active_count = 0
         self._max_observed_concurrency = 0
 
@@ -202,44 +203,96 @@ class Collector:
             mode=mode,
             started_at=now,
         )
-
-        winners: list[tuple[Target, int]] = []
         outcomes: list[TargetOutcome] = []
-        for target in plan.due_targets:
-            if self.shutdown_event.is_set():
-                outcomes.append(self._interrupted_outcome(target, plan.bucket.index))
-                continue
-            claim = self.persistence.claim_target(
-                run_id=identifier,
-                target=target,
-                logical_due_bucket=plan.bucket.index,
-                claimed_at=now,
-            )
-            if claim.won:
-                winners.append((target, plan.bucket.index))
-            else:
-                outcomes.append(
-                    TargetOutcome(
-                        target_id=target.source_parent_station_id,
-                        station_name=target.station_name,
-                        tier=target.tier,
-                        phase_index=target.phase_index,
+
+        # This is the outer atomic boundary. It must be won before target
+        # claims or a ThreadPoolExecutor are created, so a duplicate
+        # dispatcher invocation cannot race the winning dispatcher.
+        dispatcher_claim = self.persistence.claim_dispatcher_bucket(
+            run_id=identifier,
+            panel_version=self.manifest.panel_version,
+            logical_due_bucket=plan.bucket.index,
+            claimed_at=now,
+        )
+        if not dispatcher_claim.won:
+            duplicate_event = getattr(self.persistence, "record_duplicate_target_claim_event", None)
+            if callable(duplicate_event) and dispatcher_claim.existing_status in {
+                "COMPLETE",
+                "COMPLETED_WITH_FAILURES",
+                "INTERRUPTED",
+            }:
+                for target in plan.due_targets:
+                    duplicate_event(
+                        panel_version=self.manifest.panel_version,
+                        target=target,
                         logical_due_bucket=plan.bucket.index,
-                        status="DUPLICATE_CLAIM",
-                        claim_won=False,
+                        run_id=identifier,
+                        event_at=now,
                     )
+            outcomes = [
+                TargetOutcome(
+                    target_id=target.source_parent_station_id,
+                    station_name=target.station_name,
+                    tier=target.tier,
+                    phase_index=target.phase_index,
+                    logical_due_bucket=plan.bucket.index,
+                    status="DUPLICATE_DISPATCHER_CLAIM",
+                    claim_won=False,
                 )
+                for target in plan.due_targets
+            ]
+            status = "DUPLICATE_NO_WORK"
+            result = CollectorRunResult(
+                run_id=identifier,
+                mode=mode,
+                bucket=plan.bucket,
+                due_count=plan.due_count,
+                outcomes=tuple(outcomes),
+                status=status,
+                max_observed_concurrency=0,
+                live_network_used=False,
+                dispatcher_claim_won=False,
+                dispatcher_claim_status="DUPLICATE_DISPATCHER_CLAIM",
+            )
+            self.persistence.complete_collector_run(
+                run_id=identifier,
+                status=status,
+                completed_at=datetime.now(timezone.utc),
+                summary=result.to_dict(),
+            )
+            return result
 
         futures: dict[Future[TargetOutcome], Target] = {}
-        pending = list(winners)
+        pending = list(plan.due_targets)
         with ThreadPoolExecutor(max_workers=self.max_concurrency, thread_name_prefix="stage14-target") as executor:
             while pending or futures:
                 while pending and len(futures) < self.max_concurrency and not self.shutdown_event.is_set():
-                    target, bucket_index = pending.pop(0)
-                    future = executor.submit(self._execute_target, identifier, target, bucket_index, budget)
+                    target = pending.pop(0)
+                    # The target claim is deliberately just in time: targets
+                    # still waiting in ``pending`` are not marked claimed.
+                    claim = self.persistence.claim_target(
+                        run_id=identifier,
+                        target=target,
+                        logical_due_bucket=plan.bucket.index,
+                        claimed_at=datetime.now(timezone.utc),
+                    )
+                    if not claim.won:
+                        outcomes.append(
+                            TargetOutcome(
+                                target_id=target.source_parent_station_id,
+                                station_name=target.station_name,
+                                tier=target.tier,
+                                phase_index=target.phase_index,
+                                logical_due_bucket=plan.bucket.index,
+                                status="DUPLICATE_CLAIM",
+                                claim_won=False,
+                            )
+                        )
+                        continue
+                    future = executor.submit(self._execute_target, identifier, target, plan.bucket.index, budget)
                     futures[future] = target
                 if self.shutdown_event.is_set():
-                    for target, _bucket_index in pending:
+                    for target in pending:
                         outcomes.append(self._interrupted_outcome(target, plan.bucket.index, run_id=identifier))
                     pending.clear()
                 if not futures:
@@ -265,7 +318,7 @@ class Collector:
         outcomes.sort(key=lambda item: item.target_id)
         if self.shutdown_event.is_set():
             status = "INTERRUPTED"
-        elif outcomes and all(item.status == "DUPLICATE_CLAIM" for item in outcomes):
+        elif outcomes and all(item.status in {"DUPLICATE_CLAIM", "DUPLICATE_DISPATCHER_CLAIM"} for item in outcomes):
             status = "DUPLICATE_NO_WORK"
         elif any(item.status == "FAILED" for item in outcomes):
             status = "COMPLETED_WITH_FAILURES"
@@ -280,6 +333,8 @@ class Collector:
             status=status,
             max_observed_concurrency=self._max_observed_concurrency,
             live_network_used=False,
+            dispatcher_claim_won=True,
+            dispatcher_claim_status="CLAIMED",
         )
         self.persistence.complete_collector_run(
             run_id=identifier,
@@ -317,15 +372,18 @@ class Collector:
         return outcome
 
     def _enter_worker(self) -> None:
+        # ThreadPoolExecutor already bounds submissions, while this slot also
+        # makes direct worker coordination deterministic and never raises just
+        # because another invocation is active.
+        self._worker_slots.acquire()
         with self._active_lock:
             self._active_count += 1
             self._max_observed_concurrency = max(self._max_observed_concurrency, self._active_count)
-            if self._active_count > MAXIMUM_CONCURRENCY:
-                raise AssertionError("collector concurrency exceeded approved maximum")
 
     def _leave_worker(self) -> None:
         with self._active_lock:
             self._active_count -= 1
+        self._worker_slots.release()
 
     def _execute_target(self, run_id: str, target: Target, bucket_index: int, budget: HeartbeatBudget) -> TargetOutcome:
         self._enter_worker()
@@ -340,16 +398,12 @@ class Collector:
         error_category: str | None = None
         result_count: int | None = None
         pending_retry_after = 0.0
+        simulated_transport_calls = 0
+        live_network_calls = 0
         try:
             audit_id = self.persistence.start_target_audit(
                 run_id=run_id, target=target, logical_due_bucket=bucket_index, started_at=started
             )
-            initial_quota = self.quota_guard.allow_initial(at_utc=started)
-            self._record_quota(run_id, target, bucket_index, "INITIAL", initial_quota.to_dict(), started)
-            if not initial_quota.allowed:
-                outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", skip_reason=SKIPPED_QUOTA, error_category="QUOTA_DENIED")
-                self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
-                return outcome
             while attempts < self.max_attempts:
                 retrying = attempts > 0
                 retry_after = pending_retry_after if retrying else 0.0
@@ -359,14 +413,6 @@ class Collector:
                     self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
                     return outcome
                 if retrying:
-                    retry_quota = self.quota_guard.allow_retry(at_utc=datetime.now(timezone.utc))
-                    self._record_quota(run_id, target, bucket_index, "RETRY", retry_quota.to_dict(), datetime.now(timezone.utc))
-                    if not retry_quota.allowed:
-                        retry_decision = "RETRY_DENIED_QUOTA"
-                        retry_outcome = RETRY_SKIPPED_QUOTA
-                        outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_status=last_status, http_attempts=attempts, parser_outcome=parser_outcome, persistence_outcome=persistence_outcome, error_category="QUOTA_DENIED", retry_outcome=retry_outcome)
-                        self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
-                        return outcome
                     if retry_after and not budget.can_start(operation_seconds=self.request_timeout_seconds, sleep_seconds=retry_after):
                         retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
                         retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
@@ -382,6 +428,61 @@ class Collector:
                             self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
                             return outcome
 
+                decision_at = datetime.now(timezone.utc)
+                quota_decision = (
+                    self.quota_guard.allow_retry(at_utc=decision_at)
+                    if retrying
+                    else self.quota_guard.allow_initial(at_utc=decision_at)
+                )
+                self._record_quota(
+                    run_id,
+                    target,
+                    bucket_index,
+                    "RETRY" if retrying else "INITIAL",
+                    quota_decision.to_dict(),
+                    decision_at,
+                )
+                if not quota_decision.allowed:
+                    self.quota_guard.release(quota_decision)
+                    if retrying:
+                        retry_decision = "RETRY_DENIED_QUOTA"
+                        retry_outcome = RETRY_SKIPPED_QUOTA
+                        outcome = TargetOutcome(
+                            target.source_parent_station_id,
+                            target.station_name,
+                            target.tier,
+                            target.phase_index,
+                            bucket_index,
+                            "FAILED",
+                            http_status=last_status,
+                            http_attempts=attempts,
+                            parser_outcome=parser_outcome,
+                            persistence_outcome=persistence_outcome,
+                            error_category="QUOTA_DENIED",
+                            retry_outcome=retry_outcome,
+                            simulated_transport_calls=simulated_transport_calls,
+                            live_network_calls=live_network_calls,
+                        )
+                    else:
+                        outcome = TargetOutcome(
+                            target.source_parent_station_id,
+                            target.station_name,
+                            target.tier,
+                            target.phase_index,
+                            bucket_index,
+                            "SKIPPED",
+                            skip_reason=SKIPPED_QUOTA,
+                            error_category="QUOTA_DENIED",
+                            simulated_transport_calls=simulated_transport_calls,
+                            live_network_calls=live_network_calls,
+                        )
+                    self.persistence.complete_target_audit(
+                        audit_id=audit_id,
+                        outcome=outcome.to_dict(),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    return outcome
+
                 attempts += 1
                 attempt_started = datetime.now(timezone.utc)
                 try:
@@ -395,11 +496,27 @@ class Collector:
                     response_or_failure = TransportFailure("OTHER_NETWORK_FAILURE", "transport failure")
                     if isinstance(exc, TimeoutError):
                         response_or_failure = TransportFailure("TIMEOUT", "transport failure")
+                finally:
+                    # Simulated permits are released after the local fake
+                    # invocation; they are not provider consumption.
+                    self.quota_guard.release(quota_decision)
                 attempt_completed = datetime.now(timezone.utc)
+                transport_kind = "LIVE_CLIENT" if getattr(self.mdd_client, "live_network", False) else "SIMULATED_TRANSPORT"
+                if transport_kind == "LIVE_CLIENT":
+                    live_network_calls += 1
+                else:
+                    simulated_transport_calls += 1
                 if isinstance(response_or_failure, TransportFailure):
                     error_category = response_or_failure.category
-                    self.persistence.record_http_attempt(audit_id=audit_id, attempt_number=attempts, started_at=attempt_started, completed_at=attempt_completed, transport_failure=response_or_failure, retry_decision="RETRY_CANDIDATE" if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts else "NO_RETRY")
-                    self._add_local_attempt()
+                    self.persistence.record_http_attempt(
+                        audit_id=audit_id,
+                        attempt_number=attempts,
+                        started_at=attempt_started,
+                        completed_at=attempt_completed,
+                        transport_failure=response_or_failure,
+                        retry_decision="RETRY_CANDIDATE" if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts else "NO_RETRY",
+                        transport_kind=transport_kind,
+                    )
                     if retry_eligible(transport_failure=response_or_failure) and attempts < self.max_attempts:
                         retry_decision = "RETRY_CANDIDATE"
                         retry_outcome = "RETRY_PENDING"
@@ -411,8 +528,16 @@ class Collector:
                 retry_after = _retry_after_seconds(response)
                 pending_retry_after = retry_after
                 can_retry = retry_eligible(response=response) and attempts < self.max_attempts
-                self.persistence.record_http_attempt(audit_id=audit_id, attempt_number=attempts, started_at=attempt_started, completed_at=attempt_completed, response=response, retry_decision="RETRY_CANDIDATE" if can_retry else "NO_RETRY", retry_after_seconds=retry_after or None)
-                self._add_local_attempt()
+                self.persistence.record_http_attempt(
+                    audit_id=audit_id,
+                    attempt_number=attempts,
+                    started_at=attempt_started,
+                    completed_at=attempt_completed,
+                    response=response,
+                    retry_decision="RETRY_CANDIDATE" if can_retry else "NO_RETRY",
+                    retry_after_seconds=retry_after or None,
+                    transport_kind=transport_kind,
+                )
                 if response.status_code is None or not 200 <= response.status_code < 300:
                     error_category = _error_category_for_response(response)
                     if can_retry:
@@ -426,21 +551,29 @@ class Collector:
                     break
                 try:
                     parsed = parse_trias_response(response.body, self._content_type(response))
-                except TriasApplicationError:
-                    parser_outcome = "TRIAS_APPLICATION_ERROR"
-                    error_category = "TRIAS_APPLICATION_ERROR"
-                    break
                 except (TriasParserError, ValueError):
                     parser_outcome = "PARSER_FAILURE"
                     error_category = "PARSER_FAILURE"
                     break
-                parser_outcome = "PARSED"
+                parser_outcome = "TRIAS_APPLICATION_ERROR" if parsed.application_error else "PARSED"
+                if parsed.application_error:
+                    error_category = "TRIAS_APPLICATION_ERROR"
                 if attempts > 1:
                     retry_outcome = "RETRY_SUCCEEDED"
                 result_count = parsed.result_count
                 try:
                     self.persistence.persist_snapshot(audit_id=audit_id, target=target, logical_due_bucket=bucket_index, parsed_snapshot=parsed.to_dict(), persisted_at=datetime.now(timezone.utc))
                     persistence_outcome = "PERSISTED_PARSED_SNAPSHOT"
+                    retention_hook = getattr(self.persistence, "retain_raw_evidence", None)
+                    if parsed.recorded_at_time_occurrences and callable(retention_hook):
+                        retention_hook(
+                            audit_id=audit_id,
+                            target=target,
+                            logical_due_bucket=bucket_index,
+                            body=response.body,
+                            recorded_at_time_occurrences=parsed.recorded_at_time_occurrences,
+                            observed_at=datetime.now(timezone.utc),
+                        )
                 except BaseException:
                     persistence_outcome = "PERSISTENCE_FAILURE"
                     error_category = "PERSISTENCE_FAILURE"
@@ -448,7 +581,26 @@ class Collector:
                 break
 
             status = "SUCCEEDED" if parser_outcome == "PARSED" and persistence_outcome == "PERSISTED_PARSED_SNAPSHOT" else ("SKIPPED" if retry_outcome in {RETRY_SKIPPED_HEARTBEAT_BUDGET, RETRY_SKIPPED_QUOTA} or attempts == 0 else "FAILED")
-            outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, status, http_status=last_status, http_attempts=attempts, stop_event_result_count=result_count, parser_outcome=parser_outcome, persistence_outcome=persistence_outcome, duration_seconds=(datetime.now(timezone.utc) - started).total_seconds(), error_category=error_category, retry_decision=retry_decision, retry_outcome=retry_outcome, skip_reason=retry_outcome if status == "SKIPPED" else None)
+            outcome = TargetOutcome(
+                target.source_parent_station_id,
+                target.station_name,
+                target.tier,
+                target.phase_index,
+                bucket_index,
+                status,
+                http_status=last_status,
+                http_attempts=attempts,
+                stop_event_result_count=result_count,
+                parser_outcome=parser_outcome,
+                persistence_outcome=persistence_outcome,
+                duration_seconds=(datetime.now(timezone.utc) - started).total_seconds(),
+                error_category=error_category,
+                retry_decision=retry_decision,
+                retry_outcome=retry_outcome,
+                skip_reason=retry_outcome if status == "SKIPPED" else None,
+                simulated_transport_calls=simulated_transport_calls,
+                live_network_calls=live_network_calls,
+            )
             self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
             return outcome
         except BaseException:
@@ -457,7 +609,7 @@ class Collector:
                     self.persistence.complete_target_audit(audit_id=audit_id, outcome={"status": "FAILED", "http_attempts": attempts, "error_category": "SANITIZED_ERROR", "persistence_outcome": "PERSISTENCE_FAILURE"}, completed_at=datetime.now(timezone.utc))
                 except BaseException:
                     pass
-            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR")
+            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls)
         finally:
             self._leave_worker()
 
@@ -472,13 +624,6 @@ class Collector:
         recorder = getattr(self.persistence, "record_quota_decision", None)
         if callable(recorder):
             recorder(run_id=run_id, source_parent_station_id=target.source_parent_station_id, logical_due_bucket=bucket_index, decision_kind=kind, decision=decision, recorded_at=at)
-
-    def _add_local_attempt(self) -> None:
-        provider = getattr(self.quota_guard, "usage_provider", None)
-        add_attempt = getattr(provider, "add_attempt", None)
-        if callable(add_attempt):
-            add_attempt()
-
 
 def build_logger(verbose: bool = False) -> None:
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

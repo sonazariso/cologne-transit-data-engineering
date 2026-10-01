@@ -68,6 +68,7 @@ class Target:
     continuity_classification: str
     sampling_era: SamplingEra = SamplingEra.TIERED50
     production_sampling_target_id: Optional[str] = None
+    legacy_sampling_target_id: Optional[int] = None
     phase_capacity: Optional[int] = None
 
     @property
@@ -139,6 +140,8 @@ class TargetOutcome:
     retry_decision: Optional[str] = None
     retry_outcome: Optional[str] = None
     claim_won: bool = True
+    simulated_transport_calls: int = 0
+    live_network_calls: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +162,8 @@ class TargetOutcome:
             "retry_decision": self.retry_decision,
             "retry_outcome": self.retry_outcome,
             "claim_won": self.claim_won,
+            "simulated_transport_calls": self.simulated_transport_calls,
+            "live_network_calls": self.live_network_calls,
         }
 
 
@@ -183,10 +188,20 @@ class CollectorRunResult:
     status: str
     max_observed_concurrency: int = 0
     live_network_used: bool = False
+    dispatcher_claim_won: bool = True
+    dispatcher_claim_status: str = "CLAIMED"
 
     @property
     def http_attempt_count(self) -> int:
         return sum(item.http_attempts for item in self.outcomes)
+
+    @property
+    def simulated_transport_calls(self) -> int:
+        return sum(item.simulated_transport_calls for item in self.outcomes)
+
+    @property
+    def live_network_calls(self) -> int:
+        return sum(item.live_network_calls for item in self.outcomes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -198,6 +213,10 @@ class CollectorRunResult:
             "status": self.status,
             "max_observed_concurrency": self.max_observed_concurrency,
             "http_attempt_count": self.http_attempt_count,
+            "simulated_transport_calls": self.simulated_transport_calls,
+            "live_network_calls": self.live_network_calls,
             "live_network_used": self.live_network_used,
+            "dispatcher_claim_won": self.dispatcher_claim_won,
+            "dispatcher_claim_status": self.dispatcher_claim_status,
             "outcomes": [outcome.to_dict() for outcome in self.outcomes],
         }

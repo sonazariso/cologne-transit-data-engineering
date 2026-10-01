@@ -26,6 +26,20 @@ class UsageProvider(Protocol):
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
         ...
 
+    def reserve_quota_attempt(
+        self,
+        *,
+        decision_kind: str,
+        boundary: int,
+        proposed_attempts: int = 1,
+        at_utc: datetime | None = None,
+        reservation_scope: str = "LIVE_PROVIDER",
+    ) -> Mapping[str, Any]:
+        ...
+
+    def release_quota_attempt(self, *, permit_id: Any) -> None:
+        ...
+
 
 class PersistencePort(Protocol):
     """Behavioral persistence contract for a future production adapter."""
@@ -40,10 +54,27 @@ class PersistencePort(Protocol):
     def claim_target(self, *, run_id: str, target: Target, logical_due_bucket: int, claimed_at: datetime) -> Any:
         ...
 
+    def claim_dispatcher_bucket(
+        self, *, run_id: str, panel_version: str, logical_due_bucket: int, claimed_at: datetime
+    ) -> Any:
+        ...
+
     def start_target_audit(self, *, run_id: str, target: Target, logical_due_bucket: int, started_at: datetime) -> Any:
         ...
 
-    def record_http_attempt(self, *, audit_id: Any, attempt_number: int, started_at: datetime, completed_at: datetime, response: HttpResponse | None = None, transport_failure: TransportFailure | None = None, retry_decision: str | None = None, retry_after_seconds: float | None = None) -> None:
+    def record_http_attempt(
+        self,
+        *,
+        audit_id: Any,
+        attempt_number: int,
+        started_at: datetime,
+        completed_at: datetime,
+        response: HttpResponse | None = None,
+        transport_failure: TransportFailure | None = None,
+        retry_decision: str | None = None,
+        retry_after_seconds: float | None = None,
+        transport_kind: str = "UNKNOWN",
+    ) -> None:
         ...
 
     def persist_snapshot(self, *, audit_id: Any, target: Target, logical_due_bucket: int, parsed_snapshot: Mapping[str, Any], persisted_at: datetime) -> None:
@@ -74,6 +105,10 @@ class PersistencePort(Protocol):
         ...
 
     def record_sampling_era_cutover(self, **kwargs: Any) -> None:
+        ...
+
+    def retain_raw_evidence(self, **kwargs: Any) -> str:
+        """Future-live bounded raw-evidence hook; disabled by SQLite."""
         ...
 
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:

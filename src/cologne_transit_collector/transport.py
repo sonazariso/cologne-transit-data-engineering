@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
+import errno
 import socket
+import ssl
 import threading
 import time
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .domain import HttpResponse, Target, TransportFailure
 from .request import build_request_body
@@ -18,6 +20,10 @@ from .request import build_request_body
 
 MDD_API_KEY_ENV = "MDD_API_KEY"
 DEFAULT_MAX_RESPONSE_BYTES = 25 * 1024 * 1024
+RESPONSE_SIZE_EXCEEDED = "RESPONSE_SIZE_EXCEEDED"
+CREDENTIAL_MISSING = "CREDENTIAL_MISSING"
+CREDENTIAL_FORMAT_INVALID = "CREDENTIAL_FORMAT_INVALID"
+REQUEST_CONTRACT_FAILURE = "REQUEST_CONTRACT_FAILURE"
 
 
 class MddCredentialError(RuntimeError):
@@ -28,17 +34,33 @@ class MddLiveDisabled(RuntimeError):
     """Live HTTP requires an explicit opt-in even when used as a library."""
 
 
+class NoRedirectHandler(HTTPRedirectHandler):
+    """Surface 3xx responses instead of following them implicitly."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+class ResponseTooLarge(ValueError):
+    """The bounded reader observed bytes beyond the configured maximum."""
+
+
 def _read_bounded(stream: object, maximum_bytes: int) -> bytes:
+    if maximum_bytes < 0:
+        raise ValueError("maximum response size must not be negative")
     chunks: list[bytes] = []
     total = 0
     while True:
-        chunk = stream.read(min(1024 * 1024, maximum_bytes - total))  # type: ignore[attr-defined]
+        remaining_plus_probe = maximum_bytes - total + 1
+        if remaining_plus_probe <= 0:
+            raise ResponseTooLarge("response exceeded bounded byte limit")
+        chunk = stream.read(min(1024 * 1024, remaining_plus_probe))  # type: ignore[attr-defined]
         if not chunk:
             break
         chunks.append(chunk)
         total += len(chunk)
         if total > maximum_bytes:
-            raise ValueError("response exceeded bounded size")
+            raise ResponseTooLarge("response exceeded bounded byte limit")
     return b"".join(chunks)
 
 
@@ -53,20 +75,66 @@ def _headers(response: object) -> dict[str, str]:
 
 
 def _transport_category(error: BaseException) -> str:
-    if isinstance(error, (TimeoutError, socket.timeout)):
-        return "TIMEOUT"
-    if isinstance(error, socket.gaierror):
-        return "DNS_RESOLUTION_FAILED"
+    candidates: list[BaseException] = [error]
     reason = getattr(error, "reason", None)
-    if isinstance(reason, socket.gaierror):
-        return "DNS_RESOLUTION_FAILED"
-    if isinstance(reason, (TimeoutError, socket.timeout)):
-        return "TIMEOUT"
-    if isinstance(error, ConnectionRefusedError):
-        return "CONNECTION_REFUSED"
-    if isinstance(error, URLError):
-        return "OTHER_NETWORK_FAILURE"
+    if isinstance(reason, BaseException) and reason is not error:
+        candidates.insert(0, reason)
+    for candidate in candidates:
+        if isinstance(candidate, (TimeoutError, socket.timeout)):
+            return "TIMEOUT"
+        if isinstance(candidate, (ssl.SSLError, ssl.CertificateError)):
+            return "TLS_FAILURE"
+        if isinstance(candidate, (ConnectionRefusedError,)):
+            return "CONNECTION_REFUSED"
+        candidate_errno = getattr(candidate, "errno", None)
+        if candidate_errno == errno.ECONNREFUSED:
+            return "CONNECTION_REFUSED"
+        if candidate_errno in {errno.ENETUNREACH, errno.EHOSTUNREACH}:
+            return "NETWORK_UNREACHABLE"
+        if isinstance(candidate, socket.gaierror):
+            return "DNS_RESOLUTION_FAILED"
+        if candidate_errno in {
+            getattr(socket, "EAI_AGAIN", object()),
+            getattr(socket, "EAI_FAIL", object()),
+            getattr(socket, "EAI_NONAME", object()),
+            getattr(socket, "EAI_NODATA", object()),
+        }:
+            return "DNS_RESOLUTION_FAILED"
+        type_name = type(candidate).__name__.casefold()
+        safe_marker = str(candidate).casefold()
+        if "proxy" in type_name or "proxy" in safe_marker or "tunnel connection failed" in safe_marker:
+            return "PROXY_OR_ENVIRONMENT_FAILURE"
+        if any(marker in safe_marker for marker in (
+            "name or service not known",
+            "nodename nor servname",
+            "temporary failure in name resolution",
+            "no such host",
+            "getaddrinfo failed",
+        )):
+            return "DNS_RESOLUTION_FAILED"
+        if "connection refused" in safe_marker:
+            return "CONNECTION_REFUSED"
+        if any(marker in safe_marker for marker in ("network is unreachable", "host is unreachable")):
+            return "NETWORK_UNREACHABLE"
+        if "tls" in type_name or "ssl" in type_name or "certificate" in type_name:
+            return "TLS_FAILURE"
     return "OTHER_NETWORK_FAILURE"
+
+
+def validate_api_key_format(api_key: object) -> str:
+    """Validate a header-safe key without returning or logging its value."""
+
+    if not api_key:
+        return CREDENTIAL_MISSING
+    if not isinstance(api_key, str):
+        return CREDENTIAL_FORMAT_INVALID
+    try:
+        encoded = api_key.encode("ascii")
+    except UnicodeEncodeError:
+        return CREDENTIAL_FORMAT_INVALID
+    if not encoded or any(byte < 0x21 or byte > 0x7E for byte in encoded):
+        return CREDENTIAL_FORMAT_INVALID
+    return "VALID"
 
 
 class LiveMddClient:
@@ -80,13 +148,15 @@ class LiveMddClient:
         *,
         requestor_ref: str = "CologneTransitIntelligence",
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
-        urlopen_fn: Callable[..., object] = urlopen,
+        urlopen_fn: Callable[..., object] | None = None,
+        opener_factory: Callable[[], object] | None = None,
         enabled: bool = False,
     ) -> None:
         self.endpoint = endpoint
         self.requestor_ref = requestor_ref
         self.max_response_bytes = max_response_bytes
         self._urlopen = urlopen_fn
+        self._opener_factory = opener_factory or (lambda: build_opener(NoRedirectHandler()))
         self.enabled = bool(enabled)
 
     def fetch(
@@ -100,26 +170,36 @@ class LiveMddClient:
         if not self.enabled:
             raise MddLiveDisabled("live MDD HTTP requires explicit enabled=True opt-in")
         api_key = os.environ.get(MDD_API_KEY_ENV)
-        if not api_key:
-            raise MddCredentialError("MDD_API_KEY is not available")
-        body = build_request_body(
-            target,
-            request_timestamp_utc=request_timestamp_utc,
-            requestor_ref=self.requestor_ref,
-        )
-        request = Request(
-            self.endpoint,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/xml; charset=utf-8",
-                "Accept": "application/json, application/xml",
-                "x-api-key": api_key,
-            },
-        )
+        credential_status = validate_api_key_format(api_key)
+        if credential_status != "VALID":
+            return TransportFailure(credential_status, "credential preflight failed")
+        try:
+            body = build_request_body(
+                target,
+                request_timestamp_utc=request_timestamp_utc,
+                requestor_ref=self.requestor_ref,
+            )
+            request = Request(
+                self.endpoint,
+                data=body,
+                method="POST",
+                headers={
+                    "Content-Type": "application/xml; charset=utf-8",
+                    "Accept": "application/json, application/xml",
+                    "x-api-key": api_key,
+                },
+            )
+        except Exception:
+            return TransportFailure(REQUEST_CONTRACT_FAILURE, "request contract preflight failed")
         started = time.monotonic()
         try:
-            response = self._urlopen(request, timeout=float(timeout_seconds))
+            if self._urlopen is not None:
+                # Injected callables are test seams; the production default
+                # always goes through the no-redirect opener below.
+                response = self._urlopen(request, timeout=float(timeout_seconds))
+            else:
+                opener = self._opener_factory()
+                response = opener.open(request, timeout=float(timeout_seconds))  # type: ignore[attr-defined]
             try:
                 content = _read_bounded(response, self.max_response_bytes)
                 status = int(getattr(response, "status", getattr(response, "code", 200)))
@@ -131,12 +211,16 @@ class LiveMddClient:
         except HTTPError as error:
             try:
                 content = _read_bounded(error, self.max_response_bytes)
+            except ResponseTooLarge:
+                return TransportFailure(RESPONSE_SIZE_EXCEEDED, "bounded response failure")
             except Exception:
                 content = b""
             return HttpResponse(int(error.code), content, _headers(error), time.monotonic() - started)
-        except (OSError, URLError, TimeoutError, ValueError) as error:
-            if isinstance(error, ValueError) and str(error) == "response exceeded bounded size":
-                return TransportFailure("OTHER_NETWORK_FAILURE", "bounded response failure")
+        except ResponseTooLarge:
+            return TransportFailure(RESPONSE_SIZE_EXCEEDED, "bounded response failure")
+        except ValueError:
+            return TransportFailure(REQUEST_CONTRACT_FAILURE, "request contract failure")
+        except (OSError, URLError, TimeoutError) as error:
             return TransportFailure(_transport_category(error), "transport failure")
 
 

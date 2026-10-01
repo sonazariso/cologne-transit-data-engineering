@@ -30,6 +30,16 @@ LEGACY7_IDS = frozenset(
     }
 )
 
+LEGACY7_SAMPLING_TARGET_IDS = {
+    "de:05315:11110": 1,  # Köln Heumarkt
+    "de:05315:11201": 2,  # Köln Hbf
+    "de:05315:12711": 3,  # Köln Rodenkirchen Bf
+    "de:05315:14201": 4,  # Köln Bf Ehrenfeld
+    "de:05315:16601": 5,  # Köln Worringen S-Bahn
+    "de:05315:17311": 6,  # Köln Porz Markt
+    "de:05315:19201": 7,  # Köln Bf Mülheim
+}
+
 
 class ManifestValidationError(ValueError):
     """Raised when the approved runtime manifest is incomplete or altered."""
@@ -90,6 +100,11 @@ class RuntimeManifest:
                         continuity_classification=str(raw["continuity_classification"]),
                         sampling_era=SamplingEra(str(raw.get("sampling_era", "Tiered50"))),
                         production_sampling_target_id=raw.get("sampling_target_id"),
+                        legacy_sampling_target_id=(
+                            int(raw["legacy_sampling_target_id"])
+                            if raw.get("legacy_sampling_target_id") is not None
+                            else None
+                        ),
                         phase_capacity=(
                             int(raw["phase_capacity"])
                             if raw.get("phase_capacity") is not None
@@ -149,6 +164,17 @@ class RuntimeManifest:
             raise ManifestValidationError("a Legacy7 identity is classified as a new target")
         if any(target.production_sampling_target_id for target in self.new_tiered50_targets):
             raise ManifestValidationError("new targets must not receive future production SamplingTargetIds")
+        legacy_ids = {
+            target.source_parent_station_id: target.legacy_sampling_target_id
+            for target in self.targets
+            if target.legacy_sampling_target_id is not None
+        }
+        if len(legacy_ids) != 7 or set(legacy_ids.values()) != set(range(1, 8)):
+            raise ManifestValidationError("exactly seven Legacy7 lineage IDs 1 through 7 are required")
+        if legacy_ids != LEGACY7_SAMPLING_TARGET_IDS:
+            raise ManifestValidationError("Legacy7 sampling-target lineage mapping is not exact")
+        if any(target.legacy_sampling_target_id is not None for target in self.new_tiered50_targets):
+            raise ManifestValidationError("new Tiered50 targets must not receive Legacy7 lineage IDs")
 
         tier_counts: dict[str, int] = {}
         for target in self.targets:
@@ -237,6 +263,7 @@ def manifest_rows(manifest: RuntimeManifest) -> tuple[Mapping[str, Any], ...]:
             "phase_index": target.phase_index,
             "phase_count": target.phase_count,
             "continuity_classification": target.continuity_classification,
+            "legacy_sampling_target_id": target.legacy_sampling_target_id,
         }
         for target in manifest.targets
     )
