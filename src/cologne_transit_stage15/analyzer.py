@@ -388,6 +388,34 @@ class Stage15Analyzer:
         continuity, continuity_results = self._continuity(evidence, window)
         results.extend(continuity_results)
 
+        research_contexts = sorted(
+            {
+                str(row.get("collection_context"))
+                for rows in (
+                    evidence.collector_runs if evidence else (),
+                    evidence.target_audits if evidence else (),
+                    evidence.parsed_snapshots if evidence else (),
+                )
+                for row in rows
+                if row.get("collection_context")
+            }
+        )
+        is_live_research = "LIVE_RESEARCH_SINGLE_1" in research_contexts
+        if is_live_research:
+            results.append(_result(
+                validation_id="continuity.live_research_context_is_not_cutover",
+                category="CONTINUITY",
+                grain="collector-run/context",
+                expected_value="LIVE_RESEARCH_SINGLE_1 remains distinct from production Tiered50",
+                actual_value=research_contexts,
+                status="PASS",
+                policy_state="APPROVED_INVARIANT",
+                evidence_count=len(research_contexts),
+                reason="Research observations are identifiable but cannot satisfy the production sampling-era transition check.",
+                limitations=("Stage 15B remains NOT STARTED — AWAITS TIERED50 CUTOVER.",),
+                window=window,
+            ))
+
         # The overall result is deliberately not PASS when a required live or
         # evidence-backed check is absent.  Policy-pending measurements are
         # expected in readiness work; structural FAIL remains the only hard
@@ -417,7 +445,7 @@ class Stage15Analyzer:
             "stage": "15A",
             "status": overall_status,
             "readiness_status": "IN PROGRESS",
-            "stage14_overall_status": "IN PROGRESS — PRODUCTION CUTOVER DEFERRED",
+            "stage14_overall_status": "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED",
             "stage14_collector_status": "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE",
             "stage15_readiness_status": "IN PROGRESS",
             "stage15_live_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
@@ -441,6 +469,16 @@ class Stage15Analyzer:
                 "read_only": bool(getattr(self.evidence_adapter, "read_only", True)) if evidence else True,
                 "collector_evidence_mutated": False,
                 "limitations": list(evidence.limitations if evidence else ()),
+                "database_role": next(
+                    (
+                        str(row.get("metadata_value"))
+                        for row in (evidence.database_metadata if evidence else ())
+                        if str(row.get("metadata_key")) == "database_role"
+                    ),
+                    None,
+                ),
+                "collection_contexts": research_contexts,
+                "live_research_is_not_production_evidence": is_live_research,
             },
             "reconciliation": reconciliation,
             "dispatcher_validation": dispatcher,

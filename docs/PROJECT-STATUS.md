@@ -22,7 +22,7 @@
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
-| 14 | Collector Implementation and Controlled 50-Station Cutover | IN PROGRESS — PRODUCTION CUTOVER DEFERRED |
+| 14 | Collector Implementation and Controlled 50-Station Cutover | IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED |
 | 15 | Post-Cutover Validation | IN PROGRESS — READINESS; LIVE NOT STARTED |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
@@ -398,25 +398,36 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
 - The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; production phase indexes are not yet persisted and require `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.
-- Stage 14 collector implementation is complete offline-only. The real production cutover remains deferred: PostgreSQL host/adapter/schema, production target-ID materialization, sampling-era timestamp, deployment platform, live dry-run, target activation, and post-activation validation are not performed. Stage 15A readiness is now IN PROGRESS; Stage 15B live validation remains NOT STARTED — AWAITS TIERED50 CUTOVER.
+- Stage 14 collector implementation is complete, with the S78 live-research profile now available. The real Tiered50 production cutover remains deferred: production target-ID materialization, sampling-era timestamp, deployment platform, target activation, and post-activation validation are not performed. PostgreSQL work is not planned or authorized in the active roadmap. Stage 15A readiness is now IN PROGRESS; Stage 15B live validation remains NOT STARTED — AWAITS TIERED50 CUTOVER.
 
-### Stage 14 collector implementation — complete offline-only; production cutover deferred
+### Current storage direction — SQLite live research first
 
-- **Overall status:** `IN PROGRESS — PRODUCTION CUTOVER DEFERRED`.
+S78 supersedes the previously discussed PostgreSQL direction for the active
+roadmap: `SQLite Live Research First; final durable storage decision deferred
+until stable repeated collector evidence exists.` PostgreSQL work is not
+currently planned or authorized. The live-research profile is durable and
+non-disposable, uses an explicit database outside the repository, and is
+limited to the single Heumarkt context `LIVE_RESEARCH_SINGLE_1`. This is
+research lineage, not a Tiered50 production sampling era.
+
+### Stage 14 collector implementation — live research pilot; production cutover deferred
+
+- **Overall status:** `IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`.
 - **Implementation status:** `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. S76's final source-contract retention correction is complete: JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction remain independent, candidate identity extensions retain source paths, service-only mode/display/origin/destination semantics are enforced, Attribute/GeneralAttribute and affected-entity evidence is retained without causal inference, and recognized-but-unmapped relevant fields become bounded parser-gap evidence. The accepted S75 call-scope and `CLIENT_EXECUTION_FAILURE` behavior remains intact. The package under `src/cologne_transit_collector/`, thin CLI `scripts/stage_14_collector.py`, fixed manifest `config/tiered50_runtime_manifest.json`, offline validation script, sanitized fixtures, and Stage 14 tests are source-controlled.
 - The manifest contains exactly 50 targets, split 7 Legacy7 members / 43 new Tiered50 members, with approved 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits, persisted phase indexes, and no fabricated production SamplingTargetIds. Stage 13 phase evidence is reconciled at load time.
 - Pure UTC bucket scheduling reproduces `[19,18,18,18,19,18]`, 110 executions per 30-minute super-cycle, and 220/hour. The dispatcher is scheduler-neutral, cap-2, MaxAttempts 2, failure-isolated, and deadline-aware.
-- The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. The CLI `live` mode remains blocked because the production persistence adapter and activation gate do not exist.
-- SQLite is disposable development durability for atomic dispatcher/target claims, duplicate prevention, run/target audit, lifecycle-finalized quota permits, explicit transport-attempt metadata, parsed snapshots, append-only RecordedAtTime evidence, stale claims, crash/restart visibility, and synthetic-only sampling-era tests. It is not a PostgreSQL implementation.
-- The offline repository suite reports 120 tests per run and passed five consecutive times with `ResourceWarning` promoted to an error; the Stage 14 validator and compilation/static checks passed.
-- No MDD request, DNS preflight, provider quota consumption, database object creation, recurring scheduling, production target activation, or real cutover timestamp was performed.
+- The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. Production `live` remains blocked; `live-research` is a separate one-heartbeat Heumarkt mode with explicit storage, credential, target, and quota preconditions.
+- SQLite has two explicit profiles: disposable `DEVELOPMENT` state under `.local/` and durable `LIVE_RESEARCH` state under the configured live root. The live profile preserves claims, audits, parsed snapshots, RecordedAtTime, Attribute/GeneralAttribute, Situation, parser-gap, quota, and raw-evidence lineage; it is not a production cutover and does not authorize PostgreSQL work.
+- Live research defaults to `~/cologne-transit-data/live-research/collector.sqlite3` when an explicit live root is supplied, with protected `backups/` and `raw-evidence/` directories. Parsed history is retained indefinitely; raw forensic bodies are sanitized, indexed, and retained for at most 24 hours. Validated SQLite online backups retain the three most recent UTC date versions.
+- The offline repository suite reports 144 tests per run and passed five consecutive times with `ResourceWarning` promoted to an error; the Stage 14 validator and compilation/static checks passed.
+- One explicitly authorized S78 research heartbeat ran at `2026-10-01T11:30:00Z` for Köln Heumarkt (`de:05315:11110`): one HTTP 200, 20 parsed results, one persisted snapshot, one confirmed provider attempt, no retry, and 121 parser-gap fields retained with sanitized raw evidence. This is lineage-separated research evidence, not production cutover evidence; no production `live` request, database object creation, recurring scheduling, production target activation, or real Tiered50 cutover timestamp was performed.
 
-### Stage 15A post-cutover validation readiness — in progress; live validation not started
+### Stage 15A post-cutover validation readiness — in progress; Stage 15B not started
 
 - **Stage 15A status:** `IN PROGRESS`. The authoritative [readiness document](stages/15-post-cutover-validation-readiness.md), [machine-readable contract](../config/stage15_validation_contract.json), read-only backend-neutral analyzer under `src/cologne_transit_stage15/`, SQLite evidence adapter, and offline regression tests are source-controlled.
 - The analyzer derives expected due targets from the approved manifest, pure schedule engine, and logical bucket, then reconciles actual audit evidence. It explicitly classifies success, failure, skip, missing evidence, duplicate invocation prevention, and unexpected execution. It diagnoses dispatcher owners, duplicate/stale claims, target claims, structural retry violations, separated quota accounting, coverage, duration statistics, parser/persistence evidence, and Legacy7/cutover readiness.
 - Policy-pending metrics have no invented thresholds. Measured rates, coverage percentages, parser gaps, zero-result frequency, error categories, and duration statistics remain `POLICY_PENDING`; missing required evidence is `INSUFFICIENT_EVIDENCE`. No PASS is emitted for absent post-cutover evidence.
-- **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`. No real Tiered50 activation, production target materialization, sampling-era timestamp, PostgreSQL activity, scheduler deployment, MDD request, DNS/live-network activity, or Power BI change occurred in this iteration.
+- **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`. `LIVE_RESEARCH_SINGLE_1` is explicitly excluded from post-cutover evidence. No real Tiered50 activation, production target materialization, sampling-era timestamp, scheduler deployment, or Power BI change is claimed; any controlled research request is lineage-separated and cannot satisfy the production transition check.
 
 ## Post-Stage-02 validation
 

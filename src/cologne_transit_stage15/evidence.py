@@ -2,7 +2,7 @@
 
 Only the adapter knows how evidence is stored.  The analyzer consumes the
 small, row-oriented :class:`EvidenceData` shape and can therefore be reused
-with a future PostgreSQL adapter without changing validation logic.
+with a later storage adapter without changing validation logic.
 """
 
 from __future__ import annotations
@@ -43,6 +43,9 @@ class EvidenceData:
     quota_permits: tuple[Mapping[str, Any], ...] = ()
     shared_usage: tuple[Mapping[str, Any], ...] = ()
     sampling_eras: tuple[Mapping[str, Any], ...] = ()
+    recorded_at_time_evidence: tuple[Mapping[str, Any], ...] = ()
+    raw_evidence: tuple[Mapping[str, Any], ...] = ()
+    database_metadata: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def has_execution_evidence(self) -> bool:
@@ -90,6 +93,9 @@ class SQLiteEvidenceAdapter:
         "quota_permits",
         "shared_usage",
         "sampling_eras",
+        "recorded_at_time_evidence",
+        "raw_evidence",
+        "database_metadata",
     )
 
     def __init__(self, path: str | Path) -> None:
@@ -127,8 +133,18 @@ class SQLiteEvidenceAdapter:
                         raise EvidenceAdapterError(f"cannot read SQLite evidence table: {table}") from exc
         finally:
             connection.close()
+        metadata_rows = values.get("database_metadata", ())
+        role = next(
+            (
+                str(row.get("metadata_value"))
+                for row in metadata_rows
+                if str(row.get("metadata_key")) == "database_role"
+            ),
+            None,
+        )
+        source = "sqlite-live-research" if role == "LIVE_RESEARCH" else self.source
         return EvidenceData(
-            source=self.source,
+            source=source,
             available=True,
             limitations=tuple(limitations),
             manifest_targets=values.get("manifest_targets", ()),
@@ -144,6 +160,9 @@ class SQLiteEvidenceAdapter:
             quota_permits=values.get("quota_permits", ()),
             shared_usage=values.get("shared_usage", ()),
             sampling_eras=values.get("sampling_eras", ()),
+            recorded_at_time_evidence=values.get("recorded_at_time_evidence", ()),
+            raw_evidence=values.get("raw_evidence", ()),
+            database_metadata=values.get("database_metadata", ()),
         )
 
     def __enter__(self) -> "SQLiteEvidenceAdapter":
@@ -192,6 +211,9 @@ def evidence_from_mappings(
         "quota_permits",
         "shared_usage",
         "sampling_eras",
+        "recorded_at_time_evidence",
+        "raw_evidence",
+        "database_metadata",
     }
     unknown = set(tables) - allowed
     if unknown:

@@ -2,9 +2,9 @@
 
 The package consumes an approved manifest and evidence adapter.  It never
 claims a bucket, changes collector state, sends transport, or writes parsed
-evidence.  SQLite support is deliberately a read-only development adapter;
-the :class:`EvidenceAdapter` protocol is the seam for a future production
-evidence backend.
+evidence.  SQLite support is a read-only adapter for disposable development
+and durable live-research evidence; the :class:`EvidenceAdapter` protocol is
+retained for backend-neutral analysis.
 """
 
 from .analyzer import (

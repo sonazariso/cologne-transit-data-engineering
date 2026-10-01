@@ -4,18 +4,21 @@
 
 Overall Stage 14 status:
 
-`IN PROGRESS — PRODUCTION CUTOVER DEFERRED`
+`IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
 The implementation closeout is deliberately narrower than a production
-cutover. The final PostgreSQL host/runtime, production persistence adapter,
-real target materialization, sampling-era cutover timestamp, deployment
-platform, controlled live dry-run, Tiered50 activation, and post-activation
-validation remain open work. Stage 15A readiness is now `IN PROGRESS`; Stage
-15B live post-cutover validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+cutover. S78 authorizes a durable, one-station SQLite research pilot while
+the final durable-storage decision remains deferred until stable repeated
+collector evidence exists. PostgreSQL work is not currently planned or
+authorized. Real Tiered50 target materialization, a production sampling-era
+cutover timestamp, deployment platform, Tiered50 activation, and
+post-activation validation remain open work. Stage 15A readiness is now
+`IN PROGRESS`; Stage 15B live post-cutover validation remains `NOT STARTED —
+AWAITS TIERED50 CUTOVER`.
 
 This document records the Stage 14 Python collector implementation requested
 by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
@@ -30,10 +33,11 @@ cron, a system timer, a container scheduler, a cloud scheduler, or another
 platform without changing collector policy code.
 
 No recurring scheduler loop, deployment resource, database server, database
-driver, production target row, or live MDD invocation is part of this
-iteration. PostgreSQL remains the approved future authoritative direction,
-but host and runtime selection are deferred. SQLite is only a disposable
-local development backend.
+driver, production target row, or ongoing live loop is part of this iteration.
+The explicit `live-research` command performs at most one current-bucket
+Heumarkt heartbeat against a durable SQLite profile. Production `live` remains
+blocked. SQLite is disposable only in the `DEVELOPMENT` profile; the
+`LIVE_RESEARCH` profile is non-disposable and outside the repository.
 
 The manifest preserves the approved historical Legacy7 lineage IDs 1 through 7
 as `legacy_sampling_target_id`. These are continuity metadata only, not future
@@ -54,7 +58,7 @@ The implementation is under `src/cologne_transit_collector/`:
 | `transport.py` | Explicitly opted-in standard-library HTTP client plus fake/fixture clients |
 | `trias.py` | Source-faithful JSON/XML parser separated from transport and persistence |
 | `quota.py` | Shared-credential policy and durable permit lifecycle |
-| `persistence.py` | Disposable SQLite durability, claims, audit, snapshots, and usage accounting |
+| `persistence.py` | Explicit DEVELOPMENT/LIVE_RESEARCH SQLite durability, claims, audit, snapshots, raw-evidence index, backups, and usage accounting |
 | `collector.py` | One-heartbeat dispatcher, cap-2 execution, retry/deadline/failure isolation |
 | `simulation.py` | Deterministic fault-injection scenarios |
 | `cli.py` | Thin offline-safe command-line routing |
@@ -184,9 +188,14 @@ than the presence of a `live_network` client attribute. `run_simulation` owns
 and closes its internal SQLite instance in a `finally` block; callers of
 `build_simulation` own the returned persistence object and must close it.
 
-SQLite state is disposable local development state under `.local/` and is
-ignored by Git. It is not a PostgreSQL schema, production database, or
-production migration.
+SQLite has two explicit profiles. `DEVELOPMENT` state remains disposable
+local state under `.local/` and is ignored by Git. `LIVE_RESEARCH` state is
+non-disposable, additive-schema, owner-protected state outside the repository;
+its metadata identifies the database role, schema version, creation time,
+last migration time, and `LIVE_RESEARCH_SINGLE_1` context. The live profile
+never resets or recreates an existing database, retains parsed history
+indefinitely, and uses SQLite's online backup API for three daily versions.
+Neither profile is a Tiered50 production cutover or a PostgreSQL implementation.
 
 ## TRIAS and raw-response handling
 
@@ -218,11 +227,13 @@ context and field paths. Parser-gap coverage is path-based: recognized names
 are not silently suppressed, explicit evidence is not duplicated, and
 unrelated envelope fields remain ignored. It does not derive `RecordedAtTime`,
 actual physical delay, cancellation, or platform state.
-Parsed snapshots are separate from transport and persistence. The existing
-raw-response policy is unchanged: sanitized fixtures are allowed offline;
-production raw payload retention is not enabled by this implementation. The
-backend-neutral `retain_raw_evidence` hook is present for the approved
-future-live bounded forensic policy and is explicitly disabled by SQLite.
+Parsed snapshots are separate from transport and persistence. Ordinary
+successful live responses do not retain raw bodies. The `LIVE_RESEARCH` raw
+hook retains only sanitized forensic evidence for RecordedAtTime, parser gaps,
+parser/application failures, material anomalies, or useful non-success bodies;
+raw files are outside SQLite, owner-protected, indexed with a 24-hour expiry,
+and cleaned at startup, after the heartbeat, or by maintenance. The
+`DEVELOPMENT` profile keeps the hook disabled.
 
 ### Stage 8/Stage 9 semantic reconciliation
 
@@ -248,6 +259,8 @@ continue to reflect each source representation.
 | `dry-run` | Uses a sanitized fixture client and SQLite to exercise claims, audit, parsing, persistence, quota, and concurrency |
 | `simulate` | Uses deterministic fault injection; `--fault` selects an approved scenario |
 | `live` | Explicitly recognized but blocked until production persistence, safety state, cutover, and later authorization exist |
+| `live-research` | Requires `--allow-live`, explicit live root/database, `--pilot-target de:05315:11110`, and inherited `MDD_API_KEY`; executes exactly one Heumarkt target for the current bucket |
+| `live-research-maintenance` | Cleans expired raw evidence and refreshes/rotates validated live SQLite backups without transport |
 
 The fault harness covers all-success, 5xx retry success/exhaustion, 401, 403,
 429 Retry-After fit/exceed, timeout, parser failure, persistence failure,
@@ -258,16 +271,16 @@ target failure isolation. None of these scenarios opens a network connection.
 ## Sampling-era and continuity contract
 
 The domain represents `Legacy7` and `Tiered50` as distinct sampling eras.
-The runtime manifest is Tiered50 configuration but remains inactive and has no
-real cutover timestamp. SQLite can record explicitly synthetic test era times
-for simulations; no production timestamp is fabricated. Legacy history is
-not deleted or rewritten. Future production materialization must retain the
-seven existing target IDs once the authoritative mapping is available and add
-only the approved new targets.
+The runtime manifest remains the approved Tiered50 design, but the live pilot
+uses the separate operational context `LIVE_RESEARCH_SINGLE_1`; it does not
+create an active Tiered50 row or a production cutover timestamp. Live research
+observations cannot satisfy Stage 15B continuity. Legacy history is not
+deleted or rewritten, and the pilot does not materialize the 43 new production
+target IDs.
 
 ## Offline closeout validation
 
-The complete repository suite passed in five consecutive runs, with 120 tests
+The complete repository suite passed in five consecutive runs, with 144 tests
 reported in each run. The suite was also run with `ResourceWarning` promoted to
 an error; no SQLite resource warning was emitted. The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
@@ -286,22 +299,26 @@ Offline plan/simulate validation produced 19 due targets, 19 simulated
 transport calls, and zero live-network calls; CLI `live` remained blocked
 before transport.
 
-No MDD request, DNS lookup, live-network operation, PostgreSQL installation or
-object creation, scheduler deployment, production target materialization,
-Power BI change, or cutover was performed.
+No production `live` request, PostgreSQL installation/object change, scheduler
+deployment, Tiered50 target materialization, Power BI change, or production
+cutover was performed. The one authorized S78 research heartbeat used the
+`LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
+`de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
+recorded one provider attempt without retry, and retained 121 parser-gap fields
+with sanitized raw evidence. It remains excluded from Stage 15B.
 
 ## Deferred work required for real Stage 14 completion
 
 The following are intentional deferrals, not implementation defects:
 
-1. choose the final PostgreSQL host/runtime and implement the production adapter;
-2. materialize the production schema and map/retain real `SamplingTargetId` values;
-3. perform the approved seven-to-50 target migration without rewriting Legacy7 history;
-4. record the real Tiered50 sampling-era cutover timestamp;
-5. determine the final nonzero heartbeat persistence/cleanup safety margin;
-6. activate a platform-neutral deployment/scheduler after the platform decision;
-7. run a separately authorized controlled live MDD dry-run with shared-credential audit state;
-8. activate Tiered50 only after the dry-run gate passes; and
+1. run and review repeated one-heartbeat `LIVE_RESEARCH_SINGLE_1` evidence;
+2. reconsider the final durable-storage decision only after that evidence is stable;
+3. materialize production schema/identity only after a separate authorization;
+4. perform the approved seven-to-50 target migration without rewriting Legacy7 history;
+5. record the real Tiered50 sampling-era cutover timestamp;
+6. determine the final nonzero heartbeat persistence/cleanup safety margin;
+7. activate a platform-neutral deployment/scheduler after the platform decision;
+8. activate Tiered50 only after its independent cutover gate passes; and
 9. execute post-activation smoke, quota, persistence, and continuity validation.
 
 No item above is performed by the current implementation.

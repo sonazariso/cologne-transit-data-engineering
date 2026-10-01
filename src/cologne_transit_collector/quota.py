@@ -391,9 +391,11 @@ class QuotaGuard:
         value = self.usage_provider.current_month_usage(at_utc=at_utc)
         if value is None:
             return None
-        snapshot = UsageSnapshot.from_mapping(value)
-        if not snapshot.state_available:
+        # Do not coerce an unavailable provider-wide baseline into numeric
+        # zero before the fail-closed decision is made.
+        if not bool(value.get("state_available", True)):
             return None
+        snapshot = UsageSnapshot.from_mapping(value)
         if min(
             snapshot.confirmed_provider_attempts,
             snapshot.reserved_shared_usage,

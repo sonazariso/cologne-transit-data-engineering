@@ -28,11 +28,11 @@ Existing legacy SQL database, Windows scheduled task, collector runtime, and rea
 
 API keys, connection strings containing credentials, tokens, and passwords must not be committed. The exact secret-management approach for the new collector is a later implementation decision.
 
-The tracked `.env.example` file is a non-secret template containing mock values
-for the production server/SSH connection, PostgreSQL container, and optional
-pgAdmin web login. Copy it to a local `.env`, replace every mock value, and do
-not commit the resulting `.env` file. SSH keys are preferred over storing an SSH
-password when the deployment setup supports them.
+The tracked `.env.example` file is a non-secret historical environment
+template. S78 does not use or authorize PostgreSQL/SSH deployment variables.
+The live-research collector reads only inherited `MDD_API_KEY` and the
+dedicated live-root/database settings; copy values to a local `.env` only when
+the execution environment supplies them, and never commit the resulting file.
 
 pgAdmin credentials are only for signing in to the pgAdmin web interface. They
 do not replace the PostgreSQL username and password; pgAdmin still uses the
@@ -40,9 +40,10 @@ PostgreSQL credentials when registering a database server or running queries.
 
 ## Stage 14 collector runtime
 
-The collector is Python and cross-platform. Its only recurring-execution
-contract is the one-heartbeat command; the deployment platform is intentionally
-deferred. `plan`, `dry-run`, and `simulate` use no network and no production
-database. The SQLite file under `.local/` is disposable development state and
-is not the future PostgreSQL runtime. PostgreSQL host selection, installation,
-and production deployment are not required for this iteration.
+The collector is Python and cross-platform. Its only execution contract is a
+single heartbeat; no recurring scheduler is deployed. `plan`, `dry-run`, and
+`simulate` use no network. `live-research` requires an explicit root/database
+outside the repository and uses durable SQLite for `LIVE_RESEARCH_SINGLE_1`;
+`live` remains blocked. The `.local/` SQLite file remains disposable
+development state. PostgreSQL host selection, installation, and deployment
+are not planned or authorized in the active roadmap.

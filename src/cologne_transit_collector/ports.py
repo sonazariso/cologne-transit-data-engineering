@@ -74,7 +74,8 @@ class PersistencePort(Protocol):
     is_production_ready: bool
 
     def start_collector_run(
-        self, *, run_id: str, panel_version: str, logical_due_bucket: int, mode: str, started_at: datetime
+        self, *, run_id: str, panel_version: str, logical_due_bucket: int, mode: str, started_at: datetime,
+        collection_context: str | None = None,
     ) -> None:
         ...
 
@@ -86,7 +87,8 @@ class PersistencePort(Protocol):
     ) -> Any:
         ...
 
-    def start_target_audit(self, *, run_id: str, target: Target, logical_due_bucket: int, started_at: datetime) -> Any:
+    def start_target_audit(self, *, run_id: str, target: Target, logical_due_bucket: int, started_at: datetime,
+                           collection_context: str | None = None) -> Any:
         ...
 
     def record_http_attempt(
@@ -111,7 +113,9 @@ class PersistencePort(Protocol):
         """Record an attempt and finalize its permit in one transaction."""
         ...
 
-    def persist_snapshot(self, *, audit_id: Any, target: Target, logical_due_bucket: int, parsed_snapshot: Mapping[str, Any], persisted_at: datetime) -> None:
+    def persist_snapshot(self, *, audit_id: Any, target: Target, logical_due_bucket: int,
+                         parsed_snapshot: Mapping[str, Any], persisted_at: datetime,
+                         collection_context: str | None = None) -> None:
         ...
 
     def complete_target_audit(self, *, audit_id: Any, outcome: Mapping[str, Any], completed_at: datetime) -> None:
@@ -142,7 +146,16 @@ class PersistencePort(Protocol):
         ...
 
     def retain_raw_evidence(self, **kwargs: Any) -> str:
-        """Future-live bounded raw-evidence hook; disabled by SQLite."""
+        """Bounded raw-evidence hook; enabled only by LIVE_RESEARCH SQLite."""
+        ...
+
+    def cleanup_expired_raw_evidence(self, **kwargs: Any) -> Mapping[str, Any]:
+        ...
+
+    def backup_live_database(self, **kwargs: Any) -> Mapping[str, Any]:
+        ...
+
+    def verify_live_research_heartbeat(self, **kwargs: Any) -> Mapping[str, Any]:
         ...
 
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:

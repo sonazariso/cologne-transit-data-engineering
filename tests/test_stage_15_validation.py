@@ -55,7 +55,10 @@ class Stage15ValidationTests(unittest.TestCase):
 
     def test_contract_and_configuration_invariants_are_machine_readable(self) -> None:
         report = Stage15Analyzer(self.manifest, contract=self.contract).analyze()
-        self.assertEqual(report["stage14_overall_status"], "IN PROGRESS — PRODUCTION CUTOVER DEFERRED")
+        self.assertEqual(
+            report["stage14_overall_status"],
+            "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED",
+        )
         self.assertEqual(report["stage14_collector_status"], "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE")
         self.assertEqual(report["stage15_readiness_status"], "IN PROGRESS")
         self.assertEqual(report["stage15_live_status"], "NOT STARTED — AWAITS TIERED50 CUTOVER")

@@ -5,11 +5,13 @@
 
 This document is the authoritative Stage 15 readiness handoff. It does not
 claim that the Tiered50 panel has been activated, that production evidence
-exists, or that Stage 15B has started.
+exists, or that Stage 15B has started. S78's `LIVE_RESEARCH_SINGLE_1` SQLite
+observations are research evidence only and are never treated as a production
+sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `IN PROGRESS — PRODUCTION CUTOVER DEFERRED`
+- Stage 14 overall: `IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
 - Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`
@@ -21,8 +23,9 @@ activation. It provides:
 
 - the version-controlled [validation contract](../../config/stage15_validation_contract.json);
 - the reusable `cologne_transit_stage15` analyzer package;
-- a read-only SQLite evidence adapter and a backend-neutral evidence-adapter
-  protocol for a future production adapter;
+- a read-only SQLite evidence adapter that can inspect either the disposable
+  `DEVELOPMENT` profile or durable `LIVE_RESEARCH` evidence, plus a
+  backend-neutral evidence-adapter protocol where it remains useful;
 - deterministic reconciliation of approved expected target/bucket work against
   actual audit, claim, attempt, snapshot, and quota evidence;
 - dispatcher-owner, duplicate-invocation, target-claim, stale-claim, retry,
@@ -52,7 +55,8 @@ The analyzer is read-only with respect to collector evidence. It does not
 claim buckets, mutate target state, repair stale claims, finalize quota
 permits, write parsed snapshots, or send transport requests. SQLite is opened
 with a read-only connection. The adapter protocol keeps these semantics
-independent of the future PostgreSQL evidence implementation.
+independent of any later storage decision. PostgreSQL work is not currently
+planned or authorized.
 
 ## Approved automatic checks
 
@@ -133,7 +137,8 @@ Manifest/configuration readiness:
 python scripts/stage_15_validation.py
 ```
 
-Read-only analysis of an existing SQLite development evidence file:
+Read-only analysis of an existing SQLite development or live-research evidence
+file:
 
 ```text
 python scripts/stage_15_validation.py \
@@ -146,12 +151,13 @@ Deterministic offline Stage 14 evidence can be generated in a temporary
 fixture and analyzed with `--simulate all-success` or another existing
 offline fault scenario. No command in this readiness workflow performs MDD,
 DNS, live-network, PostgreSQL, scheduler, target-activation, or Power BI
-activity.
+activity. A live-research evidence file may be inspected with the same
+read-only adapter; analysis does not start Stage 15B or mutate the file.
 
 ## Explicit non-goals
 
 This readiness iteration does not define failure, retry, timeout, coverage,
 parser-gap, or heartbeat-duration thresholds. It does not install/configure
-PostgreSQL, create production database objects, materialize production
-targets, create a sampling-era timestamp, deploy a scheduler, modify Power BI,
-start live Stage 15, or begin Stage 16.
+PostgreSQL or create a PostgreSQL adapter, create production database objects,
+materialize production targets, create a sampling-era timestamp, deploy a
+scheduler, modify Power BI, start live Stage 15, or begin Stage 16.

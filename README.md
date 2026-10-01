@@ -17,6 +17,12 @@ sufficient recorded/actual timing evidence.
 
 ## Current status
 
+S78 is the active roadmap direction: the project is running a bounded
+single-station SQLite live-research pilot before any future durable-storage
+decision is reconsidered. PostgreSQL work is not currently planned or
+authorized. Live research is not Tiered50 production evidence and does not
+start Stage 15B.
+
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
@@ -37,8 +43,8 @@ sufficient recorded/actual timing evidence.
 - Stage 11 — [Power BI Model](docs/stages/11-power-bi-model-design.md): **COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED**. The semantic subject areas, table grains, physical-fact versus semantic Scheduled Trip relationship boundary, relationship/filter-direction contract, governed Date strategy, static-versus-canonical identity boundary, DAX measure contract, service-date-scoped matching coverage with separate missing-service-date evidence, threshold/NULL semantics, terminology, and sampling/coverage/reporting limits are approved. `Dim Sampling Era` currently filters only the `Fact Matching Decision` population; Data Quality classifications carried by those decisions inherit that context, while the independent `Fact Data Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in the base model. Sampling Era is not an operational KPI slicer until validated operational-event lineage exists. [Completion decision](docs/stages/11-power-bi-model-completion-decision.md).
 - Stage 12 — [50-Station Selection](docs/stages/12-50-station-selection.md): **COMPLETE — APPROVED FIXED 50-STATION PANEL**. `TIERED50_PANEL_V1` contains exactly 50 unique validated VRS parent stations, preserves all seven Legacy7 continuity anchors, measures current core-mode representation and geographic concentration, and passes a bounded sequential MDD compatibility probe with 50 HTTP 200/parseable application responses and source `StopPointRef` evidence. The complete sanitized 864-candidate population is retained in [candidate evidence](docs/stages/12-50-station-candidate-evidence.json), and the authoritative selector reproduces the fixed panel offline without the ZIP, network, MDD, or credentials. See the [completion decision](docs/stages/12-50-station-selection-completion-decision.md) and [sanitized evidence artifact](docs/stages/12-50-station-selection-evidence.json).
 - Stage 13 — [Tiered Collector Readiness](docs/stages/13-tiered-collector-readiness.md): **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**. Explicit approval recorded in `prompts/S68.md` finalizes `TIERED50_PANEL_V1` as exactly 50 fixed stations with density ranks 1–8 / 9–28 / 29–50 for Tier A/B/C, cadence 5/15/30 minutes, 110 requests per 30-minute super-cycle, Tier A/B/C `NumberOfResults` 20/30/30, bounded concurrency 2, and `MaxAttempts=2` with one approved transient retry. Static support is 50/50 at the approved tier-specific limits; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The 182,980 / 189,076 conservative shared-credential totals are valid safely below the 210,000 normal operational maximum and 207,500 automatic-retry protection boundary; the 31-day guardrail example is 189,076 with 18,424 headroom, while the Tiered50-only component is 180,048. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days. See the [completion decision](docs/stages/13-tiered-collector-readiness-completion-decision.md) and [evidence artifact](docs/stages/13-tiered-collector-readiness-evidence.json).
-- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **IN PROGRESS — PRODUCTION CUTOVER DEFERRED**. Collector implementation status is **STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE** after durable dispatcher claims, just-in-time target claims, source-contract-faithful identity/attribute/Situation retention, atomic quota-permit finalization, offline/live accounting separation, explicit transport-attempt metadata, and deterministic SQLite lifecycle validation. PostgreSQL, deployment scheduling, real target materialization/cutover, live MDD, and activation remain explicitly deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A readiness is tracked below.
-- Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. Stage 15B live post-cutover validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; no real cutover timestamp or production evidence is claimed.
+- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED**. Collector implementation status is **STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE** after durable dispatcher claims, just-in-time target claims, source-contract-faithful identity/attribute/Situation retention, atomic quota-permit finalization, offline/live accounting separation, explicit transport-attempt metadata, and deterministic SQLite lifecycle validation. The explicit `LIVE_RESEARCH_SINGLE_1` profile now durably records only the Köln Heumarkt pilot (`de:05315:11110`) outside the repository, with parsed evidence retained indefinitely, bounded raw forensics, and three daily SQLite backups. PostgreSQL work is not planned or authorized in the active roadmap; Tiered50 production, deployment scheduling, real target materialization/cutover, and activation remain deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A readiness is tracked below.
+- Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The analyzer may inspect `LIVE_RESEARCH_SINGLE_1` read-only, but that context cannot satisfy the production sampling-era transition. Stage 15B live post-cutover validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; no real cutover timestamp or production evidence is claimed.
 - Stage 4 evidence: [approved reference snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The approved reference contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Approved reference ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`. The separate Stage 9 current official snapshot is `VERSION__20260929_0106` with SHA-256 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` and passed all 17 Stage 4 revalidation checks.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
 - Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history or approve GTFS-RT for production; Stage 3A now separately validates current disruption evidence.
@@ -67,8 +73,9 @@ sufficient recorded/actual timing evidence.
   the current authorization/request contract.
 - The [future source-observation and persistence contract](docs/source-contracts/future-observation-persistence-contract.md)
   keeps timetable, estimate, source-provided recorded time, and collector
-  observation time separate; preserves estimate and Situation/Cause history;
-  and records PostgreSQL as the persistence direction. The Stage 9 matching
+  observation time separate and preserves estimate and Situation/Cause history.
+  Its earlier PostgreSQL direction is historical; S78 supersedes it for the
+  active roadmap with SQLite live research first. The Stage 9 matching
   migration is source-controlled but has not been executed or loaded with
   production data.
 - The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
@@ -138,13 +145,16 @@ Stage 14 implementation details are in
 [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md).
 The scheduler-neutral command is `python scripts/stage_14_collector.py`;
 without a mode it performs an offline `plan`. `dry-run` and `simulate` are
-offline-safe, while `live` remains explicitly blocked until the deferred
-production persistence and cutover gates are complete.
+offline-safe, `live` remains explicitly blocked, and `live-research` requires
+`--allow-live`, an explicit live root/database, `--pilot-target
+de:05315:11110`, and inherited `MDD_API_KEY`.
 
 Stage 15A readiness validation is `python scripts/stage_15_validation.py`.
 It emits the authoritative JSON report, can read an existing SQLite evidence
 file in read-only mode, and supports deterministic offline simulation evidence;
 it performs no MDD, DNS, live-network, PostgreSQL, or production-cutover work.
 
-The Stage 14 collector is the first reusable implementation in `src/`; later
-production persistence and deployment artifacts remain intentionally deferred.
+The Stage 14 collector is the first reusable implementation in `src/`; the
+live-research SQLite profile is the current durable store, while Tiered50
+production persistence, deployment, and any PostgreSQL work remain intentionally
+deferred and unauthorized.

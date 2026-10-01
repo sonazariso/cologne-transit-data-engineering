@@ -10,6 +10,9 @@ from typing import Any, Iterable, Mapping, Sequence
 from .domain import (
     PANEL_VERSION,
     PHASE_CAPACITIES,
+    LIVE_RESEARCH_LEGACY_ID,
+    LIVE_RESEARCH_STATION_NAME,
+    LIVE_RESEARCH_TARGET_ID,
     TIER_CADENCE_MINUTES,
     TIER_COUNTS,
     TIER_NUMBER_OF_RESULTS,
@@ -61,6 +64,22 @@ class RuntimeManifest:
             if target.source_parent_station_id == source_parent_station_id:
                 return target
         raise KeyError(source_parent_station_id)
+
+    def live_research_target(self) -> Target:
+        """Return the fixed, manifest-owned S78 Heumarkt target."""
+
+        target = self.target_by_id(LIVE_RESEARCH_TARGET_ID)
+        if (
+            target.station_name != LIVE_RESEARCH_STATION_NAME
+            or target.legacy_sampling_target_id != LIVE_RESEARCH_LEGACY_ID
+            or target.tier != "A"
+            or target.cadence_minutes != 5
+            or target.number_of_results != 20
+        ):
+            raise ManifestValidationError(
+                "approved manifest Heumarkt row does not match the S78 pilot contract"
+            )
+        return target
 
     @property
     def legacy7_targets(self) -> tuple[Target, ...]:

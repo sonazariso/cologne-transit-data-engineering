@@ -58,6 +58,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-053 | 2026-10-01 | S75 Stage 14 source-faithful parser hardening and retry safety: remove call-to-event/service fallback, separate event/service operational fields, restore identity/display and parser-gap retention, and classify unexpected client exceptions as non-retryable `CLIENT_EXECUTION_FAILURE` | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-054 | 2026-10-01 | S76 Stage 14 final source-contract retention correction: separate JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction, retain candidate identity extensions and service-scoped identity/display fields with lineage, preserve Attribute/GeneralAttribute and affected-entity evidence, and close recognized-but-unmapped parser-gap loss | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-055 | 2026-10-01 | S77 Stage 15A post-cutover validation readiness: add a versioned validation contract, backend-neutral read-only analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality diagnostics, and offline regression coverage without starting live Stage 15 | Stage 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage 15 live NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-056 | 2026-10-01 | S78 Single-Station Live SQLite Research Pilot: `SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.` Use durable `LIVE_RESEARCH` SQLite for the bounded `LIVE_RESEARCH_SINGLE_1` Köln Heumarkt pilot; retain parsed evidence, bound raw forensics to 24 hours, and keep three validated daily backups without starting Tiered50 production or Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; collector implementation COMPLETE; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1326,3 +1327,51 @@ MDD request, DNS/live-network activity, PostgreSQL activity, production object,
 production target materialization, scheduler deployment, Power BI change, or
 real cutover timestamp was performed. Because Tiered50 has not been activated,
 Stage 15B remains not started and no post-cutover production claim is made.
+
+## D-056 — S78 Single-Station Live SQLite Research Pilot
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 14 collector implementation COMPLETE; Stage 15A IN PROGRESS;
+Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S78 supersedes the previously discussed PostgreSQL direction for the active
+roadmap with the following decision:
+
+`SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.`
+
+The active implementation uses one explicit durable `LIVE_RESEARCH` SQLite
+profile outside the repository. Its recommended root is
+`~/cologne-transit-data/live-research/`, with `collector.sqlite3`, protected
+`backups/`, and protected `raw-evidence/` directories. The database is
+non-disposable, additive-schema, owner-protected, and identified by metadata
+including role, schema version, creation time, last migration time, and
+`LIVE_RESEARCH_SINGLE_1` collection context. Existing live state is never
+reset or recreated automatically.
+
+The dedicated `live-research` command requires explicit `--allow-live`, an
+explicit live root or database, the inherited `MDD_API_KEY`, and the approved
+pilot target `de:05315:11110` / Köln Heumarkt. It executes one current
+five-minute bucket only, retains parsed source-faithful snapshots and
+RecordedAtTime/Attribute/GeneralAttribute/Situation/parser-gap evidence
+indefinitely, and keeps provider-wide shared quota unknown when no trusted
+baseline exists. Automatic retry fails closed in that unknown state.
+
+Ordinary successful raw bodies are not retained. Sanitized raw evidence is
+temporary forensic material only, indexed with a maximum 24-hour lifetime,
+refused when the current API key is detected, and cleaned at startup, after a
+heartbeat, or by explicit maintenance. SQLite online backups are integrity
+checked, atomically published, refreshed for the current UTC date, and rotated
+to the three most recent daily versions. No Tiered50 active sampling-era row,
+production cutover timestamp, new production target ID, scheduler, Power BI
+change, Stage 16 work, or Stage 15B validation is created by this decision.
+PostgreSQL work is not currently planned or authorized; historical decisions
+that mention it remain unchanged.
+
+The single controlled S78 heartbeat completed in the `2026-10-01T11:30:00Z`
+bucket for Köln Heumarkt (`de:05315:11110`). It made exactly one provider HTTP
+attempt, received HTTP 200, parsed and durably stored 20 results, and recorded
+no retry. The source response exposed 121 parser-gap fields, so sanitized raw
+evidence was retained under the bounded forensic policy. The resulting SQLite
+backup passed integrity validation. Shared provider quota remained explicitly
+unknown; the run therefore made no retry claim. This evidence is read-only
+Stage 15A input and does not start Stage 15B or create a Tiered50 cutover.

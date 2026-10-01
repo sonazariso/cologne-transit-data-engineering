@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .collector import Collector, LiveModeBlocked
-from .configuration import CollectorSettings
+from .collector import Collector, LiveModeBlocked, LiveResearchModeBlocked
+from .configuration import (
+    LIVE_RESEARCH_DB_ENV,
+    LIVE_RESEARCH_ROOT_ENV,
+    CollectorSettings,
+)
 from .manifest import RuntimeManifest, load_default_manifest
-from .persistence import SQLitePersistence
+from .persistence import LiveResearchSafetyError, SQLitePersistence
 from .quota import QuotaGuard
 from .simulation import SCENARIO_NAMES, run_simulation
-from .transport import FixtureMddClient
+from .transport import FixtureMddClient, LiveMddClient, validate_api_key_format
 
 
 def _parse_utc(value: str | None) -> datetime | None:
@@ -29,8 +34,13 @@ def _parse_utc(value: str | None) -> datetime | None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run or inspect one offline-safe Stage 14 collector heartbeat.")
-    parser.add_argument("mode", nargs="?", choices=("plan", "dry-run", "simulate", "live"), default="plan")
+    parser = argparse.ArgumentParser(description="Run or inspect one scheduler-neutral collector heartbeat.")
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        choices=("plan", "dry-run", "simulate", "live", "live-research", "live-research-maintenance", "maintenance"),
+        default="plan",
+    )
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--state-path", type=Path)
@@ -38,7 +48,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--fault", choices=SCENARIO_NAMES, default="all-success")
     parser.add_argument("--safety-margin-seconds", type=float)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--allow-live", action="store_true", help="reserved explicit opt-in; live activation is still blocked")
+    parser.add_argument("--allow-live", action="store_true", help="required explicit opt-in for live-research")
+    parser.add_argument("--live-research-db", "--live-db", dest="live_research_db", type=Path)
+    parser.add_argument("--live-data-root", "--live-root", dest="live_data_root", type=Path)
+    parser.add_argument("--pilot-target", help="explicit live-research target; must be de:05315:11110")
     return parser
 
 
@@ -87,6 +100,103 @@ def main(argv: list[str] | None = None) -> int:
                 "live mode is blocked: no production persistence adapter, cutover timestamp, or activation exists in Stage 14"
             )
 
+        if args.mode in {"live-research-maintenance", "maintenance"}:
+            if args.state_path is not None:
+                raise LiveResearchModeBlocked(
+                    "live-research maintenance does not accept the development --state-path"
+                )
+            settings = CollectorSettings.for_live_research(
+                root,
+                database_path=args.live_research_db,
+                data_root=args.live_data_root,
+                safety_margin_seconds=args.safety_margin_seconds,
+            )
+            persistence = SQLitePersistence(
+                settings.state_path,
+                profile=settings.persistence_profile,
+                repository_root=root,
+                backup_dir=settings.backup_path,
+                raw_evidence_dir=settings.raw_evidence_path,
+                collection_context=settings.collection_context,
+            )
+            try:
+                persistence.preflight_storage()
+                summary = persistence.maintenance_summary(now_utc=at_utc)
+                print(json.dumps(summary, ensure_ascii=False, sort_keys=True, default=str))
+                return 0 if summary.get("status") == "COMPLETE" else 1
+            finally:
+                persistence.close()
+
+        if args.mode == "live-research":
+            if args.state_path is not None:
+                raise LiveResearchModeBlocked(
+                    "live-research does not accept the development --state-path"
+                )
+            if not args.allow_live:
+                raise LiveResearchModeBlocked(
+                    "live-research requires --allow-live"
+                )
+            if args.pilot_target != "de:05315:11110":
+                raise LiveResearchModeBlocked(
+                    "live-research requires --pilot-target de:05315:11110"
+                )
+            if (
+                args.live_research_db is None
+                and args.live_data_root is None
+                and not os.environ.get(LIVE_RESEARCH_DB_ENV)
+                and not os.environ.get(LIVE_RESEARCH_ROOT_ENV)
+            ):
+                raise LiveResearchModeBlocked(
+                    "live-research requires an explicit --live-db/--live-root or dedicated live-path environment variable"
+                )
+            if validate_api_key_format(os.environ.get("MDD_API_KEY")) != "VALID":
+                raise LiveResearchModeBlocked(
+                    "MDD_API_KEY is missing or invalid; zero network requests performed"
+                )
+            settings = CollectorSettings.for_live_research(
+                root,
+                database_path=args.live_research_db,
+                data_root=args.live_data_root,
+                safety_margin_seconds=args.safety_margin_seconds,
+            )
+            persistence = SQLitePersistence(
+                settings.state_path,
+                profile=settings.persistence_profile,
+                repository_root=root,
+                backup_dir=settings.backup_path,
+                raw_evidence_dir=settings.raw_evidence_path,
+                collection_context=settings.collection_context,
+            )
+            try:
+                persistence.materialize_manifest(manifest)
+                collector = Collector(
+                    manifest=manifest,
+                    persistence=persistence,
+                    mdd_client=LiveMddClient(settings.endpoint, enabled=True),
+                    quota_guard=QuotaGuard(persistence, reservation_scope="LIVE_RESEARCH"),
+                    safety_margin_seconds=settings.safety_margin_seconds,
+                )
+                previous_handlers = {}
+                for signal_name in ("SIGINT", "SIGTERM"):
+                    signal_number = getattr(signal, signal_name, None)
+                    if signal_number is not None:
+                        previous_handlers[signal_number] = signal.getsignal(signal_number)
+                        signal.signal(signal_number, lambda _signum, _frame: collector.request_shutdown())
+                try:
+                    result = collector.run_once(
+                        mode="live-research",
+                        allow_live=True,
+                        pilot_target=args.pilot_target,
+                        at_utc=at_utc,
+                    )
+                finally:
+                    for signal_number, handler in previous_handlers.items():
+                        signal.signal(signal_number, handler)
+                print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True, default=str))
+                return 0
+            finally:
+                persistence.close()
+
         settings = CollectorSettings.for_repository(
             root,
             state_path=args.state_path,
@@ -124,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             persistence.close()
-    except LiveModeBlocked as exc:
+    except (LiveModeBlocked, LiveResearchModeBlocked, LiveResearchSafetyError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc), "simulated_transport_calls": 0, "live_network_calls": 0}), file=sys.stderr)
         return 2
     except (ValueError, OSError) as exc:

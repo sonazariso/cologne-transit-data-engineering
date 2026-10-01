@@ -127,8 +127,8 @@ def run_checks() -> dict[str, object]:
     stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
     if "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE" not in stage14_doc:
         errors.append("Stage 14 implementation status is not complete")
-    if "IN PROGRESS — PRODUCTION CUTOVER DEFERRED" not in stage14_doc:
-        errors.append("Stage 14 overall status is not production-cutover deferred")
+    if "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED" not in stage14_doc:
+        errors.append("Stage 14 overall status is not the S78 live-research status")
     return {
         "status": "PASS" if not errors else "FAIL",
         "simulated_transport_calls": 0,
@@ -138,7 +138,7 @@ def run_checks() -> dict[str, object]:
         "new_tiered50_targets": len(manifest.new_tiered50_targets),
         "schedule": reconciliation,
         "architecture_errors": errors,
-        "stage15_status": "NOT STARTED",
+        "stage15_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
     }
 
 

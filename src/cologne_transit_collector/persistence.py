@@ -1,17 +1,34 @@
-"""Disposable local SQLite development backend for collector contracts."""
+"""SQLite persistence for offline development and the S78 research pilot.
+
+The same implementation serves two explicit profiles.  Development state is
+still disposable and is used by the existing simulation harness.  The
+``LIVE_RESEARCH`` profile is durable append-only evidence with additive schema
+metadata, protected temporary raw evidence, and SQLite-consistent daily
+backups.  No database-server adapter is introduced here.
+"""
 
 from __future__ import annotations
 
 import json
+import os
+import re
 import sqlite3
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from .domain import HttpResponse, Target, TransportFailure
+from .domain import (
+    HttpResponse,
+    LIVE_RESEARCH_COLLECTION_CONTEXT,
+    MAX_ATTEMPTS,
+    PersistenceProfile,
+    Target,
+    TransportFailure,
+)
 from .quota import (
     CONSERVATIVE_LIVE_ATTEMPT,
     HTTP_PROVIDER_ATTEMPT_CONFIRMED,
@@ -58,6 +75,66 @@ def _safe_error_category(value: Any) -> str | None:
     return text if text in allowed else "SANITIZED_ERROR"
 
 
+SCHEMA_VERSION = "2"
+DEFAULT_COLLECTION_CONTEXT = "OFFLINE_DEVELOPMENT"
+UNKNOWN_SHARED_QUOTA_SOURCE = "UNKNOWN_SHARED_PROVIDER_BASELINE"
+RAW_RETENTION_HOURS = 24
+_BACKUP_NAME = re.compile(r"^collector-(?P<date>\d{4}-\d{2}-\d{2})\.sqlite3$")
+_BACKUP_TEMP_NAME = re.compile(
+    r"^\.collector-\d{4}-\d{2}-\d{2}-[0-9a-f]{32}\.tmp(?:-(?:wal|shm|journal))?$"
+)
+
+
+class LiveResearchSafetyError(ValueError):
+    """The requested live-research storage path is unsafe or unavailable."""
+
+
+def _profile(value: PersistenceProfile | str) -> PersistenceProfile:
+    try:
+        return value if isinstance(value, PersistenceProfile) else PersistenceProfile(str(value))
+    except ValueError as exc:
+        raise ValueError(f"unknown SQLite persistence profile: {value}") from exc
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def validate_live_research_path(
+    path: str | Path,
+    *,
+    repository_root: str | Path | None = None,
+) -> Path:
+    """Reject repository, test, and fixture locations for live evidence."""
+
+    resolved = Path(path).expanduser().resolve()
+    repo = Path(repository_root).expanduser().resolve() if repository_root else None
+    if repo is not None and _path_is_within(resolved, repo):
+        raise LiveResearchSafetyError(
+            "LIVE_RESEARCH database must be outside the Git repository"
+        )
+    components = {part.casefold() for part in resolved.parts}
+    suspicious = {"test", "tests", "fixture", "fixtures"}
+    if components & suspicious or any(
+        marker in resolved.name.casefold() for marker in ("test", "fixture")
+    ):
+        raise LiveResearchSafetyError(
+            "LIVE_RESEARCH database path resembles a test or fixture path"
+        )
+    if resolved.name.casefold() not in {"collector.sqlite3", "collector.db"}:
+        # Explicit paths are allowed, but make accidental source-tree database
+        # names harder to use by requiring a recognizable SQLite suffix.
+        if resolved.suffix.casefold() not in {".sqlite3", ".sqlite", ".db"}:
+            raise LiveResearchSafetyError(
+                "LIVE_RESEARCH database path must have a SQLite database suffix"
+            )
+    return resolved
+
+
 @dataclass(frozen=True)
 class ClaimResult:
     won: bool
@@ -77,16 +154,63 @@ class DispatcherClaimResult:
 
 
 class SQLitePersistence:
-    """Durable behavior test backend; not a production schema or adapter."""
+    """One SQLite implementation with an explicit disposable/live profile."""
 
     is_production_ready = False
     is_disposable_development_backend = True
     supports_atomic_quota_finalization = True
     claim_identity_kind = "development dispatcher identity: (panel_version, logical_due_bucket); target identity adds source_parent_station_id"
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        profile: PersistenceProfile | str = PersistenceProfile.DEVELOPMENT,
+        repository_root: str | Path | None = None,
+        backup_dir: str | Path | None = None,
+        raw_evidence_dir: str | Path | None = None,
+        collection_context: str | None = None,
+    ) -> None:
+        self.profile = _profile(profile)
+        self.is_live_research = self.profile is PersistenceProfile.LIVE_RESEARCH
+        self.is_disposable_development_backend = not self.is_live_research
+        self.repository_root = (
+            Path(repository_root).expanduser().resolve() if repository_root is not None else None
+        )
+        if self.is_live_research and self.repository_root is None:
+            working_directory = Path.cwd().resolve()
+            if (working_directory / ".git").exists():
+                self.repository_root = working_directory
         self.path = Path(path).expanduser().resolve()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.is_live_research:
+            self.path = validate_live_research_path(
+                self.path,
+                repository_root=self.repository_root,
+            )
+        self.collection_context = str(
+            collection_context
+            or (LIVE_RESEARCH_COLLECTION_CONTEXT if self.is_live_research else DEFAULT_COLLECTION_CONTEXT)
+        )
+        self.backup_dir = (
+            Path(backup_dir).expanduser().resolve()
+            if backup_dir is not None
+            else self.path.parent / "backups"
+        )
+        self.raw_evidence_dir = (
+            Path(raw_evidence_dir).expanduser().resolve()
+            if raw_evidence_dir is not None
+            else self.path.parent / "raw-evidence"
+        )
+        if self.is_live_research:
+            for directory in (self.path.parent, self.backup_dir, self.raw_evidence_dir):
+                if self.repository_root is not None and _path_is_within(directory, self.repository_root):
+                    raise LiveResearchSafetyError(
+                        "LIVE_RESEARCH data directories must be outside the Git repository"
+                    )
+                directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+                self._owner_only_directory(directory)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
         self._connection.row_factory = sqlite3.Row
@@ -95,6 +219,29 @@ class SQLitePersistence:
             self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.execute("PRAGMA busy_timeout = 15000")
             self._create_schema()
+            if self.is_live_research:
+                for database_file in (
+                    self.path,
+                    self.path.with_name(self.path.name + "-wal"),
+                    self.path.with_name(self.path.name + "-shm"),
+                ):
+                    if database_file.exists():
+                        self._owner_only_file(database_file)
+
+    @staticmethod
+    def _owner_only_directory(path: Path) -> None:
+        try:
+            os.chmod(path, 0o700)
+        except (NotImplementedError, OSError):
+            # Windows and some mounted filesystems do not expose POSIX modes.
+            pass
+
+    @staticmethod
+    def _owner_only_file(path: Path) -> None:
+        try:
+            os.chmod(path, 0o600)
+        except (NotImplementedError, OSError):
+            pass
 
     def _create_schema(self) -> None:
         self._connection.executescript(
@@ -119,6 +266,7 @@ class SQLitePersistence:
                 panel_version TEXT NOT NULL,
                 logical_due_bucket INTEGER NOT NULL,
                 mode TEXT NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
                 started_at_utc TEXT NOT NULL,
                 completed_at_utc TEXT,
                 status TEXT,
@@ -179,6 +327,7 @@ class SQLitePersistence:
                 logical_due_bucket INTEGER NOT NULL,
                 sampling_era TEXT NOT NULL,
                 continuity_classification TEXT NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
                 started_at_utc TEXT NOT NULL,
                 completed_at_utc TEXT,
                 status TEXT,
@@ -223,6 +372,7 @@ class SQLitePersistence:
                 persisted_at_utc TEXT NOT NULL,
                 snapshot_json TEXT NOT NULL,
                 raw_payload_persisted INTEGER NOT NULL DEFAULT 0,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id)
             );
             CREATE TABLE IF NOT EXISTS quota_audit (
@@ -232,7 +382,8 @@ class SQLitePersistence:
                 logical_due_bucket INTEGER,
                 decision_kind TEXT NOT NULL,
                 decision_json TEXT NOT NULL,
-                recorded_at_utc TEXT NOT NULL
+                recorded_at_utc TEXT NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'
             );
             CREATE TABLE IF NOT EXISTS quota_permits (
                 permit_id TEXT PRIMARY KEY,
@@ -262,6 +413,7 @@ class SQLitePersistence:
                 recorded_at_time TEXT NOT NULL,
                 source_path TEXT,
                 observed_at_utc TEXT NOT NULL,
+                collection_context TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT',
                 FOREIGN KEY (audit_id) REFERENCES target_audits(audit_id),
                 FOREIGN KEY (snapshot_id) REFERENCES parsed_snapshots(snapshot_id)
             );
@@ -286,6 +438,28 @@ class SQLitePersistence:
                 is_synthetic INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (era_code, panel_version)
             );
+            CREATE TABLE IF NOT EXISTS database_metadata (
+                metadata_key TEXT PRIMARY KEY,
+                metadata_value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS raw_evidence (
+                raw_evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_id INTEGER,
+                collector_run_id TEXT,
+                source_parent_station_id TEXT,
+                station_name TEXT,
+                logical_due_bucket INTEGER,
+                collection_context TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                delete_after_utc TEXT NOT NULL,
+                content_type TEXT,
+                byte_length INTEGER NOT NULL DEFAULT 0,
+                file_path TEXT,
+                status TEXT NOT NULL,
+                deleted_at_utc TEXT,
+                refusal_reason TEXT
+            );
             """
         )
         # Keep disposable local files created by the earlier Stage 14 version
@@ -305,11 +479,45 @@ class SQLitePersistence:
         self._ensure_column("shared_usage", "live_client_invocations", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("shared_usage", "http_responses_received", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("shared_usage", "provider_quota_unknown_attempts", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("collector_runs", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("target_audits", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("parsed_snapshots", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("quota_audit", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("recorded_at_time_evidence", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._connection.execute(
             "UPDATE quota_permits SET status = ? WHERE status = 'PENDING'",
             (PENDING_AUTHORIZATION,),
         )
+        self._initialize_metadata()
         self._connection.commit()
+
+    def _initialize_metadata(self) -> None:
+        now = _iso(datetime.now(timezone.utc))
+        existing = {
+            str(row[0]): str(row[1])
+            for row in self._connection.execute(
+                "SELECT metadata_key, metadata_value FROM database_metadata"
+            ).fetchall()
+        }
+        if existing:
+            role = existing.get("database_role")
+            expected = self.profile.value
+            if role is not None and role != expected:
+                raise LiveResearchSafetyError(
+                    f"SQLite database role is {role}, not the requested {expected} profile"
+                )
+        values = {
+            "database_role": self.profile.value,
+            "schema_version": SCHEMA_VERSION,
+            "created_at_utc": existing.get("created_at_utc", now),
+            "last_schema_migration_at_utc": now,
+            "collection_context": self.collection_context,
+        }
+        for key, value in values.items():
+            self._connection.execute(
+                "INSERT OR REPLACE INTO database_metadata (metadata_key, metadata_value) VALUES (?, ?)",
+                (key, str(value)),
+            )
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
         columns = {
@@ -360,6 +568,10 @@ class SQLitePersistence:
     ) -> None:
         if is_active and effective_at_utc is None:
             raise ValueError("active sampling era requires an explicit timestamp")
+        if self.is_live_research and str(era_code) == "Tiered50" and is_active:
+            raise LiveResearchSafetyError(
+                "LIVE_RESEARCH cannot create an active Tiered50 cutover row"
+            )
         with self._lock:
             self._connection.execute(
                 """
@@ -371,11 +583,21 @@ class SQLitePersistence:
             )
             self._connection.commit()
 
-    def start_collector_run(self, *, run_id: str, panel_version: str, logical_due_bucket: int, mode: str, started_at: datetime) -> None:
+    def start_collector_run(
+        self,
+        *,
+        run_id: str,
+        panel_version: str,
+        logical_due_bucket: int,
+        mode: str,
+        started_at: datetime,
+        collection_context: str | None = None,
+    ) -> None:
+        context = str(collection_context or self.collection_context)
         with self._lock:
             self._connection.execute(
-                "INSERT INTO collector_runs (run_id, panel_version, logical_due_bucket, mode, started_at_utc, status) VALUES (?, ?, ?, ?, ?, ?)",
-                (run_id, panel_version, int(logical_due_bucket), mode, _iso(started_at), "RUNNING"),
+                "INSERT INTO collector_runs (run_id, panel_version, logical_due_bucket, mode, collection_context, started_at_utc, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, panel_version, int(logical_due_bucket), mode, context, _iso(started_at), "RUNNING"),
             )
             self._connection.commit()
 
@@ -533,19 +755,28 @@ class SQLitePersistence:
             self._connection.commit()
             return int(event.lastrowid)
 
-    def start_target_audit(self, *, run_id: str, target: Target, logical_due_bucket: int, started_at: datetime) -> int:
+    def start_target_audit(
+        self,
+        *,
+        run_id: str,
+        target: Target,
+        logical_due_bucket: int,
+        started_at: datetime,
+        collection_context: str | None = None,
+    ) -> int:
+        context = str(collection_context or self.collection_context)
         with self._lock:
             cursor = self._connection.execute(
                 """
                 INSERT INTO target_audits
                 (collector_run_id, panel_version, source_parent_station_id, station_name, tier,
                  phase_index, number_of_results, logical_due_bucket, sampling_era,
-                 continuity_classification, started_at_utc, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 continuity_classification, collection_context, started_at_utc, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, target.panel_version, target.source_parent_station_id, target.station_name, target.tier,
                  target.phase_index, target.number_of_results, int(logical_due_bucket), target.sampling_era.value,
-                 target.continuity_classification, _iso(started_at), "RUNNING"),
+                 target.continuity_classification, context, _iso(started_at), "RUNNING"),
             )
             self._connection.execute(
                 "UPDATE target_claims SET status = ?, started_at_utc = ? WHERE panel_version = ? AND source_parent_station_id = ? AND logical_due_bucket = ?",
@@ -677,7 +908,17 @@ class SQLitePersistence:
 
         self.record_http_attempt(**kwargs)
 
-    def persist_snapshot(self, *, audit_id: int, target: Target, logical_due_bucket: int, parsed_snapshot: Mapping[str, Any], persisted_at: datetime) -> None:
+    def persist_snapshot(
+        self,
+        *,
+        audit_id: int,
+        target: Target,
+        logical_due_bucket: int,
+        parsed_snapshot: Mapping[str, Any],
+        persisted_at: datetime,
+        collection_context: str | None = None,
+    ) -> None:
+        context = str(collection_context or self.collection_context)
         snapshot = dict(parsed_snapshot)
         for key in list(snapshot):
             lowered = str(key).lower()
@@ -686,28 +927,35 @@ class SQLitePersistence:
         snapshot["raw_payload_persisted"] = False
         encoded = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, allow_nan=False, default=str)
         with self._lock:
-            snapshot_cursor = self._connection.execute(
-                """
-                INSERT INTO parsed_snapshots
-                (audit_id, panel_version, source_parent_station_id, logical_due_bucket, persisted_at_utc, snapshot_json, raw_payload_persisted)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
-                """,
-                (audit_id, target.panel_version, target.source_parent_station_id, int(logical_due_bucket), _iso(persisted_at), encoded),
-            )
-            snapshot_id = int(snapshot_cursor.lastrowid)
-            self._persist_recorded_time_evidence(
-                audit_id=audit_id,
-                snapshot_id=snapshot_id,
-                target=target,
-                logical_due_bucket=logical_due_bucket,
-                parsed_snapshot=snapshot,
-                observed_at=persisted_at,
-            )
-            self._connection.execute(
-                "UPDATE target_audits SET persistence_outcome = ?, stop_event_result_count = ? WHERE audit_id = ?",
-                ("PERSISTED_PARSED_SNAPSHOT", len(snapshot.get("events", [])), audit_id),
-            )
-            self._connection.commit()
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                snapshot_cursor = self._connection.execute(
+                    """
+                    INSERT INTO parsed_snapshots
+                    (audit_id, panel_version, source_parent_station_id, logical_due_bucket,
+                     persisted_at_utc, snapshot_json, raw_payload_persisted, collection_context)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                    """,
+                    (audit_id, target.panel_version, target.source_parent_station_id, int(logical_due_bucket), _iso(persisted_at), encoded, context),
+                )
+                snapshot_id = int(snapshot_cursor.lastrowid)
+                self._persist_recorded_time_evidence(
+                    audit_id=audit_id,
+                    snapshot_id=snapshot_id,
+                    target=target,
+                    logical_due_bucket=logical_due_bucket,
+                    parsed_snapshot=snapshot,
+                    observed_at=persisted_at,
+                    collection_context=context,
+                )
+                self._connection.execute(
+                    "UPDATE target_audits SET persistence_outcome = ?, stop_event_result_count = ? WHERE audit_id = ?",
+                    ("PERSISTED_PARSED_SNAPSHOT", len(snapshot.get("events", [])), audit_id),
+                )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
 
     def _persist_recorded_time_evidence(
         self,
@@ -718,6 +966,7 @@ class SQLitePersistence:
         logical_due_bucket: int,
         parsed_snapshot: Mapping[str, Any],
         observed_at: datetime,
+        collection_context: str,
     ) -> None:
         for event in parsed_snapshot.get("events", []) or []:
             if not isinstance(event, Mapping):
@@ -734,8 +983,8 @@ class SQLitePersistence:
                     (audit_id, snapshot_id, panel_version, source_parent_station_id,
                      logical_due_bucket, event_ordinal, result_id, call_scope,
                      call_ordinal, timing_context, recorded_at_time, source_path,
-                     observed_at_utc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     observed_at_utc, collection_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         audit_id,
@@ -751,6 +1000,7 @@ class SQLitePersistence:
                         str(occurrence["recorded_at_time"]),
                         occurrence.get("source_path"),
                         _iso(observed_at),
+                        collection_context,
                     ),
                 )
 
@@ -778,11 +1028,22 @@ class SQLitePersistence:
             )
             self._connection.commit()
 
-    def record_quota_decision(self, *, run_id: str, source_parent_station_id: str | None, logical_due_bucket: int | None, decision_kind: str, decision: Mapping[str, Any], recorded_at: datetime) -> None:
+    def record_quota_decision(
+        self,
+        *,
+        run_id: str,
+        source_parent_station_id: str | None,
+        logical_due_bucket: int | None,
+        decision_kind: str,
+        decision: Mapping[str, Any],
+        recorded_at: datetime,
+        collection_context: str | None = None,
+    ) -> None:
+        context = str(collection_context or self.collection_context)
         with self._lock:
             self._connection.execute(
-                "INSERT INTO quota_audit (collector_run_id, source_parent_station_id, logical_due_bucket, decision_kind, decision_json, recorded_at_utc) VALUES (?, ?, ?, ?, ?, ?)",
-                (run_id, source_parent_station_id, logical_due_bucket, decision_kind, json.dumps(dict(decision), sort_keys=True, default=str), _iso(recorded_at)),
+                "INSERT INTO quota_audit (collector_run_id, source_parent_station_id, logical_due_bucket, decision_kind, decision_json, recorded_at_utc, collection_context) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, source_parent_station_id, logical_due_bucket, decision_kind, json.dumps(dict(decision), sort_keys=True, default=str), _iso(recorded_at), context),
             )
             self._connection.commit()
 
@@ -823,9 +1084,13 @@ class SQLitePersistence:
              projected_non_retry_attempts, conservative_live_attempts,
              live_client_invocations, http_responses_received,
              provider_quota_unknown_attempts, state_available, source)
-            VALUES (?, 0, 0, 0, 0, 0, 0, 0, 1, 'sqlite-development')
+            VALUES (?, 0, 0, 0, 0, 0, 0, 0, ?, ?)
             """,
-            (month_key,),
+            (
+                month_key,
+                0 if self.is_live_research else 1,
+                UNKNOWN_SHARED_QUOTA_SOURCE if self.is_live_research else "sqlite-development",
+            ),
         )
         if finalization == CONSERVATIVE_LIVE_ATTEMPT:
             self._connection.execute(
@@ -895,7 +1160,14 @@ class SQLitePersistence:
                 shared = self._connection.execute(
                     "SELECT * FROM shared_usage WHERE month_key = ?", (month,)
                 ).fetchone()
-                state_available = bool(shared["state_available"] if shared else True)
+                # A new LIVE_RESEARCH file says nothing about provider-wide
+                # usage. Missing shared baseline is unknown, not a confirmed
+                # zero. Development simulations retain their old default.
+                state_available = bool(
+                    shared["state_available"]
+                    if shared is not None
+                    else not self.is_live_research
+                )
                 confirmed = int(shared["confirmed_provider_attempts"] if shared else 0)
                 reserved = int(shared["reserved_shared_usage"] if shared else 0)
                 projected_non_retry = int(shared["projected_non_retry_attempts"] if shared else 0)
@@ -1152,13 +1424,28 @@ class SQLitePersistence:
         with self._lock:
             shared = self._connection.execute("SELECT * FROM shared_usage WHERE month_key = ?", (month,)).fetchone()
             active = self._connection.execute(
-                "SELECT COALESCE(SUM(amount), 0) AS amount FROM quota_permits WHERE month_key = ? AND reservation_scope = 'LIVE_PROVIDER' AND status = ?",
+                "SELECT COALESCE(SUM(amount), 0) AS amount FROM quota_permits WHERE month_key = ? AND reservation_scope LIKE 'LIVE%' AND status = ?",
                 (month, PENDING_AUTHORIZATION),
             ).fetchone()
+        state_available = bool(
+            shared["state_available"] if shared is not None else not self.is_live_research
+        )
+        known_confirmed = (
+            int(shared["confirmed_provider_attempts"])
+            if shared is not None and state_available
+            else None
+        )
+        source = str(
+            shared["source"]
+            if shared is not None
+            else UNKNOWN_SHARED_QUOTA_SOURCE
+            if self.is_live_research
+            else "sqlite-development"
+        )
         return {
-            "confirmed_provider_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
-            "confirmed_provider_http_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
-            "actual_attempts": int(shared["confirmed_provider_attempts"] if shared else 0),
+            "confirmed_provider_attempts": known_confirmed,
+            "confirmed_provider_http_attempts": known_confirmed,
+            "actual_attempts": known_confirmed,
             "reserved_shared_usage": int(shared["reserved_shared_usage"] if shared else 0) + int(active["amount"] if active else 0),
             "projected_non_retry_attempts": int(shared["projected_non_retry_attempts"] if shared else 0),
             "conservative_live_attempts": int(shared["conservative_live_attempts"] if shared else 0),
@@ -1167,11 +1454,549 @@ class SQLitePersistence:
             "http_responses_received": int(shared["http_responses_received"] if shared else 0),
             "provider_quota_unknown_attempts": int(shared["provider_quota_unknown_attempts"] if shared else 0),
             "provider_quota_consumption_unknown": int(shared["provider_quota_unknown_attempts"] if shared else 0),
-            "state_available": bool(shared["state_available"] if shared else True),
-            "source": str(shared["source"] if shared else "sqlite-development"),
+            "known_total": None if not state_available else (
+                int(shared["confirmed_provider_attempts"] if shared else 0)
+                + int(shared["reserved_shared_usage"] if shared else 0)
+                + int(shared["projected_non_retry_attempts"] if shared else 0)
+                + int(shared["conservative_live_attempts"] if shared else 0)
+                + int(active["amount"] if active else 0)
+            ),
+            "state_available": state_available,
+            "source": source,
         }
 
     get_current_month_usage = current_month_usage
+
+    @property
+    def database_role(self) -> str:
+        return self.profile.value
+
+    def get_metadata(self) -> dict[str, str]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT metadata_key, metadata_value FROM database_metadata ORDER BY metadata_key"
+            ).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows}
+
+    database_metadata = get_metadata
+
+    def integrity_check(self, *, quick: bool = True) -> str:
+        pragma = "quick_check" if quick else "integrity_check"
+        with self._lock:
+            row = self._connection.execute(f"PRAGMA {pragma}").fetchone()
+        result = str(row[0]) if row else ""
+        if result.casefold() != "ok":
+            raise LiveResearchSafetyError(f"SQLite {pragma} failed: {result or 'no result'}")
+        return result
+
+    def _verify_directory_writable(self, directory: Path) -> None:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._owner_only_directory(directory)
+        probe: Path | None = None
+        try:
+            descriptor, name = tempfile.mkstemp(prefix=".storage-preflight-", dir=str(directory))
+            os.close(descriptor)
+            probe = Path(name)
+            self._owner_only_file(probe)
+        except OSError as exc:
+            raise LiveResearchSafetyError(f"storage directory is not writable: {directory}") from exc
+        finally:
+            if probe is not None:
+                try:
+                    probe.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def preflight_storage(self) -> Mapping[str, Any]:
+        """Validate durable live-research storage before transport."""
+
+        if not self.is_live_research:
+            return {
+                "ready": True,
+                "profile": self.profile.value,
+                "database_role": self.database_role,
+            }
+        validate_live_research_path(self.path, repository_root=self.repository_root)
+        if not self.path.exists() or not self.path.is_file():
+            raise LiveResearchSafetyError(f"SQLite database is not available: {self.path}")
+        self._verify_directory_writable(self.path.parent)
+        self._verify_directory_writable(self.backup_dir)
+        self._verify_directory_writable(self.raw_evidence_dir)
+        metadata = self.get_metadata()
+        if metadata.get("database_role") != PersistenceProfile.LIVE_RESEARCH.value:
+            raise LiveResearchSafetyError("SQLite metadata does not identify LIVE_RESEARCH")
+        if metadata.get("schema_version") != SCHEMA_VERSION:
+            raise LiveResearchSafetyError("SQLite schema metadata is not supported")
+        self.integrity_check(quick=True)
+        cleanup = self.cleanup_expired_raw_evidence()
+        return {
+            "ready": True,
+            "profile": self.profile.value,
+            "database_role": metadata.get("database_role"),
+            "schema_version": metadata.get("schema_version"),
+            "raw_cleanup": cleanup,
+            "backup_directory": str(self.backup_dir),
+            "raw_evidence_directory": str(self.raw_evidence_dir),
+        }
+
+    storage_preflight = preflight_storage
+
+    def verify_live_research_heartbeat(
+        self,
+        *,
+        run_id: str,
+        panel_version: str,
+        logical_due_bucket: int,
+        target_id: str,
+    ) -> Mapping[str, Any]:
+        """Reconcile one pilot heartbeat without changing persisted evidence."""
+
+        if not self.is_live_research:
+            return {"status": "DISABLED_OFFLINE"}
+        with self._lock:
+            run = self._connection.execute(
+                "SELECT * FROM collector_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            audits = self._connection.execute(
+                """
+                SELECT * FROM target_audits
+                WHERE collector_run_id = ? AND panel_version = ? AND logical_due_bucket = ?
+                ORDER BY audit_id
+                """,
+                (run_id, panel_version, int(logical_due_bucket)),
+            ).fetchall()
+            attempts = self._connection.execute(
+                """
+                SELECT http_attempts.*
+                FROM http_attempts
+                JOIN target_audits ON target_audits.audit_id = http_attempts.audit_id
+                WHERE target_audits.collector_run_id = ?
+                  AND target_audits.panel_version = ?
+                  AND target_audits.logical_due_bucket = ?
+                ORDER BY http_attempts.attempt_id
+                """,
+                (run_id, panel_version, int(logical_due_bucket)),
+            ).fetchall()
+            snapshots = self._connection.execute(
+                """
+                SELECT parsed_snapshots.*
+                FROM parsed_snapshots
+                JOIN target_audits ON target_audits.audit_id = parsed_snapshots.audit_id
+                WHERE target_audits.collector_run_id = ?
+                  AND target_audits.panel_version = ?
+                  AND target_audits.logical_due_bucket = ?
+                ORDER BY parsed_snapshots.snapshot_id
+                """,
+                (run_id, panel_version, int(logical_due_bucket)),
+            ).fetchall()
+            recorded = self._connection.execute(
+                """
+                SELECT recorded_at_time_evidence.*
+                FROM recorded_at_time_evidence
+                JOIN target_audits ON target_audits.audit_id = recorded_at_time_evidence.audit_id
+                WHERE target_audits.collector_run_id = ?
+                  AND target_audits.panel_version = ?
+                  AND target_audits.logical_due_bucket = ?
+                ORDER BY recorded_at_time_evidence.evidence_id
+                """,
+                (run_id, panel_version, int(logical_due_bucket)),
+            ).fetchall()
+            active_tiered50 = self._connection.execute(
+                "SELECT COUNT(*) AS count FROM sampling_eras WHERE era_code = 'Tiered50' AND is_active = 1"
+            ).fetchone()
+
+        audit_rows = [dict(row) for row in audits]
+        attempt_rows = [dict(row) for row in attempts]
+        snapshot_rows = [dict(row) for row in snapshots]
+        recorded_rows = [dict(row) for row in recorded]
+        run_row = dict(run) if run is not None else None
+        exact_audit = len(audit_rows) == 1 and audit_rows[0].get("source_parent_station_id") == target_id
+        audit = audit_rows[0] if exact_audit else None
+        parsed_snapshot = None
+        if snapshot_rows:
+            try:
+                parsed_snapshot = json.loads(str(snapshot_rows[0]["snapshot_json"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed_snapshot = None
+        parse_success = bool(audit and audit.get("parser_outcome") == "PARSED")
+        expected_recorded_count = len(
+            parsed_snapshot.get("recorded_at_time_occurrences", ())
+            if isinstance(parsed_snapshot, Mapping)
+            else ()
+        )
+        evidence_fields_present = bool(
+            isinstance(parsed_snapshot, Mapping)
+            and "parser_gaps" in parsed_snapshot
+            and "recorded_at_time_occurrences" in parsed_snapshot
+            and all(
+                isinstance(event, Mapping)
+                and "service_attribute_evidence" in event
+                and "situation_evidence" in event
+                and "parser_gaps" in parsed_snapshot
+                for event in parsed_snapshot.get("events", ())
+            )
+        )
+        context_values = {
+            str(row.get("collection_context"))
+            for row in (
+                ([run_row] if run_row else [])
+                + audit_rows
+                + snapshot_rows
+                + recorded_rows
+            )
+            if row.get("collection_context") is not None
+        }
+        checks = {
+            "collector_run_row_exists": run_row is not None,
+            "exactly_one_pilot_target_audit": exact_audit,
+            "attempt_accounting_consistent": bool(
+                audit
+                and int(audit.get("http_attempts", 0)) == len(attempt_rows)
+                and all(int(row.get("attempt_number", 0)) <= MAX_ATTEMPTS for row in attempt_rows)
+            ),
+            "parsed_snapshot_exists_if_successful_parse": (not parse_success) or bool(snapshot_rows),
+            "recorded_at_time_reconciled": expected_recorded_count == len(recorded_rows),
+            "source_evidence_fields_present": (not snapshot_rows) or evidence_fields_present,
+            "no_second_target_executed": len({str(row.get("source_parent_station_id")) for row in audit_rows}) <= 1,
+            "no_active_tiered50_cutover_row": int(active_tiered50["count"] if active_tiered50 else 0) == 0,
+            "collection_context_is_live_research": context_values <= {LIVE_RESEARCH_COLLECTION_CONTEXT},
+        }
+        status = "COMPLETE" if all(checks.values()) else "FAILED"
+        usage = self.current_month_usage()
+        return {
+            "status": status,
+            "checks": checks,
+            "run_id": run_id,
+            "logical_due_bucket": int(logical_due_bucket),
+            "target_id": target_id,
+            "collection_context": LIVE_RESEARCH_COLLECTION_CONTEXT,
+            "audit_count": len(audit_rows),
+            "attempt_count": len(attempt_rows),
+            "snapshot_count": len(snapshot_rows),
+            "recorded_at_time_occurrence_count": expected_recorded_count,
+            "recorded_at_time_evidence_count": len(recorded_rows),
+            "parser_gap_count": len(parsed_snapshot.get("parser_gaps", ())) if isinstance(parsed_snapshot, Mapping) else 0,
+            "attribute_evidence_count": sum(
+                len(event.get("service_attribute_evidence", ()))
+                for event in parsed_snapshot.get("events", ())
+                if isinstance(event, Mapping)
+            ) if isinstance(parsed_snapshot, Mapping) else 0,
+            "situation_evidence_count": sum(
+                len(event.get("situation_evidence", ()))
+                for event in parsed_snapshot.get("events", ())
+                if isinstance(event, Mapping)
+            ) if isinstance(parsed_snapshot, Mapping) else 0,
+            "network_attempt_count": sum(int(row.get("network_attempted", 0)) for row in attempt_rows),
+            "http_response_count": sum(int(row.get("http_response_received", 0)) for row in attempt_rows),
+            "provider_attempt_confirmed_count": sum(int(row.get("provider_attempt_confirmed", 0)) for row in attempt_rows),
+            "quota": dict(usage) if usage is not None else None,
+        }
+
+    @staticmethod
+    def _sanitize_raw_body(body: bytes) -> bytes:
+        """Remove obvious credential-shaped fields before forensic storage."""
+
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return body
+        prefix = r"(?i)(\b(?:x-api-key|api[_-]?key|authorization|password|token|secret)\b\s*[=:]\s*)"
+        quoted = re.compile(prefix + r"([\"'])(.*?)(\2)", re.DOTALL)
+        text = quoted.sub(lambda match: f"{match.group(1)}{match.group(2)}<redacted>{match.group(2)}", text)
+        unquoted = re.compile(prefix + r"([^\"'\s<,}][^\r\n,}]*)")
+        text = unquoted.sub(lambda match: f"{match.group(1)}<redacted>", text)
+        return text.encode("utf-8")
+
+    def _raw_index_row(
+        self,
+        *,
+        audit_id: int | None,
+        collector_run_id: str | None,
+        target: Target | None,
+        logical_due_bucket: int | None,
+        reason: str,
+        created_at: datetime,
+        content_type: str | None,
+        byte_length: int,
+        file_path: str | None,
+        status: str,
+        refusal_reason: str | None = None,
+    ) -> int:
+        delete_after = created_at.astimezone(timezone.utc) + timedelta(hours=RAW_RETENTION_HOURS)
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO raw_evidence
+                (audit_id, collector_run_id, source_parent_station_id, station_name,
+                 logical_due_bucket, collection_context, reason, created_at_utc,
+                 delete_after_utc, content_type, byte_length, file_path, status,
+                 refusal_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_id,
+                    collector_run_id,
+                    target.source_parent_station_id if target else None,
+                    target.station_name if target else None,
+                    logical_due_bucket,
+                    self.collection_context,
+                    str(reason),
+                    _iso(created_at),
+                    _iso(delete_after),
+                    content_type,
+                    int(byte_length),
+                    file_path,
+                    status,
+                    refusal_reason,
+                ),
+            )
+            self._connection.commit()
+            return int(cursor.lastrowid)
+
+    def retain_raw_evidence(
+        self,
+        *,
+        body: bytes,
+        reason: str = "UNSPECIFIED",
+        observed_at: datetime | None = None,
+        content_type: str | None = None,
+        audit_id: int | None = None,
+        run_id: str | None = None,
+        collector_run_id: str | None = None,
+        target: Target | None = None,
+        logical_due_bucket: int | None = None,
+        response_status: int | None = None,
+        **_: Any,
+    ) -> str:
+        """Store one bounded sanitized raw artifact only in live research."""
+
+        if not self.is_live_research:
+            return "DISABLED_OFFLINE"
+        created_at = (observed_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        effective_run_id = collector_run_id or run_id
+        payload = bytes(body or b"")
+        secret = os.environ.get("MDD_API_KEY")
+        if secret:
+            try:
+                secret_bytes = secret.encode("utf-8")
+            except UnicodeEncodeError:
+                secret_bytes = b""
+            if secret_bytes and secret_bytes in payload:
+                self._raw_index_row(
+                    audit_id=audit_id,
+                    collector_run_id=effective_run_id,
+                    target=target,
+                    logical_due_bucket=logical_due_bucket,
+                    reason=reason,
+                    created_at=created_at,
+                    content_type=content_type,
+                    byte_length=0,
+                    file_path=None,
+                    status="REFUSED_SECRET_DETECTED",
+                    refusal_reason="current MDD_API_KEY value detected in response payload",
+                )
+                return "REFUSED_SECRET_DETECTED"
+        sanitized = self._sanitize_raw_body(payload)
+        if not sanitized:
+            self._raw_index_row(
+                audit_id=audit_id,
+                collector_run_id=effective_run_id,
+                target=target,
+                logical_due_bucket=logical_due_bucket,
+                reason=reason,
+                created_at=created_at,
+                content_type=content_type,
+                byte_length=0,
+                file_path=None,
+                status="NO_BODY",
+            )
+            return "NO_BODY"
+        self._verify_directory_writable(self.raw_evidence_dir)
+        final_path = self.raw_evidence_dir / f"raw-{created_at.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex}.bin"
+        temporary_path: Path | None = None
+        try:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".raw-", suffix=".tmp", dir=str(self.raw_evidence_dir)
+            )
+            temporary_path = Path(temporary_name)
+            self._owner_only_file(temporary_path)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(sanitized)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary_path, final_path)
+            self._owner_only_file(final_path)
+        except OSError:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+            self._raw_index_row(
+                audit_id=audit_id,
+                collector_run_id=effective_run_id,
+                target=target,
+                logical_due_bucket=logical_due_bucket,
+                reason=reason,
+                created_at=created_at,
+                content_type=content_type,
+                byte_length=0,
+                file_path=None,
+                status="REFUSED_WRITE_FAILURE",
+                refusal_reason="raw evidence file could not be written",
+            )
+            return "REFUSED_WRITE_FAILURE"
+        self._raw_index_row(
+            audit_id=audit_id,
+            collector_run_id=effective_run_id,
+            target=target,
+            logical_due_bucket=logical_due_bucket,
+            reason=reason,
+            created_at=created_at,
+            content_type=content_type,
+            byte_length=len(sanitized),
+            file_path=str(final_path),
+            status="RETAINED",
+        )
+        return "RETAINED"
+
+    def cleanup_expired_raw_evidence(self, *, now_utc: datetime | None = None) -> Mapping[str, Any]:
+        if not self.is_live_research:
+            return {"status": "DISABLED_OFFLINE", "expired": 0, "deleted": 0}
+        now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT raw_evidence_id, file_path FROM raw_evidence WHERE status = 'RETAINED' AND delete_after_utc <= ? ORDER BY raw_evidence_id",
+                (_iso(now),),
+            ).fetchall()
+            deleted = 0
+            missing = 0
+            for row in rows:
+                file_path = row[1]
+                if file_path:
+                    try:
+                        Path(str(file_path)).unlink()
+                        deleted += 1
+                    except FileNotFoundError:
+                        missing += 1
+                self._connection.execute(
+                    "UPDATE raw_evidence SET status = 'DELETED', deleted_at_utc = ? WHERE raw_evidence_id = ?",
+                    (_iso(now), int(row[0])),
+                )
+            self._connection.commit()
+        return {
+            "status": "COMPLETE",
+            "expired": len(rows),
+            "deleted": deleted,
+            "missing_already_deleted": missing,
+        }
+
+    cleanup_raw_evidence = cleanup_expired_raw_evidence
+
+    def backup_live_database(self, *, now_utc: datetime | None = None) -> Mapping[str, Any]:
+        """Publish a validated same-day online SQLite backup and rotate three dates."""
+
+        if not self.is_live_research:
+            return {"status": "DISABLED_OFFLINE"}
+        now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        self._verify_directory_writable(self.backup_dir)
+        date_text = now.strftime("%Y-%m-%d")
+        final_path = self.backup_dir / f"collector-{date_text}.sqlite3"
+        temporary_path = self.backup_dir / f".collector-{date_text}-{uuid.uuid4().hex}.tmp"
+        temporary_sidecars = tuple(
+            Path(f"{temporary_path}{suffix}")
+            for suffix in ("-wal", "-shm", "-journal")
+        )
+
+        def remove_temporary_backup_artifacts() -> None:
+            for candidate in (temporary_path, *temporary_sidecars):
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
+
+        def remove_temporary_backup_sidecars() -> None:
+            for candidate in temporary_sidecars:
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
+
+        destination: sqlite3.Connection | None = None
+        try:
+            # A process can be interrupted after closing a temporary SQLite
+            # backup but before its sidecars are removed. Only remove files
+            # matching this implementation's exact hidden-temp pattern.
+            for stale in self.backup_dir.iterdir():
+                if _BACKUP_TEMP_NAME.fullmatch(stale.name) and stale.is_file():
+                    stale.unlink()
+            destination = sqlite3.connect(str(temporary_path), timeout=15.0)
+            destination.execute("PRAGMA journal_mode = DELETE")
+            with self._lock:
+                self._connection.backup(destination)
+            # The source database uses WAL. Force the published copy back to
+            # a self-contained rollback-journal database before closing it so
+            # no hidden temporary sidecars survive the atomic rename.
+            destination.execute("PRAGMA journal_mode = DELETE")
+            destination.commit()
+            check = destination.execute("PRAGMA integrity_check").fetchone()
+            if not check or str(check[0]).casefold() != "ok":
+                raise sqlite3.DatabaseError("backup integrity check failed")
+            destination.close()
+            destination = None
+            remove_temporary_backup_sidecars()
+            self._owner_only_file(temporary_path)
+            for sidecar in temporary_sidecars:
+                if sidecar.exists():
+                    raise sqlite3.DatabaseError(
+                        f"temporary backup sidecar remained before publish: {sidecar.name}"
+                    )
+            os.replace(temporary_path, final_path)
+            self._owner_only_file(final_path)
+        except Exception as exc:
+            if destination is not None:
+                destination.close()
+            remove_temporary_backup_artifacts()
+            return {
+                "status": "FAILED",
+                "error": type(exc).__name__,
+                "reason": "validated SQLite backup could not be published",
+                "backup_path": str(final_path),
+                "rotated": [],
+            }
+
+        available: list[tuple[str, Path]] = []
+        for candidate in self.backup_dir.iterdir():
+            match = _BACKUP_NAME.match(candidate.name)
+            if match and candidate.is_file():
+                available.append((match.group("date"), candidate))
+        available.sort(key=lambda item: item[0], reverse=True)
+        keep = {path for _date, path in available[:3]}
+        removed: list[str] = []
+        for _date, candidate in available[3:]:
+            if candidate not in keep:
+                try:
+                    candidate.unlink()
+                    removed.append(str(candidate))
+                except FileNotFoundError:
+                    pass
+        return {
+            "status": "COMPLETE",
+            "backup_path": str(final_path),
+            "integrity_check": "ok",
+            "available_backup_dates": [date for date, _path in available if _path in keep],
+            "rotated": removed,
+        }
+
+    create_daily_backup = backup_live_database
+
+    def maintenance_summary(self, *, now_utc: datetime | None = None) -> Mapping[str, Any]:
+        if not self.is_live_research:
+            return {"status": "DISABLED_OFFLINE"}
+        cleanup = self.cleanup_expired_raw_evidence(now_utc=now_utc)
+        backup = self.backup_live_database(now_utc=now_utc)
+        return {"status": "COMPLETE" if backup.get("status") == "COMPLETE" else "FAILED", "raw_cleanup": cleanup, "backup": backup}
 
     def fetch_claims(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -1226,10 +2051,19 @@ class SQLitePersistence:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def retain_raw_evidence(self, **kwargs: Any) -> str:
-        """Explicit future-live hook; ordinary SQLite never stores raw payloads."""
+    def fetch_quota_audit(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM quota_audit ORDER BY quota_audit_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
-        return "DISABLED_OFFLINE"
+    def fetch_raw_evidence(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM raw_evidence ORDER BY raw_evidence_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     # Port vocabulary aliases keep the future adapter contract explicit.
     start_run = start_collector_run

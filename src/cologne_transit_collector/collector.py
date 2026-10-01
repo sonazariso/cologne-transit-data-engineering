@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import email.utils
 import logging
+import os
 import threading
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Optional
 
@@ -16,6 +18,8 @@ from .domain import (
     APPROVED_TRANSIENT_TRANSPORT_CATEGORIES,
     HEARTBEAT_SECONDS,
     INTERRUPTED_SHUTDOWN,
+    LIVE_RESEARCH_COLLECTION_CONTEXT,
+    LIVE_RESEARCH_TARGET_ID,
     MAX_ATTEMPTS,
     MAXIMUM_CONCURRENCY,
     RETRY_SKIPPED_HEARTBEAT_BUDGET,
@@ -26,6 +30,7 @@ from .domain import (
     CollectorRunResult,
     HttpResponse,
     Plan,
+    PersistenceProfile,
     Target,
     TargetOutcome,
     TransportFailure,
@@ -41,14 +46,23 @@ from .quota import (
 )
 from .schedule import bucket_for, plan_for
 from .trias import TriasApplicationError, TriasParserError, parse_trias_response
+from .transport import validate_api_key_format
 
 
 LOGGER = logging.getLogger(__name__)
 CLIENT_EXECUTION_FAILURE = "CLIENT_EXECUTION_FAILURE"
 
 
+def replace_run_maintenance(result: CollectorRunResult, maintenance: Mapping[str, Any]) -> CollectorRunResult:
+    return replace(result, maintenance=dict(maintenance))
+
+
 class LiveModeBlocked(RuntimeError):
     """Live activation remains intentionally unavailable in this iteration."""
+
+
+class LiveResearchModeBlocked(RuntimeError):
+    """The explicit single-station research mode failed closed."""
 
 
 class HeartbeatBudget:
@@ -217,24 +231,86 @@ class Collector:
     def plan(self, *, at_utc: datetime | None = None) -> Plan:
         return plan_for(self.manifest.targets, at_utc or datetime.now(timezone.utc))
 
+    def live_research_plan(self, *, at_utc: datetime | None = None) -> Plan:
+        """Return exactly the approved Heumarkt target for one current bucket."""
+
+        now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        try:
+            target = self.manifest.live_research_target()
+        except (KeyError, ValueError) as exc:
+            raise LiveResearchModeBlocked(
+                "approved manifest does not contain the fixed Heumarkt pilot target"
+            ) from exc
+        bucket = bucket_for(now)
+        return Plan(bucket=bucket, due_targets=(target,), distribution_index=bucket.index % 6)
+
+    def _live_research_preflight(self) -> None:
+        if getattr(self.mdd_client, "offline_safe", True) is not False:
+            raise LiveResearchModeBlocked(
+                "live-research requires a live MDD client; offline clients are not eligible"
+            )
+        if validate_api_key_format(os.environ.get("MDD_API_KEY")) != "VALID":
+            raise LiveResearchModeBlocked(
+                "MDD_API_KEY is missing or has an invalid format; zero network requests performed"
+            )
+        persistence_profile = getattr(self.persistence, "profile", None)
+        if not (
+            persistence_profile == PersistenceProfile.LIVE_RESEARCH
+            or getattr(persistence_profile, "value", persistence_profile)
+            == PersistenceProfile.LIVE_RESEARCH.value
+        ):
+            raise LiveResearchModeBlocked(
+                "live-research requires the explicit LIVE_RESEARCH SQLite profile"
+            )
+        preflight = getattr(self.persistence, "preflight_storage", None)
+        if not callable(preflight):
+            raise LiveResearchModeBlocked("live-research storage preflight is unavailable")
+        try:
+            result = preflight()
+        except Exception as exc:
+            raise LiveResearchModeBlocked(
+                "live-research storage preflight failed; zero network requests performed"
+            ) from exc
+        if not bool(result.get("ready", False)):
+            raise LiveResearchModeBlocked(
+                "live-research storage is not ready; zero network requests performed"
+            )
+
     def run_once(
         self,
         *,
         mode: str = "dry-run",
         at_utc: datetime | None = None,
         run_id: str | None = None,
+        allow_live: bool = False,
+        pilot_target: str | None = None,
     ) -> CollectorRunResult:
-        if mode not in {"dry-run", "simulate", "live"}:
-            raise ValueError("run_once mode must be dry-run, simulate, or live")
+        if mode not in {"dry-run", "simulate", "live", "live-research"}:
+            raise ValueError("run_once mode must be dry-run, simulate, live, or live-research")
         if mode == "live":
             raise LiveModeBlocked(
                 "live mode is blocked in Stage 14 implementation: production persistence and cutover are deferred"
             )
-        if getattr(self.mdd_client, "offline_safe", True) is False:
+        if mode == "live-research":
+            if not allow_live:
+                raise LiveResearchModeBlocked(
+                    "live-research requires explicit allow_live=True opt-in"
+                )
+            if pilot_target != LIVE_RESEARCH_TARGET_ID:
+                raise LiveResearchModeBlocked(
+                    "live-research requires the explicit Heumarkt pilot target"
+                )
+            self._live_research_preflight()
+        if mode != "live-research" and getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
         now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        plan = self.plan(at_utc=now)
+        plan = self.live_research_plan(at_utc=now) if mode == "live-research" else self.plan(at_utc=now)
+        collection_context = (
+            LIVE_RESEARCH_COLLECTION_CONTEXT
+            if mode == "live-research"
+            else "OFFLINE_DEVELOPMENT"
+        )
         identifier = run_id or str(uuid.uuid4())
         started_monotonic = self.monotonic_fn()
         budget = HeartbeatBudget(
@@ -249,6 +325,7 @@ class Collector:
             logical_due_bucket=plan.bucket.index,
             mode=mode,
             started_at=now,
+            collection_context=collection_context,
         )
         outcomes: list[TargetOutcome] = []
 
@@ -300,7 +377,13 @@ class Collector:
                 live_network_used=False,
                 dispatcher_claim_won=False,
                 dispatcher_claim_status="DUPLICATE_DISPATCHER_CLAIM",
+                collection_context=collection_context,
             )
+            maintenance = self._finish_live_research_maintenance(
+                mode=mode,
+                verify=False,
+            )
+            result = replace_run_maintenance(result, maintenance)
             self.persistence.complete_collector_run(
                 run_id=identifier,
                 status=status,
@@ -336,11 +419,26 @@ class Collector:
                             )
                         )
                         continue
-                    future = executor.submit(self._execute_target, identifier, target, plan.bucket.index, budget, now)
+                    future = executor.submit(
+                        self._execute_target,
+                        identifier,
+                        target,
+                        plan.bucket.index,
+                        budget,
+                        now,
+                        collection_context,
+                    )
                     futures[future] = target
                 if self.shutdown_event.is_set():
                     for target in pending:
-                        outcomes.append(self._interrupted_outcome(target, plan.bucket.index, run_id=identifier))
+                        outcomes.append(
+                            self._interrupted_outcome(
+                                target,
+                                plan.bucket.index,
+                                run_id=identifier,
+                                collection_context=collection_context,
+                            )
+                        )
                     pending.clear()
                 if not futures:
                     break
@@ -382,7 +480,16 @@ class Collector:
             live_network_used=any(item.live_network_calls > 0 for item in outcomes),
             dispatcher_claim_won=True,
             dispatcher_claim_status="CLAIMED",
+            collection_context=collection_context,
         )
+        maintenance = self._finish_live_research_maintenance(
+            mode=mode,
+            run_id=identifier,
+            panel_version=self.manifest.panel_version,
+            logical_due_bucket=plan.bucket.index,
+            target_id=LIVE_RESEARCH_TARGET_ID,
+        )
+        result = replace_run_maintenance(result, maintenance)
         self.persistence.complete_collector_run(
             run_id=identifier,
             status=status,
@@ -391,7 +498,87 @@ class Collector:
         )
         return result
 
-    def _interrupted_outcome(self, target: Target, bucket_index: int, *, run_id: str | None = None) -> TargetOutcome:
+    def _finish_live_research_maintenance(
+        self,
+        *,
+        mode: str,
+        verify: bool = True,
+        run_id: str | None = None,
+        panel_version: str | None = None,
+        logical_due_bucket: int | None = None,
+        target_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        if mode != "live-research":
+            return {}
+        cleanup = getattr(self.persistence, "cleanup_expired_raw_evidence", None)
+        backup = getattr(self.persistence, "backup_live_database", None)
+        try:
+            cleanup_summary = cleanup() if callable(cleanup) else {
+                "status": "UNAVAILABLE",
+                "reason": "raw cleanup hook is unavailable",
+            }
+        except Exception as exc:
+            cleanup_summary = {
+                "status": "FAILED",
+                "error": type(exc).__name__,
+                "reason": "expired raw cleanup failed",
+            }
+        try:
+            backup_summary = backup() if callable(backup) else {
+                "status": "UNAVAILABLE",
+                "reason": "SQLite backup hook is unavailable",
+            }
+        except Exception as exc:
+            backup_summary = {
+                "status": "FAILED",
+                "error": type(exc).__name__,
+                "reason": "daily SQLite backup failed",
+            }
+        verification_summary: Mapping[str, Any]
+        verifier = getattr(self.persistence, "verify_live_research_heartbeat", None)
+        if verify and callable(verifier) and run_id is not None and panel_version is not None and logical_due_bucket is not None and target_id is not None:
+            try:
+                verification_summary = verifier(
+                    run_id=run_id,
+                    panel_version=panel_version,
+                    logical_due_bucket=logical_due_bucket,
+                    target_id=target_id,
+                )
+            except Exception as exc:
+                verification_summary = {
+                    "status": "FAILED",
+                    "error": type(exc).__name__,
+                    "reason": "post-heartbeat evidence verification failed",
+                }
+        elif verify:
+            verification_summary = {
+                "status": "UNAVAILABLE",
+                "reason": "post-heartbeat evidence verification hook is unavailable",
+            }
+        else:
+            verification_summary = {
+                "status": "NOT_APPLICABLE",
+                "reason": "dispatcher duplicate produced no pilot target audit",
+            }
+        return {
+            "raw_cleanup": dict(cleanup_summary),
+            "backup": dict(backup_summary),
+            "verification": dict(verification_summary),
+            "status": "COMPLETE"
+            if cleanup_summary.get("status") == "COMPLETE"
+            and backup_summary.get("status") == "COMPLETE"
+            and verification_summary.get("status") in {"COMPLETE", "NOT_APPLICABLE"}
+            else "FAILED",
+        }
+
+    def _interrupted_outcome(
+        self,
+        target: Target,
+        bucket_index: int,
+        *,
+        run_id: str | None = None,
+        collection_context: str = "OFFLINE_DEVELOPMENT",
+    ) -> TargetOutcome:
         outcome = TargetOutcome(
             target_id=target.source_parent_station_id,
             station_name=target.station_name,
@@ -408,6 +595,7 @@ class Collector:
                     target=target,
                     logical_due_bucket=bucket_index,
                     started_at=datetime.now(timezone.utc),
+                    collection_context=collection_context,
                 )
                 self.persistence.complete_target_audit(
                     audit_id=audit_id,
@@ -439,6 +627,7 @@ class Collector:
         bucket_index: int,
         budget: HeartbeatBudget,
         quota_at_utc: datetime,
+        collection_context: str,
     ) -> TargetOutcome:
         self._enter_worker()
         started = datetime.now(timezone.utc)
@@ -457,7 +646,11 @@ class Collector:
         live_client_invocations = 0
         try:
             audit_id = self.persistence.start_target_audit(
-                run_id=run_id, target=target, logical_due_bucket=bucket_index, started_at=started
+                run_id=run_id,
+                target=target,
+                logical_due_bucket=bucket_index,
+                started_at=started,
+                collection_context=collection_context,
             )
             while attempts < self.max_attempts:
                 retrying = attempts > 0
@@ -499,6 +692,7 @@ class Collector:
                     "RETRY" if retrying else "INITIAL",
                     quota_decision.to_dict(),
                     decision_at,
+                    collection_context,
                 )
                 if not quota_decision.allowed:
                     self.quota_guard.release(quota_decision)
@@ -603,6 +797,16 @@ class Collector:
                 )
                 if response.status_code is None or not 200 <= response.status_code < 300:
                     error_category = _error_category_for_response(response)
+                    if response.body:
+                        self._retain_live_response(
+                            audit_id=audit_id,
+                            run_id=run_id,
+                            target=target,
+                            bucket_index=bucket_index,
+                            response=response,
+                            reason="HTTP_PROVIDER_ERROR_RESPONSE",
+                            collection_context=collection_context,
+                        )
                     if can_retry:
                         if not budget.can_start(operation_seconds=self.request_timeout_seconds, sleep_seconds=retry_after):
                             retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
@@ -617,6 +821,15 @@ class Collector:
                 except (TriasParserError, ValueError):
                     parser_outcome = "PARSER_FAILURE"
                     error_category = "PARSER_FAILURE"
+                    self._retain_live_response(
+                        audit_id=audit_id,
+                        run_id=run_id,
+                        target=target,
+                        bucket_index=bucket_index,
+                        response=response,
+                        reason="PARSER_FAILURE",
+                        collection_context=collection_context,
+                    )
                     break
                 parser_outcome = "TRIAS_APPLICATION_ERROR" if parsed.application_error else "PARSED"
                 if parsed.application_error:
@@ -625,17 +838,31 @@ class Collector:
                     retry_outcome = "RETRY_SUCCEEDED"
                 result_count = parsed.result_count
                 try:
-                    self.persistence.persist_snapshot(audit_id=audit_id, target=target, logical_due_bucket=bucket_index, parsed_snapshot=parsed.to_dict(), persisted_at=datetime.now(timezone.utc))
+                    self.persistence.persist_snapshot(
+                        audit_id=audit_id,
+                        target=target,
+                        logical_due_bucket=bucket_index,
+                        parsed_snapshot=parsed.to_dict(),
+                        persisted_at=datetime.now(timezone.utc),
+                        collection_context=collection_context,
+                    )
                     persistence_outcome = "PERSISTED_PARSED_SNAPSHOT"
-                    retention_hook = getattr(self.persistence, "retain_raw_evidence", None)
-                    if parsed.recorded_at_time_occurrences and callable(retention_hook):
-                        retention_hook(
+                    reasons: list[str] = []
+                    if parsed.recorded_at_time_occurrences:
+                        reasons.append("SOURCE_RECORDED_AT_TIME")
+                    if parsed.parser_gaps:
+                        reasons.append("PARSER_GAP")
+                    if parsed.application_error:
+                        reasons.append("TRIAS_APPLICATION_ERROR")
+                    if reasons:
+                        self._retain_live_response(
                             audit_id=audit_id,
+                            run_id=run_id,
                             target=target,
-                            logical_due_bucket=bucket_index,
-                            body=response.body,
-                            recorded_at_time_occurrences=parsed.recorded_at_time_occurrences,
-                            observed_at=datetime.now(timezone.utc),
+                            bucket_index=bucket_index,
+                            response=response,
+                            reason="+".join(reasons),
+                            collection_context=collection_context,
                         )
                 except BaseException:
                     persistence_outcome = "PERSISTENCE_FAILURE"
@@ -676,6 +903,34 @@ class Collector:
             return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls, live_client_invocations=live_client_invocations)
         finally:
             self._leave_worker()
+
+    def _retain_live_response(
+        self,
+        *,
+        audit_id: Any,
+        run_id: str,
+        target: Target,
+        bucket_index: int,
+        response: HttpResponse,
+        reason: str,
+        collection_context: str,
+    ) -> None:
+        if collection_context != LIVE_RESEARCH_COLLECTION_CONTEXT:
+            return
+        retention_hook = getattr(self.persistence, "retain_raw_evidence", None)
+        if not callable(retention_hook):
+            return
+        retention_hook(
+            audit_id=audit_id,
+            run_id=run_id,
+            target=target,
+            logical_due_bucket=bucket_index,
+            body=response.body,
+            reason=reason,
+            content_type=self._content_type(response),
+            response_status=response.status_code,
+            observed_at=datetime.now(timezone.utc),
+        )
 
     def _record_attempt_with_permit(
         self,
@@ -751,10 +1006,27 @@ class Collector:
                 return value
         return None
 
-    def _record_quota(self, run_id: str, target: Target, bucket_index: int, kind: str, decision: Mapping[str, Any], at: datetime) -> None:
+    def _record_quota(
+        self,
+        run_id: str,
+        target: Target,
+        bucket_index: int,
+        kind: str,
+        decision: Mapping[str, Any],
+        at: datetime,
+        collection_context: str,
+    ) -> None:
         recorder = getattr(self.persistence, "record_quota_decision", None)
         if callable(recorder):
-            recorder(run_id=run_id, source_parent_station_id=target.source_parent_station_id, logical_due_bucket=bucket_index, decision_kind=kind, decision=decision, recorded_at=at)
+            recorder(
+                run_id=run_id,
+                source_parent_station_id=target.source_parent_station_id,
+                logical_due_bucket=bucket_index,
+                decision_kind=kind,
+                decision=decision,
+                recorded_at=at,
+                collection_context=collection_context,
+            )
 
 def build_logger(verbose: bool = False) -> None:
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

@@ -291,7 +291,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — PRODUCTION CUTOVER DEFERRED; STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE**.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE**.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -353,7 +353,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Offline Cutover Readiness — IN PROGRESS — PRODUCTION CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Offline Cutover Readiness — IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -365,18 +365,21 @@ uses maximum concurrency 2, MaxAttempts 2, approved transient retries,
 heartbeat deadline outcomes, shared-credential quota protection, isolated
 target outcomes, and durable local claim/audit behavior.
 
-`plan`, `dry-run`, and `simulate` are offline-safe; `live` is explicitly
-blocked until production persistence and safety state exist. SQLite is
-disposable development infrastructure only. The implementation status is
-`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76 correction for
-independent journey/direction identity fields, service-only identity/display
-scope, Attribute/GeneralAttribute and affected-entity evidence, and
-path-based parser-gap coverage. The final PostgreSQL adapter and host,
-production SamplingTargetId materialization, real sampling-era cutover
-timestamp, deployment/scheduler activation, controlled live dry-run, actual
-Tiered50 activation, and post-activation validation are deferred. Stage 15B
-live validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A
-readiness is in progress below.
+`plan`, `dry-run`, and `simulate` are offline-safe; production `live` is
+explicitly blocked. S78 adds a separate `live-research` mode backed by the
+durable `LIVE_RESEARCH` SQLite profile, limited to Köln Heumarkt
+(`de:05315:11110`) in context `LIVE_RESEARCH_SINGLE_1`. Parsed research
+history is retained, raw forensic bodies are bounded to 24 hours, and
+validated online backups retain three UTC daily versions. The implementation
+status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
+source-contract corrections and S78 live-research safety controls. SQLite live
+research is the active storage direction; the final durable-storage decision
+is deferred until stable repeated collector evidence exists. PostgreSQL work is
+not currently planned or authorized. Production SamplingTargetId
+materialization, a real sampling-era cutover timestamp, deployment/scheduler
+activation, Tiered50 activation, and post-activation validation remain
+deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50
+CUTOVER**; Stage 15A readiness is in progress below.
 
 ## Stage 15 — Post-Cutover Validation
 

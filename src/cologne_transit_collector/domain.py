@@ -53,6 +53,24 @@ class SamplingEra(str, Enum):
     TIERED50 = "Tiered50"
 
 
+class PersistenceProfile(str, Enum):
+    """Explicit roles for SQLite state.
+
+    ``DEVELOPMENT`` retains the disposable offline/simulation behavior that
+    predates S78.  ``LIVE_RESEARCH`` is durable research evidence and is
+    subject to the stricter path, migration, retention, and backup rules.
+    """
+
+    DEVELOPMENT = "DEVELOPMENT"
+    LIVE_RESEARCH = "LIVE_RESEARCH"
+
+
+LIVE_RESEARCH_COLLECTION_CONTEXT = "LIVE_RESEARCH_SINGLE_1"
+LIVE_RESEARCH_TARGET_ID = "de:05315:11110"
+LIVE_RESEARCH_STATION_NAME = "Köln Heumarkt"
+LIVE_RESEARCH_LEGACY_ID = 1
+
+
 @dataclass(frozen=True)
 class Target:
     """One immutable approved runtime target from the versioned manifest."""
@@ -210,6 +228,8 @@ class CollectorRunResult:
     live_network_used: bool = False
     dispatcher_claim_won: bool = True
     dispatcher_claim_status: str = "CLAIMED"
+    collection_context: str = "OFFLINE_DEVELOPMENT"
+    maintenance: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def http_attempt_count(self) -> int:
@@ -243,5 +263,7 @@ class CollectorRunResult:
             "live_network_used": self.live_network_used,
             "dispatcher_claim_won": self.dispatcher_claim_won,
             "dispatcher_claim_status": self.dispatcher_claim_status,
+            "collection_context": self.collection_context,
+            "maintenance": dict(self.maintenance),
             "outcomes": [outcome.to_dict() for outcome in self.outcomes],
         }
