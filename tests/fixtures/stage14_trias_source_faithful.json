@@ -1,0 +1,74 @@
+{
+  "serviceDelivery": {
+    "status": "OK",
+    "responseTimestamp": "2026-10-01T12:00:00Z[GMT]",
+    "deliveryPayload": {
+      "stopEventResponse": {
+        "stopEventResult": [
+          {
+            "resultId": "source-faithful-result-1",
+            "stopEvent": {
+              "cancelled": true,
+              "service": {
+                "operatingDayRef": "2026-10-01",
+                "journeyRef": "journey-source-faithful-1",
+                "lineRef": "line-source-faithful",
+                "directionRef": "outbound",
+                "operatorRef": "operator-source-faithful",
+                "ptMode": {"value": "tram"},
+                "railSubmode": {"value": "lightRail"},
+                "publishedLineName": {"text": "Line 18"},
+                "deviation": true,
+                "stopPointRef": "de:05315:service-context",
+                "plannedBay": "SERVICE-BAY",
+                "origin": {
+                  "stopPointRef": {"value": "de:05315:origin"},
+                  "text": {"text": "Origin Station"}
+                },
+                "destination": {
+                  "stopPointRef": "de:05315:destination",
+                  "name": "Destination Station"
+                }
+              },
+              "previousCall": [
+                {
+                  "callAtStop": {
+                    "stopSeqNumber": 3,
+                    "notServicedStop": true,
+                    "serviceArrival": {
+                      "timetabledTime": "2026-10-01T11:55:00Z[GMT]"
+                    }
+                  }
+                }
+              ],
+              "thisCall": {
+                "callAtStop": {
+                  "stopPointRef": "de:05315:this",
+                  "stopPointName": "This Stop",
+                  "stopSeqNumber": 4,
+                  "plannedBay": "B",
+                  "serviceArrival": {
+                    "timetabledTime": "2026-10-01T12:00:00Z[GMT]",
+                    "estimatedTime": "2026-10-01T12:01:00Z[GMT]",
+                    "UnknownEstimatedQuality": {"value": "raw-estimate-evidence"}
+                  }
+                }
+              },
+              "onwardCall": [
+                {
+                  "callAtStop": {
+                    "stopPointName": "Onward Stop",
+                    "stopSeqNumber": 5,
+                    "serviceDeparture": {
+                      "timetabledTime": "2026-10-01T12:06:00Z[GMT]"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

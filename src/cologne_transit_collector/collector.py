@@ -44,6 +44,7 @@ from .trias import TriasApplicationError, TriasParserError, parse_trias_response
 
 
 LOGGER = logging.getLogger(__name__)
+CLIENT_EXECUTION_FAILURE = "CLIENT_EXECUTION_FAILURE"
 
 
 class LiveModeBlocked(RuntimeError):
@@ -148,6 +149,26 @@ def _quota_finalization_for_result(result: HttpResponse | TransportFailure) -> s
     if network_attempted:
         return CONSERVATIVE_LIVE_ATTEMPT
     return RELEASED_NO_NETWORK
+
+
+def _client_execution_failure(error: BaseException) -> TransportFailure:
+    """Convert an unstructured client exception without making up its cause."""
+
+    # A client exception is outside the normal result port, but a custom
+    # adapter may attach explicit boolean transport metadata to it.  Only an
+    # exact ``True`` is accepted as proof; the ordinary RuntimeError path is
+    # therefore a no-network release and cannot enter the transient retry set.
+    network_attempted = getattr(error, "network_attempted", None) is True
+    http_response_received = network_attempted and getattr(error, "http_response_received", None) is True
+    live_client_invocation = getattr(error, "live_client_invocation", None) is True
+    return TransportFailure(
+        CLIENT_EXECUTION_FAILURE,
+        "client execution failure",
+        network_attempted=network_attempted,
+        http_response_received=http_response_received,
+        transport_kind="UNKNOWN",
+        live_client_invocation=live_client_invocation,
+    )
 
 
 class Collector:
@@ -530,26 +551,12 @@ class Collector:
                         attempt_number=attempts,
                     )
                 except Exception as exc:
-                    # A client that raises instead of returning a structured
-                    # result provides no evidence that its opener was
-                    # reached. Do not infer network activity from the client
-                    # class; the standard live client returns explicit
-                    # metadata for expected transport failures.
-                    response_or_failure = TransportFailure(
-                        "OTHER_NETWORK_FAILURE",
-                        "transport failure",
-                        network_attempted=False,
-                        http_response_received=False,
-                        transport_kind="UNKNOWN",
-                    )
-                    if isinstance(exc, TimeoutError):
-                        response_or_failure = TransportFailure(
-                            "TIMEOUT",
-                            "transport failure",
-                            network_attempted=False,
-                            http_response_received=False,
-                            transport_kind="UNKNOWN",
-                        )
+                    # A client exception is not a structured transport result.
+                    # Do not classify it as a transient network failure: the
+                    # client abstraction provides no evidence that a network
+                    # attempt was made, so the permit must be released as
+                    # no-network and the target must not be retried.
+                    response_or_failure = _client_execution_failure(exc)
                 attempt_completed = datetime.now(timezone.utc)
                 network_attempted, _http_response_received, transport_kind, live_client_invocation = _transport_metadata(response_or_failure)
                 if network_attempted:

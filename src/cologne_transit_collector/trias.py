@@ -27,6 +27,180 @@ TIMING_FIELDS = (
     "estimated_time_high",
 )
 
+# Keep this vocabulary aligned with the approved Stage 8 parser.  A field in
+# this set is part of the known TRIAS/source-contract surface; a relevant
+# field outside it is retained as explicit parser-gap evidence below.
+RECOGNIZED_SOURCE_FIELDS = frozenset(
+    {
+        "version",
+        "servicedelivery",
+        "status",
+        "responsetimestamp",
+        "calctime",
+        "deliverypayload",
+        "stopeventresponse",
+        "stopeventresult",
+        "resultid",
+        "stopevent",
+        "service",
+        "servicesection",
+        "operatingdayref",
+        "journeyref",
+        "vehiclejourneyref",
+        "datedvehiclejourneyref",
+        "affectedvehiclejourney",
+        "vehiclejourneys",
+        "operatingdaysdescription",
+        "lineref",
+        "directionref",
+        "direction",
+        "operatorref",
+        "ptmode",
+        "mode",
+        "modes",
+        "railsubmode",
+        "submode",
+        "publishedlinename",
+        "origin",
+        "originref",
+        "originstoppointref",
+        "originstoppointname",
+        "origintext",
+        "origins",
+        "destination",
+        "destinationref",
+        "destinationstoppointref",
+        "destinationstoppointname",
+        "destinationtext",
+        "destinations",
+        "previouscall",
+        "thiscall",
+        "onwardcall",
+        "callatstop",
+        "stoppointref",
+        "stoppointname",
+        "stopname",
+        "stopdisplaytext",
+        "stopseqnumber",
+        "servicearrival",
+        "servicedeparture",
+        "timetabledtime",
+        "estimatedtime",
+        "recordedattime",
+        "estimatedtimelow",
+        "estimatedtimehigh",
+        "plannedbay",
+        "estimatedbay",
+        "cancelled",
+        "journeycancelled",
+        "deviation",
+        "unplannedstop",
+        "notservicedstop",
+        "noboardingatstop",
+        "noalightingatstop",
+        "situationfullref",
+        "situationref",
+        "ptsituation",
+        "ptsituationelement",
+        "roadsituation",
+        "situation",
+        "participantref",
+        "situationnumber",
+        "identifier",
+        "id",
+        "summary",
+        "description",
+        "detail",
+        "creationtime",
+        "validfrom",
+        "validto",
+        "validityperiod",
+        "starttime",
+        "endtime",
+        "source",
+        "sourcetype",
+        "priority",
+        "affects",
+        "affectedentity",
+        "affectedjourney",
+        "affectedline",
+        "attribute",
+        "generalattribute",
+        "code",
+        "text",
+        "allfacilities",
+        "mandatory",
+        "importance",
+        "infourl",
+        "incidentcall",
+        "infocall",
+        "errormessage",
+        "errorcode",
+        "errorcondition",
+        "language",
+        "lang",
+        "value",
+        "name",
+        "ref",
+        "at",
+    }
+)
+
+RELEVANT_FIELD_TERMS = (
+    "situation",
+    "affect",
+    "attribute",
+    "generalattribute",
+    "incident",
+    "infocall",
+    "error",
+    "realtime",
+    "availability",
+    "status",
+    "recorded",
+    "estimated",
+    "timetabled",
+    "timing",
+    "timestamp",
+    "time",
+    "schedule",
+    "arrival",
+    "departure",
+    "bay",
+    "platform",
+    "cancel",
+    "deviation",
+    "unplanned",
+    "notserviced",
+    "boarding",
+    "alighting",
+    "operatingday",
+    "journey",
+    "service",
+    "line",
+    "direction",
+    "operator",
+    "mode",
+    "submode",
+    "stoppoint",
+    "stopseq",
+    "origin",
+    "destination",
+    "resultid",
+    "resultref",
+    "resultreference",
+    "stopid",
+    "stopref",
+    "stopidentifier",
+    "callid",
+    "callref",
+    "callidentifier",
+    "priority",
+    "valid",
+    "creation",
+    "publishedline",
+)
+
 
 class TriasParserError(ValueError):
     """Deterministic response decoding/schema failure; never retry automatically."""
@@ -264,10 +438,156 @@ def _direct_source(obj: Any, names: set[str], path: str) -> tuple[Any, str | Non
     return _scalar(value), _path_for_key(path, key)
 
 
+def _source_value_at_path(value: Any, path: str) -> tuple[str | None, Any]:
+    """Return a source scalar and the deepest safe source path for it."""
+
+    if value is None:
+        return path, None
+    if isinstance(value, (str, int, float, bool)):
+        return path, _scalar(value)
+    if isinstance(value, Mapping):
+        for preferred_name in ("value", "text", "name", "id", "ref", "sourcetype"):
+            for key, child in value.items():
+                if _normalise_name(key) != preferred_name:
+                    continue
+                child_path = _path_for_key(path, key)
+                leaf_path, extracted = _source_value_at_path(child, child_path)
+                if extracted is not None:
+                    return leaf_path, extracted
+        return path, _scalar(value)
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            leaf_path, extracted = _source_value_at_path(item, f"{path}[{index}]")
+            if extracted is not None:
+                return leaf_path, extracted
+        return path, _scalar(value)
+    return path, _scalar(value)
+
+
+def _direct_raw(obj: Any, names: set[str], path: str) -> tuple[str | None, Any]:
+    found, key, value = _direct_entry(obj, names)
+    if not found or key is None:
+        return None, None
+    return _path_for_key(path, key), value
+
+
+def _first_named_raw(obj: Any, names: set[str], path: str) -> tuple[str | None, Any]:
+    for entry_path, key, child, _parent_path, _parent in _iter_entries(obj, path):
+        if _normalise_name(key) in names:
+            return entry_path, child
+    return None, None
+
+
+def _origin_destination(service: Mapping[str, Any], event: Mapping[str, Any], *, service_path: str, event_path: str) -> dict[str, Any]:
+    """Retain origin/destination identity and display text independently."""
+
+    output: dict[str, Any] = {}
+    objects = ((service, service_path), (event, event_path))
+    for prefix, specific_ref_names, specific_text_names, container_names in (
+        (
+            "origin",
+            {"originstoppointref", "originref"},
+            {"origintext", "originstoppointname"},
+            {"origin"},
+        ),
+        (
+            "destination",
+            {"destinationstoppointref", "destinationref"},
+            {"destinationtext", "destinationstoppointname"},
+            {"destination"},
+        ),
+    ):
+        ref_path: str | None = None
+        raw_ref: Any = None
+        text_path: str | None = None
+        raw_text: Any = None
+        container_path: str | None = None
+        raw_container: Any = None
+
+        for obj, object_path in objects:
+            if ref_path is None:
+                ref_path, raw_ref = _direct_raw(obj, specific_ref_names, object_path)
+            if text_path is None:
+                text_path, raw_text = _direct_raw(obj, specific_text_names, object_path)
+            if ref_path is not None and text_path is not None:
+                break
+        for obj, object_path in objects:
+            if ref_path is None:
+                ref_path, raw_ref = _first_named_raw(obj, specific_ref_names, object_path)
+            if text_path is None:
+                text_path, raw_text = _first_named_raw(obj, specific_text_names, object_path)
+            if ref_path is not None and text_path is not None:
+                break
+
+        if ref_path is None or text_path is None:
+            for obj, object_path in objects:
+                candidate_path, candidate = _direct_raw(obj, container_names, object_path)
+                if candidate_path is None:
+                    candidate_path, candidate = _first_named_raw(obj, container_names, object_path)
+                if candidate_path is None:
+                    continue
+                container_path, raw_container = candidate_path, candidate
+                if isinstance(candidate, Mapping):
+                    if ref_path is None:
+                        ref_path, raw_ref = _direct_raw(
+                            candidate,
+                            {"stoppointref", "originref", "destinationref", "ref", "id"},
+                            candidate_path,
+                        )
+                        if ref_path is None:
+                            ref_path, raw_ref = _first_named_raw(
+                                candidate,
+                                {"stoppointref", "originref", "destinationref", "ref", "id"},
+                                candidate_path,
+                            )
+                    if text_path is None:
+                        text_path, raw_text = _direct_raw(
+                            candidate,
+                            {"origintext", "destinationtext", "stoppointname", "name", "text", "value"},
+                            candidate_path,
+                        )
+                        if text_path is None:
+                            text_path, raw_text = _first_named_raw(
+                                candidate,
+                                {"origintext", "destinationtext", "stoppointname", "name", "text"},
+                                candidate_path,
+                            )
+                elif text_path is None:
+                    # A scalar Origin/Destination is retained as display text;
+                    # it is never promoted to a stop-point identity.
+                    text_path, raw_text = candidate_path, candidate
+                break
+
+        ref_value_path, ref = _source_value_at_path(raw_ref, ref_path or service_path)
+        text_value_path, text = _source_value_at_path(raw_text, text_path or service_path)
+        if ref is not None:
+            ref_path = ref_value_path
+        if text is not None:
+            text_path = text_value_path
+        source_path = container_path or ref_path or text_path
+        output[f"{prefix}_stop_point_ref"] = ref
+        output[f"{prefix}_stop_point_ref_source_path"] = ref_path
+        output[f"{prefix}_text"] = text
+        output[f"{prefix}_text_source_path"] = text_path
+        output[f"{prefix}_source_path"] = source_path
+        output[prefix] = {
+            "stop_point_ref": ref,
+            "stop_point_ref_source_path": ref_path,
+            "text": text,
+            "text_source_path": text_path,
+            "source_path": source_path,
+        }
+    return output
+
+
 def _unwrap_call(call: Mapping[str, Any], call_path: str) -> tuple[Mapping[str, Any], str]:
     found, key, value = _direct_entry(call, {"callatstop"})
     if found and key is not None and isinstance(value, Mapping):
         return value, _path_for_key(call_path, key)
+    if found and key is not None and isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, Mapping):
+                return item, f"{_path_for_key(call_path, key)}[{index}]"
     return call, call_path
 
 
@@ -292,6 +612,19 @@ def _timing_context(call: Mapping[str, Any], call_path: str, names: set[str]) ->
     return values
 
 
+def _timing_context_from_call(
+    objects: tuple[tuple[Mapping[str, Any], str], ...],
+    names: set[str],
+) -> dict[str, Any]:
+    """Read timing only from the current call/CallAtStop source scope."""
+
+    for obj, path in objects:
+        timing = _timing_context(obj, path, names)
+        if timing["source_path"] is not None:
+            return timing
+    return _timing_context({}, "$", names)
+
+
 def _source_from_objects(
     name_sets: tuple[set[str], ...],
     objects: tuple[tuple[Mapping[str, Any], str], ...],
@@ -310,10 +643,12 @@ def _parse_call(
     call_scope: str,
     call_ordinal: int,
     source_path: str,
-    event_objects: tuple[tuple[Mapping[str, Any], str], ...],
 ) -> Mapping[str, Any]:
     context, context_path = _unwrap_call(call, source_path)
-    objects = ((context, context_path), (call, source_path)) + event_objects
+    # Only the current occurrence and its CallAtStop child are in scope here.
+    # StopEvent/Service objects are deliberately not searched: absent call
+    # fields must remain NULL rather than being inherited from journey context.
+    objects = ((context, context_path), (call, source_path))
 
     stop_point_ref, stop_point_path = _source_from_objects(({"stoppointref"},), objects)
     stop_display_text, stop_display_path = _source_from_objects(
@@ -327,8 +662,8 @@ def _parse_call(
     def flag(name: str) -> tuple[Any, str | None]:
         return _source_from_objects(({_normalise_name(name)},), objects)
 
-    arrival = _timing_context(context, context_path, {"servicearrival"})
-    departure = _timing_context(context, context_path, {"servicedeparture"})
+    arrival = _timing_context_from_call(objects, {"servicearrival"})
+    departure = _timing_context_from_call(objects, {"servicedeparture"})
     source_paths = {
         "stop_point_ref": stop_point_path,
         "stop_display_text": stop_display_path,
@@ -336,23 +671,15 @@ def _parse_call(
         "planned_bay": planned_bay_path,
         "estimated_bay": estimated_bay_path,
     }
-    for field_name, field_path in (
-        ("cancelled", flag("cancelled")[1]),
-        ("deviation", flag("deviation")[1]),
-        ("unplanned_stop", flag("unplannedStop")[1]),
-        ("not_serviced_stop", flag("notServicedStop")[1]),
-        ("no_boarding_at_stop", flag("noBoardingAtStop")[1]),
-        ("no_alighting_at_stop", flag("noAlightingAtStop")[1]),
-    ):
-        source_paths[field_name] = field_path
-    flags = {
-        "cancelled": _flag(flag("cancelled")[0]),
-        "deviation": _flag(flag("deviation")[0]),
-        "unplanned_stop": _flag(flag("unplannedStop")[0]),
-        "not_serviced_stop": _flag(flag("notServicedStop")[0]),
-        "no_boarding_at_stop": _flag(flag("noBoardingAtStop")[0]),
-        "no_alighting_at_stop": _flag(flag("noAlightingAtStop")[0]),
+    call_flags = {
+        "unplanned_stop": flag("unplannedStop"),
+        "not_serviced_stop": flag("notServicedStop"),
+        "no_boarding_at_stop": flag("noBoardingAtStop"),
+        "no_alighting_at_stop": flag("noAlightingAtStop"),
     }
+    for field_name, (_field_value, field_path) in call_flags.items():
+        source_paths[field_name] = field_path
+    flags = {field_name: _flag(value) for field_name, (value, _path) in call_flags.items()}
     return {
         "call_scope": call_scope,
         "call_ordinal": call_ordinal,
@@ -509,6 +836,117 @@ def _parse_errors(root: Mapping[str, Any], result_entries: list[tuple[str, Mappi
     return errors
 
 
+_PARSER_GAP_SENSITIVE_NAMES = {
+    "apikey",
+    "authorization",
+    "credential",
+    "password",
+    "secret",
+    "token",
+}
+
+
+def _sanitize_parser_gap_value(value: Any, *, depth: int = 0) -> Any:
+    """Retain bounded source representation without exposing credential material."""
+
+    if depth > 4:
+        return f"<{type(value).__name__}>"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:500]
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+        for key, child in list(value.items())[:50]:
+            key_text = str(key)
+            if _normalise_name(key_text) in _PARSER_GAP_SENSITIVE_NAMES:
+                sanitized[key_text] = "<redacted>"
+            else:
+                sanitized[key_text] = _sanitize_parser_gap_value(child, depth=depth + 1)
+        if len(value) > 50:
+            sanitized["<truncated>"] = len(value) - 50
+        return sanitized
+    if isinstance(value, list):
+        sanitized_list = [
+            _sanitize_parser_gap_value(item, depth=depth + 1)
+            for item in value[:50]
+        ]
+        if len(value) > 50:
+            sanitized_list.append(f"<truncated {len(value) - 50} items>")
+        return sanitized_list
+    return str(value)[:500]
+
+
+def _parser_gap_excerpt(value: Any) -> Any:
+    safe = _sanitize_parser_gap_value(value)
+    if isinstance(safe, (Mapping, list)):
+        try:
+            text = json.dumps(safe, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            text = str(safe)
+        return text[:500]
+    return safe
+
+
+def _parser_gap_entries(
+    root: Mapping[str, Any],
+    result_entries: list[tuple[str, Mapping[str, Any]]],
+) -> list[Mapping[str, Any]]:
+    """Retain relevant source fields that are outside the approved mapping."""
+
+    contexts: list[tuple[int, str, Mapping[str, Any], Any]] = []
+    for ordinal, (result_path, result) in enumerate(result_entries):
+        result_id, _ = _direct_source(result, {"resultid"}, result_path)
+        contexts.append((ordinal, result_path, result, result_id))
+
+    def context_for_path(path: str) -> tuple[int, str, Any] | None:
+        matches = [
+            (ordinal, result_path, result_id)
+            for ordinal, result_path, _result, result_id in contexts
+            if path == result_path
+            or path.startswith(result_path + ".")
+            or path.startswith(result_path + "[")
+        ]
+        return max(matches, key=lambda item: len(item[1])) if matches else None
+
+    gaps: list[Mapping[str, Any]] = []
+    for path, key, raw_value, _parent_path, _parent in _iter_entries(root):
+        normalized = _normalise_name(key)
+        if normalized in RECOGNIZED_SOURCE_FIELDS:
+            continue
+        if "extension" not in normalized and not any(
+            term in normalized for term in RELEVANT_FIELD_TERMS
+        ):
+            continue
+        context = context_for_path(path)
+        result_ordinal = context[0] if context else None
+        result_path = context[1] if context else None
+        result_id = context[2] if context else None
+        scalar_value = _scalar(raw_value)
+        gaps.append(
+            {
+                "field_name": str(key),
+                "normalized_field_name": normalized,
+                "normalized_name": normalized,
+                "source_path": path,
+                "value_type": type(raw_value).__name__,
+                "source_value": _sanitize_parser_gap_value(scalar_value),
+                "source_representation": _sanitize_parser_gap_value(raw_value),
+                "value_excerpt": _parser_gap_excerpt(raw_value),
+                "mapping_status": "UNMAPPED_RELEVANT_SOURCE_FIELD",
+                "semantic_hint": "RELEVANT_FIELD_NAME_OUTSIDE_APPROVED_MAPPING",
+                "result_id": result_id,
+                "result_source_path": result_path,
+                "result_ordinal": result_ordinal,
+                "event_ordinal": result_ordinal,
+                "event_context": "STOP_EVENT_RESULT" if context else "RESPONSE_CONTEXT",
+                "association_scope": _association_scope(path),
+                "call_scope": _call_scope_from_path(path),
+            }
+        )
+    return gaps
+
+
 def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, Any]:
     result_obj = _as_object(result)
     found, stop_event_key, stop_event_value = _direct_entry(result_obj, {"stopevent"})
@@ -518,10 +956,11 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
     service = _as_object(service_value if found else {})
     service_path = _path_for_key(event_path, service_key) if found and service_key else event_path
     result_id, result_id_path = _direct_source(result_obj, {"resultid"}, result_path)
-    event_objects = ((service, service_path), (event, event_path))
+    service_objects = ((service, service_path), (event, event_path))
+    event_objects = ((event, event_path), (service, service_path))
 
     def service_identity(output_name: str, names: set[str]) -> tuple[Any, str | None]:
-        return _source_from_objects((names,), event_objects)
+        return _source_from_objects((names,), service_objects)
 
     identity_values: dict[str, Any] = {}
     identity_paths: dict[str, str | None] = {}
@@ -531,12 +970,32 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
         ("line_ref", {"lineref"}),
         ("direction_ref", {"directionref", "direction"}),
         ("operator_ref", {"operatorref"}),
-        ("origin", {"origin", "originref", "origintext"}),
-        ("destination", {"destination", "destinationref", "destinationtext"}),
+        ("pt_mode", {"ptmode", "mode", "modes"}),
+        ("rail_submode", {"railsubmode", "submode"}),
+        ("published_line_name", {"publishedlinename"}),
     ):
         value, value_path = service_identity(output_name, names)
         identity_values[output_name] = value
+        identity_values[f"{output_name}_source_path"] = value_path
         identity_paths[output_name] = value_path
+
+    origin_destination = _origin_destination(
+        service,
+        event,
+        service_path=service_path,
+        event_path=event_path,
+    )
+    for prefix in ("origin", "destination"):
+        identity_values[prefix] = origin_destination[prefix]
+        identity_values[f"{prefix}_source_path"] = origin_destination[f"{prefix}_source_path"]
+        for field_name in ("stop_point_ref", "text"):
+            output_name = f"{prefix}_{field_name}"
+            value = origin_destination[output_name]
+            value_path = origin_destination[f"{output_name}_source_path"]
+            identity_values[output_name] = value
+            identity_values[f"{output_name}_source_path"] = value_path
+            identity_paths[output_name] = value_path
+        identity_paths[prefix] = origin_destination[f"{prefix}_source_path"]
 
     calls_by_scope: dict[str, list[Mapping[str, Any]]] = {scope: [] for scope in CALL_SCOPES}
     for scope, names in (
@@ -557,7 +1016,6 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
                     call_scope=scope,
                     call_ordinal=call_ordinal,
                     source_path=call_path,
-                    event_objects=event_objects,
                 )
             )
     # A ThisCall response is normally a single object. Preserve one object in
@@ -593,6 +1051,10 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
     situation_evidence, situation_references = _parse_situations(
         result_obj, result_path, result_id, ordinal
     )
+    cancelled, cancelled_path = _source_from_objects(
+        ({"cancelled"}, {"journeycancelled"}), event_objects
+    )
+    deviation, deviation_path = _source_from_objects(({"deviation"},), event_objects)
     event_record = {
         "result_id": result_id,
         "result_source_path": result_path,
@@ -610,11 +1072,19 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
             "call_scope": "THIS",
             "call_ordinal": 0,
             "source_path": None,
+            "call_at_stop_source_path": None,
             "stop_point_ref": None,
             "stop_display_text": None,
             "stop_seq_number": None,
             "arrival": {field: None for field in TIMING_FIELDS},
             "departure": {field: None for field in TIMING_FIELDS},
+            "planned_bay": None,
+            "estimated_bay": None,
+            "unplanned_stop": None,
+            "not_serviced_stop": None,
+            "no_boarding_at_stop": None,
+            "no_alighting_at_stop": None,
+            "source_paths": {},
         },
         "call_scope_counts": {
             "previous": len(calls_by_scope["PREVIOUS"]),
@@ -625,8 +1095,12 @@ def _parse_event(result: Any, result_path: str, ordinal: int) -> Mapping[str, An
         "situation_references": situation_references,
         "situation_evidence": situation_evidence,
         "operational_event_fields": {
-            "cancelled": _source_from_objects(({"cancelled", "journeycancelled"},), event_objects)[0],
-            "deviation": _source_from_objects(({"deviation"},), event_objects)[0],
+            "cancelled": _flag(cancelled),
+            "deviation": _flag(deviation),
+        },
+        "operational_event_field_source_paths": {
+            "cancelled": cancelled_path,
+            "deviation": deviation_path,
         },
     }
     return event_record
@@ -654,6 +1128,7 @@ def parse_trias_response(body: bytes, content_type: str | None = None) -> Parsed
         parser_version=PARSER_VERSION,
         response_timestamp=response_timestamp,
         events=events,
+        parser_gaps=tuple(_parser_gap_entries(root, result_entries)),
         response_errors=errors,
         application_status=status_text or None,
         application_status_source_path=status_path,

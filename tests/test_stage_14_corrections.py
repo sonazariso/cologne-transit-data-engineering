@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from cologne_transit_collector.collector import Collector
+from cologne_transit_collector.collector import CLIENT_EXECUTION_FAILURE, Collector
 from cologne_transit_collector.domain import HttpResponse, TransportFailure
 from cologne_transit_collector.manifest import LEGACY7_SAMPLING_TARGET_IDS, load_default_manifest
 from cologne_transit_collector.persistence import SQLitePersistence
@@ -51,6 +51,8 @@ from cologne_transit_collector.trias import parse_trias_response
 AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 JSON_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.json"
 XML_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.xml"
+SOURCE_FAITHFUL_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_faithful.json"
+SOURCE_FAITHFUL_XML_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_faithful.xml"
 SUCCESS_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_success.json"
 
 
@@ -78,8 +80,13 @@ class Stage14CorrectionTests(unittest.TestCase):
                     "line_ref",
                     "direction_ref",
                     "operator_ref",
-                    "origin",
-                    "destination",
+                    "origin_stop_point_ref",
+                    "origin_text",
+                    "destination_stop_point_ref",
+                    "destination_text",
+                    "pt_mode",
+                    "rail_submode",
+                    "published_line_name",
                 )
             },
             "calls": [
@@ -111,8 +118,6 @@ class Stage14CorrectionTests(unittest.TestCase):
                     },
                     "planned_bay": call["planned_bay"],
                     "estimated_bay": call["estimated_bay"],
-                    "cancelled": call["cancelled"],
-                    "deviation": call["deviation"],
                     "unplanned_stop": call["unplanned_stop"],
                     "not_serviced_stop": call["not_serviced_stop"],
                     "no_boarding_at_stop": call["no_boarding_at_stop"],
@@ -136,6 +141,116 @@ class Stage14CorrectionTests(unittest.TestCase):
         json_parsed = parse_trias_response(JSON_FIXTURE.read_bytes(), "application/json")
         xml_parsed = parse_trias_response(XML_FIXTURE.read_bytes(), "application/xml")
         self.assertEqual(self._semantic_snapshot(json_parsed), self._semantic_snapshot(xml_parsed))
+
+    def test_source_faithful_identity_operational_grains_and_parser_gaps(self) -> None:
+        json_parsed = parse_trias_response(
+            SOURCE_FAITHFUL_JSON_FIXTURE.read_bytes(), "application/json"
+        )
+        xml_parsed = parse_trias_response(
+            SOURCE_FAITHFUL_XML_FIXTURE.read_bytes(), "application/xml"
+        )
+        json_event = json_parsed.events[0]
+        xml_event = xml_parsed.events[0]
+
+        for event in (json_event, xml_event):
+            self.assertEqual(event["operational_event_fields"], {"cancelled": True, "deviation": True})
+            self.assertTrue(event["operational_event_field_source_paths"]["cancelled"])
+            self.assertTrue(event["operational_event_field_source_paths"]["deviation"])
+            self.assertEqual(event["pt_mode"], "tram")
+            self.assertEqual(event["rail_submode"], "lightRail")
+            self.assertEqual(event["published_line_name"], "Line 18")
+            self.assertTrue(event["pt_mode_source_path"])
+            self.assertTrue(event["rail_submode_source_path"])
+            self.assertTrue(event["published_line_name_source_path"])
+            self.assertEqual(event["origin_stop_point_ref"], "de:05315:origin")
+            self.assertEqual(event["origin_text"], "Origin Station")
+            self.assertEqual(event["destination_stop_point_ref"], "de:05315:destination")
+            self.assertEqual(event["destination_text"], "Destination Station")
+            for field_name in (
+                "origin_stop_point_ref",
+                "origin_text",
+                "destination_stop_point_ref",
+                "destination_text",
+            ):
+                self.assertTrue(event[f"{field_name}_source_path"])
+
+            previous, current, onward = (
+                event["previous_calls"][0],
+                event["this_calls"][0],
+                event["onward_calls"][0],
+            )
+            self.assertIsNone(previous["stop_point_ref"])
+            self.assertIsNone(previous["planned_bay"])
+            self.assertTrue(previous["not_serviced_stop"])
+            self.assertEqual(current["stop_point_ref"], "de:05315:this")
+            self.assertEqual(current["planned_bay"], "B")
+            self.assertIsNone(onward["stop_point_ref"])
+            self.assertIsNone(onward["planned_bay"])
+            for call in (previous, current, onward):
+                self.assertNotIn("cancelled", call)
+                self.assertNotIn("deviation", call)
+                self.assertNotEqual(call.get("stop_point_ref"), "de:05315:service-context")
+                self.assertNotEqual(call.get("planned_bay"), "SERVICE-BAY")
+
+        self.assertEqual(
+            [
+                (
+                    event["origin_stop_point_ref"],
+                    event["origin_text"],
+                    event["destination_stop_point_ref"],
+                    event["destination_text"],
+                    event["pt_mode"],
+                    event["rail_submode"],
+                    event["published_line_name"],
+                )
+                for event in (json_event, xml_event)
+            ][0],
+            [
+                (
+                    event["origin_stop_point_ref"],
+                    event["origin_text"],
+                    event["destination_stop_point_ref"],
+                    event["destination_text"],
+                    event["pt_mode"],
+                    event["rail_submode"],
+                    event["published_line_name"],
+                )
+                for event in (json_event, xml_event)
+            ][1],
+        )
+        for parsed in (json_parsed, xml_parsed):
+            self.assertEqual(len(parsed.parser_gaps), 1)
+            gap = parsed.parser_gaps[0]
+            self.assertEqual(gap["field_name"], "UnknownEstimatedQuality")
+            self.assertEqual(gap["normalized_field_name"], "unknownestimatedquality")
+            self.assertIn("unknownestimatedquality", gap["source_path"])
+            self.assertEqual(gap["source_value"], "raw-estimate-evidence")
+            self.assertEqual(gap["result_id"], "source-faithful-result-1")
+            self.assertEqual(gap["result_ordinal"], 0)
+            self.assertEqual(gap["event_context"], "STOP_EVENT_RESULT")
+            self.assertEqual(gap["call_scope"], "THIS")
+
+        unrelated_envelope = json.loads(JSON_FIXTURE.read_text(encoding="utf-8"))
+        unrelated_envelope["diagnosticEnvelope"] = {
+            "traceId": "offline-test-trace",
+            "requestMetadata": {"source": "fixture"},
+        }
+        unrelated = parse_trias_response(
+            json.dumps(unrelated_envelope).encode("utf-8"), "application/json"
+        )
+        self.assertEqual(unrelated.parser_gaps, ())
+
+    def test_parser_does_not_project_event_fields_or_call_data_from_broader_scopes(self) -> None:
+        parsed = parse_trias_response(SOURCE_FAITHFUL_JSON_FIXTURE.read_bytes(), "application/json")
+        event = parsed.events[0]
+        self.assertEqual(event["operational_event_fields"]["cancelled"], True)
+        self.assertEqual(event["operational_event_fields"]["deviation"], True)
+        for call in event["calls"]:
+            self.assertIsNone(call.get("cancelled"))
+            self.assertIsNone(call.get("deviation"))
+        self.assertIsNone(event["previous_calls"][0]["stop_point_ref"])
+        self.assertIsNone(event["onward_calls"][0]["planned_bay"])
+        self.assertTrue(event["previous_calls"][0]["not_serviced_stop"])
 
     def test_recorded_at_time_is_retained_in_all_call_and_timing_contexts(self) -> None:
         parsed = parse_trias_response(JSON_FIXTURE.read_bytes(), "application/json")
@@ -604,6 +719,45 @@ class Stage14CorrectionTests(unittest.TestCase):
                 [warning for warning in caught if "database" in str(warning.message).lower()],
                 [],
             )
+
+    def test_unstructured_client_exception_is_non_retryable_and_no_network(self) -> None:
+        target_id = "de:05315:11110"
+        with tempfile.TemporaryDirectory() as directory:
+            persistence = self._new_state(directory, "client-exception.sqlite3")
+            client = FakeMddClient(responses={target_id: [RuntimeError("unpersisted detail")]})
+            collector = Collector(
+                manifest=self.manifest,
+                persistence=persistence,
+                mdd_client=client,
+                quota_guard=QuotaGuard(persistence, reservation_scope="CLIENT_EXCEPTION"),
+                safety_margin_seconds=0,
+            )
+            result = collector.run_once(mode="simulate", at_utc=AT, run_id="client-exception")
+            outcome = next(item for item in result.outcomes if item.target_id == target_id)
+            self.assertEqual(outcome.http_attempts, 1)
+            self.assertEqual(outcome.error_category, CLIENT_EXECUTION_FAILURE)
+            self.assertEqual(client.call_count(target_id), 1)
+            self.assertEqual(result.live_network_calls, 0)
+            self.assertEqual(result.live_client_invocations, 0)
+            audit_ids = {
+                row["audit_id"]
+                for row in persistence.fetch_target_audits()
+                if row["source_parent_station_id"] == target_id
+            }
+            attempts = [row for row in persistence.fetch_attempts() if row["audit_id"] in audit_ids]
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(attempts[0]["network_attempted"], 0)
+            self.assertEqual(attempts[0]["provider_attempt_confirmed"], 0)
+            self.assertEqual(attempts[0]["conservative_quota_accounted"], 0)
+            self.assertNotIn("unpersisted detail", json.dumps(attempts))
+            usage = persistence.current_month_usage(at_utc=AT)
+            self.assertEqual(usage["confirmed_provider_attempts"], 0)
+            self.assertEqual(usage["conservative_live_attempts"], 0)
+            self.assertTrue(persistence.fetch_quota_permits())
+            self.assertTrue(
+                all(row["status"] == RELEASED_NO_NETWORK for row in persistence.fetch_quota_permits())
+            )
+            persistence.close()
 
 
 if __name__ == "__main__":

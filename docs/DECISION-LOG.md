@@ -55,6 +55,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-050 | 2026-09-30 | Stage 13 post-closeout contract hardening: separate normal-observed timing from degraded heartbeat-budget feasibility, correct phase assignment to source_parent_station_id / parent StopPointRef, clarify design-time versus production phase-index materialization, and restore critical offline regressions without changing approved production values | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
 | D-051 | 2026-09-30 | Stage 14 collector-first implementation: implement a Python cross-platform scheduler-neutral collector with minimal runtime dependencies, remove future architectural dependence on Windows/VM-specific execution, defer PostgreSQL host/runtime and production cutover, keep the collector persistence-neutral, and permit SQLite only as disposable local development durability | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-052 | 2026-10-01 | S73/S74 Stage 14 collector hardening: correct durable dispatcher and just-in-time target claims, preserve parser/RecordedAtTime retention, finalize quota permits atomically across no-network, conservative-live, and confirmed-provider states, add explicit transport safety metadata, preserve Legacy7 lineage, correct the final quota-attempt lifecycle, and close owned SQLite simulation resources | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-053 | 2026-10-01 | S75 Stage 14 source-faithful parser hardening and retry safety: remove call-to-event/service fallback, separate event/service operational fields, restore identity/display and parser-gap retention, and classify unexpected client exceptions as non-retryable `CLIENT_EXECUTION_FAILURE` | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1209,3 +1210,41 @@ while `build_simulation` documents caller ownership. The closeout remains
 offline-only: no PostgreSQL objects, deployment, live dry-run, MDD request,
 DNS activity, production target materialization, Power BI change, or cutover
 was performed.
+
+## D-053 — Stage 14 Source-Faithful Parser Hardening and Retry Safety
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S75's final parser-hardening correction is complete without reopening the
+accepted S74 quota-permit accounting, cadence, concurrency, dispatcher claims,
+SQLite lifecycle, or any Stage 13 decision. Call-level StopPointRef,
+display text, sequence, bay, stop flags, and arrival/departure timing now read
+only from the current call/`CallAtStop` source scope. Missing values remain
+NULL and exact call source paths are retained; no StopEvent/Service fallback is
+performed.
+
+`Cancelled`/`JourneyCancelled` and `Deviation` remain separate operational
+event/service fields with source paths and are not copied into call
+observations. `PtMode`, nullable `RailSubmode`/submode,
+`PublishedLineName`, and origin/destination stop identity and display text are
+retained independently, including nested Origin/Destination source shapes.
+The Stage 8 recognized-source vocabulary and relevance filter are restored for
+sanitized parser-gap evidence with result/event/call context, while unrelated
+envelope fields do not become defects.
+
+An unexpected unstructured exception escaping the client abstraction is now a
+sanitized, deterministic non-retryable `CLIENT_EXECUTION_FAILURE` with
+`network_attempted=false` by default. Its permit finalizes as
+`RELEASED_NO_NETWORK`; expected structured `LiveMddClient` transport failures
+retain their approved transient categories and retry behavior. The regression
+suite covers one-attempt RuntimeError behavior, zero confirmed or conservative
+provider attempts, and no persisted exception text.
+
+The complete offline repository suite contains 118 tests and passed five
+consecutive times with `ResourceWarning` promoted to an error. The Stage 14
+validator passed with the approved 50/7/43 panel split, phase sequence
+`[19,18,18,18,19,18]`, 220 requests/hour, and zero live-network calls.
+Compilation/static architecture checks and `git diff --check` passed. No MDD,
+DNS, PostgreSQL, scheduler deployment, production cutover, or Power BI change
+was performed, and Stage 15 remains `NOT STARTED`.
