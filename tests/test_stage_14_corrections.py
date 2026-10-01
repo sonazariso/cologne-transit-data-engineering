@@ -53,6 +53,8 @@ JSON_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.json"
 XML_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_equivalent.xml"
 SOURCE_FAITHFUL_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_faithful.json"
 SOURCE_FAITHFUL_XML_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_faithful.xml"
+SOURCE_CONTRACT_JSON_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_contract_correction.json"
+SOURCE_CONTRACT_XML_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_source_contract_correction.xml"
 SUCCESS_FIXTURE = ROOT / "tests" / "fixtures" / "stage14_trias_success.json"
 
 
@@ -239,6 +241,139 @@ class Stage14CorrectionTests(unittest.TestCase):
             json.dumps(unrelated_envelope).encode("utf-8"), "application/json"
         )
         self.assertEqual(unrelated.parser_gaps, ())
+
+    def test_source_contract_identity_separation_and_service_scope_json_xml(self) -> None:
+        parsed_values = []
+        for fixture, content_type in (
+            (SOURCE_CONTRACT_JSON_FIXTURE, "application/json"),
+            (SOURCE_CONTRACT_XML_FIXTURE, "application/xml"),
+        ):
+            parsed = parse_trias_response(fixture.read_bytes(), content_type)
+            event = parsed.events[0]
+            parsed_values.append(
+                {
+                    "journey_ref": event["journey_ref"],
+                    "vehicle_journey_ref": event["vehicle_journey_ref"],
+                    "dated_vehicle_journey_ref": event["dated_vehicle_journey_ref"],
+                    "direction_ref": event["direction_ref"],
+                    "direction": event["direction"],
+                    "pt_mode": event["pt_mode"],
+                    "rail_submode": event["rail_submode"],
+                    "published_line_name": event["published_line_name"],
+                    "origin_stop_point_ref": event["origin_stop_point_ref"],
+                    "origin_text": event["origin_text"],
+                    "destination_stop_point_ref": event["destination_stop_point_ref"],
+                    "destination_text": event["destination_text"],
+                }
+            )
+
+            # JourneyRef and DirectionRef remain NULL/distinct when only the
+            # richer/candidate evidence is supplied.
+            self.assertIsNone(event["journey_ref"])
+            self.assertIsNone(event["journey_ref_source_path"])
+            self.assertEqual(event["vehicle_journey_ref"], "vehicle-journey-candidate-1")
+            self.assertEqual(event["dated_vehicle_journey_ref"], "dated-vehicle-journey-candidate-1")
+            self.assertTrue(event["vehicle_journey_ref_source_path"])
+            self.assertTrue(event["dated_vehicle_journey_ref_source_path"])
+            self.assertEqual(event["direction_ref"], "direction-ref-1")
+            self.assertEqual(event["direction"], "Northbound candidate evidence")
+            self.assertNotEqual(event["direction_ref"], event["direction"])
+
+            # Service identity/display fields never fall back to StopEvent
+            # lookalikes when the Service scope is absent.
+            for field_name in (
+                "pt_mode",
+                "rail_submode",
+                "published_line_name",
+                "origin_stop_point_ref",
+                "origin_text",
+                "destination_stop_point_ref",
+                "destination_text",
+            ):
+                self.assertIsNone(event[field_name])
+                self.assertIsNone(event[f"{field_name}_source_path"])
+
+            self.assertEqual(event["affected_vehicle_journey"], "affected-vehicle-journey-1")
+            self.assertEqual(
+                event["vehicle_journeys"],
+                ["vehicle-journey-candidate-2", "vehicle-journey-candidate-3"],
+            )
+            self.assertEqual(event["operating_days_description"], "Monday-Friday")
+            self.assertEqual(event["origins"], ["candidate-origin-1", "candidate-origin-2"])
+            self.assertEqual(event["destinations"], "candidate-destination-1")
+            for field_name in (
+                "affected_vehicle_journey",
+                "vehicle_journeys",
+                "operating_days_description",
+                "direction",
+                "origins",
+                "destinations",
+            ):
+                self.assertTrue(event[f"{field_name}_source_path"])
+
+            attributes = event["service_attribute_evidence"]
+            self.assertEqual(
+                {
+                    (item["attribute_field_name"].casefold(), item["code"], item["text"])
+                    for item in attributes
+                },
+                {
+                    ("attribute", "INC-001", "Provider-reported incident text"),
+                    ("generalattribute", "GEN-001", "Provider-reported general text"),
+                },
+            )
+            for attribute in attributes:
+                self.assertTrue(attribute["source_path"])
+                self.assertTrue(attribute["association_context_path"])
+                self.assertTrue(attribute["code_source_paths"])
+                self.assertTrue(attribute["text_source_paths"])
+                self.assertEqual(
+                    attribute["semantic_role"], "PROVIDER_REPORTED_EVIDENCE_ONLY"
+                )
+                self.assertNotIn("cause", attribute)
+
+            situation = event["situation_evidence"][0]
+            self.assertEqual(situation["affected_entity_context"]["affects"], "SERVICE")
+            self.assertEqual(
+                next(iter(situation["affected_entity_context"]["affected_journey"].values())),
+                "affected-journey-1",
+            )
+            self.assertTrue(situation["affected_entity_field_paths"]["affected_line"])
+            self.assertTrue(situation["source_path"])
+
+            gap_names = {gap["normalized_field_name"] for gap in parsed.parser_gaps}
+            self.assertEqual(
+                gap_names,
+                {"ptmode", "origin", "destination", "unmappedserviceextension"},
+            )
+            self.assertEqual(
+                sum(gap["normalized_field_name"] == "unmappedserviceextension" for gap in parsed.parser_gaps),
+                1,
+            )
+            self.assertFalse(any(gap["normalized_field_name"] in {"attribute", "generalattribute"} for gap in parsed.parser_gaps))
+            for gap in parsed.parser_gaps:
+                self.assertTrue(gap["source_path"])
+                self.assertEqual(gap["result_id"], "source-contract-correction-1")
+                self.assertEqual(gap["event_ordinal"], 0)
+
+        self.assertEqual(parsed_values[0], parsed_values[1])
+
+    def test_recognized_vocabulary_does_not_suppress_unmapped_relevant_evidence(self) -> None:
+        parsed = parse_trias_response(
+            SOURCE_CONTRACT_JSON_FIXTURE.read_bytes(), "application/json"
+        )
+        # The intentionally unmapped extension is a relevant source-contract
+        # field. It is emitted as a bounded gap even though the parser has a
+        # broad recognized vocabulary for the surrounding TRIAS structures.
+        gap = next(
+            item
+            for item in parsed.parser_gaps
+            if item["normalized_field_name"] == "unmappedserviceextension"
+        )
+        self.assertEqual(gap["mapping_status"], "UNMAPPED_RELEVANT_SOURCE_FIELD")
+        self.assertEqual(gap["source_value"], "retained-parser-gap-evidence")
+        self.assertEqual(gap["association_scope"], "SERVICE")
+        self.assertEqual(gap["call_scope"], None)
 
     def test_parser_does_not_project_event_fields_or_call_data_from_broader_scopes(self) -> None:
         parsed = parse_trias_response(SOURCE_FAITHFUL_JSON_FIXTURE.read_bytes(), "application/json")

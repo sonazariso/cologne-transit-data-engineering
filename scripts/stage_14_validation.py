@@ -85,6 +85,45 @@ def run_checks() -> dict[str, object]:
             errors.append("XML RecordedAtTime regression fixture does not cover six contexts")
     except (OSError, ValueError) as exc:
         errors.append(f"TRIAS fixture validation failed: {type(exc).__name__}")
+    correction_json_fixture = ROOT / "tests" / "fixtures" / "stage14_trias_source_contract_correction.json"
+    correction_xml_fixture = ROOT / "tests" / "fixtures" / "stage14_trias_source_contract_correction.xml"
+    try:
+        correction_snapshots = (
+            parse_trias_response(correction_json_fixture.read_bytes(), "application/json"),
+            parse_trias_response(correction_xml_fixture.read_bytes(), "application/xml"),
+        )
+        for snapshot in correction_snapshots:
+            event = snapshot.events[0]
+            if event.get("journey_ref") is not None:
+                errors.append("JourneyRef correction fixture promoted a candidate identity")
+            if event.get("vehicle_journey_ref") != "vehicle-journey-candidate-1":
+                errors.append("VehicleJourneyRef correction fixture was not retained")
+            if event.get("dated_vehicle_journey_ref") != "dated-vehicle-journey-candidate-1":
+                errors.append("DatedVehicleJourneyRef correction fixture was not retained")
+            if event.get("direction_ref") != "direction-ref-1" or event.get("direction") != "Northbound candidate evidence":
+                errors.append("DirectionRef/Direction correction fixture was collapsed")
+            if any(
+                event.get(field_name) is not None
+                for field_name in (
+                    "pt_mode",
+                    "rail_submode",
+                    "published_line_name",
+                    "origin_stop_point_ref",
+                    "origin_text",
+                    "destination_stop_point_ref",
+                    "destination_text",
+                )
+            ):
+                errors.append("event-level service identity lookalike was promoted")
+            if len(event.get("service_attribute_evidence", [])) != 2:
+                errors.append("service Attribute/GeneralAttribute evidence was not retained")
+            gap_names = {item.get("normalized_field_name") for item in snapshot.parser_gaps}
+            if "unmappedserviceextension" not in gap_names:
+                errors.append("relevant unmapped source field did not become parser-gap evidence")
+            if any(item.get("normalized_field_name") in {"attribute", "generalattribute"} for item in snapshot.parser_gaps):
+                errors.append("explicit attribute evidence was duplicated as parser-gap evidence")
+    except (IndexError, OSError, ValueError) as exc:
+        errors.append(f"source-contract correction validation failed: {type(exc).__name__}")
     stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
     if "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE" not in stage14_doc:
         errors.append("Stage 14 implementation status is not complete")

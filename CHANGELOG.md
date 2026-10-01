@@ -6,6 +6,16 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- Stage 14 S76 final source-contract retention correction: separated
+  `JourneyRef` / `VehicleJourneyRef` / `DatedVehicleJourneyRef` and
+  `DirectionRef` / `Direction`, retained candidate identity extensions and
+  service-scoped identity/display fields with exact source paths, preserved
+  `Attribute` / `GeneralAttribute` and affected-entity evidence, and replaced
+  recognized-name parser-gap suppression with path-based retention coverage.
+  The overall Stage 14 status remains `IN PROGRESS — PRODUCTION CUTOVER
+  DEFERRED`, implementation remains complete offline-only, and Stage 15 remains
+  `NOT STARTED`; no MDD, DNS, live-network, PostgreSQL, scheduler, Power BI, or
+  cutover activity was performed.
 - Stage 14 collector-first implementation: added the cross-platform Python
   collector package, fixed `TIERED50_PANEL_V1` runtime manifest, pure UTC
   five-minute due-target engine, cap-2 dispatcher, approved retry/deadline and

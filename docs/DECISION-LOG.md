@@ -56,6 +56,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-051 | 2026-09-30 | Stage 14 collector-first implementation: implement a Python cross-platform scheduler-neutral collector with minimal runtime dependencies, remove future architectural dependence on Windows/VM-specific execution, defer PostgreSQL host/runtime and production cutover, keep the collector persistence-neutral, and permit SQLite only as disposable local development durability | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-052 | 2026-10-01 | S73/S74 Stage 14 collector hardening: correct durable dispatcher and just-in-time target claims, preserve parser/RecordedAtTime retention, finalize quota permits atomically across no-network, conservative-live, and confirmed-provider states, add explicit transport safety metadata, preserve Legacy7 lineage, correct the final quota-attempt lifecycle, and close owned SQLite simulation resources | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 | D-053 | 2026-10-01 | S75 Stage 14 source-faithful parser hardening and retry safety: remove call-to-event/service fallback, separate event/service operational fields, restore identity/display and parser-gap retention, and classify unexpected client exceptions as non-retryable `CLIENT_EXECUTION_FAILURE` | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-054 | 2026-10-01 | S76 Stage 14 final source-contract retention correction: separate JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction, retain candidate identity extensions and service-scoped identity/display fields with lineage, preserve Attribute/GeneralAttribute and affected-entity evidence, and close recognized-but-unmapped parser-gap loss | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -1248,3 +1249,47 @@ validator passed with the approved 50/7/43 panel split, phase sequence
 Compilation/static architecture checks and `git diff --check` passed. No MDD,
 DNS, PostgreSQL, scheduler deployment, production cutover, or Power BI change
 was performed, and Stage 15 remains `NOT STARTED`.
+
+## D-054 — Stage 14 Final Source-Contract Retention Correction
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S76's final focused parser correction is complete without reopening the
+accepted S73/S74 dispatcher, concurrency, accounting, transport, quota,
+heartbeat, cadence, or SQLite lifecycle decisions, and without changing
+Stage 12, Stage 13, Power BI, or production-cutover state.
+
+The normalized event now retains `JourneyRef`, `VehicleJourneyRef`, and
+`DatedVehicleJourneyRef` independently with independent source paths. A
+missing `JourneyRef` remains NULL when either richer candidate identity is
+present. `DirectionRef` and `Direction` are likewise independent. The
+candidate evidence extensions `AffectedVehicleJourney`,
+`VehicleJourneys`, `OperatingDaysDescription`, `Origins`, and
+`Destinations` are retained separately and are never promoted to universal
+keys.
+
+`PtMode`, submode, `PublishedLineName`, and origin/destination identity/text
+are read only from the `Service` scope. StopEvent/call lookalikes remain NULL
+for service identity and are retained only as bounded source-contract gap
+evidence where they are relevant. Service `Attribute` and
+`GeneralAttribute` occurrences, including `IncidentCall` service-information
+structures, retain Code, sibling Text, exact source paths, safe source
+representations, association context, result/event lineage, and an explicit
+provider-reported evidence label. No normalized cause or measured-delay claim
+is derived.
+
+Situation representations now expose source-faithful affected-entity context
+for `Affects`, `AffectedEntity`, `AffectedJourney`, and `AffectedLine`
+with field paths. Parser-gap coverage is path-based rather than
+vocabulary-based: structural containers, explicitly retained paths, safe
+generic metadata, and bounded unmapped relevant fields are distinct states.
+Explicitly retained attributes and Situation objects are not duplicated as
+parser gaps; unrelated envelope metadata remains ignored.
+
+Offline JSON/XML regressions and the retention-coverage regression pass. The
+full repository suite contains 120 tests per run and passed five consecutive
+times with `ResourceWarning` promoted to an error. The Stage 14 validator,
+Python compilation, static architecture checks, and whitespace validation
+pass. No MDD, DNS, live-network, PostgreSQL, scheduler deployment, production
+cutover, or Power BI activity was performed. Stage 15 remains `NOT STARTED`.

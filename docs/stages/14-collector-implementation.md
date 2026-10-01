@@ -17,7 +17,7 @@ platform, controlled live dry-run, Tiered50 activation, and post-activation
 validation remain open work. Stage 15 remains `NOT STARTED`.
 
 This document records the Stage 14 Python collector implementation requested
-by S73, hardened by S74, and source-faithfulness-corrected by S75. It does not reopen the approved Stage 13 panel, tiers, cadence, result
+by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
 limits, retry boundary, concurrency, or phase assignments.
 
 ## Strategy and boundaries
@@ -203,17 +203,39 @@ paths and event/call ordinals, and keeps Situation and result/application error
 references source-faithful. Call fields are read only from the current call or
 `CallAtStop` scope; missing values are not inherited from `StopEvent` or
 `Service`. Journey/service `Cancelled` and `Deviation` remain separate
-event-level fields. `PtMode`, nullable rail submode, `PublishedLineName`, and
-origin/destination identity and display text are retained independently with
-source paths. The parser also retains sanitized, context-linked parser-gap
-evidence for relevant unmapped source fields using the approved Stage 8
-vocabulary, while ignoring unrelated envelope fields. It does not derive
-`RecordedAtTime`, actual physical delay, cancellation, or platform state.
+event-level fields. `JourneyRef`, `VehicleJourneyRef`,
+`DatedVehicleJourneyRef`, `DirectionRef`, and `Direction` are independent
+nullable source fields. The approved candidate identity extensions
+`AffectedVehicleJourney`, `VehicleJourneys`, `OperatingDaysDescription`,
+`Origins`, and `Destinations` retain their own source paths. `PtMode`, nullable
+submode, `PublishedLineName`, and origin/destination identity and display text
+are read only from `Service`; event-level lookalikes remain NULL. Service
+`Attribute`/`GeneralAttribute` and `IncidentCall` evidence retains Code,
+sibling Text, source representation, association context, and result/event
+lineage without causal inference. Situation evidence retains affected-entity
+context and field paths. Parser-gap coverage is path-based: recognized names
+are not silently suppressed, explicit evidence is not duplicated, and
+unrelated envelope fields remain ignored. It does not derive `RecordedAtTime`,
+actual physical delay, cancellation, or platform state.
 Parsed snapshots are separate from transport and persistence. The existing
 raw-response policy is unchanged: sanitized fixtures are allowed offline;
 production raw payload retention is not enabled by this implementation. The
 backend-neutral `retain_raw_evidence` hook is present for the approved
 future-live bounded forensic policy and is explicitly disabled by SQLite.
+
+### Stage 8/Stage 9 semantic reconciliation
+
+The S76 offline comparison against the approved Stage 8/Stage 9 source
+semantics passes. `JourneyRef` is retained separately from
+`VehicleJourneyRef`/`DatedVehicleJourneyRef`; `DirectionRef` is retained
+separately from candidate `Direction`; service mode/display and
+origin/destination fields remain service-scoped; candidate identity
+extensions retain independent source paths; Attribute/GeneralAttribute and
+affected-entity evidence remains source representation rather than causal
+interpretation; and every relevant unmapped field is either bounded parser-gap
+evidence or an intentionally structural/safe generic field. JSON and XML
+correction fixtures produce the same semantic values, while their exact paths
+continue to reflect each source representation.
 
 ## Execution modes
 
@@ -244,15 +266,17 @@ only the approved new targets.
 
 ## Offline closeout validation
 
-The complete repository suite passed in five consecutive runs, with 118 tests
+The complete repository suite passed in five consecutive runs, with 120 tests
 reported in each run. The suite was also run with `ResourceWarning` promoted to
 an error; no SQLite resource warning was emitted. The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
 `[19, 18, 18, 18, 19, 18]`, 220 requests/hour, zero live-network calls, and
 Stage 15 `NOT STARTED`. Python compilation, static architecture validation,
 and `git diff --check` passed. The parser regression coverage includes
-call-scope isolation, event/service operational-field grain, identity/display
-retention, JSON/XML parity, and contextual parser-gap evidence. Unexpected
+call-scope isolation, event/service-operational-field grain, independent
+journey/direction identity retention, service-only identity scope,
+Attribute/GeneralAttribute and affected-entity evidence, JSON/XML parity, and
+contextual parser-gap coverage. Unexpected
 unstructured client exceptions are deterministic non-retryable
 `CLIENT_EXECUTION_FAILURE` outcomes with no-network permit finalization.
 Offline plan/simulate validation produced 19 due targets, 19 simulated

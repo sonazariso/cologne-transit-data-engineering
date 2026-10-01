@@ -368,8 +368,11 @@ target outcomes, and durable local claim/audit behavior.
 `plan`, `dry-run`, and `simulate` are offline-safe; `live` is explicitly
 blocked until production persistence and safety state exist. SQLite is
 disposable development infrastructure only. The implementation status is
-`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. The final PostgreSQL adapter and
-host, production SamplingTargetId materialization, real sampling-era cutover
+`STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76 correction for
+independent journey/direction identity fields, service-only identity/display
+scope, Attribute/GeneralAttribute and affected-entity evidence, and
+path-based parser-gap coverage. The final PostgreSQL adapter and host,
+production SamplingTargetId materialization, real sampling-era cutover
 timestamp, deployment/scheduler activation, controlled live dry-run, actual
 Tiered50 activation, and post-activation validation are deferred. Stage 15
 remains **NOT STARTED**.

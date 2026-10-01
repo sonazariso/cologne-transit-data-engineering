@@ -1,0 +1,82 @@
+{
+  "serviceDelivery": {
+    "status": "OK",
+    "responseTimestamp": "2026-10-01T12:00:00Z[GMT]",
+    "deliveryPayload": {
+      "stopEventResponse": {
+        "stopEventResult": [
+          {
+            "resultId": "source-contract-correction-1",
+            "stopEvent": {
+              "ptMode": "event-lookalike-mode",
+              "origin": {
+                "stopPointRef": "event-origin-lookalike",
+                "text": "Event Origin Lookalike"
+              },
+              "destination": {
+                "stopPointRef": "event-destination-lookalike",
+                "text": "Event Destination Lookalike"
+              },
+              "service": {
+                "operatingDayRef": "2026-10-01",
+                "vehicleJourneyRef": "vehicle-journey-candidate-1",
+                "datedVehicleJourneyRef": "dated-vehicle-journey-candidate-1",
+                "affectedVehicleJourney": "affected-vehicle-journey-1",
+                "vehicleJourneys": [
+                  "vehicle-journey-candidate-2",
+                  "vehicle-journey-candidate-3"
+                ],
+                "operatingDaysDescription": "Monday-Friday",
+                "directionRef": "direction-ref-1",
+                "direction": "Northbound candidate evidence",
+                "origins": ["candidate-origin-1", "candidate-origin-2"],
+                "destinations": ["candidate-destination-1"],
+                "incidentCall": {
+                  "attribute": [
+                    {
+                      "Code": "INC-001",
+                      "Text": "Provider-reported incident text"
+                    }
+                  ],
+                  "generalAttribute": {
+                    "Code": "GEN-001",
+                    "Text": "Provider-reported general text"
+                  }
+                },
+                "situation": {
+                  "participantRef": "participant-1",
+                  "situationNumber": "situation-1",
+                  "version": "2",
+                  "summary": "Provider situation summary",
+                  "affects": "SERVICE",
+                  "affectedEntity": {
+                    "vehicleJourneyRef": "affected-vehicle-journey-2"
+                  },
+                  "affectedJourney": {
+                    "journeyRef": "affected-journey-1"
+                  },
+                  "affectedLine": {
+                    "lineRef": "affected-line-1"
+                  }
+                },
+                "unmappedServiceExtension": {
+                  "value": "retained-parser-gap-evidence"
+                }
+              },
+              "thisCall": {
+                "callAtStop": {
+                  "stopPointRef": "de:05315:11201",
+                  "stopPointName": "Requested Stop",
+                  "stopSeqNumber": 4,
+                  "serviceArrival": {
+                    "timetabledTime": "2026-10-01T12:00:00Z[GMT]"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
