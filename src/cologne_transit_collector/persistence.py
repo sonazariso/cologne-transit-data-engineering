@@ -82,6 +82,11 @@ SCHEMA_VERSION = "5"
 DEFAULT_COLLECTION_CONTEXT = "OFFLINE_DEVELOPMENT"
 UNKNOWN_SHARED_QUOTA_SOURCE = "UNKNOWN_SHARED_PROVIDER_BASELINE"
 RAW_RETENTION_HOURS = 24
+SCHEMA_MIGRATION_STATUS_KEY = "schema_migration_status"
+SCHEMA_MIGRATION_SOURCE_VERSION_KEY = "schema_migration_source_version"
+SCHEMA_MIGRATION_STARTED_AT_KEY = "schema_migration_started_at_utc"
+SCHEMA_MIGRATION_COMPLETE = "COMPLETE"
+SCHEMA_MIGRATION_IN_PROGRESS = "IN_PROGRESS"
 _BACKUP_NAME = re.compile(r"^collector-(?P<date>\d{4}-\d{2}-\d{2})\.sqlite3$")
 _BACKUP_TEMP_NAME = re.compile(
     r"^\.collector-\d{4}-\d{2}-\d{2}-[0-9a-f]{32}\.tmp(?:-(?:wal|shm|journal))?$"
@@ -329,19 +334,31 @@ class SQLitePersistence:
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
         self._connection.row_factory = sqlite3.Row
-        with self._lock:
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA journal_mode = WAL")
-            self._connection.execute("PRAGMA busy_timeout = 15000")
-            self._create_schema()
-            if self.is_live_research:
-                for database_file in (
-                    self.path,
-                    self.path.with_name(self.path.name + "-wal"),
-                    self.path.with_name(self.path.name + "-shm"),
-                ):
-                    if database_file.exists():
-                        self._owner_only_file(database_file)
+        self._migration_report: Mapping[str, Any] | None = None
+        try:
+            with self._lock:
+                self._connection.execute("PRAGMA foreign_keys = ON")
+                self._connection.execute("PRAGMA journal_mode = WAL")
+                self._connection.execute("PRAGMA busy_timeout = 15000")
+                self._create_schema()
+                if self.is_live_research:
+                    for database_file in (
+                        self.path,
+                        self.path.with_name(self.path.name + "-wal"),
+                        self.path.with_name(self.path.name + "-shm"),
+                    ):
+                        if database_file.exists():
+                            self._owner_only_file(database_file)
+        except Exception:
+            # A migration can fail after additive schema work has committed.
+            # Close this connection before the caller attempts safety-backup
+            # restoration; the durable in-progress marker remains available for
+            # a later explicit retry when no safety restore is performed.
+            try:
+                self._connection.close()
+            except sqlite3.Error:
+                pass
+            raise
 
     @staticmethod
     def _owner_only_directory(path: Path) -> None:
@@ -730,8 +747,9 @@ class SQLitePersistence:
 
         # Schema objects are additive, but reporting views are definitions and
         # therefore need an explicit replacement path.  Read the old metadata
-        # before updating it so a v2/v3/v4 database can run its idempotent
-        # projection backfill exactly once as part of opening the database.
+        # before updating it.  Historical projection backfill is completed
+        # before the durable schema version is advanced; an explicit marker
+        # makes an interrupted open resumable instead of falsely complete.
         self._connection.commit()
         existing = {
             str(row[0]): str(row[1])
@@ -751,9 +769,57 @@ class SQLitePersistence:
                     f"SQLite schema version is not numeric: {previous_schema_version}"
                 ) from exc
 
-        schema_version_changed = previous_schema_version != SCHEMA_VERSION
+        migration_status = existing.get(SCHEMA_MIGRATION_STATUS_KEY)
+        if migration_status not in {
+            None,
+            SCHEMA_MIGRATION_COMPLETE,
+            SCHEMA_MIGRATION_IN_PROGRESS,
+        }:
+            raise LiveResearchSafetyError(
+                f"SQLite schema migration status is not recognized: {migration_status}"
+            )
+        migration_required = migration_status == SCHEMA_MIGRATION_IN_PROGRESS
+        if previous_schema_version is not None:
+            migration_required = migration_required or int(previous_schema_version) < int(SCHEMA_VERSION)
         reporting_views_need_replacement = not self._reporting_views_are_current()
-        if schema_version_changed or reporting_views_need_replacement:
+        migration_source_schema_version = (
+            existing.get(SCHEMA_MIGRATION_SOURCE_VERSION_KEY)
+            if migration_status == SCHEMA_MIGRATION_IN_PROGRESS
+            else previous_schema_version
+        ) or "UNKNOWN"
+
+        if migration_required:
+            self._mark_schema_migration_in_progress(
+                source_schema_version=migration_source_schema_version,
+            )
+            self._connection.commit()
+            if reporting_views_need_replacement:
+                self._connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._recreate_reporting_views()
+                    self._connection.commit()
+                except Exception:
+                    self._connection.rollback()
+                    raise
+            migration_report = self.backfill_existing_snapshots()
+            reconciliation = migration_report.get("recorded_at_time_reconciliation")
+            if not isinstance(reconciliation, Mapping) or reconciliation.get("status") != "PASS":
+                raise LiveResearchSafetyError(
+                    "historical projection migration did not reconcile RecordedAtTime evidence"
+                )
+            self._initialize_metadata(migration_completed=True)
+            self._connection.commit()
+            self._migration_report = dict(migration_report)
+            self._migration_report.update(
+                {
+                    "source_schema_version": (
+                        migration_source_schema_version
+                    ),
+                    "schema_version": SCHEMA_VERSION,
+                    "completion_status": SCHEMA_MIGRATION_COMPLETE,
+                }
+            )
+        elif reporting_views_need_replacement:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
                 self._recreate_reporting_views()
@@ -765,12 +831,35 @@ class SQLitePersistence:
         else:
             self._initialize_metadata()
             self._connection.commit()
+        if self._migration_report is None:
+            self._migration_report = {
+                "status": "NOT_REQUIRED",
+                "source_schema_version": previous_schema_version,
+                "schema_version": SCHEMA_VERSION,
+                "completion_status": SCHEMA_MIGRATION_COMPLETE,
+                "recorded_at_time_reconciliation": {"status": "PASS"},
+            }
 
-        if previous_schema_version in {"2", "3", "4"}:
-            # The v2 contract predates timing_observations; v3/v4 may have
-            # partial projections.  The same unique grains make this safe for
-            # all three historical states and preserve snapshot JSON exactly.
-            self.backfill_existing_snapshots()
+    def _mark_schema_migration_in_progress(self, *, source_schema_version: str) -> None:
+        existing = {
+            str(row[0]): str(row[1])
+            for row in self._connection.execute(
+                "SELECT metadata_key, metadata_value FROM database_metadata"
+            ).fetchall()
+        }
+        values = {
+            SCHEMA_MIGRATION_STATUS_KEY: SCHEMA_MIGRATION_IN_PROGRESS,
+            SCHEMA_MIGRATION_SOURCE_VERSION_KEY: str(source_schema_version),
+            SCHEMA_MIGRATION_STARTED_AT_KEY: existing.get(
+                SCHEMA_MIGRATION_STARTED_AT_KEY,
+                _iso(datetime.now(timezone.utc)),
+            ),
+        }
+        for key, value in values.items():
+            self._connection.execute(
+                "INSERT OR REPLACE INTO database_metadata (metadata_key, metadata_value) VALUES (?, ?)",
+                (key, str(value)),
+            )
 
     def _reporting_views_are_current(self) -> bool:
         rows = self._connection.execute(
@@ -809,7 +898,7 @@ class SQLitePersistence:
             "SELECT * FROM timing_recorded_at_time_reporting"
         )
 
-    def _initialize_metadata(self) -> None:
+    def _initialize_metadata(self, *, migration_completed: bool = False) -> None:
         now = _iso(datetime.now(timezone.utc))
         existing = {
             str(row[0]): str(row[1])
@@ -834,10 +923,21 @@ class SQLitePersistence:
             # This timestamp describes a real schema-version transition (or
             # initial durable schema creation), not an ordinary database open.
             "last_schema_migration_at_utc": (
-                now if schema_version_changed else (previous_migration_at or now)
+                now
+                if migration_completed or schema_version_changed
+                else (previous_migration_at or now)
             ),
             "collection_context": self.collection_context,
+            SCHEMA_MIGRATION_STATUS_KEY: SCHEMA_MIGRATION_COMPLETE,
         }
+        if SCHEMA_MIGRATION_SOURCE_VERSION_KEY in existing:
+            values[SCHEMA_MIGRATION_SOURCE_VERSION_KEY] = existing[
+                SCHEMA_MIGRATION_SOURCE_VERSION_KEY
+            ]
+        if SCHEMA_MIGRATION_STARTED_AT_KEY in existing:
+            values[SCHEMA_MIGRATION_STARTED_AT_KEY] = existing[
+                SCHEMA_MIGRATION_STARTED_AT_KEY
+            ]
         for key, value in values.items():
             self._connection.execute(
                 "INSERT OR REPLACE INTO database_metadata (metadata_key, metadata_value) VALUES (?, ?)",
@@ -1814,7 +1914,10 @@ class SQLitePersistence:
                 self._connection.rollback()
                 report["status"] = "FAILED"
                 raise
-            report["recorded_at_time_reconciliation"] = self.reconcile_recorded_at_time_evidence()
+            reconciliation = self.reconcile_recorded_at_time_evidence()
+            report["recorded_at_time_reconciliation"] = reconciliation
+            if not isinstance(reconciliation, Mapping) or reconciliation.get("status") != "PASS":
+                report["status"] = "FAILED"
             return report
 
     def reconcile_recorded_at_time_evidence(self) -> Mapping[str, Any]:
@@ -2360,6 +2463,16 @@ class SQLitePersistence:
         return {str(row[0]): str(row[1]) for row in rows}
 
     database_metadata = get_metadata
+
+    def migration_report(self) -> Mapping[str, Any]:
+        """Return the report from the constructor's historical migration.
+
+        The report is intentionally read-only and exists so an offline
+        orchestrator can reconcile projection count changes with the exact
+        idempotent backfill that completed before schema metadata was finalized.
+        """
+
+        return dict(self._migration_report or {})
 
     def integrity_check(self, *, quick: bool = True) -> str:
         pragma = "quick_check" if quick else "integrity_check"
