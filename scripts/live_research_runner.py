@@ -37,14 +37,18 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 from cologne_transit_collector.collector import (  # noqa: E402
     Collector,
     LiveResearchModeBlocked,
+    retry_eligible,
 )
 from cologne_transit_collector.configuration import CollectorSettings  # noqa: E402
 from cologne_transit_collector.domain import (  # noqa: E402
+    MAX_ATTEMPTS,
     LIVE_RESEARCH_COLLECTION_CONTEXT,
     LIVE_RESEARCH_LEGACY_ID,
     LIVE_RESEARCH_STATION_NAME,
     LIVE_RESEARCH_TARGET_ID,
+    HttpResponse,
     PersistenceProfile,
+    TransportFailure,
 )
 from cologne_transit_collector.manifest import RuntimeManifest, load_default_manifest  # noqa: E402
 from cologne_transit_collector.persistence import (  # noqa: E402
@@ -137,7 +141,7 @@ def _bool(value: Any) -> bool:
 
 
 def _parse_duration(value: str) -> float:
-    """Parse a finite positive duration such as ``6h`` or ``21600`` seconds."""
+    """Parse a finite positive duration such as ``4h`` or ``21600`` seconds."""
 
     match = _DURATION_RE.fullmatch(str(value))
     if match is None:
@@ -704,6 +708,140 @@ def _duration_report(
     }
 
 
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _attempt_is_retry_policy_eligible(row: Mapping[str, Any]) -> bool:
+    http_status = _optional_int(row.get("http_status"))
+    if http_status is not None:
+        return retry_eligible(response=HttpResponse(status_code=http_status))
+    category = row.get("transport_failure_category")
+    if category:
+        return retry_eligible(transport_failure=TransportFailure(category=str(category)))
+    return False
+
+
+def _retry_diagnostics(
+    attempts: Sequence[Mapping[str, Any]],
+    audits: Sequence[Mapping[str, Any]],
+    quota_audit: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Expose provider/transport failures separately from retry safety decisions."""
+
+    audit_context = {
+        _int(row.get("audit_id"), -1): (
+            str(row.get("collector_run_id") or ""),
+            str(row.get("source_parent_station_id") or ""),
+            _int(row.get("logical_due_bucket"), -1),
+        )
+        for row in audits
+    }
+    retry_denials: dict[tuple[str, str, int], list[Mapping[str, Any]]] = defaultdict(list)
+    for row in quota_audit:
+        if str(row.get("decision_kind") or "").upper() != "RETRY":
+            continue
+        try:
+            decision = json.loads(str(row.get("decision_json", "{}")))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            decision = {}
+        if not isinstance(decision, Mapping) or decision.get("allowed", True):
+            continue
+        key = (
+            str(row.get("collector_run_id") or ""),
+            str(row.get("source_parent_station_id") or ""),
+            _int(row.get("logical_due_bucket"), -1),
+        )
+        retry_denials[key].append(decision)
+
+    failure_attempts: list[dict[str, Any]] = []
+    suppression_counts: Counter[str] = Counter()
+    for row in attempts:
+        http_status = _optional_int(row.get("http_status"))
+        category = str(row.get("transport_failure_category") or "") or None
+        is_http_failure = http_status is not None and not 200 <= http_status < 300
+        if not is_http_failure and category is None:
+            continue
+
+        policy_eligible = _attempt_is_retry_policy_eligible(row)
+        attempt_number = _int(row.get("attempt_number"), 0)
+        retry_available = policy_eligible and attempt_number < MAX_ATTEMPTS
+        context = audit_context.get(_int(row.get("audit_id"), -1))
+        denial: Mapping[str, Any] | None = None
+        if context is not None:
+            denial_candidates = retry_denials.get(context)
+            if denial_candidates:
+                denial = denial_candidates[0]
+
+        suppression_reason: str | None = None
+        suppression_detail: str | None = None
+        if denial is not None:
+            suppression_reason = str(denial.get("decision") or "RETRY_DENIED")
+            suppression_detail = str(denial.get("reason") or "") or None
+        elif not policy_eligible:
+            suppression_reason = "NOT_RETRY_POLICY_ELIGIBLE"
+        elif attempt_number >= MAX_ATTEMPTS:
+            suppression_reason = "MAX_ATTEMPTS_REACHED"
+        if suppression_reason is not None:
+            suppression_counts[suppression_reason] += 1
+
+        if http_status is not None:
+            classification = (
+                "TRANSIENT_PROVIDER_SERVER_HTTP_FAILURE"
+                if http_status == 500
+                else "HTTP_RESPONSE_FAILURE"
+            )
+            failure_kind = "HTTP_RESPONSE"
+        else:
+            classification = "TRANSPORT_FAILURE"
+            failure_kind = "TRANSPORT_FAILURE"
+        failure_attempts.append(
+            {
+                "audit_id": _int(row.get("audit_id"), -1),
+                "attempt_number": attempt_number,
+                "original_failure": {
+                    "kind": failure_kind,
+                    "http_status": http_status,
+                    "transport_failure_category": category,
+                    "classification": classification,
+                    "cause_inferred": False,
+                },
+                "retry_eligible": policy_eligible,
+                "retry_policy_eligible": policy_eligible,
+                "retry_available_under_max_attempts": retry_available,
+                "retry_decision": row.get("retry_decision"),
+                "retry_suppression_reason": suppression_reason,
+                "retry_suppression_detail": suppression_detail,
+            }
+        )
+
+    return {
+        "http_500_semantics": {
+            "classification": "TRANSIENT_PROVIDER_SERVER_HTTP_FAILURE",
+            "approved_retryable_status": True,
+            "cause_inferred": False,
+        },
+        "failure_attempt_count": len(failure_attempts),
+        "retry_policy_eligible_failure_attempt_count": sum(
+            bool(row["retry_policy_eligible"]) for row in failure_attempts
+        ),
+        "retry_suppressed_failure_attempt_count": sum(
+            row["retry_suppression_reason"] is not None for row in failure_attempts
+        ),
+        "retry_suppression_distribution": dict(sorted(suppression_counts.items())),
+        "failure_attempts": failure_attempts,
+        "statement": (
+            "HTTP/transport failure evidence, retry-policy eligibility, and quota-safety "
+            "suppression are separate facts; quota-state denial does not reclassify an HTTP 500."
+        ),
+    }
+
+
 def _build_read_only_analysis(
     *,
     manifest: RuntimeManifest,
@@ -844,6 +982,11 @@ def build_final_report(
     repeated_lifecycle_count = timing_lifecycle["events_seen_in_more_than_one_snapshot"]
     nonnull_count = timing_lifecycle["total_non_null_recorded_at_time_occurrences"]
     extension_recommended = nonnull_count == 0 or repeated_lifecycle_count == 0
+    retry_diagnostics = _retry_diagnostics(
+        attempts,
+        audits,
+        session_evidence.quota_audit,
+    )
     structural_failures: list[str] = []
     if str(database_status.get("integrity_check", "")).casefold() != "ok":
         structural_failures.append("database_integrity_check")
@@ -908,6 +1051,7 @@ def build_final_report(
             "http_response_status_distribution": dict(sorted(status_distribution.items())),
             "transport_failure_distribution": dict(sorted(transport_distribution.items())),
             "retry_attempts": retry_attempts,
+            "retry_diagnostics": retry_diagnostics,
             "quota_state_limitations": quota_limitations,
             "observed_collector_runs": session.get("observed_collector_runs", []),
         },
@@ -931,11 +1075,13 @@ def build_final_report(
         "read_only_analysis": analyzer_report,
         "extension_rule": {
             "status": "EVIDENCE_WINDOW_EXTENSION_RECOMMENDED" if extension_recommended else "NOT_RECOMMENDED",
-            "recommend_total_duration_hours": 12 if extension_recommended else None,
+            "recommend_total_duration_hours": 8 if extension_recommended else None,
+            "extension_requires_explicit_later_invocation": True,
             "reason": (
-                "No non-null RecordedAtTime was observed or no established event lifecycle repeated across snapshots."
+                "No non-null RecordedAtTime was observed or no established event lifecycle repeated across snapshots; "
+                "an explicit later invocation may extend the same Heumarkt research window to a total of 8 hours."
                 if extension_recommended
-                else "The six-hour window contained non-null RecordedAtTime and repeated established event lifecycles."
+                else "The requested bounded window contained non-null RecordedAtTime and repeated established event lifecycles."
             ),
             "automatic_extension_performed": False,
         },
@@ -983,6 +1129,7 @@ def _markdown_summary(report: Mapping[str, Any]) -> str:
             f"- Collector runs: `{execution.get('collector_run_count')}`; successful/failed/skipped-budget targets: `{execution.get('successful_target_executions')}` / `{execution.get('failed_target_executions')}` / `{execution.get('skipped_budget_executions')}`",
             f"- Live network attempts: `{execution.get('actual_live_network_attempts')}`; HTTP statuses: `{execution.get('http_response_status_distribution')}`; retries: `{execution.get('retry_attempts')}`",
             f"- Duplicate claim prevention: `{execution.get('duplicate_invocation_claim_prevention')}`",
+            f"- HTTP 500 remains a transient provider/server failure; retry eligibility and quota-state suppression are separate: `{execution.get('retry_diagnostics')}`",
             "",
             "## Persistence and timing",
             "",
@@ -1003,7 +1150,7 @@ def _markdown_summary(report: Mapping[str, Any]) -> str:
             f"- HTTP attempt: `{durations.get('http_attempt_duration')}`",
             f"- Collector run: `{durations.get('heartbeat_collector_run_duration')}`",
             "",
-            f"Extension rule: `{extension.get('status')}`; automatic extension: `{extension.get('automatic_extension_performed')}`.",
+            f"Extension rule: `{extension.get('status')}`; recommended total duration: `{extension.get('recommend_total_duration_hours')} hours`; automatic extension: `{extension.get('automatic_extension_performed')}`; explicit later invocation required: `{extension.get('extension_requires_explicit_later_invocation')}`.",
             "",
             "PostgreSQL, production live, Tiered50 activation, production cutover, post-cutover validation, and Power BI activity remained untouched.",
             "",
@@ -1023,8 +1170,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--duration",
         type=_parse_duration,
-        default=_parse_duration("6h"),
-        help="bounded duration, for example 6h or 21600 (default: 6h)",
+        default=_parse_duration("4h"),
+        help="bounded duration, for example 4h or 14400 (default: 4h)",
     )
     parser.add_argument("--live-research-db", "--live-db", dest="live_research_db", type=Path)
     parser.add_argument("--live-data-root", "--live-root", dest="live_data_root", type=Path)

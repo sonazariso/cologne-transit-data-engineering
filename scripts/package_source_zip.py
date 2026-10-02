@@ -72,8 +72,18 @@ def source_members(repository_root: str | Path, *, output_path: str | Path | Non
             yield path, archive_name
 
 
+def verify_source_zip(output_path: str | Path) -> tuple[str, ...]:
+    """Return forbidden archive members, raising if the archive is unreadable."""
+
+    output = Path(output_path).expanduser().resolve()
+    with zipfile.ZipFile(output, "r") as archive:
+        return tuple(
+            name for name in archive.namelist() if is_macos_metadata(name)
+        )
+
+
 def create_source_zip(repository_root: str | Path, output_path: str | Path) -> Path:
-    """Write a sanitized source ZIP and return its absolute path."""
+    """Write and verify a sanitized source ZIP, then return its absolute path."""
 
     root = Path(repository_root).resolve()
     output = Path(output_path).expanduser().resolve()
@@ -84,6 +94,10 @@ def create_source_zip(repository_root: str | Path, output_path: str | Path) -> P
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path, archive_name in source_members(root, output_path=output):
             archive.write(path, archive_name)
+    forbidden_members = verify_source_zip(output)
+    if forbidden_members:
+        formatted = ", ".join(repr(member) for member in forbidden_members)
+        raise ValueError(f"source ZIP contains forbidden macOS metadata: {formatted}")
     return output
 
 
@@ -98,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         output = create_source_zip(args.repository, args.output)
-    except (OSError, subprocess.CalledProcessError, UnicodeError) as exc:
+    except (OSError, subprocess.CalledProcessError, UnicodeError, ValueError, zipfile.BadZipFile) as exc:
         print(f"source ZIP creation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     print(output)
