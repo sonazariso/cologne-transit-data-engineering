@@ -4,6 +4,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 
 | ID | Date | Decision | Status |
 |---|---|---|---|
+| D-060 | 2026-10-05 | S87 SQL Server stabilization: Microsoft SQL Server is the sole authoritative project database; `CologneTransitIntelligence` is the official database, PostgreSQL/SQLite/Ubuntu/Docker are not active architecture, and the current Windows-VM SQL Server baseline must be backed up and verified before collector/pipeline connection | IN PROGRESS — BLOCKED: no verifiable FULL backup; see [Stage 1 evidence](stages/01-sql-server-stabilization-evidence.json) |
 | D-001 | 2026-09-25 | New project name: **Cologne Transport Intelligence** | Approved |
 | D-002 | 2026-09-25 | New GitHub repository: `sonazariso/cologne-transit-intelligence` | Approved |
 | D-003 | 2026-09-25 | Legacy repository remains reference/evidence and is not bulk-copied | Approved |
@@ -61,6 +62,29 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-056 | 2026-10-01 | S78 Single-Station Live SQLite Research Pilot: `SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.` Use durable `LIVE_RESEARCH` SQLite for the bounded `LIVE_RESEARCH_SINGLE_1` Köln Heumarkt pilot; retain parsed evidence, bound raw forensics to 24 hours, and keep three validated daily backups without starting Tiered50 production or Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; collector implementation COMPLETE; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 | D-057 | 2026-10-01 | S79 timing-history and first-gap correction: append normalized source timing observations with deterministic MDD-local identity and reporting lineage; preserve the existing `recorded_at_time_evidence`; audit the actual S78 Heumarkt database read-only; correct only clear structural parser gaps; keep ambiguous ServiceSection fields under review; measure timing history in Stage 15A without starting Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
 | D-059 | 2026-10-01 | S81 reporting-lineage and migration correction: use `recorded_at_time_source_path` for all RecordedAtTime reporting paths, replace schema-4 reporting views through an explicit schema-5 migration, add genuine schema-v2/schema-v4 regressions, and correct the ServiceSection evidence wording without rewriting historical source facts | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+
+## D-060 — S87 SQL Server Stabilization
+
+**Status:** IN PROGRESS — BLOCKED: verified native FULL backup required
+
+Microsoft SQL Server is the sole authoritative project database. The official
+database is `CologneTransitIntelligence` on the current Windows VM. Future
+collectors and pipelines are planned as Python on macOS; SQL Server remains on
+the VM; Power BI consumes SQL Server analytical/warehouse data.
+
+The live database is ONLINE and its read-only inventory is captured in the
+[Stage 1 stabilization record](stages/01-sql-server-stabilization.md) and
+[machine-readable evidence](stages/01-sql-server-stabilization-evidence.json).
+`NRWTransportDW` remains an untouched `LEGACY_REFERENCE`. Earlier PostgreSQL
+architecture and the SQLite research runtime remain version-controlled
+historical/deferred-cleanup material; no code cleanup occurs in S87.
+
+The stage is blocked because `msdb` has no FULL-backup history for the official
+database, the existing `.bak` candidate could not be opened by SQL Server for
+`RESTORE HEADERONLY` or `RESTORE VERIFYONLY WITH CHECKSUM`, and the only
+visible SQL Server volume reached 175 MB free during the audit (1,489 MB after
+the uninitiated VM restart). No backup, schema change, data change,
+collector/API request, GTFS load, or Power BI change was made.
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 

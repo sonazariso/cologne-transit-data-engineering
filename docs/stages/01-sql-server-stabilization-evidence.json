@@ -1,0 +1,259 @@
+{
+  "stage": "01-sql-server-stabilization",
+  "evidence_captured_at_utc": "2026-10-05T14:05:46Z",
+  "status": "BLOCKED_VERIFIED_FULL_BACKUP_REQUIRED",
+  "secrets_included": false,
+  "source": {
+    "method": "Existing authenticated SQL Server connection from the Windows VM; read-only inventory and backup-audit queries",
+    "server_endpoint": "172.16.192.128:1433",
+    "vm_name": "DataAnalyst-VM",
+    "sql_server": {
+      "product": "Microsoft SQL Server 2025",
+      "product_version": "17.0.1125.2",
+      "product_level": "RTM",
+      "edition": "Standard Developer Edition (64-bit)",
+      "instance_name": null,
+      "server_collation": "SQL_Latin1_General_CP1_CI_AS",
+      "instance_default_backup_path": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\Backup"
+    }
+  },
+  "authoritative_database": {
+    "name": "CologneTransitIntelligence",
+    "decision": "SOLE_OFFICIAL_PROJECT_DATABASE",
+    "state": "ONLINE",
+    "user_access": "MULTI_USER",
+    "compatibility_level": 170,
+    "recovery_model": "SIMPLE",
+    "collation": "SQL_Latin1_General_CP1_CI_AS",
+    "allocated_size_mb": 12887.63,
+    "files": [
+      {
+        "logical_name": "CologneTransitIntelligence",
+        "type": "ROWS",
+        "size_mb": 3848.0,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence.mdf"
+      },
+      {
+        "logical_name": "CologneTransitIntelligence_log",
+        "type": "LOG",
+        "size_mb": 9039.63,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence_log.ldf"
+      }
+    ]
+  },
+  "project_related_databases": [
+    {
+      "name": "CologneTransitIntelligence",
+      "classification": "OFFICIAL_PROJECT_DATABASE",
+      "state": "ONLINE",
+      "compatibility_level": 170,
+      "recovery_model": "SIMPLE",
+      "allocated_size_mb": 12887.63
+    },
+    {
+      "name": "NRWTransportDW",
+      "classification": "LEGACY_REFERENCE",
+      "state": "ONLINE",
+      "compatibility_level": 170,
+      "recovery_model": "FULL",
+      "collation": "SQL_Latin1_General_CP1_CI_AS",
+      "allocated_size_mb": 38672.0,
+      "user_table_count": 21,
+      "cross_database_dependency_count": 0,
+      "active_repository_references": [],
+      "prompt_only_references": ["prompts/86-BackupSQL", "prompts/S87.md"]
+    }
+  ],
+  "backup_audit": {
+    "msdb_full_backup_history_rows_for_authoritative_database": 0,
+    "default_backup_directory_listing": [],
+    "existing_backup_reused": false,
+    "new_backup_created": false,
+    "selected_verified_backup": null,
+    "candidate_files": [
+      {
+        "path": "/Users/admin/Documents/CologneTransitIntelligence-Full-2026-09-30T18-32-56.bak",
+        "bytes": 619831296,
+        "modified_local": "2026-09-30T20:34:50+02:00",
+        "sha256": "3cbadd3fe2cca22f2394a0afadd5f18e8551b2214c2597ed393d4278b6b06523",
+        "sql_server_access_path": "\\\\vmware-host\\Shared Folders\\CologneTransitIntelligence-Full-2026-09-30T18-32-56.bak",
+        "headeronly_result": "FAILED_OS_ERROR_2_CANNOT_OPEN_BACKUP_DEVICE",
+        "restore_verifyonly_with_checksum_result": "FAILED_OS_ERROR_2_CANNOT_OPEN_BACKUP_DEVICE",
+        "validity": "UNVERIFIED_NOT_SELECTED"
+      }
+    ],
+    "backup_destination_blocker": {
+      "visible_fixed_drives": [
+        {
+          "drive": "C",
+          "free_mb": 1489
+        }
+      ],
+      "minimum_observed_free_mb_during_audit": 175,
+      "authoritative_database_allocated_mb": 12887.63,
+      "default_backup_directory_is_empty": true,
+      "alternate_writable_destination_validated": false,
+      "reason": "Insufficient SQL Server VM storage headroom and no validated writable alternate destination"
+    },
+    "required_next_backup": {
+      "database": "CologneTransitIntelligence",
+      "options": ["COPY_ONLY", "COMPRESSION", "CHECKSUM"],
+      "filename": "timestamped_non_overwriting_native_full_backup.bak",
+      "verify_after_creation": "RESTORE VERIFYONLY WITH CHECKSUM"
+    }
+  },
+  "object_inventory": {
+    "counts": {
+      "schemas": 18,
+      "persistent_tables": 31,
+      "views": 25,
+      "stored_procedures": 5,
+      "user_defined_table_types": 3,
+      "functions": 1,
+      "indexes": 56,
+      "primary_keys": 20,
+      "unique_constraints": 8,
+      "foreign_keys": 39
+    },
+    "names": {
+      "schemas": ["analytics", "ctl", "db_accessadmin", "db_backupoperator", "db_datareader", "db_datawriter", "db_ddladmin", "db_denydatareader", "db_denydatawriter", "db_owner", "db_securityadmin", "dbo", "dw", "guest", "INFORMATION_SCHEMA", "stg", "sys", "wrk"],
+      "persistent_tables": ["ctl.GtfsLoadBatch", "ctl.GtfsStagingState", "ctl.GtfsValidationResult", "ctl.MddCollectorRun", "ctl.MddRealtimeSamplingSlot", "ctl.MddRealtimeSamplingTarget", "ctl.StaticWarehouseLoadBatch", "dw.BridgeServiceDate", "dw.DimAgency", "dw.DimDate", "dw.DimMode", "dw.DimRoute", "dw.DimService", "dw.DimStop", "dw.FactOperationalStopOutcome", "dw.FactScheduledStopEvent", "dw.FactScheduledTrip", "stg.GtfsAgency", "stg.GtfsCalendar", "stg.GtfsCalendarDates", "stg.GtfsFeedInfo", "stg.GtfsFrequencies", "stg.GtfsRoutes", "stg.GtfsShapes", "stg.GtfsStops", "stg.GtfsStopTimes", "stg.GtfsTransfers", "stg.GtfsTrips", "stg.MddRealtimeSituationObservation", "stg.MddRealtimeStopObservation", "stg.MddRealtimeStopSituationLink"],
+      "views": ["analytics.vwActiveDateProfile", "analytics.vwDailyScheduledTripProfile", "analytics.vwModeScheduleProfile", "analytics.vwNetworkBaselineKpi", "analytics.vwParentStationScheduleProfile", "analytics.vwRealtimeCollectorRunHealth", "analytics.vwRealtimeDataQualityCoverage", "analytics.vwRealtimeDelayHotspot", "analytics.vwRealtimeOperationalConsolidationQuality", "analytics.vwRealtimePlatformChangeEvidence", "analytics.vwRealtimeReliabilityByDimension", "analytics.vwRealtimeReliabilityOutcome", "analytics.vwRealtimeSituationLinkedOutcome", "analytics.vwRouteScheduleProfile", "analytics.vwStopPositionScheduleProfile", "wrk.vwCologneModeSummary", "wrk.vwCologneRealtimeEvidenceSituation", "wrk.vwCologneRealtimeStopEnriched", "wrk.vwCologneRealtimeStopObservation", "wrk.vwCologneRealtimeTripMatch", "wrk.vwCologneRealtimeTripMatchKey", "wrk.vwCologneScheduledStopEvent", "wrk.vwCologneServingRoute", "wrk.vwCologneServingTrip", "wrk.vwCologneStop"],
+      "stored_procedures": ["ctl.uspCompleteMddCollectorRun", "ctl.uspGetMddRealtimeSamplingTarget", "ctl.uspStartMddCollectorRun", "dw.uspRefreshFactOperationalStopOutcome", "stg.uspPersistMddRealtimeSnapshot"],
+      "user_defined_table_types": ["stg.MddRealtimeSituationObservationInputType", "stg.MddRealtimeStopObservationInputType", "stg.MddRealtimeStopSituationLinkInputType"],
+      "functions": ["wrk.GtfsTimeToSeconds"],
+      "indexes": ["ctl.GtfsLoadBatch.PK_ctl_GtfsLoadBatch", "ctl.GtfsStagingState.PK_ctl_GtfsStagingState", "ctl.GtfsValidationResult.PK_ctl_GtfsValidationResult", "ctl.GtfsValidationResult.UQ_ctl_GtfsValidationResult_LoadBatch_CheckName", "ctl.MddCollectorRun.PK_ctl_MddCollectorRun", "ctl.MddCollectorRun.IX_ctl_MddCollectorRun_StartedAtUtc", "ctl.MddCollectorRun.IX_ctl_MddCollectorRun_Status_StartedAtUtc", "ctl.MddRealtimeSamplingSlot.PK_ctl_MddRealtimeSamplingSlot", "ctl.MddRealtimeSamplingTarget.PK_ctl_MddRealtimeSamplingTarget", "ctl.MddRealtimeSamplingTarget.UX_ctl_MddRealtimeSamplingTarget_StopPointRef", "ctl.StaticWarehouseLoadBatch.PK_ctl_StaticWarehouseLoadBatch", "dw.BridgeServiceDate.PK_dw_BridgeServiceDate", "dw.BridgeServiceDate.IX_BridgeServiceDate_Date", "dw.DimAgency.PK_dw_DimAgency", "dw.DimAgency.UQ_dw_DimAgency_AgencyId", "dw.DimDate.PK_dw_DimDate", "dw.DimDate.UQ_dw_DimDate_DateValue", "dw.DimMode.PK_dw_DimMode", "dw.DimMode.UQ_dw_DimMode_ModeDetail", "dw.DimRoute.PK_dw_DimRoute", "dw.DimRoute.UQ_dw_DimRoute_RouteId", "dw.DimService.PK_dw_DimService", "dw.DimService.UQ_dw_DimService_ServiceId", "dw.DimStop.PK_dw_DimStop", "dw.DimStop.UQ_dw_DimStop_StopId", "dw.FactOperationalStopOutcome.PK_dw_FactOperationalStopOutcome", "dw.FactOperationalStopOutcome.UX_dw_FactOperationalStopOutcome_Date_StopEvent", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_Date", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_Route", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_Stop", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_Mode", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_MatchStatus", "dw.FactOperationalStopOutcome.IX_dw_FactOperationalStopOutcome_ScheduledStopEvent", "dw.FactScheduledStopEvent.PK_dw_FactScheduledStopEvent", "dw.FactScheduledStopEvent.UX_FactScheduledStopEvent_TripSequence", "dw.FactScheduledStopEvent.IX_FactScheduledStopEvent_Stop", "dw.FactScheduledStopEvent.IX_FactScheduledStopEvent_Route", "dw.FactScheduledStopEvent.IX_FactScheduledStopEvent_Mode", "dw.FactScheduledStopEvent.IX_FactScheduledStopEvent_RealtimeMatch", "dw.FactScheduledTrip.PK_dw_FactScheduledTrip", "dw.FactScheduledTrip.UQ_dw_FactScheduledTrip_TripId", "stg.GtfsAgency.IX_GtfsAgency_AgencyId", "stg.GtfsCalendar.IX_GtfsCalendar_ServiceId", "stg.GtfsCalendarDates.IX_GtfsCalendarDates_ServiceId", "stg.GtfsRoutes.IX_GtfsRoutes_RouteId", "stg.GtfsShapes.IX_GtfsShapes_ShapeId", "stg.GtfsStops.IX_GtfsStops_StopId", "stg.GtfsStopTimes.IX_GtfsStopTimes_TripId", "stg.GtfsStopTimes.IX_GtfsStopTimes_StopId", "stg.GtfsTrips.IX_GtfsTrips_TripId", "stg.GtfsTrips.IX_GtfsTrips_RouteId", "stg.MddRealtimeSituationObservation.PK_MddRealtimeSituationObservation", "stg.MddRealtimeSituationObservation.UX_MddRealtimeSituationObservation_Snapshot", "stg.MddRealtimeStopObservation.PK_MddRealtimeStopObservation", "stg.MddRealtimeStopObservation.UX_MddRealtimeStopObservation_ObservedAt_ResultId", "stg.MddRealtimeStopSituationLink.PK_MddRealtimeStopSituationLink"],
+      "primary_keys": ["ctl.GtfsLoadBatch.PK_ctl_GtfsLoadBatch", "ctl.GtfsStagingState.PK_ctl_GtfsStagingState", "ctl.GtfsValidationResult.PK_ctl_GtfsValidationResult", "ctl.MddCollectorRun.PK_ctl_MddCollectorRun", "ctl.MddRealtimeSamplingSlot.PK_ctl_MddRealtimeSamplingSlot", "ctl.MddRealtimeSamplingTarget.PK_ctl_MddRealtimeSamplingTarget", "ctl.StaticWarehouseLoadBatch.PK_ctl_StaticWarehouseLoadBatch", "dw.BridgeServiceDate.PK_dw_BridgeServiceDate", "dw.DimAgency.PK_dw_DimAgency", "dw.DimDate.PK_dw_DimDate", "dw.DimMode.PK_dw_DimMode", "dw.DimRoute.PK_dw_DimRoute", "dw.DimService.PK_dw_DimService", "dw.DimStop.PK_dw_DimStop", "dw.FactOperationalStopOutcome.PK_dw_FactOperationalStopOutcome", "dw.FactScheduledStopEvent.PK_dw_FactScheduledStopEvent", "dw.FactScheduledTrip.PK_dw_FactScheduledTrip", "stg.MddRealtimeSituationObservation.PK_MddRealtimeSituationObservation", "stg.MddRealtimeStopObservation.PK_MddRealtimeStopObservation", "stg.MddRealtimeStopSituationLink.PK_MddRealtimeStopSituationLink"],
+      "unique_constraints": ["ctl.GtfsValidationResult.UQ_ctl_GtfsValidationResult_LoadBatch_CheckName", "dw.DimAgency.UQ_dw_DimAgency_AgencyId", "dw.DimDate.UQ_dw_DimDate_DateValue", "dw.DimMode.UQ_dw_DimMode_ModeDetail", "dw.DimRoute.UQ_dw_DimRoute_RouteId", "dw.DimService.UQ_dw_DimService_ServiceId", "dw.DimStop.UQ_dw_DimStop_StopId", "dw.FactScheduledTrip.UQ_dw_FactScheduledTrip_TripId"],
+      "foreign_keys": ["ctl.GtfsStagingState.FK_ctl_GtfsStagingState_CurrentLoadBatch -> ctl.GtfsLoadBatch", "ctl.GtfsValidationResult.FK_ctl_GtfsValidationResult_GtfsLoadBatch -> ctl.GtfsLoadBatch", "ctl.MddRealtimeSamplingSlot.FK_ctl_MddRealtimeSamplingSlot_Target -> ctl.MddRealtimeSamplingTarget", "ctl.StaticWarehouseLoadBatch.FK_ctl_StaticWarehouseLoadBatch_GtfsLoadBatch -> ctl.GtfsLoadBatch", "dw.BridgeServiceDate.FK_dw_BridgeServiceDate_Date -> dw.DimDate", "dw.BridgeServiceDate.FK_dw_BridgeServiceDate_Service -> dw.DimService", "dw.BridgeServiceDate.FK_dw_BridgeServiceDate_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimAgency.FK_dw_DimAgency_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimDate.FK_dw_DimDate_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimMode.FK_dw_DimMode_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimRoute.FK_dw_DimRoute_Agency -> dw.DimAgency", "dw.DimRoute.FK_dw_DimRoute_Mode -> dw.DimMode", "dw.DimRoute.FK_dw_DimRoute_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimService.FK_dw_DimService_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.DimStop.FK_dw_DimStop_ParentStop -> dw.DimStop", "dw.DimStop.FK_dw_DimStop_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Date -> dw.DimDate", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_FirstObservation -> stg.MddRealtimeStopObservation", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_LastObservation -> stg.MddRealtimeStopObservation", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Mode -> dw.DimMode", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Route -> dw.DimRoute", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_ScheduledStopEvent -> dw.FactScheduledStopEvent", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Service -> dw.DimService", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Stop -> dw.DimStop", "dw.FactOperationalStopOutcome.FK_dw_FactOperationalStopOutcome_Trip -> dw.FactScheduledTrip", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Agency -> dw.DimAgency", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Mode -> dw.DimMode", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Route -> dw.DimRoute", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Service -> dw.DimService", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Stop -> dw.DimStop", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_Trip -> dw.FactScheduledTrip", "dw.FactScheduledStopEvent.FK_dw_FactScheduledStopEvent_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "dw.FactScheduledTrip.FK_dw_FactScheduledTrip_Agency -> dw.DimAgency", "dw.FactScheduledTrip.FK_dw_FactScheduledTrip_Mode -> dw.DimMode", "dw.FactScheduledTrip.FK_dw_FactScheduledTrip_Route -> dw.DimRoute", "dw.FactScheduledTrip.FK_dw_FactScheduledTrip_Service -> dw.DimService", "dw.FactScheduledTrip.FK_dw_FactScheduledTrip_WarehouseLoadBatch -> ctl.StaticWarehouseLoadBatch", "stg.MddRealtimeStopSituationLink.FK_MddRealtimeStopSituationLink_Observation -> stg.MddRealtimeStopObservation", "stg.MddRealtimeStopSituationLink.FK_MddRealtimeStopSituationLink_Situation -> stg.MddRealtimeSituationObservation"]
+    }
+  },
+  "persistent_table_row_counts": {
+    "ctl.GtfsLoadBatch": 2,
+    "ctl.GtfsStagingState": 1,
+    "ctl.GtfsValidationResult": 23,
+    "ctl.MddCollectorRun": 348,
+    "ctl.MddRealtimeSamplingSlot": 10,
+    "ctl.MddRealtimeSamplingTarget": 7,
+    "ctl.StaticWarehouseLoadBatch": 3,
+    "dw.BridgeServiceDate": 99399,
+    "dw.DimAgency": 15,
+    "dw.DimDate": 364,
+    "dw.DimMode": 7,
+    "dw.DimRoute": 153,
+    "dw.DimService": 3947,
+    "dw.DimStop": 3156,
+    "dw.FactOperationalStopOutcome": 527,
+    "dw.FactScheduledStopEvent": 1551343,
+    "dw.FactScheduledTrip": 90331,
+    "stg.GtfsAgency": 36,
+    "stg.GtfsCalendar": 6337,
+    "stg.GtfsCalendarDates": 1025387,
+    "stg.GtfsFeedInfo": 1,
+    "stg.GtfsFrequencies": 0,
+    "stg.GtfsRoutes": 981,
+    "stg.GtfsShapes": 1742925,
+    "stg.GtfsStops": 30719,
+    "stg.GtfsStopTimes": 3818617,
+    "stg.GtfsTransfers": 1708,
+    "stg.GtfsTrips": 167386,
+    "stg.MddRealtimeSituationObservation": 659,
+    "stg.MddRealtimeStopObservation": 2548,
+    "stg.MddRealtimeStopSituationLink": 806
+  },
+  "realtime_baseline": {
+    "stop_observation": {
+      "rows": 2548,
+      "min_observed_at_utc": "2026-09-05 08:27:28",
+      "max_observed_at_utc": "2026-10-05 13:48:47"
+    },
+    "situation_observation": {
+      "rows": 659,
+      "min_observed_at_utc": "2026-09-05 08:27:28",
+      "max_observed_at_utc": "2026-10-05 13:48:47"
+    },
+    "stop_situation_links": 806,
+    "collector_runs": {
+      "rows": 348,
+      "min_started_at_utc": "2026-09-07 20:03:53",
+      "max_started_at_utc": "2026-10-05 13:48:53",
+      "min_completed_at_utc": "2026-09-07 20:03:55",
+      "max_completed_at_utc": "2026-10-05 13:48:55",
+      "status_distribution": {
+        "Succeeded": 341,
+        "Failed": 5,
+        "Started": 2
+      },
+      "number_of_results_distribution": {
+        "5": 346,
+        "NULL": 2
+      }
+    },
+    "sampling_targets": [
+      {"sampling_target_id": 1, "stop_point_ref": "de:05315:11110", "target_name": "Köln Heumarkt", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 2, "stop_point_ref": "de:05315:11201", "target_name": "Köln Hbf", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 3, "stop_point_ref": "de:05315:12711", "target_name": "Köln Rodenkirchen Bf", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 4, "stop_point_ref": "de:05315:14201", "target_name": "Köln Bf Ehrenfeld", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 5, "stop_point_ref": "de:05315:16601", "target_name": "Köln Worringen S-Bahn", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 6, "stop_point_ref": "de:05315:17311", "target_name": "Köln Porz Markt", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"},
+      {"sampling_target_id": 7, "stop_point_ref": "de:05315:19201", "target_name": "Köln Bf Mülheim", "number_of_results": 5, "is_enabled": true, "created_at_utc": "2026-09-07 08:53:00"}
+    ],
+    "sampling_target_summary": {
+      "target_count": 7,
+      "enabled_count": 7,
+      "disabled_count": 0,
+      "minimum_sampling_target_id": 1,
+      "maximum_sampling_target_id": 7,
+      "number_of_results_values": [5]
+    },
+    "sampling_slots": [
+      {"sampling_slot": 1, "sampling_target_id": 2},
+      {"sampling_slot": 2, "sampling_target_id": 7},
+      {"sampling_slot": 3, "sampling_target_id": 1},
+      {"sampling_slot": 4, "sampling_target_id": 4},
+      {"sampling_slot": 5, "sampling_target_id": 6},
+      {"sampling_slot": 6, "sampling_target_id": 2},
+      {"sampling_slot": 7, "sampling_target_id": 7},
+      {"sampling_slot": 8, "sampling_target_id": 1},
+      {"sampling_slot": 9, "sampling_target_id": 5},
+      {"sampling_slot": 10, "sampling_target_id": 3}
+    ],
+    "operational_fact": {
+      "rows": 527,
+      "min_service_date": "2026-09-05",
+      "max_service_date": "2026-09-08",
+      "freshness": {
+        "min_refreshed_at_utc": "2026-09-08 11:59:32",
+        "max_refreshed_at_utc": "2026-09-08 12:10:43"
+      },
+      "freshness_status": "CAPTURED_READ_ONLY"
+    }
+  },
+  "identity_preservation": {
+    "existing_sampling_target_ids_observed": [1, 2, 3, 4, 5, 6, 7],
+    "existing_sampling_target_row_count": 7,
+    "database_writes_issued": false,
+    "identities_reseeded_or_recreated": false,
+    "history_migrated": false
+  },
+  "validation": {
+    "authoritative_database_online": "PASS",
+    "read_only_inventory": "PASS",
+    "readability_of_queried_objects": "PASS",
+    "full_dbcc_checkdb": "NOT_RUN_LOW_DISK_HEADROOM_AND_VM_INTERRUPTION",
+    "vm_interruption_observed": true,
+    "sql_server_restart_initiated_by_stage": false,
+    "verified_full_backup": "BLOCKED",
+    "historical_data_deleted_or_modified_by_stage": false,
+    "collector_executed": false,
+    "mdd_request_issued": false,
+    "project_external_api_requests": false,
+    "gtfs_loaded": false,
+    "power_bi_changed": false,
+    "postgresql_activity": false,
+    "sqlite_project_runtime_activity": false,
+    "ubuntu_activity": false,
+    "docker_activity": false,
+    "stage_1_can_be_marked_complete": false
+  }
+}

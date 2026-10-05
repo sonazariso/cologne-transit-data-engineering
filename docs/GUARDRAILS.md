@@ -95,10 +95,11 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 39. The intended future evidence flow is `SOURCE -> COLLECTOR -> APPEND-ONLY
     SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE`; source disappearance must
     never erase previously observed evidence.
-40. PostgreSQL 18 is the approved future authoritative platform direction for
-    the redesigned architecture, with JSONB only where later justified. This
-    does not change source availability, create PostgreSQL tables, migrate SQL
-    Server assets, or authorize production persistence.
+40. The earlier PostgreSQL 18 direction for the redesigned architecture is
+    historical/deferred-cleanup material and is superseded for the active
+    roadmap by S87. Microsoft SQL Server is the sole authoritative project
+    database. This does not change source availability, create PostgreSQL
+    tables, migrate SQL Server assets, or authorize production persistence.
 41. A future short-term raw-payload retention option may be evaluated for
     forensic reprocessing and parser improvements. No duration is approved;
     storage volume, privacy/data considerations, reprocessing need, and
@@ -378,10 +379,10 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's authoritative overall status is `IN PROGRESS — LIVE SQLITE
-     RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`; its implementation status is
-     `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. This is a bounded research
-     profile, not a completed production cutover. Stage 15A readiness is in
+116. Stage 14's historical implementation status is `IMPLEMENTATION COMPLETE;
+     PRODUCTION CUTOVER DEFERRED`. The SQLite research profile is retained as
+     bounded historical evidence, not active architecture; S87 makes SQL
+     Server the sole authoritative project database. Stage 15A readiness is in
      progress; Stage 15B live validation remains `NOT STARTED — AWAITS
      TIERED50 CUTOVER`.
 117. The Stage 14 runtime is a Python, cross-platform, standard-library-first

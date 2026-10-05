@@ -6,6 +6,23 @@ Every stage follows the same control pattern:
 
 No stage is considered authoritative merely because a similar solution existed in the legacy repository.
 
+## Active architecture guardrail — S87 (2026-10-05)
+
+Microsoft SQL Server is the sole authoritative project database.
+`CologneTransitIntelligence` on the current Windows VM is the official project
+database; SQL Server remains on that VM, future collectors and pipelines are
+planned as Python on macOS, and Power BI consumes SQL Server analytical/
+warehouse data. PostgreSQL, SQLite, Ubuntu, and Docker are not active target
+architecture. Their existing documents and code remain historical/deferred
+cleanup and are not deleted in this stage.
+
+Stage 1 SQL Server stabilization is **BLOCKED** until a native SQL Server FULL
+backup is physically accessible and passes `RESTORE VERIFYONLY WITH CHECKSUM`.
+The live inventory and blocker are recorded in
+[the S87 stabilization evidence](stages/01-sql-server-stabilization.md).
+No collector, MDD/API request, GTFS load, Power BI change, schema redesign, or
+historical-data cleanup is authorized by this gate.
+
 ## Stage 0 — Project Definition — APPROVED
 Define business questions, portfolio goal, geography, modes, System Performance, audience, and explicit exclusions.
 
@@ -167,8 +184,12 @@ are authoritative. The [historical/legacy evidence JSON](stages/04-cologne-scope
 is preserved for comparison and is not current authority. Stage 4 does not
 implement a database, collector, matching layer, warehouse, or Power BI model.
 
-## Stage 5 — Database Architecture — COMPLETE — APPROVED ARCHITECTURE
-PostgreSQL 18 is approved as the future authoritative platform direction,
+## Stage 5 — Database Architecture — COMPLETE — HISTORICAL APPROVED DESIGN
+This historical Stage 5 design approved PostgreSQL 18 as a future
+authoritative platform direction. S87 supersedes that direction for the active
+roadmap: Microsoft SQL Server is now the sole authoritative project database.
+The PostgreSQL design remains retained historical/deferred-cleanup material.
+The historical design specified PostgreSQL 18,
 using the latest supported PostgreSQL 18 minor available at implementation
 time. The approved strategy is a clean PostgreSQL redesign with `ctl`, `src`,
 `wrk`, `core`, `dw`, and `analytics` layers. The Stage 5 architecture,
@@ -291,7 +312,7 @@ revalidation checks; railway Köln Hbf remains unresolved and no adjacent KVB
 identity is substituted. The exact run is in
 `stages/09-source-backed-matching-summary.json`, with sanitized row-level
 evidence in `stages/09-source-backed-matching-evidence.jsonl`. The current Stage
-10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and Stage 14 is **IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE**.
+10 status is **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**; Stage 11 is now closed as an approved design; Stage 12 is now **COMPLETE — APPROVED FIXED 50-STATION PANEL**; Stage 13 is **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**; and the historical Stage 14 implementation is retained while its SQL Server production cutover remains deferred.
 
 ## Stage 10 — Operational Fact — NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED
 The source-controlled PostgreSQL `dw.fact_operational_service_event` contract
@@ -353,7 +374,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Offline Cutover Readiness — IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Offline Cutover Readiness — HISTORICAL IMPLEMENTATION RETAINED; SQL SERVER CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -366,17 +387,17 @@ heartbeat deadline outcomes, shared-credential quota protection, isolated
 target outcomes, and durable local claim/audit behavior.
 
 `plan`, `dry-run`, and `simulate` are offline-safe; production `live` is
-explicitly blocked. S78 adds a separate `live-research` mode backed by the
-durable `LIVE_RESEARCH` SQLite profile, limited to Köln Heumarkt
+explicitly blocked. The retained S78 `live-research` mode is historical,
+lineage-separated evidence backed by the durable `LIVE_RESEARCH` SQLite
+profile, limited to Köln Heumarkt
 (`de:05315:11110`) in context `LIVE_RESEARCH_SINGLE_1`. Parsed research
 history is retained, raw forensic bodies are bounded to 24 hours, and
 validated online backups retain three UTC daily versions. The implementation
 status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
-source-contract corrections and S78 live-research safety controls. SQLite live
-research is the active storage direction; the final durable-storage decision
-is deferred until stable repeated collector evidence exists. PostgreSQL work is
-not currently planned or authorized, and PostgreSQL host/runtime/adapter choice
-is not an active Stage 14 completion gate. Production SamplingTargetId
+source-contract corrections and S78 live-research safety controls. Those
+collector/SQLite details are retained historical implementation evidence; they
+are not the active storage direction after S87. SQL Server is the sole official
+database, and PostgreSQL/SQLite/Ubuntu/Docker remain deferred cleanup. Production SamplingTargetId
 materialization, a real sampling-era cutover timestamp, deployment/scheduler
 activation, Tiered50 activation, and post-activation validation remain
 deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50

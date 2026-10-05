@@ -1,5 +1,10 @@
 # Stage 15 — Post-Cutover Validation Readiness
 
+> **S87 status note (2026-10-05):** This readiness record is retained for
+> historical planning. SQL Server is now the sole authoritative project
+> database, and S87 does not authorize SQLite research continuation, collector
+> activation, or Stage 15B live validation.
+
 **Current Stage 15A status:** `IN PROGRESS`
 **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`
 
@@ -11,7 +16,7 @@ sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`
+- Stage 14 overall: `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
 - Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`

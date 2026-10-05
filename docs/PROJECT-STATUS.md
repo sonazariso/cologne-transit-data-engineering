@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-10-01
+**Status date:** 2026-10-05
 
 ## Authoritative status
 
@@ -10,6 +10,7 @@
 |---|---|---|
 | 0 | Project Definition | APPROVED |
 | 1 | Source Inventory & Permission | APPROVED |
+| 1A | SQL Server Stabilization (S87) | BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
 | 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
 | 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
@@ -22,10 +23,31 @@
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
-| 14 | Collector Implementation and Controlled 50-Station Cutover | IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED |
+| 14 | Collector Implementation and Controlled 50-Station Cutover | HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED |
 | 15 | Post-Cutover Validation | IN PROGRESS — READINESS; LIVE NOT STARTED |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
+
+## Current active architecture
+
+Microsoft SQL Server is the sole authoritative project database. The official
+database is `CologneTransitIntelligence` on the current Windows VM. Future
+collectors and pipelines are planned as Python on macOS, SQL Server remains on
+the VM, and Power BI consumes SQL Server analytical/warehouse data.
+
+The Stage 1 SQL Server baseline is captured in the [stabilization record](stages/01-sql-server-stabilization.md)
+and [evidence JSON](stages/01-sql-server-stabilization-evidence.json). The
+database is ONLINE and readable for the captured inventory, but the stage is
+BLOCKED: `msdb` has no FULL-backup history for the official database, the
+existing `.bak` candidate failed SQL Server `RESTORE HEADERONLY`/
+`RESTORE VERIFYONLY WITH CHECKSUM` because the SQL Server service could not
+open it, and the SQL Server volume reached 175 MB free during the audit
+(1,489 MB after the uninitiated VM restart).
+
+PostgreSQL, SQLite, Ubuntu, and Docker are not active architecture. Their
+existing documents and code remain historical/deferred-cleanup material and
+were not removed or modified. `NRWTransportDW` remains an untouched
+`LEGACY_REFERENCE` database.
 
 ### Current Stage 3 substage
 
@@ -73,12 +95,15 @@ for the authoritative closeout record.
   completed its architecture approval; Stage 6's design/contract closeout is
   recorded below and physical implementation remains deferred.
 
-### Stage 5 closeout
+### Stage 5 closeout — historical design; superseded for active platform by S87
 
-- **Stage 5 — COMPLETE — APPROVED ARCHITECTURE.** PostgreSQL 18 is the future
-  authoritative platform direction, with the latest supported PostgreSQL 18
-  minor selected at implementation time. The approved migration strategy is a
-  clean PostgreSQL redesign, not a 1:1 SQL Server lift-and-shift.
+- **Historical Stage 5 design — COMPLETE — APPROVED at the time.** PostgreSQL
+  18 was approved as the future authoritative platform direction, with the
+  latest supported PostgreSQL 18 minor selected at implementation time. S87
+  supersedes that platform direction for the active roadmap: Microsoft SQL
+  Server is now the sole authoritative project database. The retained
+  migration strategy is a clean PostgreSQL redesign, not a 1:1 SQL Server
+  lift-and-shift.
 - The approved logical layers are `ctl`, `src`, `wrk`, `core`, `dw`, and
   `analytics`. `src` is durable source-faithful evidence; `wrk`, `core`, `dw`,
   and `analytics` are derived or validated layers with explicit ownership and
@@ -398,21 +423,19 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
 - The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; production phase indexes are not yet persisted and require `DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.
-- Stage 14 collector implementation is complete, with the S78 live-research profile now available. The real Tiered50 production cutover remains deferred: production target-ID materialization, sampling-era timestamp, deployment platform, target activation, and post-activation validation are not performed. PostgreSQL work is not planned or authorized in the active roadmap. Stage 15A readiness is now IN PROGRESS; Stage 15B live validation remains NOT STARTED — AWAITS TIERED50 CUTOVER.
+- The historical Stage 14 collector implementation is complete, with the S78 live-research profile retained as offline/research evidence. The real Tiered50 production cutover remains deferred: production target-ID materialization, sampling-era timestamp, deployment platform, target activation, and post-activation validation are not performed. SQL Server is the active persistence authority under S87; the SQLite profile and PostgreSQL contracts are historical/deferred-cleanup material. Stage 15A readiness remains IN PROGRESS; Stage 15B live validation remains NOT STARTED — AWAITS TIERED50 CUTOVER.
 
-### Current storage direction — SQLite live research first
+### Current storage direction — SQL Server authoritative; prior research retained
 
-S78 supersedes the previously discussed PostgreSQL direction for the active
-roadmap: `SQLite Live Research First; final durable storage decision deferred
-until stable repeated collector evidence exists.` PostgreSQL work is not
-currently planned or authorized. The live-research profile is durable and
-non-disposable, uses an explicit database outside the repository, and is
-limited to the single Heumarkt context `LIVE_RESEARCH_SINGLE_1`. This is
-research lineage, not a Tiered50 production sampling era.
+S87 supersedes the previously discussed PostgreSQL and SQLite-first directions
+for the active roadmap. The official database is SQL Server
+`CologneTransitIntelligence`; the live-research SQLite profile and PostgreSQL
+contracts remain historical/deferred-cleanup evidence only. No S87 collector
+runtime or persistence change was made.
 
-### Stage 14 collector implementation — live research pilot; production cutover deferred
+### Stage 14 collector implementation — retained legacy research; SQL Server cutover deferred
 
-- **Overall status:** `IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`.
+- **Overall status:** `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`.
 - **Implementation status:** `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. S76's final source-contract retention correction is complete: JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction remain independent, candidate identity extensions retain source paths, service-only mode/display/origin/destination semantics are enforced, Attribute/GeneralAttribute and affected-entity evidence is retained without causal inference, and recognized-but-unmapped relevant fields become bounded parser-gap evidence. The accepted S75 call-scope and `CLIENT_EXECUTION_FAILURE` behavior remains intact. The package under `src/cologne_transit_collector/`, thin CLI `scripts/stage_14_collector.py`, fixed manifest `config/tiered50_runtime_manifest.json`, offline validation script, sanitized fixtures, and Stage 14 tests are source-controlled.
 - The manifest contains exactly 50 targets, split 7 Legacy7 members / 43 new Tiered50 members, with approved 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits, persisted phase indexes, and no fabricated production SamplingTargetIds. Stage 13 phase evidence is reconciled at load time.
 - Pure UTC bucket scheduling reproduces `[19,18,18,18,19,18]`, 110 executions per 30-minute super-cycle, and 220/hour. The dispatcher is scheduler-neutral, cap-2, MaxAttempts 2, failure-isolated, and deadline-aware.
@@ -575,11 +598,11 @@ is documented and does not replace the future Stage 8 pilot.
 - Situation/Cause evidence is future append-only historical evidence: observed
   versions, source paths, text, reason/effect fields, validity, and association
   scope are preserved rather than reduced to one mutable cause value.
-- PostgreSQL is the intended future persistence direction for the redesigned
-  append-only observation architecture. Stage 5 now approves PostgreSQL 18 as
-  the future authoritative platform direction and the clean redesign, but no
-  migration, production PostgreSQL tables, or persistence implementation has
-  been created. Database choice does not change source availability.
+- The earlier PostgreSQL direction for the redesigned append-only observation
+  architecture is retained as historical/deferred-cleanup material and is
+  superseded for the active roadmap by S87's SQL Server authority decision.
+  No migration, production PostgreSQL tables, or persistence implementation
+  was created. Database choice does not change source availability.
 - The audited successful response did not contain `RecordedAtTime` or a direct
   delay value; this does not establish general MDD absence.
 - `RecordedAtTime` is a TRIAS 1.2 optional actual-time field. It was not

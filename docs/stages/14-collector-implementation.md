@@ -1,10 +1,15 @@
 # Stage 14 — Collector Implementation and Offline Cutover Readiness
 
+> **S87 status note (2026-10-05):** This implementation record is retained as
+> historical/deferred-cleanup evidence. SQL Server is the sole active project
+> database; the SQLite research profile is not active architecture, and no
+> production persistence cutover is authorized by S87.
+
 ## Authoritative status
 
 Overall Stage 14 status:
 
-`IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED`
+`HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`
 
 Implementation status:
 

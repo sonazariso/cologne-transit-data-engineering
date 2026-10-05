@@ -17,14 +17,18 @@ sufficient recorded/actual timing evidence.
 
 ## Current status
 
-S78 is the active roadmap direction: the project is running a bounded
-single-station SQLite live-research pilot before any future durable-storage
-decision is reconsidered. PostgreSQL work is not currently planned or
-authorized. Live research is not Tiered50 production evidence and does not
-start Stage 15B.
+S87 is the active architecture decision: **Microsoft SQL Server is the sole
+authoritative project database**, and the expected database is
+`CologneTransitIntelligence` on the current Windows VM. Future collectors and
+pipelines are planned as Python running on macOS and connecting to that SQL
+Server; Power BI consumes SQL Server analytical/warehouse data. The existing
+PostgreSQL contracts and SQLite collector/research implementation remain
+historical/legacy artifacts for deferred cleanup. S87 is a baseline
+stabilization gate, not collector activation or a new collection stage.
 
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
+- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED**. The authoritative database is ONLINE and the read-only baseline is captured; backup history is empty, the existing local `.bak` could not be opened by SQL Server for `RESTORE VERIFYONLY`, and the SQL Server volume reached 175 MB free during the audit (1,489 MB after the uninitiated VM restart).
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
   technical-closure package remains the approved baseline. The previous host
   run completed the five S15 historical requests, and S16 performed zero MDD
@@ -34,8 +38,8 @@ start Stage 15B.
 - Stage 3B — [Collection Strategy & Cadence Contract](docs/stage-03/03b-collection-strategy-cadence-contract.md): **COMPLETE — APPROVED DESIGN; ACTIVATION DEFERRED**. The cadence policy does not activate a fixed station schedule.
 - Stage 3C — [Cross-Source Matching Design](docs/stage-03/03c-cross-source-matching-design.md): **COMPLETE — APPROVED DESIGN HANDOFF**. Stage 9 now owns the implemented matching/data-quality foundation.
 - Stage 4 — [Cologne Scope & Mode Classification](docs/stages/04-cologne-scope-mode-classification.md): **COMPLETE — APPROVED**. The current official VRS Global-ID static feed validates the direct `de:05315:` stop rule, stop-event-first scope, both-endpoints internal segments, cross-boundary handling, and the source-faithful mode classifier.
-- Stage 5 — [Database Architecture](docs/stages/05-database-architecture.md): **COMPLETE — APPROVED ARCHITECTURE**. PostgreSQL 18 is approved as the future authoritative platform direction using a clean redesign with durable source-faithful evidence, explicit grains, lineage, and deferred physical implementation. [Completion decision](docs/stages/05-database-architecture-completion-decision.md) and [table/grain catalog](docs/stages/05-table-grain-catalog.md) are authoritative. Its static warehouse/analytics handoff is documented in Stage 6; physical implementation remains deferred until explicit user authorization.
-- Stage 6 — [Static Warehouse & Analytics Design](docs/stages/06-static-warehouse-analytics-design.md): **COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED**. The [completion decision](docs/stages/06-static-warehouse-analytics-completion-decision.md) finalizes source-to-Cologne scope, grains, time/calendar semantics, static analytics, lineage, and the future reconciliation contract without creating PostgreSQL objects or loading data.
+- Stage 5 — [Database Architecture](docs/stages/05-database-architecture.md): **HISTORICAL APPROVED DESIGN — ACTIVE PLATFORM SUPERSEDED BY S87**. The retained PostgreSQL 18 redesign and its [completion decision](docs/stages/05-database-architecture-completion-decision.md) remain historical design evidence; SQL Server is now the sole official database platform.
+- Stage 6 — [Static Warehouse & Analytics Design](docs/stages/06-static-warehouse-analytics-design.md): **HISTORICAL APPROVED DESIGN — ACTIVE PLATFORM SUPERSEDED BY S87**. The retained static warehouse/analytics contract remains reference material and is not a PostgreSQL implementation authorization.
 - Stage 7 — [Realtime Pilot Design](docs/stages/07-realtime-pilot-design.md): **COMPLETE — APPROVED PILOT DESIGN**. The active Stage 8 handoff is MDD/TRIAS-only at Köln Hbf (`de:05315:11201`) under `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`: fixed start-to-start 3-second slots for at most 60 minutes, at most 1200 scheduled logical slots and 1200 normal HTTP attempts, a fixed `DepArrTime` anchor, 20 results, zero retries, sequential/non-concurrent execution, overlap skipping, explicit lineage, append-only `RecordedAtTime` capture, and a temporary raw-response exception. The 3-second cadence is a bounded diagnostic design, not production approval. Stage 7 historically described 207,500–210,000 (83–84%) as a planning target; Stage 13 now governs the approved lower-load design with a 250,000 provider ceiling, a 210,000 normal operational maximum, a 207,500 automatic-retry protection boundary, and no minimum utilization requirement. [Completion decision](docs/stages/07-realtime-pilot-design-completion-decision.md) is authoritative.
 - Stage 8 — [Small Realtime Pilot completion and historical authorization chronology](docs/stages/08-small-realtime-pilot-blocked.md): **COMPLETE**. The corrected local credential configuration produced the successful differential diagnostic at Köln Hbf: Control A (`NumberOfResults=5`) returned HTTP 200 and Control B (`NumberOfResults=20`) returned HTTP 200, both parseable. The classification was `CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`; no request-contract reduction was required. The full Hbf/N20/V3 pilot then completed successfully with 343 HTTP 200 responses, 100% parse/reconciliation over successful HTTP responses, and successful cleanup. The historical 401 and earlier missing-key/credential-configuration attempts remain documented as chronology.
 - Stage 9 — [Matching & Data Quality](docs/stages/09-matching-data-quality.md): **COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS**. The matcher prevents unvalidated StopSeqNumber/direction/operator/endpoint coincidences from changing candidate rank or tie resolution, while validated policies remain usable. The corrected bounded source-backed run made exactly 3 MDD attempts and retained 60 live observations: 53 independently established service dates, 51 core deterministic matches, and 51 `MEDIUM` / 9 `UNMATCHED` decisions. The durable row-level evidence integrity gate passed with exact JSONL-to-summary reconciliation. See the [evidence artifact](docs/stages/09-matching-data-quality-evidence.json), [probe summary](docs/stages/09-source-backed-matching-summary.json), and [row-level evidence](docs/stages/09-source-backed-matching-evidence.jsonl). Railway Köln Hbf remains unresolved.
@@ -43,7 +47,7 @@ start Stage 15B.
 - Stage 11 — [Power BI Model](docs/stages/11-power-bi-model-design.md): **COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED**. The semantic subject areas, table grains, physical-fact versus semantic Scheduled Trip relationship boundary, relationship/filter-direction contract, governed Date strategy, static-versus-canonical identity boundary, DAX measure contract, service-date-scoped matching coverage with separate missing-service-date evidence, threshold/NULL semantics, terminology, and sampling/coverage/reporting limits are approved. `Dim Sampling Era` currently filters only the `Fact Matching Decision` population; Data Quality classifications carried by those decisions inherit that context, while the independent `Fact Data Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in the base model. Sampling Era is not an operational KPI slicer until validated operational-event lineage exists. [Completion decision](docs/stages/11-power-bi-model-completion-decision.md).
 - Stage 12 — [50-Station Selection](docs/stages/12-50-station-selection.md): **COMPLETE — APPROVED FIXED 50-STATION PANEL**. `TIERED50_PANEL_V1` contains exactly 50 unique validated VRS parent stations, preserves all seven Legacy7 continuity anchors, measures current core-mode representation and geographic concentration, and passes a bounded sequential MDD compatibility probe with 50 HTTP 200/parseable application responses and source `StopPointRef` evidence. The complete sanitized 864-candidate population is retained in [candidate evidence](docs/stages/12-50-station-candidate-evidence.json), and the authoritative selector reproduces the fixed panel offline without the ZIP, network, MDD, or credentials. See the [completion decision](docs/stages/12-50-station-selection-completion-decision.md) and [sanitized evidence artifact](docs/stages/12-50-station-selection-evidence.json).
 - Stage 13 — [Tiered Collector Readiness](docs/stages/13-tiered-collector-readiness.md): **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**. Explicit approval recorded in `prompts/S68.md` finalizes `TIERED50_PANEL_V1` as exactly 50 fixed stations with density ranks 1–8 / 9–28 / 29–50 for Tier A/B/C, cadence 5/15/30 minutes, 110 requests per 30-minute super-cycle, Tier A/B/C `NumberOfResults` 20/30/30, bounded concurrency 2, and `MaxAttempts=2` with one approved transient retry. Static support is 50/50 at the approved tier-specific limits; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The 182,980 / 189,076 conservative shared-credential totals are valid safely below the 210,000 normal operational maximum and 207,500 automatic-retry protection boundary; the 31-day guardrail example is 189,076 with 18,424 headroom, while the Tiered50-only component is 180,048. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days. See the [completion decision](docs/stages/13-tiered-collector-readiness-completion-decision.md) and [evidence artifact](docs/stages/13-tiered-collector-readiness-evidence.json).
-- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED**. Collector implementation status is **STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE** after durable dispatcher claims, just-in-time target claims, source-contract-faithful identity/attribute/Situation retention, atomic quota-permit finalization, offline/live accounting separation, explicit transport-attempt metadata, and deterministic SQLite lifecycle validation. The explicit `LIVE_RESEARCH_SINGLE_1` profile now durably records only the Köln Heumarkt pilot (`de:05315:11110`) outside the repository, with parsed evidence retained indefinitely, bounded raw forensics, and three daily SQLite backups. PostgreSQL work is not planned or authorized in the active roadmap; Tiered50 production, deployment scheduling, real target materialization/cutover, and activation remain deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A readiness is tracked below.
+- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **HISTORICAL IMPLEMENTATION — ACTIVE RUNTIME/DATABASE CUTOVER DEFERRED**. The Python/SQLite research implementation and its evidence remain source-controlled and untouched; S87 does not change the collector runtime. Any later cleanup or SQL Server persistence connection requires a separate approved stage.
 - Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The analyzer may inspect `LIVE_RESEARCH_SINGLE_1` read-only, but that context cannot satisfy the production sampling-era transition. Stage 15B live post-cutover validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; no real cutover timestamp or production evidence is claimed.
 - Stage 4 evidence: [approved reference snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The approved reference contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Approved reference ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`. The separate Stage 9 current official snapshot is `VERSION__20260929_0106` with SHA-256 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` and passed all 17 Stage 4 revalidation checks.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
@@ -74,20 +78,21 @@ start Stage 15B.
 - The [future source-observation and persistence contract](docs/source-contracts/future-observation-persistence-contract.md)
   keeps timetable, estimate, source-provided recorded time, and collector
   observation time separate and preserves estimate and Situation/Cause history.
-  Its earlier PostgreSQL direction is historical; S78 supersedes it for the
-  active roadmap with SQLite live research first. The Stage 9 matching
-  migration is source-controlled but has not been executed or loaded with
-  production data.
+  Its PostgreSQL direction and the S78 SQLite-first direction are historical;
+  S87 supersedes both for the active architecture with SQL Server as the sole
+  official database. The Stage 9 matching migration remains source-controlled
+  historical material and has not been executed or loaded with production data.
 - The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
   is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION**. Six bounded
   live journeys were reviewed (three at Köln Hbf and three at Köln Neumarkt);
   no `RecordedAtTime` was observed, and the result does not make a
   provider-wide absence claim or reopen Stage 02.
-- No physical PostgreSQL database has been created or loaded. Stage 5/6
-  physical warehouse work remains deferred; Stage 9 adds a source-controlled
-  PostgreSQL matching migration contract but does not execute it or activate a
-  collector. Power BI semantic design is now approved under Stage 11, while
-  PBIP/Desktop implementation remains deferred.
+- No physical PostgreSQL database has been created or loaded. The live SQL
+  Server baseline and its current `ctl`/`stg`/`wrk`/`dw`/`analytics` objects are
+  recorded in [S87 evidence](docs/stages/01-sql-server-stabilization-evidence.json).
+  The retained PostgreSQL migration/design files remain legacy/deferred
+  cleanup. Power BI semantic design is approved, while PBIP/Desktop work
+  remains deferred.
 - The legacy collector/database remains untouched.
 - Confirmed Actual Time is unavailable; Actual Delay and prediction accuracy
   against confirmed actual timing remain unapproved/unavailable.
@@ -123,14 +128,16 @@ The authoritative Git working copy is intended to live on macOS:
 
 `/Users/admin/Documents/cologne-transit-intelligence/`
 
-Windows may access the same working tree through VMware Shared Folders:
+Windows hosts the official SQL Server instance and may access the same working
+tree through VMware Shared Folders:
 
 `\\vmware-host\Shared Folders\cologne-transit-intelligence`
 
-Windows should not maintain a second Git clone for this project. The new
-Stage 14 collector does not require Windows, VMware, PowerShell, Windows Task
-Scheduler, or a host-specific runtime; those remain legacy/optional tooling
-boundaries only.
+Windows should not maintain a second Git clone for this project. The future
+collector/pipeline runtime is planned for Python on macOS; SQL Server remains
+on this VM. The retained Stage 14 collector does not require Windows Task
+Scheduler or PowerShell, and its SQLite research path is legacy/deferred
+cleanup rather than the official database runtime.
 
 ## Repository layout
 
@@ -141,7 +148,7 @@ boundaries only.
 - `powerbi/` — Power BI semantic-model boundary and later PBIP/TMDL/PBIR source
 - `tests/` — automated/validation tests when implementation begins
 
-Stage 14 implementation details are in
+The retained Stage 14 implementation details are in
 [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md).
 The scheduler-neutral command is `python scripts/stage_14_collector.py`;
 without a mode it performs an offline `plan`. `dry-run` and `simulate` are
@@ -150,11 +157,11 @@ offline-safe, `live` remains explicitly blocked, and `live-research` requires
 de:05315:11110`, and inherited `MDD_API_KEY`.
 
 Stage 15A readiness validation is `python scripts/stage_15_validation.py`.
-It emits the authoritative JSON report, can read an existing SQLite evidence
-file in read-only mode, and supports deterministic offline simulation evidence;
-it performs no MDD, DNS, live-network, PostgreSQL, or production-cutover work.
+It emits the historical SQLite-oriented readiness report and performs no MDD,
+DNS, live-network, PostgreSQL, or production-cutover work. S87 did not execute
+it or alter its runtime contract.
 
-The Stage 14 collector is the first reusable implementation in `src/`; the
-live-research SQLite profile is the current durable store, while Tiered50
-production persistence, deployment, and any PostgreSQL work remain intentionally
-deferred and unauthorized.
+The Stage 14 collector is retained as legacy/deferred implementation evidence.
+The official database is SQL Server; future Python collectors and pipelines
+must connect to `CologneTransitIntelligence` on the Windows VM after the
+stabilization gate is complete.
