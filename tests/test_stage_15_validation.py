@@ -57,7 +57,7 @@ class Stage15ValidationTests(unittest.TestCase):
         report = Stage15Analyzer(self.manifest, contract=self.contract).analyze()
         self.assertEqual(
             report["stage14_overall_status"],
-            "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED",
+            "HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED",
         )
         self.assertEqual(report["stage14_collector_status"], "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE")
         self.assertEqual(report["stage15_readiness_status"], "IN PROGRESS")
@@ -74,6 +74,18 @@ class Stage15ValidationTests(unittest.TestCase):
         self.assertEqual(self._check(report, "schedule.logical_requests_per_hour")["actual_value"], 220)
         self.assertEqual(self._check(report, "execution.maximum_concurrency")["actual_value"], 2)
         self.assertEqual(self._check(report, "execution.max_attempts")["actual_value"], 2)
+
+    def test_active_status_guardrails_match_s87_without_rewriting_history(self) -> None:
+        stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(
+            encoding="utf-8"
+        )
+        guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
+        historical_prompt = (ROOT / "prompts" / "S80.md").read_text(encoding="utf-8")
+
+        self.assertIn("HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED", stage14_doc)
+        self.assertIn("HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED", guardrails)
+        self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", guardrails)
+        self.assertIn("IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED", historical_prompt)
 
     def test_all_success_reconciles_every_expected_target_and_leaves_live_stage_unstarted(self) -> None:
         report = self._report(self._state())

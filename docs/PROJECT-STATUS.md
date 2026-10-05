@@ -38,11 +38,11 @@ the VM, and Power BI consumes SQL Server analytical/warehouse data.
 The Stage 1 SQL Server baseline is captured in the [stabilization record](stages/01-sql-server-stabilization.md)
 and [evidence JSON](stages/01-sql-server-stabilization-evidence.json). The
 database is ONLINE and readable for the captured inventory, but the stage is
-BLOCKED: `msdb` has no FULL-backup history for the official database, the
-existing `.bak` candidate failed SQL Server `RESTORE HEADERONLY`/
-`RESTORE VERIFYONLY WITH CHECKSUM` because the SQL Server service could not
-open it, and the SQL Server volume reached 175 MB free during the audit
-(1,489 MB after the uninitiated VM restart).
+BLOCKED: the current recheck found no FULL-backup history, only `C:` visible
+to SQL Server with 1,598 MB free, and no validated alternate destination. The
+existing `.bak` candidate remains historical/unverified because SQL Server
+could not open its VMware Shared Folder path for `RESTORE HEADERONLY` or
+`RESTORE VERIFYONLY WITH CHECKSUM`.
 
 PostgreSQL, SQLite, Ubuntu, and Docker are not active architecture. Their
 existing documents and code remain historical/deferred-cleanup material and

@@ -45,6 +45,12 @@ from cologne_transit_collector.schedule import (
 )
 
 from .evidence import EvidenceAdapter, EvidenceData
+from .status import (
+    STAGE_14_COLLECTOR_STATUS,
+    STAGE_14_OVERALL_STATUS,
+    STAGE_15_LIVE_STATUS,
+    STAGE_15_READINESS_STATUS,
+)
 
 
 STATUS_VOCABULARY = (
@@ -565,11 +571,11 @@ class Stage15Analyzer:
             "schema_version": "stage15-validation-report-1.0",
             "stage": "15A",
             "status": overall_status,
-            "readiness_status": "IN PROGRESS",
-            "stage14_overall_status": "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED",
-            "stage14_collector_status": "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE",
-            "stage15_readiness_status": "IN PROGRESS",
-            "stage15_live_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+            "readiness_status": STAGE_15_READINESS_STATUS,
+            "stage14_overall_status": STAGE_14_OVERALL_STATUS,
+            "stage14_collector_status": STAGE_14_COLLECTOR_STATUS,
+            "stage15_readiness_status": STAGE_15_READINESS_STATUS,
+            "stage15_live_status": STAGE_15_LIVE_STATUS,
             "manifest": {
                 "panel_version": self.manifest.panel_version,
                 "activation_status": self.manifest.activation_status,

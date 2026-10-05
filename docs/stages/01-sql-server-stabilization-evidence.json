@@ -1,6 +1,6 @@
 {
   "stage": "01-sql-server-stabilization",
-  "evidence_captured_at_utc": "2026-10-05T14:05:46Z",
+  "evidence_captured_at_utc": "2026-10-05T15:05:08Z",
   "status": "BLOCKED_VERIFIED_FULL_BACKUP_REQUIRED",
   "secrets_included": false,
   "source": {
@@ -31,15 +31,64 @@
         "logical_name": "CologneTransitIntelligence",
         "type": "ROWS",
         "size_mb": 3848.0,
+        "used_mb": 3594.38,
         "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence.mdf"
       },
       {
         "logical_name": "CologneTransitIntelligence_log",
         "type": "LOG",
         "size_mb": 9039.63,
+        "used_mb": 23.18,
+        "used_percent": 0.25642332434654236,
         "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence_log.ldf"
       }
     ]
+  },
+  "current_recheck": {
+    "captured_at_utc": "2026-10-05T15:05:08.7183131Z",
+    "sql_server_start_time_server_local": "2026-10-05T15:56:11.700000",
+    "sql_server_service_last_startup_europe_berlin": "2026-10-05T15:56:11.054279+02:00",
+    "database_state": "ONLINE",
+    "database_user_access": "MULTI_USER",
+    "database_allocated_mb": 12887.63,
+    "database_data_allocated_mb": 3848.0,
+    "database_data_used_mb": 3594.38,
+    "database_log_allocated_mb": 9039.63,
+    "log_space": {
+      "allocated_bytes": 9478725632,
+      "used_bytes": 24305664,
+      "used_mb": 23.18,
+      "used_percent": 0.25642332434654236,
+      "bytes_since_last_backup": 11628544
+    },
+    "fixed_windows_volumes": [
+      {
+        "drive": "C",
+        "free_mb_xp_fixeddrives": 1598,
+        "free_bytes_dm_os_volume_stats": 1676353536,
+        "total_bytes_dm_os_volume_stats": 95511638016,
+        "filesystem": "NTFS"
+      }
+    ],
+    "default_backup_path": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\Backup",
+    "sql_server_service_account": "NT Service\\MSSQLSERVER",
+    "msdb_full_backup_history_rows": 0,
+    "latest_realtime_observation_utc": "2026-10-05T15:03:50",
+    "latest_situation_observation_utc": "2026-10-05T14:48:50",
+    "latest_collector_run_started_utc": "2026-10-05T15:03:52",
+    "latest_collector_run_completed_utc": "2026-10-05T15:03:54",
+    "collector_run_rows": 362,
+    "collector_run_status_distribution": {
+      "Succeeded": 355,
+      "Failed": 5,
+      "Started": 2
+    },
+    "stop_observation_rows": 2618,
+    "situation_observation_rows": 664,
+    "stop_situation_link_rows": 811,
+    "safe_backup_destination_selected": false,
+    "backup_operation_started": false,
+    "reason_backup_not_started": "Only C: is visible to SQL Server and it has 1598 MB free; no alternate SQL-Server-writable destination with safe headroom was validated."
   },
   "project_related_databases": [
     {
@@ -89,6 +138,13 @@
           "free_mb": 1489
         }
       ],
+      "current_recheck_fixed_drives": [
+        {
+          "drive": "C",
+          "free_mb": 1598
+        }
+      ],
+      "current_recheck_at_utc": "2026-10-05T15:05:08.7183131Z",
       "minimum_observed_free_mb_during_audit": 175,
       "authoritative_database_allocated_mb": 12887.63,
       "default_backup_directory_is_empty": true,
@@ -101,6 +157,32 @@
       "filename": "timestamped_non_overwriting_native_full_backup.bak",
       "verify_after_creation": "RESTORE VERIFYONLY WITH CHECKSUM"
     }
+  },
+  "collector_runtime_inventory": {
+    "captured_at_utc": "2026-10-05T15:08:54Z",
+    "inspection_mode": "READ_ONLY_SQL_EVIDENCE_PLUS_EXISTING_DEPLOYMENT_DOCUMENTATION",
+    "task_scheduler_direct_inventory": "NOT_AVAILABLE_FROM_HOST_SQL_AUTHENTICATED_PATH",
+    "task_scheduler_query_note": "The host could not query the Windows Task Scheduler COM/API; a read-only xp_dirtree check of C:\\Windows\\System32\\Tasks returned zero rows. No task was disabled or modified.",
+    "historically_documented_task_name": "\\Cologne Transit Realtime Collector",
+    "historically_documented_principal": "DATAANALYST-VM\\Somaye",
+    "historically_documented_action": "C:\\Collector\\Run-MddRealtimeCollector.ps1 -> C:\\Collector\\Invoke-MddRealtimeCollector.ps1",
+    "historically_documented_cadence": "Every 5 minutes",
+    "fresh_sql_evidence": {
+      "latest_collector_run_id": 20338,
+      "latest_started_at_utc": "2026-10-05T15:08:52",
+      "latest_completed_at_utc": "2026-10-05T15:08:54",
+      "latest_status": "Succeeded",
+      "latest_sampling_mode": "Automatic",
+      "latest_sampling_target_id": 3,
+      "latest_sampling_slot": 10,
+      "latest_observation_utc": "2026-10-05T15:08:50",
+      "latest_http_status": 200,
+      "latest_http_attempts": 1,
+      "active_started_rows_at_query": "NOT_DETERMINED; 2 Started rows remain in the table and were not treated as a live-process proof",
+      "process_currently_running": "NOT_DIRECTLY_OBSERVED; latest SQL audit row had completed"
+    },
+    "next_run_time": "NOT_DIRECTLY_CAPTURED; next five-minute bucket was expected after the latest successful run",
+    "dual_collection_risk": "CURRENT_WINDOWS_RUNTIME_CAN_WRITE_SQL_SERVER_OBSERVATIONS; FUTURE_MAC_COLLECTOR_MUST_NOT_BE_ACTIVATED_UNTIL_THIS_RUNTIME_IS_EXPLICITLY_RETIRED_OR_COORDINATED"
   },
   "object_inventory": {
     "counts": {
@@ -236,9 +318,46 @@
     "identities_reseeded_or_recreated": false,
     "history_migrated": false
   },
+  "repository_validation": {
+    "json_files_validated": 15,
+    "json_parse": "PASS",
+    "full_unit_test_suite": {
+      "status": "PASS",
+      "tests": 175,
+      "duration_seconds": 14.417
+    },
+    "intermediate_full_unit_test_attempt": {
+      "status": "BLOCKED_BY_HOST_DISK_SPACE",
+      "tests_discovered": 175,
+      "failures": 2,
+      "errors": 75,
+      "reason": "The host had no usable temporary directory; test-created SQLite/temp-directory setup failed with ENOSPC. The earlier complete 175-test run remains the recorded code-validation PASS."
+    },
+    "latest_full_unit_test_rerun": {
+      "status": "PASS",
+      "tests": 175,
+      "duration_seconds": 14.417,
+      "live_network_calls": 0
+    },
+    "stage_14_validator": "PASS",
+    "stage_15_offline_validation": {
+      "status": "INSUFFICIENT_EVIDENCE",
+      "stage15_live_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+      "simulated_transport_calls": 0,
+      "live_network_calls": 0
+    },
+    "python_compilation": "PASS",
+    "git_diff_check": "PASS",
+    "source_zip": {
+      "path": "v82(1).zip",
+      "members": 233,
+      "forbidden_macos_metadata_members": 0
+    }
+  },
   "validation": {
     "authoritative_database_online": "PASS",
     "read_only_inventory": "PASS",
+    "current_read_only_recheck": "PASS",
     "readability_of_queried_objects": "PASS",
     "full_dbcc_checkdb": "NOT_RUN_LOW_DISK_HEADROOM_AND_VM_INTERRUPTION",
     "vm_interruption_observed": true,

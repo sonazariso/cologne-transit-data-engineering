@@ -15,6 +15,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
 from cologne_transit_collector.schedule import schedule_reconciliation  # noqa: E402
 from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
+from cologne_transit_stage15.status import (  # noqa: E402
+    STAGE_14_COLLECTOR_STATUS,
+    STAGE_14_OVERALL_STATUS,
+    STAGE_15_LIVE_STATUS,
+)
 
 
 BANNED_IMPORTS = {
@@ -125,10 +130,15 @@ def run_checks() -> dict[str, object]:
     except (IndexError, OSError, ValueError) as exc:
         errors.append(f"source-contract correction validation failed: {type(exc).__name__}")
     stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
-    if "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE" not in stage14_doc:
+    if STAGE_14_COLLECTOR_STATUS not in stage14_doc:
         errors.append("Stage 14 implementation status is not complete")
-    if "IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED" not in stage14_doc:
-        errors.append("Stage 14 overall status is not the S78 live-research status")
+    if STAGE_14_OVERALL_STATUS not in stage14_doc:
+        errors.append("Stage 14 overall status does not match the active S87 architecture")
+    guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
+    if STAGE_14_OVERALL_STATUS not in guardrails:
+        errors.append("active guardrails do not state the S87 Stage 14 overall status")
+    if STAGE_15_LIVE_STATUS not in guardrails:
+        errors.append("active guardrails do not state the Stage 15 live status")
     return {
         "status": "PASS" if not errors else "FAIL",
         "simulated_transport_calls": 0,
@@ -138,7 +148,7 @@ def run_checks() -> dict[str, object]:
         "new_tiered50_targets": len(manifest.new_tiered50_targets),
         "schedule": reconciliation,
         "architecture_errors": errors,
-        "stage15_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+        "stage15_status": STAGE_15_LIVE_STATUS,
     }
 
 

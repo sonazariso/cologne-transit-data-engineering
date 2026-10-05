@@ -28,7 +28,7 @@ stabilization gate, not collector activation or a new collection stage.
 
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
-- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED**. The authoritative database is ONLINE and the read-only baseline is captured; backup history is empty, the existing local `.bak` could not be opened by SQL Server for `RESTORE VERIFYONLY`, and the SQL Server volume reached 175 MB free during the audit (1,489 MB after the uninitiated VM restart).
+- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED**. The authoritative database remains ONLINE; the 2026-10-05 recheck captured 12,887.63 MB allocated, 3,594.38 MB data used, 9,039.63 MB log allocated with 23.18 MB used, zero FULL-backup history rows, and only `C:` visible with 1,598 MB free. The September 30 `.bak` remains historical/unverified evidence, and no current backup was started without a safe SQL-Server-writable destination.
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
   technical-closure package remains the approved baseline. The previous host
   run completed the five S15 historical requests, and S16 performed zero MDD
