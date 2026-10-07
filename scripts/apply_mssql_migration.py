@@ -37,6 +37,7 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddImportEvidenceAudit",
     "ctl.MddImportSourceRow",
     "ctl.MddImportOverlap",
+    "ctl.MddMacMethodologyEvidence",
 )
 
 

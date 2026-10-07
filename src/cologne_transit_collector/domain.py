@@ -69,7 +69,10 @@ LIVE_RESEARCH_COLLECTION_CONTEXT = "LIVE_RESEARCH_SINGLE_1"
 LIVE_RESEARCH_TARGET_ID = "de:05315:11110"
 LIVE_RESEARCH_STATION_NAME = "Köln Heumarkt"
 LIVE_RESEARCH_LEGACY_ID = 1
-MAC_SQL_COLLECTION_CONTEXT = "MAC_PYTHON_MSSQL_PREPARED"
+MAC_SQL_PREPARED_COLLECTION_CONTEXT = "MAC_PYTHON_MSSQL_PREPARED"
+MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT = "MAC_LEGACY7_PRODUCTION"
+MAC_SQL_COLLECTION_CONTEXT = MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT
+LEGACY7_SELECTION_POLICY_VERSION = "LEGACY7_SQL_SLOT_V1"
 MAC_SQL_ENABLED_ENV = "COLLECTOR_MAC_SQL_ENABLED"
 MAC_SQL_RUNTIME_STATE_ENV = "COLLECTOR_WINDOWS_RUNTIME_STATE"
 MAC_SQL_CUTOVER_APPROVED_ENV = "COLLECTOR_CUTOVER_APPROVED"
@@ -97,6 +100,9 @@ class Target:
     production_sampling_target_id: Optional[str] = None
     legacy_sampling_target_id: Optional[int] = None
     phase_capacity: Optional[int] = None
+    legacy_sampling_slots: tuple[int, ...] = ()
+    selected_sampling_slot: Optional[int] = None
+    selection_policy_version: Optional[str] = None
 
     @property
     def is_legacy7_member(self) -> bool:

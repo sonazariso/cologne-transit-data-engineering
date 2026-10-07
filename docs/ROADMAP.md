@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Offline Cutover Readiness — HISTORICAL IMPLEMENTATION RETAINED; SQL SERVER CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -389,22 +389,21 @@ uses maximum concurrency 2, MaxAttempts 2, approved transient retries,
 heartbeat deadline outcomes, shared-credential quota protection, isolated
 target outcomes, and durable local claim/audit behavior.
 
-`plan`, `dry-run`, and `simulate` are offline-safe; production `live` is
-explicitly blocked. The retained S78 `live-research` mode is historical,
-lineage-separated evidence backed by the durable `LIVE_RESEARCH` SQLite
-profile, limited to Köln Heumarkt
+`plan`, `dry-run`, and `simulate` are offline-safe. The retained S78
+`live-research` mode is historical, lineage-separated evidence backed by the
+durable `LIVE_RESEARCH` SQLite profile, limited to Köln Heumarkt
 (`de:05315:11110`) in context `LIVE_RESEARCH_SINGLE_1`. Parsed research
 history is retained, raw forensic bodies are bounded to 24 hours, and
 validated online backups retain three UTC daily versions. The implementation
 status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
-source-contract corrections and S78 live-research safety controls. Those
-collector/SQLite details are retained historical implementation evidence; they
-are not the active storage direction after S87. SQL Server is the sole official
-database, and PostgreSQL/SQLite/Ubuntu/Docker remain deferred cleanup. Production SamplingTargetId
-materialization, a real sampling-era cutover timestamp, deployment/scheduler
-activation, Tiered50 activation, and post-activation validation remain
-deferred. Stage 15B live validation remains **NOT STARTED — AWAITS TIERED50
-CUTOVER**; Stage 15A readiness is in progress below.
+source-contract corrections and S78 live-research safety controls. SQL Server
+is the sole official database and the direct Mac Legacy7 path uses the
+existing seven target IDs, one target per deterministic UTC five-minute slot,
+with `MAC_LEGACY7_PRODUCTION` reserved for corrected future audits. The
+LaunchAgent is safety-stopped pending live selector, lineage-migration,
+least-privilege-login, and corrected-heartbeat gates. Tiered50 activation and
+Stage 15B live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**;
+Stage 15A readiness is in progress below.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,

@@ -40,6 +40,9 @@ REQUIRED_MARKERS = (
     "ctl.MddImportEvidenceAudit",
     "ctl.MddImportSourceRow",
     "ctl.MddImportOverlap",
+    "ctl.MddMacMethodologyEvidence",
+    "SamplingSlot",
+    "SelectionPolicyVersion",
     "stg.uspPersistMddMacSnapshot",
     "analytics.vwMddMacRecordedAtTimeHistory",
 )

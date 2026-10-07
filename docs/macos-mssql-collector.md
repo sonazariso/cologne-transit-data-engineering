@@ -2,10 +2,57 @@
 
 This document describes the macOS Legacy7 collector path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
-database. The additive SQL contract is applied and live-validated, the proven
-historical SQLite source has been imported and reconciled, and the exact
+database. The original additive SQL contract was applied and live-validated,
+the proven historical SQLite source was imported and reconciled, and the exact
 Windows task was manually disabled by the operator on 2026-10-07. The normal
-Legacy7 `launchd` job is active; Tiered50 remains inactive.
+Legacy7 `launchd` job was active during the historical cutover window but is
+now unloaded/disabled pending the corrected cadence and least-privilege gates;
+Tiered50 remains inactive.
+
+## Cadence-correction addendum — 2026-10-07
+
+The existing cutover evidence reports that the following three Mac runs each
+contain seven target audits, seven initial HTTP attempts, and seven parsed
+snapshots:
+
+- `127809b0-70fa-4770-9943-664942be5fc3`;
+- `83c3f261-5bf0-484e-8de6-b6f0e0724a49`; and
+- `5a7e014c-6266-421c-b402-98c4f1cb89b6`.
+
+Review identified this as a bounded seven-target-per-heartbeat oversampling
+window, not the approved one-target-per-five-minute Legacy7 cadence. The rows
+remain unchanged and must be excluded from simple Windows-versus-Mac cadence
+volume comparisons. A fresh read-only SQL probe must confirm the counts before
+the append-only methodology evidence records actual 21, historical-equivalent
+3, and excess 18 initial attempts. The current machine has the LaunchAgent
+unloaded and disabled; the SQL VM is not reachable until it is interactively
+unlocked, so no new MDD request or SQL evidence write has been made in this
+review.
+
+Corrected future Mac audits use `MAC_LEGACY7_PRODUCTION`, preserve
+`SamplingTargetId`, `SamplingSlot`, `LogicalDueBucket`, and
+`SelectionPolicyVersion`, and use the dedicated `CologneTransitCollector`
+runtime login. The source-faithful slot mapping and selector definition are
+validated by [`scripts/legacy7_sql_probe.py`](../scripts/legacy7_sql_probe.py)
+before reactivation. The exact grants for the dedicated database role are
+listed in [`scripts/provision_macos_runtime_login.py`](../scripts/provision_macos_runtime_login.py)
+and contain no secret material.
+
+The one-time administrator provisioning grants this exact role/object set:
+
+| Permission | Object |
+| --- | --- |
+| `SELECT` | `ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot`, `ctl.MddCollectorRun`, `stg.MddRealtimeStopObservation`, `stg.MddRealtimeSituationObservation`, `stg.MddRealtimeStopSituationLink`, `ctl.MddMacSamplingEra`, `ctl.MddMacMethodologyEvidence`, `analytics.vwMddMacRecordedAtTimeHistory`, `analytics.vwMddMacSourceFieldCoverage` |
+| `EXECUTE`, `VIEW DEFINITION` | `ctl.uspGetMddRealtimeSamplingTarget` |
+| `SELECT, INSERT, UPDATE` | `ctl.MddMacCollectorRun`, `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit`, `ctl.MddMacQuotaPermit` |
+| `INSERT` | `ctl.MddMacDispatcherClaimEvent`, `ctl.MddMacTargetClaimEvent`, `ctl.MddMacHttpAttempt`, `ctl.MddMacQuotaAudit` |
+| `EXECUTE` | `stg.uspPersistMddMacSnapshot` |
+
+The runtime role receives no `DELETE`, schema, migration, broad server-role,
+database-owner, or datareader/datawriter permission. Provisioning verifies the
+positive target/selector path and metadata-based denials for server
+administration, table control/alter/delete, database creation, and unrelated
+`msdb` reads before writing the owner-only username and Keychain password.
 
 The first three untouched scheduled Mac runs completed successfully:
 `127809b0-70fa-4770-9943-664942be5fc3` (bucket `5971301`),
@@ -27,8 +74,9 @@ never relabeled as Mac, Windows, Legacy7, or Tiered50 production evidence.
 ## Runtime boundary
 
 The macOS working copy contains the parser, direct DB-API adapter, migration,
-offline tests, and a safe-by-default tracked `launchd` template. The active
-user-local LaunchAgent is generated from that template and runs from the
+offline tests, and a safe-by-default tracked `launchd` template. The user-local
+LaunchAgent is generated from that template and is currently unloaded/disabled;
+when activated it runs from the
 owner-only runtime bundle under
 `~/Library/Application Support/CologneTransitIntelligence/`. The adapter uses
 the pinned `pymssql==2.3.2` wheel because the actual Python 3.9 x86_64
@@ -53,9 +101,11 @@ can construct an enabled MDD client:
 - a valid `MDD_API_KEY`.
 
 It then reads the unchanged seven rows from `ctl.MddRealtimeSamplingTarget`,
-requires IDs 1–7 and the existing StopPointRef mapping, and uses those rows as
-the only target scope. It does not use the deferred 50-target manifest as a
-live target list and does not create a new sampling era.
+the ten rows from `ctl.MddRealtimeSamplingSlot`, and the existing
+`ctl.uspGetMddRealtimeSamplingTarget` definition. It requires IDs 1–7, the
+existing StopPointRef mapping, and exactly one SQL-selected target for the
+current deterministic UTC bucket. It does not use the deferred 50-target
+manifest as a live target list and does not create a new sampling era.
 
 The exact task `\Cologne Transit Realtime Collector` is now operator-confirmed
 `DISABLED`. Read-only SQL confirmation captured two post-retirement boundaries
@@ -67,11 +117,12 @@ Windows observation is at `2026-10-07T13:43:55Z`. No SQL-side task disable
 operation was used for the final retirement. Existing SQLite evidence was
 reconciled offline; no manual Heumarkt request was made or required.
 
-The runtime reuses the existing approved SQL login from the migration
-configuration. Read-only inspection identifies that login as `sa`/sysadmin;
-no login or permission grant was created or broadened. Replacing that existing
-credential with a least-privilege runtime login remains an explicit security
-follow-up.
+The future runtime uses the dedicated `CologneTransitCollector` login and
+`CologneTransitCollectorRuntime` database role. Provisioning is intentionally
+blocked until the SQL VM is reachable; the current inactive machine remains on
+the existing administrative configuration and cannot collect. The runtime
+login must report `sysadmin = false` and must not belong to any broad server or
+database data role.
 
 ## Old and prepared flow
 
@@ -110,6 +161,7 @@ the new run and audit rows.
 | `ctl.MddMacTargetClaim` | One `(PanelVersion, TargetIdentity, LogicalDueBucket)` target claim | Start/completion are nullable while pending | Composite primary key; run FK |
 | `ctl.MddMacTargetClaimEvent` | Append-only target claim attempt event | Existing status may be NULL for a first claim | Identity key; target/bucket/time index; run FK |
 | `ctl.MddMacTargetAudit` | One target outcome within a run/bucket; identity `AuditId` | HTTP/parser/persistence/error fields remain nullable when not observed | Unique `(RunId, TargetIdentity, LogicalDueBucket)`; status/time index; run FK |
+| `ctl.MddMacMethodologyEvidence` | Append-only bounded methodology/oversampling evidence | Window, counts, run IDs, and sanitized evidence JSON remain source-lineage fields | Identity key; no historical audit update/delete path |
 | `ctl.MddMacHttpAttempt` | One actual transport attempt per audit/attempt number | HTTP status, failure, retry, and provider confirmation can be NULL when inapplicable | Unique `(AuditId, AttemptNumber)`; completion-time index; audit and quota-permit FKs |
 | `ctl.MddMacQuotaPermit` | One quota reservation/finalization | Finalization time is NULL while pending | Permit GUID primary key; status is never inferred from local simulation |
 | `ctl.MddMacQuotaAudit` | Append-only decision record for a run/target/bucket | Target/bucket may be NULL for run-level decisions | Identity key; run FK |
@@ -230,9 +282,11 @@ are not persisted.
 
 ## Connectivity and validation evidence
 
-The pre-activation SQL validation established reachability to
+The historical pre-activation SQL validation established reachability to
 `172.16.192.128:1433`, selected database `CologneTransitIntelligence`, all 23
-additive tables and 3 procedures/views, and unchanged sampling-target IDs 1–7.
+original additive tables and 3 procedures/views, and unchanged sampling-target
+IDs 1–7. The new nullable lineage/methodology migration has not yet been
+applied to live SQL in the current review.
 The production preflight used the same path and passed without issuing an MDD
 request. Three subsequent normal scheduled Legacy7 runs then proved live
 Mac-to-SQL persistence.
@@ -260,8 +314,8 @@ database.
 
 ## Current operation and rollback
 
-The controlled cutover is complete for the existing Legacy7 scope. The tracked
-plist remains safe-by-default and disabled; the active machine-specific plist
+The historical controlled cutover established the existing Legacy7 scope. The
+tracked plist remains safe-by-default and disabled; the machine-specific plist
 is the generated owner-local artifact at
 `~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`.
 It uses the exact interpreter
@@ -269,16 +323,18 @@ It uses the exact interpreter
 `RunAtLoad=false`, and the five approved non-secret gates. Its recorded SHA-256
 is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
 
-Rollback is scheduler-level and additive: unload or disable only the Mac job,
-leave all new evidence intact for diagnosis, and resume the Windows task only
-after an operator confirms its state. No migration rollback should drop the
+The current review has unloaded and disabled only the Mac job. Rollback is
+scheduler-level and additive: leave all new evidence intact for diagnosis,
+and resume the Windows task only after an operator confirms its state. No
+migration rollback should drop the
 new objects or delete historical rows. Tiered50 activation, new production
 target IDs, and Power BI changes remain out of scope.
 
 At final verification the Windows SQL VM was subsequently powered off. The
 next scheduled LaunchAgent invocation exited during SQL connectivity preflight
-before opening a SQL run or issuing an MDD request. The LaunchAgent remains
-loaded; the VM must be running for subsequent intervals to collect.
+before opening a SQL run or issuing an MDD request. The current review then
+unloaded and disabled the LaunchAgent; the VM must be interactively unlocked
+before any live selector, migration, login, or heartbeat gate can proceed.
 
 Rollback is scheduler-level and additive: stop/unload the Mac job, leave all
 new evidence intact for diagnosis, and resume the previously approved Windows
@@ -296,8 +352,11 @@ rollback step.
 - Runtime configuration: [`scripts/configure_macos_runtime.py`](../scripts/configure_macos_runtime.py)
 - LaunchAgent installer: [`scripts/install_macos_launch_agent.py`](../scripts/install_macos_launch_agent.py)
 - Production preflight: [`scripts/macos_production_preflight.py`](../scripts/macos_production_preflight.py)
+- Read-only Legacy7 SQL probe: [`scripts/legacy7_sql_probe.py`](../scripts/legacy7_sql_probe.py)
+- Dedicated-login provisioning and permission tests: [`scripts/provision_macos_runtime_login.py`](../scripts/provision_macos_runtime_login.py)
+- Append-only cadence/era evidence writer: [`scripts/record_legacy7_methodology_evidence.py`](../scripts/record_legacy7_methodology_evidence.py)
 - Windows retirement confirmation: [`scripts/confirm_windows_retirement.py`](../scripts/confirm_windows_retirement.py)
 - Static/live migration validator: [`scripts/validate_mssql_migration.py`](../scripts/validate_mssql_migration.py)
 - Additive migration runner: [`scripts/apply_mssql_migration.py`](../scripts/apply_mssql_migration.py)
 - Explicit SQLite importer: [`scripts/import_live_research_sqlite.py`](../scripts/import_live_research_sqlite.py)
-- Offline contract tests: [`tests/test_mssql_persistence.py`](../tests/test_mssql_persistence.py), [`tests/test_mssql_runtime.py`](../tests/test_mssql_runtime.py), and [`tests/test_s91_sqlite_import.py`](../tests/test_s91_sqlite_import.py)
+- Offline contract tests: [`tests/test_mssql_persistence.py`](../tests/test_mssql_persistence.py), [`tests/test_mssql_runtime.py`](../tests/test_mssql_runtime.py), [`tests/test_legacy7_schedule.py`](../tests/test_legacy7_schedule.py), [`tests/test_macos_legacy7_security.py`](../tests/test_macos_legacy7_security.py), and [`tests/test_s91_sqlite_import.py`](../tests/test_s91_sqlite_import.py)

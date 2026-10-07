@@ -115,15 +115,35 @@ def main(argv: list[str] | None = None) -> int:
         mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
         if mssql_settings.database != EXPECTED_SQL_DATABASE:
             raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
-        at_utc = _parse_utc(args.at_utc)
+        at_utc = _parse_utc(args.at_utc) or datetime.now(timezone.utc)
         base_manifest = load_default_manifest(root)
         persistence = MssqlPersistence(
             settings=mssql_settings,
             raw_evidence_directory=runtime_values.get("MSSQL_RAW_EVIDENCE_DIR"),
             collection_context=MAC_SQL_COLLECTION_CONTEXT,
         )
+        login_status = persistence.runtime_login_status()
+        if str(login_status.get("login_name", "")).casefold() in {"", "sa"}:
+            raise MssqlSafetyError("Mac Legacy7 runtime requires the dedicated non-sa SQL login")
+        if any(
+            bool(login_status.get(name))
+            for name in (
+                "is_sysadmin",
+                "is_serveradmin",
+                "is_securityadmin",
+                "is_db_owner",
+                "is_db_datareader",
+                "is_db_datawriter",
+            )
+        ):
+            raise MssqlSafetyError("Mac Legacy7 runtime login has a prohibited broad privilege")
         schema = persistence.validate_schema()
-        targets = persistence.load_existing_sampling_targets()
+        approved_targets = persistence.load_existing_sampling_targets()
+        selected_target = persistence.select_existing_legacy7_target(
+            at_utc=at_utc,
+            targets=approved_targets,
+        )
+        targets = (selected_target,)
         manifest = replace(
             base_manifest,
             panel_version="MDD_MAC_LEGACY7_EXISTING_V1",
@@ -163,6 +183,15 @@ def main(argv: list[str] | None = None) -> int:
                     "mode": "mac-sql",
                     "collection_context": MAC_SQL_COLLECTION_CONTEXT,
                     "target_count": len(targets),
+                    "approved_target_scope_count": len(approved_targets),
+                    "selection_policy_version": selected_target.selection_policy_version,
+                    "sampling_slot": selected_target.selected_sampling_slot,
+                    "sampling_target_id": selected_target.legacy_sampling_target_id,
+                    "stop_point_ref": selected_target.source_parent_station_id,
+                    "station_name": selected_target.station_name,
+                    "number_of_results": selected_target.number_of_results,
+                    "logical_due_bucket": int(at_utc.timestamp() // 300),
+                    "sql_login_status": login_status,
                     "schema": schema,
                     "result": result.to_dict(),
                 },

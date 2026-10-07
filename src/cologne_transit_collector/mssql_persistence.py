@@ -16,12 +16,25 @@ import re
 import stat
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from .domain import HttpResponse, MAC_SQL_COLLECTION_CONTEXT, SamplingEra, Target, TransportFailure
+from .domain import (
+    HttpResponse,
+    LEGACY7_SELECTION_POLICY_VERSION,
+    MAC_SQL_COLLECTION_CONTEXT,
+    SamplingEra,
+    Target,
+    TransportFailure,
+)
+from .legacy7_schedule import (
+    LEGACY7_BUCKET_SLOT_RULE,
+    LEGACY7_SLOT_TO_SAMPLING_TARGET_ID,
+    legacy7_selection_for_bucket,
+    validate_legacy7_slot_mapping,
+)
 from .manifest import LEGACY7_SAMPLING_TARGET_IDS
 from .quota import (
     CONSERVATIVE_LIVE_ATTEMPT,
@@ -209,6 +222,18 @@ def _row_value(row: Any, key: str, index: int = 0) -> Any:
         return row[index]
     except (IndexError, KeyError, TypeError):
         return None
+
+
+def _row_named(row: Any, *keys: str, index: int = 0) -> Any:
+    """Read a DB-API row using a small set of case-insensitive aliases."""
+
+    if isinstance(row, Mapping):
+        lowered = {str(key).lower(): value for key, value in row.items()}
+        for key in keys:
+            if key.lower() in lowered:
+                return lowered[key.lower()]
+        return None
+    return _row_value(row, keys[0] if keys else "", index)
 
 
 def _json_value(value: Any) -> Any:
@@ -698,6 +723,8 @@ class MssqlPersistence:
 
     def validate_schema(self) -> Mapping[str, Any]:
         expected_tables = (
+            "ctl.MddRealtimeSamplingTarget",
+            "ctl.MddRealtimeSamplingSlot",
             "ctl.MddMacCollectorRun",
             "ctl.MddMacDispatcherClaim",
             "ctl.MddMacDispatcherClaimEvent",
@@ -708,6 +735,7 @@ class MssqlPersistence:
             "ctl.MddMacQuotaPermit",
             "ctl.MddMacQuotaAudit",
             "ctl.MddMacSamplingEra",
+            "ctl.MddMacMethodologyEvidence",
             "stg.MddMacSourceSnapshot",
             "stg.MddMacCallObservation",
             "stg.MddMacTimingObservation",
@@ -723,6 +751,7 @@ class MssqlPersistence:
             "ctl.MddImportOverlap",
         )
         expected_routines = (
+            "ctl.uspGetMddRealtimeSamplingTarget",
             "stg.uspPersistMddMacSnapshot",
             "analytics.vwMddMacRecordedAtTimeHistory",
             "analytics.vwMddMacSourceFieldCoverage",
@@ -735,18 +764,40 @@ class MssqlPersistence:
                 FROM sys.objects AS o
                 INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
                 WHERE s.name IN ('ctl', 'stg', 'analytics')
-                  AND (o.name LIKE 'MddMac%' OR o.name LIKE 'MddImport%' OR o.name IN ('uspPersistMddMacSnapshot', 'vwMddMacRecordedAtTimeHistory', 'vwMddMacSourceFieldCoverage'))
+                  AND (o.name LIKE 'MddMac%' OR o.name LIKE 'MddImport%' OR o.name LIKE 'MddRealtime%'
+                       OR o.name IN ('uspGetMddRealtimeSamplingTarget', 'uspPersistMddMacSnapshot',
+                                     'vwMddMacRecordedAtTimeHistory', 'vwMddMacSourceFieldCoverage'))
                 """
             )
             rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT s.name + N'.' + o.name AS object_name, c.name AS column_name
+                FROM sys.columns AS c
+                INNER JOIN sys.objects AS o ON o.object_id = c.object_id
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE s.name = N'ctl'
+                  AND o.name = N'MddMacTargetAudit'
+                  AND c.name IN (N'SamplingSlot', N'SelectionPolicyVersion')
+                """
+            )
+            column_rows = cursor.fetchall()
         names = {str(_row_value(row, "object_name", 0)) for row in rows}
         missing = [name for name in expected_tables + expected_routines if name not in names]
         if missing:
             raise MssqlSchemaError("additive collector objects are missing: " + ", ".join(missing))
+        observed_columns = {str(_row_named(row, "column_name", index=1)) for row in column_rows}
+        required_columns = {"SamplingSlot", "SelectionPolicyVersion"}
+        missing_columns = sorted(required_columns - observed_columns)
+        if missing_columns:
+            raise MssqlSchemaError(
+                "Legacy7 audit lineage columns are missing: " + ", ".join(missing_columns)
+            )
         return {
             "status": "PASS",
             "expected_table_count": len(expected_tables),
             "expected_routine_count": len(expected_routines),
+            "required_legacy7_audit_columns": sorted(required_columns),
             "missing": [],
         }
 
@@ -795,8 +846,37 @@ class MssqlPersistence:
             "latest_collector_run": dict(latest_run) if isinstance(latest_run, Mapping) else latest_run,
         }
 
+    def runtime_login_status(self) -> Mapping[str, Any]:
+        """Return non-secret identity/privilege metadata for the active login."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT DB_NAME() AS database_name,
+                       SUSER_SNAME() AS login_name,
+                       IS_SRVROLEMEMBER(N'sysadmin') AS is_sysadmin,
+                       IS_SRVROLEMEMBER(N'serveradmin') AS is_serveradmin,
+                       IS_SRVROLEMEMBER(N'securityadmin') AS is_securityadmin,
+                       IS_ROLEMEMBER(N'db_owner') AS is_db_owner,
+                       IS_ROLEMEMBER(N'db_datareader') AS is_db_datareader,
+                       IS_ROLEMEMBER(N'db_datawriter') AS is_db_datawriter
+                """
+            )
+            row = cursor.fetchone()
+        return {
+            "database_name": str(_row_named(row, "database_name", index=0) or ""),
+            "login_name": str(_row_named(row, "login_name", index=1) or ""),
+            "is_sysadmin": bool(_row_named(row, "is_sysadmin", index=2)),
+            "is_serveradmin": bool(_row_named(row, "is_serveradmin", index=3)),
+            "is_securityadmin": bool(_row_named(row, "is_securityadmin", index=4)),
+            "is_db_owner": bool(_row_named(row, "is_db_owner", index=5)),
+            "is_db_datareader": bool(_row_named(row, "is_db_datareader", index=6)),
+            "is_db_datawriter": bool(_row_named(row, "is_db_datawriter", index=7)),
+        }
+
     def load_existing_sampling_targets(self) -> tuple[Target, ...]:
-        """Read the unchanged seven-target contract for a future gated run."""
+        """Read the unchanged seven-target and ten-slot Legacy7 contract."""
 
         with self._connection() as connection:
             cursor = self._cursor(connection)
@@ -808,6 +888,14 @@ class MssqlPersistence:
                 """
             )
             rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT SamplingSlot, SamplingTargetId
+                FROM ctl.MddRealtimeSamplingSlot
+                ORDER BY SamplingSlot
+                """
+            )
+            slot_rows = cursor.fetchall()
         normalized: list[tuple[int, str, str, int, bool]] = []
         for row in rows:
             target_id = int(_row_value(row, "SamplingTargetId", 0))
@@ -824,6 +912,25 @@ class MssqlPersistence:
             raise MssqlSafetyError("existing sampling target identity mapping changed")
         if any(number_of_results <= 0 for *_, number_of_results, _ in normalized):
             raise MssqlSafetyError("existing sampling target result limits are invalid")
+        try:
+            slot_mapping = {
+                int(_row_named(row, "SamplingSlot", "Slot", index=0)):
+                int(_row_named(row, "SamplingTargetId", "TargetId", index=1))
+                for row in slot_rows
+            }
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("existing Legacy7 sampling slots contain invalid IDs") from exc
+        if len(slot_rows) != 10 or len(slot_mapping) != 10:
+            raise MssqlSafetyError("existing Legacy7 sampling slots are not exactly ten unique rows")
+        try:
+            validate_legacy7_slot_mapping(slot_mapping)
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("existing Legacy7 sampling-slot mapping changed") from exc
+        slots_by_target: dict[int, list[int]] = {target_id: [] for target_id, *_ in normalized}
+        for slot, target_id in sorted(slot_mapping.items()):
+            if target_id not in slots_by_target:
+                raise MssqlSafetyError("Legacy7 sampling slot references an unknown target")
+            slots_by_target[target_id].append(slot)
         return tuple(
             Target(
                 panel_version="MDD_MAC_LEGACY7_EXISTING_V1",
@@ -832,14 +939,161 @@ class MssqlPersistence:
                 tier="Legacy7",
                 cadence_minutes=5,
                 number_of_results=number_of_results,
-                phase_index=0,
-                phase_count=1,
+                phase_index=min(slots_by_target[target_id]) - 1,
+                phase_count=10,
                 continuity_classification="Existing SQL sampling target",
                 sampling_era=SamplingEra.LEGACY7,
                 legacy_sampling_target_id=target_id,
-                phase_capacity=7,
+                phase_capacity=len(slots_by_target[target_id]),
+                legacy_sampling_slots=tuple(slots_by_target[target_id]),
+                selection_policy_version=LEGACY7_SELECTION_POLICY_VERSION,
             )
             for target_id, stop_ref, name, number_of_results, _enabled in sorted(normalized)
+        )
+
+    def legacy7_selector_definition(self) -> Mapping[str, Any]:
+        """Capture the existing selector definition and parameter metadata read-only."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT p.parameter_id, p.name, TYPE_NAME(p.user_type_id) AS type_name,
+                       p.max_length, p.is_output
+                FROM sys.parameters AS p
+                INNER JOIN sys.objects AS o ON o.object_id = p.object_id
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE s.name = N'ctl' AND o.name = N'uspGetMddRealtimeSamplingTarget'
+                  AND p.parameter_id > 0
+                ORDER BY p.parameter_id
+                """
+            )
+            parameters = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT OBJECT_DEFINITION(OBJECT_ID(N'ctl.uspGetMddRealtimeSamplingTarget', N'P'))
+                    AS procedure_definition
+                """
+            )
+            definition_row = cursor.fetchone()
+        definition = _row_named(definition_row, "procedure_definition", index=0)
+        if not definition:
+            raise MssqlSchemaError("Legacy7 selector definition is unavailable")
+        return {
+            "procedure_name": "ctl.uspGetMddRealtimeSamplingTarget",
+            "offline_bucket_rule": LEGACY7_BUCKET_SLOT_RULE,
+            "parameters": [
+                {
+                    "parameter_id": int(_row_named(row, "parameter_id", index=0) or 0),
+                    "name": str(_row_named(row, "name", index=1) or ""),
+                    "type_name": str(_row_named(row, "type_name", index=2) or ""),
+                    "max_length": int(_row_named(row, "max_length", index=3) or 0),
+                    "is_output": bool(_row_named(row, "is_output", index=4)),
+                }
+                for row in parameters
+            ],
+            "definition": str(definition or ""),
+        }
+
+    def select_existing_legacy7_target(
+        self,
+        *,
+        at_utc: datetime,
+        targets: Sequence[Target] | None = None,
+    ) -> Target:
+        """Use the established SQL selector for exactly one current heartbeat."""
+
+        selected_at = _utc(at_utc)
+        target_rows = tuple(targets or self.load_existing_sampling_targets())
+        metadata = self.legacy7_selector_definition()
+        parameters = metadata["parameters"]
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            if len(parameters) == 0:
+                cursor.execute("EXEC ctl.uspGetMddRealtimeSamplingTarget")
+            elif len(parameters) == 1:
+                parameter_name = str(parameters[0]["name"])
+                if not re.fullmatch(r"@[A-Za-z_][A-Za-z0-9_]*", parameter_name):
+                    raise MssqlSafetyError("Legacy7 selector parameter name is not safe to call")
+                parameter_type = str(parameters[0].get("type_name", "")).casefold()
+                parameter_value: Any
+                logical_bucket = int(selected_at.timestamp() // 300)
+                if any(marker in parameter_type for marker in ("date", "time")):
+                    parameter_value = selected_at
+                elif parameter_type in {"tinyint", "smallint", "int", "bigint"}:
+                    parameter_value = logical_bucket
+                else:
+                    raise MssqlSafetyError("Legacy7 selector parameter type is unsupported")
+                cursor.execute(
+                    f"EXEC ctl.uspGetMddRealtimeSamplingTarget {parameter_name}=%s",
+                    (parameter_value,),
+                )
+            else:
+                raise MssqlSafetyError("Legacy7 selector has an unsupported parameter contract")
+            rows = cursor.fetchall()
+            description = getattr(cursor, "description", None) or ()
+            if description:
+                column_names = [str(column[0]) for column in description]
+                rows = [
+                    {
+                        column_names[index]: value
+                        for index, value in enumerate(row)
+                    }
+                    if not isinstance(row, Mapping)
+                    else row
+                    for row in rows
+                ]
+        if len(rows) != 1:
+            raise MssqlSafetyError("Legacy7 selector must return exactly one target row")
+        row = rows[0]
+        expected_selection = legacy7_selection_for_bucket(
+            int(selected_at.timestamp() // 300)
+        )
+        target_value = _row_named(
+            row,
+            "SamplingTargetId",
+            "TargetId",
+            "LegacySamplingTargetId",
+            index=0,
+        )
+        try:
+            target_id = int(target_value or 0)
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("Legacy7 selector returned an invalid target") from exc
+        slot_value = _row_named(
+            row,
+            "SamplingSlot",
+            "Slot",
+            "SamplingSlotNumber",
+            "SlotNumber",
+            index=1,
+        )
+        try:
+            sampling_slot = int(slot_value) if slot_value is not None else expected_selection.sampling_slot
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("Legacy7 selector returned an invalid slot") from exc
+        if target_id not in {1, 2, 3, 4, 5, 6, 7} or sampling_slot not in range(1, 11):
+            raise MssqlSafetyError("Legacy7 selector returned an invalid target or slot")
+        if (
+            sampling_slot != expected_selection.sampling_slot
+            or target_id != expected_selection.sampling_target_id
+            or LEGACY7_SLOT_TO_SAMPLING_TARGET_ID[sampling_slot] != target_id
+        ):
+            raise MssqlSafetyError(
+                "live Legacy7 selector does not match the approved deterministic UTC slot contract"
+            )
+        matching = [
+            target for target in target_rows if target.legacy_sampling_target_id == target_id
+        ]
+        if len(matching) != 1:
+            raise MssqlSafetyError("Legacy7 selector returned a target outside the approved seven-target scope")
+        target = matching[0]
+        if sampling_slot not in target.legacy_sampling_slots:
+            raise MssqlSafetyError("Legacy7 selector returned a target outside its slot lineage")
+        return replace(
+            target,
+            selected_sampling_slot=sampling_slot,
+            selection_policy_version=LEGACY7_SELECTION_POLICY_VERSION,
         )
 
     def start_collector_run(
@@ -1015,6 +1269,15 @@ class MssqlPersistence:
         collection_context: str | None = None,
     ) -> int:
         context = str(collection_context or self.collection_context)
+        if context == MAC_SQL_COLLECTION_CONTEXT and (
+            target.sampling_era is not SamplingEra.LEGACY7
+            or _target_sampling_id(target) is None
+            or target.selected_sampling_slot is None
+            or target.selection_policy_version != LEGACY7_SELECTION_POLICY_VERSION
+        ):
+            raise MssqlSafetyError(
+                "MAC_LEGACY7_PRODUCTION audits require target ID, SamplingSlot, and selection-policy lineage"
+            )
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
@@ -1024,9 +1287,10 @@ class MssqlPersistence:
                     INSERT INTO ctl.MddMacTargetAudit
                     (RunId, PanelVersion, TargetIdentity, StationName, Tier, PhaseIndex,
                      NumberOfResults, LogicalDueBucket, SamplingEra, SamplingTargetId,
-                     ContinuityClassification, CollectionContext, StartedAtUtc)
+                     SamplingSlot, SelectionPolicyVersion, ContinuityClassification,
+                     CollectionContext, StartedAtUtc)
                     OUTPUT INSERTED.AuditId
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         run_id,
@@ -1039,6 +1303,8 @@ class MssqlPersistence:
                         int(logical_due_bucket),
                         target.sampling_era.value,
                         _target_sampling_id(target),
+                        target.selected_sampling_slot,
+                        target.selection_policy_version,
                         target.continuity_classification,
                         context,
                         _utc(started_at),
@@ -1578,6 +1844,50 @@ class MssqlPersistence:
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (era_code, panel_version, _utc(effective_at_utc) if effective_at_utc else None, timestamp_kind, int(is_active), int(is_synthetic)),
+            )
+            connection.commit()
+
+    def record_methodology_evidence(
+        self,
+        *,
+        era_code: str,
+        panel_version: str,
+        collection_context: str,
+        methodology_version: str,
+        run_ids: Sequence[str],
+        evidence: Mapping[str, Any],
+        window_start_utc: datetime | None = None,
+        window_end_utc: datetime | None = None,
+        actual_initial_attempts: int | None = None,
+        historical_equivalent_initial_attempts: int | None = None,
+        excess_initial_attempts: int | None = None,
+    ) -> None:
+        """Append bounded methodology evidence without touching collection rows."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                INSERT INTO ctl.MddMacMethodologyEvidence
+                    (EraCode, PanelVersion, CollectionContext, WindowStartUtc,
+                     WindowEndUtc, MethodologyVersion, ActualInitialAttempts,
+                     HistoricalEquivalentInitialAttempts, ExcessInitialAttempts,
+                     RunIdsJson, EvidenceJson)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(era_code),
+                    str(panel_version),
+                    str(collection_context),
+                    _utc(window_start_utc) if window_start_utc else None,
+                    _utc(window_end_utc) if window_end_utc else None,
+                    str(methodology_version),
+                    actual_initial_attempts,
+                    historical_equivalent_initial_attempts,
+                    excess_initial_attempts,
+                    json.dumps([str(run_id) for run_id in run_ids], ensure_ascii=False, sort_keys=True),
+                    json.dumps(_safe_document(dict(evidence)), ensure_ascii=False, sort_keys=True, default=str),
+                ),
             )
             connection.commit()
 

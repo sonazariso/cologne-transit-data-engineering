@@ -99,7 +99,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     historical/deferred-cleanup material and is superseded for the active
     roadmap by S87. Microsoft SQL Server is the sole authoritative project
     database. The active Stage 14 overall status is
-    `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`; its
+    `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`; its
     collector implementation remains `STAGE 14 COLLECTOR IMPLEMENTATION
     COMPLETE`, and Stage 15 live remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
     This does not change source availability, create PostgreSQL
@@ -383,7 +383,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's historical implementation status is `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`. The SQLite research profile is retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is prepared but not activated. Stage 15A readiness is in progress; Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+116. Stage 14's active status is `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`. The SQLite research profile is retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is the Legacy7 production path, currently safety-stopped while the corrected ten-slot lineage, additive migration, and least-privilege login are validated. Stage 15A readiness is in progress; Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 117. The offline Stage 14 runtime remains a Python, cross-platform,
      standard-library-first collector package. Its offline core must not import
      PostgreSQL/SQL-driver modules, platform-specific APIs, shell orchestration,
@@ -455,7 +455,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 15A validation-readiness guardrails
 
-127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 128. Stage 15A must not start live Stage 15, issue MDD requests, perform DNS or
      live-network activity, install/configure PostgreSQL, create production
      database objects, materialize the 43 new production targets, create a

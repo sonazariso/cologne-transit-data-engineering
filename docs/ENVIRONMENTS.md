@@ -13,8 +13,11 @@ Planned path:
 Role: host for the official Microsoft SQL Server instance and optional Power BI
 tooling. The authoritative project database is
 `CologneTransitIntelligence`; the SQL Server instance remains on this VM.
-The active Legacy7 collector runs as Python on macOS and connects to SQL
-Server here. Tiered50 remains inactive; Power BI is unchanged.
+The corrected Legacy7 collector is implemented as Python on macOS and connects
+to SQL Server here; its future production context is
+`MAC_LEGACY7_PRODUCTION`. The user-local LaunchAgent is currently safety-stopped
+pending live SQL/provisioning gates. Tiered50 remains inactive; Power BI is
+unchanged.
 
 Access the same macOS working tree through VMware Shared Folders:
 
@@ -26,7 +29,9 @@ Do not create a separate Git clone on Windows under the current workflow.
 
 The existing collector runtime, SQLite research database path, PostgreSQL
 contracts, Windows scheduled-task material, and historical realtime files remain
-untouched and are marked for deferred cleanup only. S87 does not migrate,
+untouched and are marked for deferred cleanup only. The Mac LaunchAgent is
+currently unloaded/disabled while its Legacy7 cadence correction is validated.
+S87 does not migrate,
 delete, or rewrite them. The S87 stabilization work left `NRWTransportDW`
 untouched; it was later classified
 `LEGACY_SAFE_TO_ARCHIVE` and was removed from the SQL Server instance on

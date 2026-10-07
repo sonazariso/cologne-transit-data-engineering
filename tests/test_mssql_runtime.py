@@ -38,6 +38,22 @@ class _Cursor:
         self.statements.append((statement, params))
 
     def fetchall(self):
+        if self.statements and "MddRealtimeSamplingSlot" in self.statements[-1][0]:
+            return [
+                {"SamplingSlot": slot, "SamplingTargetId": target_id}
+                for slot, target_id in (
+                    (1, 2),
+                    (2, 7),
+                    (3, 1),
+                    (4, 4),
+                    (5, 6),
+                    (6, 2),
+                    (7, 7),
+                    (8, 1),
+                    (9, 5),
+                    (10, 3),
+                )
+            ]
         return self.rows
 
 
@@ -145,6 +161,8 @@ class MssqlRuntimeTests(unittest.TestCase):
         self.assertEqual([target.legacy_sampling_target_id for target in targets], list(range(1, 8)))
         self.assertTrue(all(target.sampling_era is SamplingEra.LEGACY7 for target in targets))
         self.assertEqual({target.number_of_results for target in targets}, {5})
+        self.assertEqual([target.phase_count for target in targets], [10] * 7)
+        self.assertEqual(targets[0].legacy_sampling_slots, (3, 8))
         self.assertTrue(connection.closed)
 
     def test_launchd_artifact_is_disabled_and_secret_free(self) -> None:

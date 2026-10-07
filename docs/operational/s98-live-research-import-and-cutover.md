@@ -106,7 +106,8 @@ production preflight passed against `CologneTransitIntelligence` using
 with Keychain-backed secrets, exact Legacy7 IDs 1–7, no active SQLite runtime,
 and no PostgreSQL runtime.
 
-The generated user-local LaunchAgent is active at
+During the historical activation window, the generated user-local LaunchAgent
+was active at
 `~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`;
 the tracked plist remains safe-by-default and disabled. Its installed SHA-256
 is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
@@ -119,7 +120,37 @@ Three normal scheduled runs completed successfully:
 | `5a7e014c-6266-421c-b402-98c4f1cb89b6` | 5971303 | 7/7 | 7 | 7 | `COMPLETE` |
 
 No manual Heumarkt request was made. Tiered50 target materialization and
-activation remain deferred, and Power BI was not changed. The runtime reuses
-the existing approved SQL login; read-only inspection identifies it as
+activation remain deferred, and Power BI was not changed. During that
+historical window, the runtime reused the existing approved SQL login;
+read-only inspection identified it as
 `sa`/sysadmin, with no new login or permission grant made. A least-privilege
 runtime login remains a follow-up.
+
+## Cadence-correction addendum — current review
+
+The three run rows above are preserved historical source evidence, not a
+normal Legacy7 cadence sample. Review found that the Mac runner expanded the
+approved seven-target scope into all seven target audits on each of the three
+heartbeats. The bounded oversampling window therefore has a reported shape of
+21 initial attempts versus 3 historical Legacy7-equivalent attempts, an
+excess of 18, subject to fresh read-only SQL confirmation before those counts
+are inserted into append-only methodology evidence. No existing run, audit,
+attempt, snapshot, or collection-context value is to be updated.
+
+The exact user-local LaunchAgent was unloaded and disabled on 2026-10-07
+before further SQL activity. The tracked plist and SQL evidence remain in
+place; the retired Windows collector was not changed or re-enabled, and no
+manual MDD request was issued. The SQL VM is currently unavailable because it
+requires interactive unlock, so live verification of
+`ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot`,
+`ctl.uspGetMddRealtimeSamplingTarget`, the new nullable audit columns, and the
+existing run counts is pending.
+
+Corrected future Mac Legacy7 audits will use one SQL-selected target per UTC
+five-minute bucket under `MAC_LEGACY7_PRODUCTION`, with
+`SamplingTargetId`, `SamplingSlot`, `LogicalDueBucket`,
+`SelectionPolicyVersion`, and collection context retained. The dedicated
+`CologneTransitCollector` login is not yet provisioned; its exact object-level
+grants and rollback-safe negative checks are source-controlled in
+[`scripts/provision_macos_runtime_login.py`](../../scripts/provision_macos_runtime_login.py).
+Tiered50 remains inactive and Power BI remains unchanged.

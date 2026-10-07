@@ -1,29 +1,39 @@
-# Stage 14 — Collector Implementation and Offline Cutover Readiness
+# Stage 14 — Collector Implementation and Legacy7 SQL Runtime
 
-> **S87 status note (2026-10-05):** This implementation record is retained as
-> historical/deferred-cleanup evidence. SQL Server is the sole active project
-> database; the SQLite research profile is not active architecture, and no
-> production persistence cutover is authorized by S87.
+> **S87 status note (2026-10-05):** The earlier SQLite-first/deferred-runtime
+> position is retained as historical chronology. It is superseded for the
+> current operational path by the additive SQL Server Legacy7 runtime.
 
 ## Authoritative status
 
 Overall Stage 14 status:
 
-`HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`
+`LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
-The implementation closeout is deliberately narrower than a production
-cutover. S78 authorizes a durable, one-station SQLite research pilot while
-the final durable-storage decision remains deferred until stable repeated
-collector evidence exists. PostgreSQL work is not currently planned or
-authorized. Real Tiered50 target materialization, a production sampling-era
-cutover timestamp, deployment platform, Tiered50 activation, and
-post-activation validation remain open work. Stage 15A readiness is now
-`IN PROGRESS`; Stage 15B live post-cutover validation remains `NOT STARTED —
-AWAITS TIERED50 CUTOVER`.
+The current production path is the additive macOS-to-SQL Server Legacy7
+runtime. The historical SQLite research profile remains immutable,
+lineage-separated evidence. The corrected runtime selects one target from the
+authoritative ten-slot SQL rotation per current UTC five-minute bucket; it
+does not replay missed buckets or use an in-memory counter. Tiered50 target
+materialization, Tiered50 activation, and Stage 15B live validation remain
+deferred. Stage 15A readiness remains `IN PROGRESS`; Stage 15B remains
+`NOT STARTED — AWAITS TIERED50 CUTOVER`.
+
+## Current Legacy7 operational correction
+
+The first three Mac cutover-validation runs were valid source observations but
+were oversampled: each run selected all seven targets in one heartbeat. The
+affected runs are preserved unchanged and are excluded from simple
+Windows-versus-Mac cadence-volume comparisons. The corrected runtime uses
+`MAC_LEGACY7_PRODUCTION`, records `SamplingSlot` and
+`SelectionPolicyVersion` additively on future target audits, and requires the
+dedicated least-privilege `CologneTransitCollector` SQL login. The LaunchAgent
+is safety-stopped while the live slot definition, additive migration, login
+boundary, and corrected scheduled heartbeats are validated.
 
 This document records the Stage 14 Python collector implementation requested
 by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
@@ -37,12 +47,13 @@ future deployment system may invoke one heartbeat every five minutes through
 cron, a system timer, a container scheduler, a cloud scheduler, or another
 platform without changing collector policy code.
 
-No recurring scheduler loop, deployment resource, database server, database
-driver, production target row, or ongoing live loop is part of this iteration.
-The explicit `live-research` command performs at most one current-bucket
-Heumarkt heartbeat against a durable SQLite profile. Production `live` remains
-blocked. SQLite is disposable only in the `DEVELOPMENT` profile; the
-`LIVE_RESEARCH` profile is non-disposable and outside the repository.
+The historical collector package remains scheduler-neutral and offline-safe.
+The corrected Legacy7 production path is a five-minute user-local LaunchAgent
+that writes directly to SQL Server; it is currently safety-stopped pending the
+live gates above. The explicit `live-research` command
+remains a separate historical SQLite mode; it is not production runtime
+evidence. SQLite is disposable only in the `DEVELOPMENT` profile, while the
+`LIVE_RESEARCH` profile is immutable research evidence outside the repository.
 
 The manifest preserves the approved historical Legacy7 lineage IDs 1 through 7
 as `legacy_sampling_target_id`. These are continuity metadata only, not future
@@ -103,6 +114,16 @@ Due selection is pure:
 
 The persisted approved phase capacities reproduce the six-heartbeat sequence
 `[19, 18, 18, 18, 19, 18]`, 110 executions per 30 minutes, and 220 per hour.
+
+For the corrected Mac Legacy7 SQL path, the seven existing target rows are
+not expanded into the Tiered50 phase planner. SQL selects exactly one target
+for the current bucket through `ctl.uspGetMddRealtimeSamplingTarget`, with the
+ten-slot mapping `1→2, 2→7, 3→1, 4→4, 5→6, 6→2, 7→7, 8→1, 9→5, 10→3`.
+The offline contract is the one-based rule
+`UTC_EPOCH_BUCKET_MOD_10_PLUS_1`; the live stored-procedure definition must
+confirm that rule before reactivation. Missed buckets are not replayed and no
+in-memory counter is used. The approved nominal Legacy7 load is 12 logical
+requests/hour, 288/day, 8,640 per 30-day month, and 8,928 per 31-day month.
 
 ## Execution, retry, and deadline policy
 
@@ -362,9 +383,11 @@ target IDs.
 
 ## Offline closeout validation
 
-The complete repository suite passed in five consecutive runs, with 154 tests
-reported in each run. The suite was also run with `ResourceWarning` promoted to
-an error; no SQLite resource warning was emitted. The Stage 14 validator
+The historical closeout suite passed in five consecutive runs, with 154 tests
+reported in each run. In the current cadence-correction review, the complete
+repository suite passed in five consecutive runs with 216 tests per run and
+`ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
+The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
 `[19, 18, 18, 18, 19, 18]`, 220 requests/hour, zero live-network calls, and
 Stage 15B live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`; Stage 15A

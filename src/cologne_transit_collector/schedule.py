@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Sequence
 
 from .domain import HEARTBEAT_SECONDS, LogicalBucket, Plan, Target
+from .legacy7_schedule import legacy7_sampling_slot_for_bucket
 
 
 def ensure_utc(value: datetime) -> datetime:
@@ -36,6 +37,13 @@ def may_execute_bucket(current_bucket: int, candidate_bucket: int) -> bool:
 def target_is_due(target: Target, bucket_index: int) -> bool:
     """Pure due rule using the finalized manifest phase, never mutable rank/order."""
 
+    if target.selected_sampling_slot is not None:
+        # The live SQL selector has already chosen this one target for the
+        # current bucket.  Keeping the marker explicit prevents the generic
+        # Tiered50 phase planner from re-expanding the selected heartbeat.
+        return True
+    if target.legacy_sampling_slots:
+        return legacy7_sampling_slot_for_bucket(bucket_index) in target.legacy_sampling_slots
     return int(bucket_index) % target.phase_count == target.phase_index
 
 

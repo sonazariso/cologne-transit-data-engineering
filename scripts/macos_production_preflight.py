@@ -15,6 +15,7 @@ import os
 import plistlib
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -120,8 +121,27 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
         raise RuntimeError(f"connected SQL Server database must be {EXPECTED_SQL_DATABASE}")
 
     persistence = MssqlPersistence(settings=settings, raw_evidence_directory=None)
+    login_status = persistence.runtime_login_status()
+    if login_status["database_name"] != EXPECTED_SQL_DATABASE:
+        raise RuntimeError("connected SQL Server database must be CologneTransitIntelligence")
+    if login_status["is_sysadmin"]:
+        raise RuntimeError("active Mac runtime login must not be sysadmin")
+    if str(login_status["login_name"]).lower() == "sa":
+        raise RuntimeError("active Mac runtime login must not be sa")
+    if (
+        login_status["is_serveradmin"]
+        or login_status["is_securityadmin"]
+        or login_status["is_db_owner"]
+        or login_status["is_db_datareader"]
+        or login_status["is_db_datawriter"]
+    ):
+        raise RuntimeError("active Mac runtime login has a prohibited broad role")
     schema = persistence.validate_schema()
     targets = persistence.load_existing_sampling_targets()
+    selected_target = persistence.select_existing_legacy7_target(
+        at_utc=datetime.now(timezone.utc),
+        targets=targets,
+    )
     target_ids = [int(target.legacy_sampling_target_id or 0) for target in targets]
     target_mapping = {target.source_parent_station_id: int(target.legacy_sampling_target_id or 0) for target in targets}
     if target_ids != list(range(1, 8)):
@@ -148,9 +168,18 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
         "mdd_api_key_format": "VALID",
         "mdd_network_calls": 0,
         "sql_database": database_name,
+        "sql_login_status": login_status,
+        "mac_sql_collection_context": "MAC_LEGACY7_PRODUCTION",
         "schema": schema,
         "sampling_target_ids": target_ids,
         "legacy7_mapping": target_mapping,
+        "legacy7_selection": {
+            "sampling_slot": selected_target.selected_sampling_slot,
+            "sampling_target_id": selected_target.legacy_sampling_target_id,
+            "stop_point_ref": selected_target.source_parent_station_id,
+            "number_of_results": selected_target.number_of_results,
+            "selection_policy_version": selected_target.selection_policy_version,
+        },
         "sqlite_runtime_database": "NOT_ACTIVE",
         "postgresql_runtime": "NOT_USED",
         "launchd": plist,

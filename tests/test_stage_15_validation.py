@@ -57,7 +57,7 @@ class Stage15ValidationTests(unittest.TestCase):
         report = Stage15Analyzer(self.manifest, contract=self.contract).analyze()
         self.assertEqual(
             report["stage14_overall_status"],
-            "HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED",
+            "LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED",
         )
         self.assertEqual(report["stage14_collector_status"], "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE")
         self.assertEqual(report["stage15_readiness_status"], "IN PROGRESS")
@@ -82,8 +82,8 @@ class Stage15ValidationTests(unittest.TestCase):
         guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
         historical_prompt = (ROOT / "prompts" / "S80.md").read_text(encoding="utf-8")
 
-        self.assertIn("HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED", stage14_doc)
-        self.assertIn("HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED", guardrails)
+        self.assertIn("LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED", stage14_doc)
+        self.assertIn("LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED", guardrails)
         self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", guardrails)
         self.assertIn("IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED", historical_prompt)
 

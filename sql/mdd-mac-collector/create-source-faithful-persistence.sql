@@ -171,6 +171,8 @@ BEGIN
         LogicalDueBucket BIGINT NOT NULL,
         SamplingEra VARCHAR(40) NOT NULL,
         SamplingTargetId INT NULL,
+        SamplingSlot INT NULL,
+        SelectionPolicyVersion VARCHAR(80) NULL,
         ContinuityClassification VARCHAR(80) NOT NULL,
         CollectionContext VARCHAR(80) NOT NULL,
         StartedAtUtc DATETIME2(7) NOT NULL,
@@ -309,6 +311,35 @@ BEGIN
         IsSynthetic BIT NOT NULL,
         RecordedAtUtc DATETIME2(7) NOT NULL
             CONSTRAINT DF_ctl_MddMacSamplingEra_RecordedAtUtc DEFAULT (SYSUTCDATETIME())
+    );
+END;
+GO
+
+IF OBJECT_ID(N'ctl.MddMacMethodologyEvidence', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacMethodologyEvidence
+    (
+        MethodologyEvidenceId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddMacMethodologyEvidence PRIMARY KEY CLUSTERED,
+        EraCode VARCHAR(80) NOT NULL,
+        PanelVersion NVARCHAR(100) NOT NULL,
+        CollectionContext VARCHAR(80) NOT NULL,
+        WindowStartUtc DATETIME2(7) NULL,
+        WindowEndUtc DATETIME2(7) NULL,
+        MethodologyVersion VARCHAR(100) NOT NULL,
+        ActualInitialAttempts INT NULL,
+        HistoricalEquivalentInitialAttempts INT NULL,
+        ExcessInitialAttempts INT NULL,
+        RunIdsJson NVARCHAR(MAX) NOT NULL,
+        EvidenceJson NVARCHAR(MAX) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacMethodologyEvidence_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT CK_ctl_MddMacMethodologyEvidence_Attempts
+            CHECK (
+                (ActualInitialAttempts IS NULL OR ActualInitialAttempts >= 0)
+                AND (HistoricalEquivalentInitialAttempts IS NULL OR HistoricalEquivalentInitialAttempts >= 0)
+                AND (ExcessInitialAttempts IS NULL OR ExcessInitialAttempts >= 0)
+            )
     );
 END;
 GO
@@ -1192,6 +1223,14 @@ GO
 
 IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'DurationMs') IS NULL
     ALTER TABLE ctl.MddMacTargetAudit ADD DurationMs DECIMAL(18,6) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'SamplingSlot') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD SamplingSlot INT NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'SelectionPolicyVersion') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD SelectionPolicyVersion VARCHAR(80) NULL;
 GO
 
 IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'SkipReason') IS NULL
