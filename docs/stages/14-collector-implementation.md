@@ -8,20 +8,21 @@
 
 Overall Stage 14 status:
 
-`LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED`
+`LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
 The corrected production path is the additive macOS-to-SQL Server Legacy7
-runtime, but it is currently safety-stopped pending live reactivation gates.
-The historical SQLite research profile remains immutable,
+runtime. Its user-local LaunchAgent is active after the dedicated-login,
+preflight, Windows-retirement, selector, corrected-era, and three-heartbeat
+gates passed. The historical SQLite research profile remains immutable,
 lineage-separated evidence. The corrected runtime selects one target from the
 authoritative ten-slot SQL rotation per current UTC five-minute bucket; it
 does not replay missed buckets or use an in-memory counter. Tiered50 target
 materialization, Tiered50 activation, and Stage 15B live validation remain
-deferred. Stage 15A readiness remains `IN PROGRESS`; Stage 15B remains
+deferred. Stage 15A readiness remains `IN PROGRESS`; Stage 15 remains
 `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 
 ## Current Legacy7 operational correction
@@ -34,8 +35,9 @@ Windows-versus-Mac cadence-volume comparisons. The corrected runtime uses
 `SelectionPolicyVersion` additively on future target audits, and requires the
 dedicated least-privilege `CologneTransitCollector` SQL login. The live slot
 definition, additive migration, and bounded 21/3/18 methodology evidence are
-validated; the LaunchAgent remains safety-stopped while login, preflight, and
-corrected scheduled-heartbeat gates are completed.
+validated. Three ordinary scheduled heartbeats completed with one target each,
+the expected SQL-selected slot/target lineage, HTTP 200, and durable
+completion under `MAC_LEGACY7_PRODUCTION`.
 
 This document records the Stage 14 Python collector implementation requested
 by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
@@ -51,8 +53,8 @@ platform without changing collector policy code.
 
 The historical collector package remains scheduler-neutral and offline-safe.
 The corrected Legacy7 production path is a five-minute user-local LaunchAgent
-that writes directly to SQL Server; it is currently safety-stopped pending the
-live gates above. The explicit `live-research` command
+that writes directly to SQL Server and is active after the live gates above.
+The explicit `live-research` command
 remains a separate historical SQLite mode; it is not production runtime
 evidence. SQLite is disposable only in the `DEVELOPMENT` profile, while the
 `LIVE_RESEARCH` profile is immutable research evidence outside the repository.
@@ -406,9 +408,11 @@ Offline plan/simulate validation produced 19 due targets, 19 simulated
 transport calls, and zero live-network calls; CLI `live` remained blocked
 before transport.
 
-No production `live` request, PostgreSQL installation/object change, scheduler
-deployment, Tiered50 target materialization, Power BI change, or production
-cutover was performed. The one authorized S78 research heartbeat used the
+No Tiered50 production `live` request, PostgreSQL installation/object change,
+Tiered50 target materialization, Tiered50 cutover, or Power BI change was
+performed. The corrected Legacy7 production path is active through ordinary
+scheduled heartbeats; no manual Heumarkt request was made. The one authorized
+S78 research heartbeat used the
 `LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
 `de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
 recorded one provider attempt without retry, and retained 121 historical
@@ -416,18 +420,17 @@ parser-gap fields with sanitized raw evidence. The S80 offline migration then
 updated only the additive schema/evidence tables; the stored snapshot JSON was
 not rewritten. It remains excluded from Stage 15B.
 
-## Deferred work required for real Stage 14 completion
+## Deferred work after Legacy7 activation
 
 The following are intentional deferrals, not implementation defects:
 
-1. run and review repeated one-heartbeat `LIVE_RESEARCH_SINGLE_1` evidence;
-2. reconsider the final durable-storage decision only after that evidence is stable;
-3. materialize production schema/identity only after a separate authorization;
-4. perform the approved seven-to-50 target migration without rewriting Legacy7 history;
-5. record the real Tiered50 sampling-era cutover timestamp;
-6. determine the final nonzero heartbeat persistence/cleanup safety margin;
-7. activate a platform-neutral deployment/scheduler after the platform decision;
-8. activate Tiered50 only after its independent cutover gate passes; and
-9. execute post-activation smoke, quota, persistence, and continuity validation.
+1. materialize the approved 43 additional production targets only after a
+   separate Tiered50 authorization;
+2. perform the approved seven-to-50 target migration without rewriting
+   Legacy7 history;
+3. record a Tiered50 sampling-era cutover timestamp only after Tiered50 is
+   actually activated;
+4. activate Tiered50 only after its independent cutover gate passes; and
+5. begin live Stage 15B validation after real Tiered50 evidence exists.
 
 No item above is performed by the current implementation.

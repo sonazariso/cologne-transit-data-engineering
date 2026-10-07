@@ -184,8 +184,13 @@ def install(*, activate: bool, runtime_config_path: str | Path = DEFAULT_RUNTIME
     return manifest
 
 
-def bootstrap() -> None:
-    """Load the installed LaunchAgent without manually invoking its program."""
+def bootstrap(*, activate: bool = True) -> None:
+    """Load the installed LaunchAgent without manually invoking its program.
+
+    ``launchctl`` persists a per-label disabled override after a previous
+    safety stop.  The plist's ``Disabled`` key alone does not clear that
+    override, so synchronize the exact label state before bootstrapping it.
+    """
 
     domain = f"gui/{os.getuid()}"
     # bootout is scoped to this exact user-local label and is idempotent when
@@ -196,6 +201,15 @@ def bootstrap() -> None:
         stderr=subprocess.PIPE,
         check=False,
     )
+    state_command = "enable" if activate else "disable"
+    state = subprocess.run(
+        ["/bin/launchctl", state_command, f"{domain}/{LABEL}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if state.returncode != 0:
+        raise RuntimeError(f"launchd {state_command} failed")
     completed = subprocess.run(
         ["/bin/launchctl", "bootstrap", domain, str(INSTALLED_PATH)],
         stdout=subprocess.PIPE,
@@ -222,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         manifest = install(activate=activate, runtime_config_path=args.runtime_config)
         if args.bootstrap:
-            bootstrap()
+            bootstrap(activate=activate)
             manifest["launchd_bootstrapped"] = True
         print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
         return 0

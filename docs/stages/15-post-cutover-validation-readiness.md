@@ -1,9 +1,9 @@
 # Stage 15 — Post-Cutover Validation Readiness
 
-> **S87 status note (2026-10-05):** This readiness record is retained for
-> historical planning. SQL Server is now the sole authoritative project
-> database, and S87 does not authorize SQLite research continuation, collector
-> activation, or Stage 15B live validation.
+> **Current status note (2026-10-07):** This readiness record remains the
+> version-controlled offline contract for later Tiered50 validation. SQL Server
+> is the sole authoritative project database. The Legacy7 runtime is active,
+> but that activation does not authorize Tiered50 or start Stage 15B.
 
 **Current Stage 15A status:** `IN PROGRESS`
 **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`
@@ -16,15 +16,16 @@ sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED`
+- Stage 14 overall: `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
 - Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`
 
-The Mac Legacy7 runtime is currently safety-stopped after the corrected
-ten-slot selector, additive lineage migration, and bounded methodology
-evidence passed. Dedicated-login provisioning and the remaining production
-gates are still pending. This does not activate Tiered50 or start Stage 15B.
+The Mac Legacy7 runtime is active after the corrected ten-slot selector,
+additive lineage migration, bounded methodology evidence, dedicated-login
+provisioning, production preflight, Windows-task retirement, scheduler
+activation, corrected-era recording, and three ordinary scheduled heartbeats
+passed. This does not activate Tiered50 or start Stage 15B.
 
 ## 15A — Pre-cutover validation framework/readiness
 

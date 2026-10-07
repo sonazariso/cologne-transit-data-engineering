@@ -57,7 +57,7 @@ class Stage15ValidationTests(unittest.TestCase):
         report = Stage15Analyzer(self.manifest, contract=self.contract).analyze()
         self.assertEqual(
             report["stage14_overall_status"],
-            "LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED",
+            "LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED",
         )
         self.assertEqual(report["stage14_collector_status"], "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE")
         self.assertEqual(report["stage15_readiness_status"], "IN PROGRESS")
@@ -75,15 +75,15 @@ class Stage15ValidationTests(unittest.TestCase):
         self.assertEqual(self._check(report, "execution.maximum_concurrency")["actual_value"], 2)
         self.assertEqual(self._check(report, "execution.max_attempts")["actual_value"], 2)
 
-    def test_temporary_status_guardrails_match_s103_without_rewriting_history(self) -> None:
+    def test_active_status_guardrails_preserve_history(self) -> None:
         stage14_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(
             encoding="utf-8"
         )
         guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
         historical_prompt = (ROOT / "prompts" / "S80.md").read_text(encoding="utf-8")
 
-        self.assertIn("LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED", stage14_doc)
-        self.assertIn("LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED", guardrails)
+        self.assertIn("LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED", stage14_doc)
+        self.assertIn("LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED", guardrails)
         self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", guardrails)
         self.assertIn("IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED", historical_prompt)
 

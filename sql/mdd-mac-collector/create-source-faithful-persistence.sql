@@ -697,28 +697,61 @@ IF NOT EXISTS
 GO
 
 CREATE OR ALTER PROCEDURE stg.uspPersistMddMacSnapshot
-    @RunId NVARCHAR(100),
-    @AuditId BIGINT,
-    @TargetIdentity NVARCHAR(200),
+    @RunId NVARCHAR(100) = NULL,
+    @AuditId BIGINT = NULL,
+    @TargetIdentity NVARCHAR(200) = NULL,
     @SamplingTargetId INT = NULL,
-    @LogicalDueBucket BIGINT,
-    @ObservedAtUtc DATETIME2(7),
+    @LogicalDueBucket BIGINT = NULL,
+    @ObservedAtUtc DATETIME2(7) = NULL,
     @ResponseTimestampSourceText NVARCHAR(256) = NULL,
-    @ParserVersion VARCHAR(80),
+    @ParserVersion VARCHAR(80) = NULL,
     @ApplicationStatus VARCHAR(80) = NULL,
-    @PayloadHashSha256 CHAR(64),
-    @SnapshotJson NVARCHAR(MAX),
-    @CallsJson NVARCHAR(MAX),
-    @TimingsJson NVARCHAR(MAX),
-    @SituationEvidenceJson NVARCHAR(MAX),
-    @ServiceSectionsJson NVARCHAR(MAX),
-    @AttributesJson NVARCHAR(MAX),
-    @ResponseErrorsJson NVARCHAR(MAX),
-    @ParserGapsJson NVARCHAR(MAX)
+    @PayloadHashSha256 CHAR(64) = NULL,
+    @SnapshotJson NVARCHAR(MAX) = NULL,
+    @CallsJson NVARCHAR(MAX) = NULL,
+    @TimingsJson NVARCHAR(MAX) = NULL,
+    @SituationEvidenceJson NVARCHAR(MAX) = NULL,
+    @ServiceSectionsJson NVARCHAR(MAX) = NULL,
+    @AttributesJson NVARCHAR(MAX) = NULL,
+    @ResponseErrorsJson NVARCHAR(MAX) = NULL,
+    @ParserGapsJson NVARCHAR(MAX) = NULL,
+    @CompletedRunStatus VARCHAR(40) = NULL,
+    @CompletedAtUtc DATETIME2(7) = NULL,
+    @RunSummaryJson NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @CompletedRunStatus IS NOT NULL
+    BEGIN
+        IF @RunId IS NULL OR @CompletedAtUtc IS NULL OR ISJSON(@RunSummaryJson) <> 1
+            THROW 51112, 'MDD Mac run finalization arguments are invalid.', 1;
+
+        BEGIN TRY
+            BEGIN TRANSACTION;
+
+            UPDATE ctl.MddMacCollectorRun
+            SET CompletedAtUtc = @CompletedAtUtc,
+                Status = @CompletedRunStatus,
+                SummaryJson = @RunSummaryJson
+            WHERE RunId = @RunId;
+
+            UPDATE ctl.MddMacDispatcherClaim
+            SET Status = @CompletedRunStatus,
+                CompletedAtUtc = @CompletedAtUtc
+            WHERE RunId = @RunId;
+
+            COMMIT TRANSACTION;
+            SELECT CAST(NULL AS BIGINT) AS SnapshotId;
+            RETURN;
+        END TRY
+        BEGIN CATCH
+            IF XACT_STATE() <> 0
+                ROLLBACK TRANSACTION;
+            THROW;
+        END CATCH;
+    END;
 
     IF ISJSON(@SnapshotJson) <> 1
         THROW 51110, 'MDD Mac snapshot JSON is invalid.', 1;

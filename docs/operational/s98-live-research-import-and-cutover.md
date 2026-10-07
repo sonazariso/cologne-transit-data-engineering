@@ -126,31 +126,52 @@ read-only inspection identified it as
 `sa`/sysadmin, with no new login or permission grant made. A least-privilege
 runtime login remains a follow-up.
 
-## Cadence-correction addendum — current review
+## Cadence-correction addendum — pre-activation review
 
 The three run rows above are preserved historical source evidence, not a
-normal Legacy7 cadence sample. Review found that the Mac runner expanded the
+normal Legacy7 cadence sample. The pre-activation review found that the Mac runner expanded the
 approved seven-target scope into all seven target audits on each of the three
 heartbeats. The bounded oversampling window therefore has a reported shape of
 21 initial attempts versus 3 historical Legacy7-equivalent attempts, an
-excess of 18, subject to fresh read-only SQL confirmation before those counts
-are inserted into append-only methodology evidence. No existing run, audit,
-attempt, snapshot, or collection-context value is to be updated.
+excess of 18. The counts were subsequently confirmed read-only and recorded
+in the append-only methodology evidence. No existing run, audit, attempt,
+snapshot, or collection-context value was updated.
 
-The exact user-local LaunchAgent was unloaded and disabled on 2026-10-07
-before further SQL activity. The tracked plist and SQL evidence remain in
-place; the retired Windows collector was not changed or re-enabled, and no
-manual MDD request was issued. The SQL VM is currently unavailable because it
-requires interactive unlock, so live verification of
-`ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot`,
-`ctl.uspGetMddRealtimeSamplingTarget`, the new nullable audit columns, and the
-existing run counts is pending.
+The exact user-local LaunchAgent was unloaded and disabled during the
+pre-activation recovery window before further SQL activity. The tracked plist
+and SQL evidence remain in place; the retired Windows collector was not
+changed or re-enabled, and no manual MDD request was issued in that window.
 
-Corrected future Mac Legacy7 audits will use one SQL-selected target per UTC
-five-minute bucket under `MAC_LEGACY7_PRODUCTION`, with
+Corrected future Mac Legacy7 audits were specified to use one SQL-selected
+target per UTC five-minute bucket under `MAC_LEGACY7_PRODUCTION`, with
 `SamplingTargetId`, `SamplingSlot`, `LogicalDueBucket`,
 `SelectionPolicyVersion`, and collection context retained. The dedicated
-`CologneTransitCollector` login is not yet provisioned; its exact object-level
-grants and rollback-safe negative checks are source-controlled in
+`CologneTransitCollector` login and its exact object-level grants and
+rollback-safe negative checks are now provisioned and recorded in
 [`scripts/provision_macos_runtime_login.py`](../../scripts/provision_macos_runtime_login.py).
 Tiered50 remains inactive and Power BI remains unchanged.
+
+## Corrected Legacy7 activation follow-up — 2026-10-07
+
+After the pre-activation gates passed, the generated user-local LaunchAgent
+was activated with the tracked template still disabled, `StartInterval=300`,
+and `RunAtLoad=false`. Three ordinary scheduled heartbeats completed under
+`MAC_LEGACY7_PRODUCTION`:
+
+| RunId | Bucket | Slot | SamplingTargetId | Status |
+| --- | ---: | ---: | ---: | --- |
+| `85d2d601-ff66-4fd1-b3e6-105a1a384478` | 5971342 | 3 | 1 | `COMPLETE` |
+| `8286961f-0edc-4b64-b5ef-15ae776c1389` | 5971343 | 4 | 4 | `COMPLETE` |
+| `24cb4cab-38f9-4629-bedf-6bf41c52b57a` | 5971344 | 5 | 6 | `COMPLETE` |
+
+Each run used the live SQL selector, persisted one target audit and snapshot,
+and received HTTP 200. The corrected sampling era
+`MAC_LEGACY7_PRODUCTION` was recorded effective at
+`2026-10-07T19:51:46.041Z`, the first corrected scheduled heartbeat. The
+retired Windows task remains disabled; no manual Heumarkt request was made;
+Tiered50 target materialization/cutover and Power BI changes remain deferred.
+
+Two interrupted pre-activation diagnostic runs were separately finalized as
+`FAILED` through the existing run-finalization procedure after scheduler
+restart recovery. They are excluded from the three-heartbeat success gate; no
+production run remains in `RUNNING` state.

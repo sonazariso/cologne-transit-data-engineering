@@ -59,6 +59,21 @@ class MacLegacy7SecurityTests(unittest.TestCase):
         self.assertTrue(plist["Disabled"])
         self.assertFalse(plist["RunAtLoad"])
 
+    def test_runtime_identity_and_completion_sql_match_least_privilege_contract(self) -> None:
+        adapter = (ROOT / "src" / "cologne_transit_collector" / "mssql_persistence.py").read_text(
+            encoding="utf-8"
+        )
+        migration = (ROOT / "sql" / "mdd-mac-collector" / "create-source-faithful-persistence.sql").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("OUTPUT INSERTED.DispatcherClaimEventId", adapter)
+        self.assertNotIn("OUTPUT INSERTED.TargetClaimEventId", adapter)
+        self.assertGreaterEqual(adapter.count("SCOPE_IDENTITY()"), 3)
+        self.assertIn("EXEC stg.uspPersistMddMacSnapshot", adapter)
+        self.assertIn("@CompletedRunStatus", adapter)
+        self.assertIn("@CompletedRunStatus VARCHAR(40) = NULL", migration)
+        self.assertIn("UPDATE ctl.MddMacDispatcherClaim", migration)
+
 
 if __name__ == "__main__":
     unittest.main()

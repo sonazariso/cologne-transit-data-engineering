@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED; CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -399,12 +399,12 @@ status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
 source-contract corrections and S78 live-research safety controls. SQL Server
 is the sole official database and the direct Mac Legacy7 path uses the
 existing seven target IDs, one target per deterministic UTC five-minute slot,
-with `MAC_LEGACY7_PRODUCTION` reserved for corrected future audits. The
-LaunchAgent is safety-stopped after live selector, lineage-migration, and
-bounded oversampling-evidence gates passed; dedicated-login, preflight, and
-corrected-heartbeat gates remain pending. Tiered50 activation and Stage 15B
-live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A
-readiness is in progress below.
+with `MAC_LEGACY7_PRODUCTION`. Dedicated-login provisioning, preflight,
+Windows-task retirement, scheduler activation, corrected-era recording, and
+three ordinary scheduled heartbeats passed. The tracked plist remains disabled
+by design; the generated user-local LaunchAgent is active. Tiered50 activation
+and Stage 15B live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**;
+Stage 15A readiness is in progress below.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,
@@ -420,9 +420,9 @@ audit is recorded in [the Stage 14 audit artifact](stages/14-live-research-first
 
 ## Stage 15 — Post-Cutover Validation
 
-Stage 15
-remains **NOT STARTED** as a live post-cutover stage; its pre-cutover
-readiness work is separately tracked below as Stage 15A.
+Stage 15 remains **NOT STARTED — AWAITS TIERED50 CUTOVER** as a live
+post-cutover stage; its readiness work is separately tracked below as Stage
+15A. The active Legacy7 runtime does not constitute Tiered50 cutover evidence.
 
 ### Stage 15A — Post-Cutover Validation Readiness — IN PROGRESS
 

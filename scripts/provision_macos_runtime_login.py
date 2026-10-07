@@ -150,6 +150,14 @@ def _create_login(
     rotate_existing: bool,
     reuse_existing_password: bool = False,
 ) -> bool:
+    """Create or update only the server-level login.
+
+    SQL Server does not allow ``sp_addlogin`` (and can reject password
+    rotation procedures) inside an explicit transaction.  The caller runs
+    this function on an autocommit connection, then commits the database-user,
+    role, and grant changes separately.
+    """
+
     exists = _login_exists(cursor)
     if exists and not rotate_existing and not reuse_existing_password:
         raise RuntimeError(
@@ -175,6 +183,12 @@ def _create_login(
         cursor.execute(
             f"ALTER LOGIN [{RUNTIME_LOGIN}] WITH CHECK_POLICY = ON, CHECK_EXPIRATION = OFF"
         )
+    return exists
+
+
+def _ensure_runtime_database_principal(cursor: Any) -> None:
+    """Create the database principal and apply the exact runtime grants."""
+
     cursor.execute(
         f"""
         IF USER_ID(N'{RUNTIME_LOGIN}') IS NULL
@@ -198,7 +212,6 @@ def _create_login(
     )
     for statement in GRANT_STATEMENTS:
         cursor.execute(statement)
-    return exists
 
 
 def _negative_permission_checks(settings: MssqlConnectionSettings) -> dict[str, Any]:
@@ -369,7 +382,15 @@ def provision(
     connection = connect_mssql(admin_settings)
     try:
         cursor = connection.cursor()
-        cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+        # ``sp_addlogin`` is a server-level procedure and SQL Server rejects
+        # it inside a transaction.  Keep the login operation in autocommit
+        # mode; the pending Keychain item makes this non-rollbackable step
+        # recoverable without generating another credential.  Test doubles
+        # need not implement autocommit, so the helper is intentionally
+        # capability-based.
+        autocommit = getattr(connection, "autocommit", None)
+        if callable(autocommit):
+            autocommit(True)
         existed = _login_exists(cursor)
         if existed and not rotate_existing and not resume:
             if pending_password:
@@ -400,6 +421,13 @@ def provision(
         )
         if existed_from_create != existed:
             raise RuntimeError("dedicated runtime login existence changed during provisioning")
+
+        # The server login now exists.  Switch back to an explicit transaction
+        # for the database user, role membership, and object-level grants.
+        if callable(autocommit):
+            autocommit(False)
+        cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+        _ensure_runtime_database_principal(cursor)
         cursor.execute("COMMIT TRANSACTION;")
         connection.commit()
         committed = True

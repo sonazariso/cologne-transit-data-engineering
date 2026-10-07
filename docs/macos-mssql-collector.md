@@ -4,10 +4,10 @@ This document describes the macOS Legacy7 collector path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
 database. The original additive SQL contract was applied and live-validated,
 the proven historical SQLite source was imported and reconciled, and the exact
-Windows task was manually disabled by the operator on 2026-10-07. The normal
-Legacy7 `launchd` job was active during the historical cutover window but is
-now unloaded/disabled pending the corrected cadence and least-privilege gates;
-Tiered50 remains inactive.
+Windows task was manually disabled by the operator on 2026-10-07. The corrected
+Legacy7 `launchd` job is active on its ordinary five-minute schedule after the
+dedicated-login, preflight, retirement, selector, and heartbeat gates passed.
+The tracked template remains disabled by design; Tiered50 remains inactive.
 
 ## Cadence-correction addendum — 2026-10-07
 
@@ -25,17 +25,18 @@ remain unchanged and must be excluded from simple Windows-versus-Mac cadence
 volume comparisons. A fresh read-only SQL probe confirmed the counts and the
 append-only methodology evidence recorded actual 21,
 historical-equivalent 3, and excess 18 initial attempts. The additive lineage
-migration also passed live validation. The current machine has the LaunchAgent
-unloaded and disabled; the SQL VM became unreachable during dedicated-login
-provisioning, so no new MDD request was made and login/preflight/reactivation
-remain pending.
+migration also passed live validation. During the pre-activation recovery
+window the machine-specific LaunchAgent was unloaded and disabled while the
+SQL VM was unreachable; no new MDD request was made in that window. The
+dedicated-login, preflight, and corrected scheduled-heartbeat gates later
+passed.
 
 Corrected future Mac audits use `MAC_LEGACY7_PRODUCTION`, preserve
 `SamplingTargetId`, `SamplingSlot`, `LogicalDueBucket`, and
 `SelectionPolicyVersion`, and use the dedicated `CologneTransitCollector`
 runtime login. The source-faithful slot mapping and selector definition are
-validated by [`scripts/legacy7_sql_probe.py`](../scripts/legacy7_sql_probe.py)
-before reactivation. The exact grants for the dedicated database role are
+validated by [`scripts/legacy7_sql_probe.py`](../scripts/legacy7_sql_probe.py).
+The exact grants for the dedicated database role are
 listed in [`scripts/provision_macos_runtime_login.py`](../scripts/provision_macos_runtime_login.py)
 and contain no secret material.
 
@@ -94,6 +95,16 @@ The three preserved cutover-validation Mac runs completed successfully:
 seven successful target audits, seven HTTP attempts, seven parsed snapshots,
 and no duplicate target/bucket keys.
 
+The corrected production activation then completed three ordinary scheduled
+heartbeats. Their run IDs were
+`85d2d601-ff66-4fd1-b3e6-105a1a384478` (bucket `5971342`, slot 3, target 1),
+`8286961f-0edc-4b64-b5ef-15ae776c1389` (bucket `5971343`, slot 4, target 4),
+and `24cb4cab-38f9-4629-bedf-6bf41c52b57a` (bucket `5971344`, slot 5, target
+6). Each completed with one SQL-selected target, HTTP 200, persisted lineage,
+and status `COMPLETE` under `MAC_LEGACY7_PRODUCTION`. The append-only sampling
+era `MAC_LEGACY7_PRODUCTION` is effective at the first corrected heartbeat,
+`2026-10-07T19:51:46.041Z`; it is not a Tiered50 cutover.
+
 The durable historical source is explicitly
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`. Its
 read-only proof is: 575,041,536 bytes, SHA-256
@@ -108,8 +119,7 @@ never relabeled as Mac, Windows, Legacy7, or Tiered50 production evidence.
 
 The macOS working copy contains the parser, direct DB-API adapter, migration,
 offline tests, and a safe-by-default tracked `launchd` template. The user-local
-LaunchAgent is generated from that template and is currently unloaded/disabled;
-when activated it runs from the
+LaunchAgent is generated from that template and is active; it runs from the
 owner-only runtime bundle under
 `~/Library/Application Support/CologneTransitIntelligence/`. The adapter uses
 the pinned `pymssql==2.3.2` wheel because the actual Python 3.9 x86_64
@@ -150,12 +160,11 @@ Windows observation is at `2026-10-07T13:43:55Z`. No SQL-side task disable
 operation was used for the final retirement. Existing SQLite evidence was
 reconciled offline; no manual Heumarkt request was made or required.
 
-The future runtime uses the dedicated `CologneTransitCollector` login and
-`CologneTransitCollectorRuntime` database role. Provisioning is intentionally
-blocked until the SQL VM is reachable; the current inactive machine remains on
-the existing administrative configuration and cannot collect. The runtime
-login must report `sysadmin = false` and must not belong to any broad server or
-database data role.
+The active runtime uses the dedicated `CologneTransitCollector` login and
+`CologneTransitCollectorRuntime` database role. Provisioning and finalization
+completed with the pending Keychain credential removed only after positive and
+negative permission checks passed. The runtime login reports `sysadmin = false`
+and belongs to no broad server or database data role.
 
 ## Old and prepared flow
 
@@ -263,8 +272,9 @@ failed import batches remain retained and auditable, including the interrupted
 partial batch; no failed history was deleted. The final report records 70
 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, 121 parser
 gaps, zero unexplained differences, and zero source `RecordedAtTime` values.
-The remaining cutover blocker is Windows task retirement, not SQL row-volume
-capacity. See the [operational record](operational/s98-live-research-import-and-cutover.md).
+The historical capacity/import work is complete; the active Legacy7 path now
+also has dedicated-login, scheduler, and three-heartbeat evidence. See the
+[operational record](operational/s98-live-research-import-and-cutover.md).
 
 ## Timing and RecordedAtTime
 
@@ -304,6 +314,11 @@ are not persisted.
 
 - The installed scheduler interval is five minutes with `StartInterval=300`,
   `ThrottleInterval=300`, no `RunAtLoad`, and no missed-bucket replay.
+- With one selected Legacy7 target per five-minute heartbeat, nominal cadence
+  is 12 logical requests/hour, 288/day, 8,640 per 30-day month, and 8,928 per
+  31-day month before retries. The three preserved seven-target oversampling
+  runs remain valid source evidence but are excluded from cadence-equivalent
+  volume comparisons.
 - Dispatcher and target claims are durable and stale claims are observable.
 - Initial quota reservations are durable. Because Windows provider-wide usage
   is still unreconciled, initial attempts can be recorded conservatively but
@@ -315,11 +330,11 @@ are not persisted.
 
 ## Connectivity and validation evidence
 
-The historical pre-activation SQL validation established reachability to
-`172.16.192.128:1433`, selected database `CologneTransitIntelligence`, all 23
-original additive tables and 3 procedures/views, and unchanged sampling-target
-IDs 1–7. The new nullable lineage/methodology migration has not yet been
-applied to live SQL in the current review.
+The pre-activation SQL validation established reachability to
+`172.16.192.128:1433`, selected database `CologneTransitIntelligence`, and
+unchanged sampling-target IDs 1–7. The additive lineage/methodology migration
+was then applied and final live validation confirmed 26 tables and 4
+routines/views.
 The production preflight used the same path and passed without issuing an MDD
 request. Three subsequent normal scheduled Legacy7 runs then proved live
 Mac-to-SQL persistence.
@@ -356,18 +371,20 @@ It uses the exact interpreter
 `RunAtLoad=false`, and the five approved non-secret gates. Its recorded SHA-256
 is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
 
-The current review has unloaded and disabled only the Mac job. Rollback is
-scheduler-level and additive: leave all new evidence intact for diagnosis,
-and resume the Windows task only after an operator confirms its state. No
-migration rollback should drop the
-new objects or delete historical rows. Tiered50 activation, new production
-target IDs, and Power BI changes remain out of scope.
+The generated user-local LaunchAgent is active with `StartInterval=300`,
+`ThrottleInterval=300`, and `RunAtLoad=false`; the tracked template remains
+safe-by-default and disabled. Rollback is scheduler-level and additive: if SQL
+connectivity or a fail-closed gate fails, unload/disable this exact user-local
+job, leave all evidence intact for diagnosis, and do not issue a manual
+Heumarkt request. The retired Windows task must not be resumed without a new
+operator decision. No migration rollback should drop new objects or delete
+historical rows. Tiered50 activation, new Tiered50 production target IDs, and
+Power BI changes remain out of scope.
 
-At final verification the Windows SQL VM was subsequently powered off. The
-next scheduled LaunchAgent invocation exited during SQL connectivity preflight
-before opening a SQL run or issuing an MDD request. The current review then
-unloaded and disabled the LaunchAgent; the VM must be interactively unlocked
-before any live selector, migration, login, or heartbeat gate can proceed.
+During pre-activation recovery, the SQL VM was temporarily unavailable and a
+scheduled invocation exited during connectivity preflight before opening a SQL
+run or issuing an MDD request. The job was re-enabled only after the VM was
+reachable and all live gates passed.
 
 Rollback is scheduler-level and additive: stop/unload the Mac job, leave all
 new evidence intact for diagnosis, and resume the previously approved Windows

@@ -1362,8 +1362,8 @@ class MssqlPersistence:
                     """
                     INSERT INTO ctl.MddMacDispatcherClaimEvent
                         (PanelVersion, LogicalDueBucket, RunId, EventAtUtc, Outcome, ExistingStatus)
-                    OUTPUT INSERTED.DispatcherClaimEventId
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s);
+                    SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS DispatcherClaimEventId;
                     """,
                     (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_DISPATCHER_CLAIM", existing_status),
                 )
@@ -1417,8 +1417,8 @@ class MssqlPersistence:
                     INSERT INTO ctl.MddMacTargetClaimEvent
                         (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
                          EventAtUtc, Outcome, ExistingStatus)
-                    OUTPUT INSERTED.TargetClaimEventId
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
                     """,
                     (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_CLAIM", existing_status),
                 )
@@ -1446,8 +1446,8 @@ class MssqlPersistence:
                 INSERT INTO ctl.MddMacTargetClaimEvent
                     (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
                      EventAtUtc, Outcome, ExistingStatus)
-                OUTPUT INSERTED.TargetClaimEventId
-                VALUES (%s, %s, %s, %s, %s, 'DUPLICATE_DISPATCHER_CLAIM', NULL)
+                    VALUES (%s, %s, %s, %s, %s, 'DUPLICATE_DISPATCHER_CLAIM', NULL);
+                SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
                 """,
                 (panel_version, target.source_parent_station_id, int(logical_due_bucket), run_id, _utc(event_at)),
             )
@@ -1811,24 +1811,22 @@ class MssqlPersistence:
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
-                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
                 cursor.execute(
                     """
-                    UPDATE ctl.MddMacCollectorRun
-                    SET CompletedAtUtc = %s, Status = %s, SummaryJson = %s
-                    WHERE RunId = %s
+                    EXEC stg.uspPersistMddMacSnapshot
+                        @RunId=%s,
+                        @CompletedRunStatus=%s,
+                        @CompletedAtUtc=%s,
+                        @RunSummaryJson=%s
                     """,
-                    (_utc(completed_at), str(status), encoded, str(run_id)),
+                    (str(run_id), str(status), _utc(completed_at), encoded),
                 )
-                cursor.execute(
-                    """
-                    UPDATE ctl.MddMacDispatcherClaim
-                    SET Status = %s, CompletedAtUtc = %s
-                    WHERE RunId = %s
-                    """,
-                    (str(status), _utc(completed_at), str(run_id)),
-                )
-                cursor.execute("COMMIT TRANSACTION;")
+                # The finalization branch returns a scalar NULL SnapshotId;
+                # consume it before the DB-API connection is reused.
+                try:
+                    cursor.fetchall()
+                except Exception:
+                    pass
                 connection.commit()
             except BaseException:
                 connection.rollback()
