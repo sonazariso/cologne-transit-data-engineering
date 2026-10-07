@@ -92,6 +92,24 @@ change was made by this work. Existing Windows collector appends observed during
 the window are recorded separately, and its current Task Scheduler/process
 state remains `WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED`.
 
+## Operational archive-removal record — 2026-10-07
+
+`NRWTransportDW` was classified `LEGACY_SAFE_TO_ARCHIVE` after the final
+dependency review. No required Köln asset needed migration, and the user had
+confirmed that the verified native backup archive had been copied to external
+USB storage and hash-checked. The controlled `SINGLE_USER` transition and
+`DROP DATABASE` removed only `NRWTransportDW` from the Windows VM.
+
+`CologneTransitIntelligence` remains the only project SQL Server database. Its
+post-removal state is `ONLINE` / `MULTI_USER`; `DBCC CHECKDB` with
+`PHYSICAL_ONLY, NO_INFOMSGS` passed; the seven sampling-target IDs remain; and
+the latest realtime observation recorded by the validation was
+`2026-10-07T11:58:55Z`. The operation recovered 40,241,139,712 bytes
+(37.477 GiB) on C:. The native `.bak`, archive ZIP, manifest, inventory, and
+restore instructions were not deleted. Full machine-readable evidence is in
+the [removal evidence](archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-evidence-20261007T120030Z.json)
+and the [human-readable report](archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-report-20261007T120030Z.md).
+
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
 **Decision:** Use MDD/TRIAS as the primary realtime source for the Cologne

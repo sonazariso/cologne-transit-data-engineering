@@ -40,6 +40,9 @@ EXPECTED_SQL_DATABASE = "CologneTransitIntelligence"
 EXPECTED_SQLITE_SCHEMA_VERSION = 5
 MIN_SESSION_SECONDS = 4 * 60 * 60
 MAX_SESSION_SECONDS = 7 * 60 * 60
+CONSERVATIVE_IMPORT_MULTIPLIER = 2
+MIN_PHYSICAL_FREE_PERCENT = 5.0
+MIN_PHYSICAL_FREE_RESERVE_BYTES = 1024 * 1024 * 1024
 
 
 class SQLiteImportError(RuntimeError):
@@ -619,6 +622,274 @@ def _result_snapshot_id(cursor: Any) -> int | None:
     return int(value)
 
 
+def _json_object(value: Any) -> Any:
+    """Decode an audit JSON field without allowing malformed history to hide."""
+
+    if value is None or value == "":
+        return {}
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except (TypeError, ValueError):
+        return {"_unparsed": str(value)}
+
+
+def _capacity_file_row(row: Any, *, file_type: str) -> dict[str, Any]:
+    """Normalize one SQL Server file/volume metadata row for reports."""
+
+    allocated = int(_row_value(row, "allocated_bytes", 0) or 0)
+    space_used_pages = _row_value(row, "space_used_pages", 1)
+    space_used = None
+    if space_used_pages is not None:
+        space_used = max(0, int(space_used_pages)) * 8192
+    volume_total = int(_row_value(row, "total_bytes", 8) or 0)
+    volume_free = int(_row_value(row, "available_bytes", 9) or 0)
+    growth = int(_row_value(row, "growth", 6) or 0)
+    percent_growth = bool(_row_value(row, "is_percent_growth", 7))
+    max_size_bytes = _row_value(row, "max_size_bytes", 5)
+    if max_size_bytes is not None:
+        max_size_bytes = int(max_size_bytes)
+    return {
+        "logical_file_name": str(_row_value(row, "logical_name", 4) or ""),
+        "physical_path": str(_row_value(row, "physical_name", 2) or ""),
+        "file_type": file_type,
+        "allocated_bytes": allocated,
+        "allocated_mb": allocated / (1024 * 1024),
+        "space_used_bytes": space_used,
+        "space_used_mb": None if space_used is None else space_used / (1024 * 1024),
+        "internal_free_bytes": None if space_used is None else max(0, allocated - space_used),
+        "internal_free_mb": (
+            None
+            if space_used is None
+            else max(0, allocated - space_used) / (1024 * 1024)
+        ),
+        "growth": growth,
+        "is_percent_growth": percent_growth,
+        "growth_setting": f"{growth}%" if percent_growth else f"{growth * 8 / 1024:.6g} MB",
+        "growth_bytes": None if percent_growth else growth * 8192,
+        "max_size_bytes": max_size_bytes,
+        "max_size": "UNLIMITED" if max_size_bytes is None else max_size_bytes,
+        "volume_name": str(_row_value(row, "volume_mount_point", 3) or ""),
+        "volume_total_bytes": volume_total,
+        "volume_free_bytes": volume_free,
+        "volume_free_percent": (volume_free / volume_total * 100.0) if volume_total else None,
+    }
+
+
+def _capacity_report(
+    *,
+    proof: SQLiteSourceProof,
+    rows_files: Sequence[Mapping[str, Any]],
+    log_files: Sequence[Mapping[str, Any]],
+    log_usage: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Evaluate the read-only SQL Server capacity model.
+
+    Only ROWS internal free space can satisfy the import requirement.  Physical
+    free space is evaluated independently as the guardrail for any required
+    data-file autogrowth.  LOG reusable space is reported but deliberately
+    excluded from all ROWS calculations.
+    """
+
+    all_files = [*rows_files, *log_files]
+    volume_map: dict[str, dict[str, Any]] = {}
+    for file_row in all_files:
+        volume = str(file_row.get("volume_name") or "")
+        if not volume:
+            continue
+        current = volume_map.setdefault(
+            volume,
+            {
+                "volume_name": volume,
+                "total_bytes": int(file_row.get("volume_total_bytes") or 0),
+                "free_bytes": int(file_row.get("volume_free_bytes") or 0),
+                "file_types": set(),
+            },
+        )
+        current["total_bytes"] = min(
+            int(current["total_bytes"] or 0), int(file_row.get("volume_total_bytes") or 0)
+        ) if current["total_bytes"] else int(file_row.get("volume_total_bytes") or 0)
+        current["free_bytes"] = min(
+            int(current["free_bytes"] or 0), int(file_row.get("volume_free_bytes") or 0)
+        ) if current["free_bytes"] else int(file_row.get("volume_free_bytes") or 0)
+        current["file_types"].add(str(file_row.get("file_type") or ""))
+
+    volumes: list[dict[str, Any]] = []
+    for value in sorted(volume_map.values(), key=lambda item: str(item["volume_name"])):
+        total = int(value["total_bytes"])
+        free = int(value["free_bytes"])
+        reserve = max(MIN_PHYSICAL_FREE_RESERVE_BYTES, int(total * 0.05))
+        volumes.append(
+            {
+                "volume_name": value["volume_name"],
+                "total_bytes": total,
+                "free_bytes": free,
+                "free_percent": (free / total * 100.0) if total else None,
+                "required_safety_reserve_bytes": reserve,
+                "file_types": sorted(value["file_types"]),
+            }
+        )
+
+    source_size = int(proof.byte_size)
+    conservative_requirement = source_size * CONSERVATIVE_IMPORT_MULTIPLIER
+    rows_internal_free = sum(int(row.get("internal_free_bytes") or 0) for row in rows_files)
+    expected_physical_growth = max(0, conservative_requirement - rows_internal_free)
+
+    rows_volumes = [volume for volume in volumes if "ROWS" in volume["file_types"]]
+    projected_volumes: list[dict[str, Any]] = []
+    growth_remaining = expected_physical_growth
+    # SQL Server may have multiple ROWS volumes.  The importer does not control
+    # file-growth allocation, so the report applies the conservative amount to
+    # the least-free ROWS volume and leaves the others unchanged.
+    for volume in sorted(rows_volumes, key=lambda item: (item["free_bytes"], item["volume_name"])):
+        growth = min(growth_remaining, int(volume["free_bytes"]))
+        growth_remaining -= growth
+        projected_free = int(volume["free_bytes"]) - growth
+        projected = {
+            **volume,
+            "projected_growth_bytes": growth,
+            "projected_free_bytes": projected_free,
+            "projected_free_percent": (
+                projected_free / int(volume["total_bytes"]) * 100.0
+                if int(volume["total_bytes"])
+                else None
+            ),
+            "projected_safety_reserve_bytes": int(volume["required_safety_reserve_bytes"]),
+        }
+        projected_volumes.append(projected)
+
+    projected_volume_names = {item["volume_name"] for item in projected_volumes}
+    for volume in volumes:
+        if volume["volume_name"] not in projected_volume_names:
+            projected_volumes.append(
+                {
+                    **volume,
+                    "projected_growth_bytes": 0,
+                    "projected_free_bytes": int(volume["free_bytes"]),
+                    "projected_free_percent": volume["free_percent"],
+                    "projected_safety_reserve_bytes": int(volume["required_safety_reserve_bytes"]),
+                }
+            )
+
+    volume_failures = []
+    for volume in projected_volumes:
+        if int(volume["free_bytes"]) < int(volume["required_safety_reserve_bytes"]):
+            volume_failures.append(
+                {
+                    "volume_name": volume["volume_name"],
+                    "reason": "CURRENT_PHYSICAL_FREE_SPACE_BELOW_SAFETY_RESERVE",
+                    "additional_free_bytes_required": int(volume["required_safety_reserve_bytes"])
+                    - int(volume["free_bytes"]),
+                }
+            )
+        if int(volume["projected_free_bytes"]) < int(volume["projected_safety_reserve_bytes"]):
+            volume_failures.append(
+                {
+                    "volume_name": volume["volume_name"],
+                    "reason": "PROJECTED_PHYSICAL_FREE_SPACE_BELOW_SAFETY_RESERVE",
+                    "additional_free_bytes_required": int(volume["projected_safety_reserve_bytes"])
+                    - int(volume["projected_free_bytes"]),
+                }
+            )
+        projected_percent = volume["projected_free_percent"]
+        if projected_percent is not None and projected_percent < MIN_PHYSICAL_FREE_PERCENT:
+            volume_failures.append(
+                {
+                    "volume_name": volume["volume_name"],
+                    "reason": "PROJECTED_PHYSICAL_FREE_PERCENT_BELOW_SAFETY_THRESHOLD",
+                    "projected_free_percent": projected_percent,
+                    "required_free_percent": MIN_PHYSICAL_FREE_PERCENT,
+                }
+            )
+
+    row_physical_free = min((int(item["free_bytes"]) for item in rows_volumes), default=0)
+    row_physical_total = min((int(item["total_bytes"]) for item in rows_volumes), default=0)
+    physical_reserve_after = min(
+        (int(item["projected_free_bytes"])
+         for item in projected_volumes),
+        default=0,
+    )
+    physical_reserve_after_percent = min(
+        (float(item["projected_free_percent"])
+         for item in projected_volumes
+         if item["projected_free_percent"] is not None),
+        default=0.0,
+    )
+    physical_shortfall = max(
+        [
+            int(item["projected_safety_reserve_bytes"]) - int(item["projected_free_bytes"])
+            for item in projected_volumes
+        ]
+        or [0]
+    )
+    rows_shortfall = max(0, expected_physical_growth - row_physical_free)
+    additional_free_required = max(rows_shortfall, physical_shortfall)
+    log_allocated = sum(int(row.get("allocated_bytes") or 0) for row in log_files)
+    log_used = int(log_usage.get("used_log_space_in_bytes") or 0)
+    log_reusable = max(0, log_allocated - log_used)
+    log_used_percent = float(log_usage.get("used_log_space_in_percent") or 0.0)
+    status = (
+        "PASS"
+        if rows_files
+        and log_files
+        and not volume_failures
+        and growth_remaining == 0
+        and rows_internal_free + row_physical_free >= conservative_requirement
+        and physical_reserve_after_percent >= MIN_PHYSICAL_FREE_PERCENT
+        else "FAIL"
+    )
+    return {
+        "status": status,
+        "windows_volumes": volumes,
+        "projected_volumes": sorted(projected_volumes, key=lambda item: str(item["volume_name"])),
+        "rows_files": list(rows_files),
+        "log_files": list(log_files),
+        "log_usage": {
+            "allocated_bytes": log_allocated,
+            "allocated_mb": log_allocated / (1024 * 1024),
+            "used_bytes": log_used,
+            "used_mb": log_used / (1024 * 1024),
+            "used_percent": log_used_percent,
+            "reusable_internal_free_bytes": log_reusable,
+            "reusable_internal_free_mb": log_reusable / (1024 * 1024),
+            "recovery_model": log_usage.get("recovery_model_desc"),
+            "log_reuse_wait_desc": log_usage.get("log_reuse_wait_desc"),
+        },
+        "import_capacity": {
+            "source_byte_size": source_size,
+            "conservative_multiplier": CONSERVATIVE_IMPORT_MULTIPLIER,
+            "conservative_import_requirement_bytes": conservative_requirement,
+            "projected_import_storage_requirement_bytes": conservative_requirement,
+            "rows_internal_free_capacity_bytes": rows_internal_free,
+            "rows_internal_free_capacity_mb": rows_internal_free / (1024 * 1024),
+            "expected_physical_growth_requirement_bytes": expected_physical_growth,
+            "expected_physical_growth_requirement_mb": expected_physical_growth / (1024 * 1024),
+            "rows_volume_free_bytes": row_physical_free,
+            "rows_volume_total_bytes": row_physical_total,
+            "physical_os_reserve_after_projected_import_bytes": physical_reserve_after,
+            "physical_os_reserve_after_projected_import_mb": physical_reserve_after / (1024 * 1024),
+            "physical_os_reserve_after_projected_import_percent": physical_reserve_after_percent,
+            "minimum_required_os_reserve_bytes": min(
+                (int(item["required_safety_reserve_bytes"]) for item in projected_volumes),
+                default=0,
+            ),
+            "additional_free_bytes_required": additional_free_required,
+            "capacity_blockers": volume_failures
+            + ([{"reason": "ROWS_PHYSICAL_FREE_SPACE_INSUFFICIENT", "additional_free_bytes_required": rows_shortfall}]
+               if rows_shortfall else [])
+            + ([{"reason": "ROWS_VOLUME_NOT_FOUND"}] if not rows_files else [])
+            + ([{"reason": "LOG_FILE_NOT_FOUND"}] if not log_files else []),
+        },
+        "volume_safety": {
+            "minimum_allowed_free_percent": MIN_PHYSICAL_FREE_PERCENT,
+            "minimum_allowed_free_reserve_bytes": MIN_PHYSICAL_FREE_RESERVE_BYTES,
+            "failures": volume_failures,
+        },
+        "log_space_excluded_from_rows_capacity": True,
+    }
+
+
 class SQLiteToMssqlImporter:
     """Explicit importer whose default is never apply."""
 
@@ -647,6 +918,8 @@ class SQLiteToMssqlImporter:
         self.table_counters: dict[str, ImportCounters] = {}
         self.evidence_counters: dict[str, ImportCounters] = {}
         self.lineage_cache: dict[tuple[str, str], Any | None] = {}
+        self._lineage_cache_loaded = False
+        self.timing_destination_cache: dict[int, dict[tuple[Any, ...], int]] = {}
 
     def _source_rows(self, table_name: str) -> Iterable[dict[str, Any]]:
         if self.source_connection is None:
@@ -689,12 +962,16 @@ class SQLiteToMssqlImporter:
                 table_name = str(row[0])
                 identity = str(row[1])
             self.lineage_cache[(table_name, identity)] = row
+        self._lineage_cache_loaded = True
 
     def _existing_lineage(self, source_table: str, source_key: str) -> Any | None:
         identity = _identity_hash(self.proof.sha256, source_table, source_key)  # type: ignore[union-attr]
         cache_key = (source_table, identity)
         if cache_key in self.lineage_cache:
             return self.lineage_cache[cache_key]
+        if self._lineage_cache_loaded:
+            self.lineage_cache[cache_key] = None
+            return None
         cursor = self._execute(
             """
             SELECT TOP (1) ImportSourceRowId, ImportBatchId, RowStatus,
@@ -1118,6 +1395,7 @@ class SQLiteToMssqlImporter:
             if self._existing_lineage("target_audits", source_key) is None:
                 self._execute(
                     """
+                    SET NOCOUNT ON;
                     INSERT INTO ctl.MddMacTargetAudit
                         (RunId, PanelVersion, TargetIdentity, StationName, Tier,
                          PhaseIndex, NumberOfResults, LogicalDueBucket, SamplingEra,
@@ -1126,9 +1404,9 @@ class SQLiteToMssqlImporter:
                          HttpStatus, StopEventResultCount, ParserOutcome,
                          PersistenceOutcome, ErrorCategory, OutcomeJson,
                          DurationMs, SkipReason, RetryDecision, RetryOutcome)
-                    OUTPUT INSERTED.AuditId
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ; SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS AuditId
                     """,
                     (
                         self.run_map[str(row["collector_run_id"])], row["panel_version"],
@@ -1168,6 +1446,7 @@ class SQLiteToMssqlImporter:
                 audit_id = self.audit_map[int(row["audit_id"])]
                 self._execute(
                     """
+                    SET NOCOUNT ON;
                     INSERT INTO ctl.MddMacHttpAttempt
                         (AuditId, AttemptNumber, StartedAtUtc, CompletedAtUtc,
                          HttpStatus, TransportFailureCategory, Outcome,
@@ -1175,9 +1454,9 @@ class SQLiteToMssqlImporter:
                          TransportKind, NetworkAttempted, HttpResponseReceived,
                          LiveClientInvocation, ConservativeQuotaAccounted,
                          ProviderQuotaStatus, ProviderAttemptConfirmed)
-                    OUTPUT INSERTED.HttpAttemptId
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s, %s)
+                    ; SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS HttpAttemptId
                     """,
                     (
                         audit_id, int(row["attempt_number"]), _parse_utc(row["started_at_utc"]),
@@ -1308,20 +1587,33 @@ class SQLiteToMssqlImporter:
         self._commit()
 
     def _find_timing(self, destination_snapshot_id: int, row: Mapping[str, Any]) -> int | None:
-        result = self._execute(
-            """
-            SELECT TOP (1) TimingObservationId
-            FROM stg.MddMacTimingObservation
-            WHERE SnapshotId = %s AND EventOrdinal = %s AND CallScope = %s
-              AND CallOrdinal = %s AND TimingContext = %s
-            """,
+        if destination_snapshot_id not in self.timing_destination_cache:
+            rows = self._execute(
+                """
+                SELECT TimingObservationId, EventOrdinal, CallScope,
+                       CallOrdinal, TimingContext
+                FROM stg.MddMacTimingObservation
+                WHERE SnapshotId = %s
+                """,
+                (destination_snapshot_id,),
+            ).fetchall()
+            self.timing_destination_cache[destination_snapshot_id] = {
+                (
+                    row.get("EventOrdinal") if isinstance(row, Mapping) else row[1],
+                    row.get("CallScope") if isinstance(row, Mapping) else row[2],
+                    row.get("CallOrdinal") if isinstance(row, Mapping) else row[3],
+                    row.get("TimingContext") if isinstance(row, Mapping) else row[4],
+                ): int(row.get("TimingObservationId") if isinstance(row, Mapping) else row[0])
+                for row in rows
+            }
+        return self.timing_destination_cache[destination_snapshot_id].get(
             (
-                destination_snapshot_id, row["event_ordinal"], row["call_scope"],
-                row["call_ordinal"], row["timing_context"],
-            ),
-        ).fetchone()
-        value = _row_value(result, "TimingObservationId", 0)
-        return int(value) if value is not None else None
+                row["event_ordinal"],
+                row["call_scope"],
+                row["call_ordinal"],
+                row["timing_context"],
+            )
+        )
 
     def _import_timing_rows(self) -> None:
         for row in self._source_rows("timing_observations"):
@@ -1340,6 +1632,7 @@ class SQLiteToMssqlImporter:
                     # imported additively with the source fields unchanged.
                     self._execute(
                         """
+                        SET NOCOUNT ON;
                         INSERT INTO stg.MddMacTimingObservation
                             (SnapshotId, ResultId, ResultOrdinal, EventOrdinal,
                              CallScope, CallOrdinal, TimingContext,
@@ -1356,11 +1649,11 @@ class SQLiteToMssqlImporter:
                              SourceEventIdentityVersion, SourceEventIdentityStatus,
                              SourceEventIdentityBasisJson, SourceEventIdentityMissingFieldsJson,
                              SourceEventIdentityAmbiguityJson, SourcePathsJson)
-                        OUTPUT INSERTED.TimingObservationId
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s)
+                        ; SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS TimingObservationId
                         """,
                         (
                             destination_snapshot_id, row["result_id"], row["event_ordinal"], row["event_ordinal"],
@@ -1425,6 +1718,7 @@ class SQLiteToMssqlImporter:
                 else:
                     self._execute(
                         """
+                        SET NOCOUNT ON;
                         INSERT INTO stg.MddMacServiceSectionEvidence
                             (SnapshotId, ResultId, ResultOrdinal, EventOrdinal,
                              SectionOrdinal, SourcePath, LineRef, DirectionRef,
@@ -1433,9 +1727,9 @@ class SQLiteToMssqlImporter:
                              RouteDescription, Via, PublishedLineName,
                              ModeSourceJson, SourcePathsJson,
                              SourceRepresentationJson, SemanticRole)
-                        OUTPUT INSERTED.ServiceSectionEvidenceId
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ; SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS ServiceSectionEvidenceId
                         """,
                         (
                             destination_snapshot_id, row["result_id"], row["result_ordinal"], row["event_ordinal"],
@@ -1634,11 +1928,25 @@ class SQLiteToMssqlImporter:
             raise SQLiteImportError("explicit SQL Server settings are required with --apply")
         if self.settings.database != EXPECTED_SQL_DATABASE:
             raise SQLiteImportError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
+        # These are all read-only gates.  Capacity and failed-batch history are
+        # intentionally evaluated before a new ImportBatchId is created.
+        failed_import_audit = read_only_failed_import_audit(self.settings, self.proof.sha256)
+        if not failed_import_audit["resume_reconcile_safe"]:
+            raise SQLiteImportError(
+                "existing FAILED import history contains inconsistent inserted lineage; "
+                "refusing to create a new batch"
+            )
+        capacity = read_only_capacity_audit(self.settings, self.proof)
+        if capacity["status"] != "PASS":
+            blockers = capacity.get("import_capacity", {}).get("capacity_blockers", [])
+            raise SQLiteImportError(
+                "SQL Server capacity preflight failed before batch creation: "
+                + _canonical_json(blockers)
+            )
         adapter = MssqlPersistence(self.settings)
         schema = adapter.validate_schema()
         before = adapter.baseline()
         overlap = read_only_overlap_audit(self.settings, self.proof)
-        capacity = read_only_capacity_audit(self.settings, self.proof)
         # Reopen the exact proven file through SQLite's read-only URI.  The
         # importer never uses an implicitly discovered or writable source.
         self.source_connection = sqlite3.connect(_sqlite_uri(self.source_path), uri=True)
@@ -1701,6 +2009,7 @@ class SQLiteToMssqlImporter:
                 "inventory": inventory_dict,
                 "schema": schema,
                 "capacity_audit": capacity,
+                "previous_failed_import_audit": failed_import_audit,
                 "overlap_audit": overlap,
                 "reconciliation": reconciliation,
                 "before": before,
@@ -1793,53 +2102,212 @@ def read_only_overlap_audit(settings: MssqlConnectionSettings, proof: SQLiteSour
         connection.close()
 
 
-def read_only_capacity_audit(settings: MssqlConnectionSettings, proof: SQLiteSourceProof) -> dict[str, Any]:
-    """Check row-volume headroom before opening an import batch."""
+def read_only_failed_import_audit(
+    settings: MssqlConnectionSettings,
+    source_sha256: str,
+) -> dict[str, Any]:
+    """Return immutable history and partial-destination evidence for failed batches."""
 
     connection = connect_mssql(settings)
     try:
         cursor = connection.cursor()
         cursor.execute(
             """
-            SELECT DISTINCT
-                vs.volume_mount_point,
-                vs.available_bytes,
-                vs.total_bytes
+            SELECT ImportBatchId, ImportStartedAtUtc, ImportCompletedAtUtc,
+                   FailureReason, SourceCountsJson, InsertedCountsJson,
+                   DuplicateCountsJson, OverlapCountsJson,
+                   ReconciliationResultJson, ImporterVersion
+            FROM ctl.MddImportBatch
+            WHERE SourceDatabaseSha256 = %s AND Status = 'FAILED'
+            ORDER BY ImportStartedAtUtc, ImportBatchId
+            """,
+            (source_sha256,),
+        )
+        batches = cursor.fetchall()
+        audited: list[dict[str, Any]] = []
+        for batch in batches:
+            batch_id = _row_value(batch, "ImportBatchId", 0)
+            cursor.execute(
+                """
+                SELECT SourceTableName, Classification, SourceRowCount,
+                       EligibleRowCount, InsertedRowCount, DuplicateRowCount,
+                       OverlapClassifiedRowCount, DestinationRowCount,
+                       UnexplainedDifference, ReconciliationStatus
+                FROM ctl.MddImportTableAudit
+                WHERE ImportBatchId = %s
+                ORDER BY SourceTableName
+                """,
+                (batch_id,),
+            )
+            table_audits = [dict(row) if isinstance(row, Mapping) else row for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT EvidenceFamily, SourceRowCount, EligibleRowCount,
+                       InsertedRowCount, DuplicateRowCount,
+                       OverlapClassifiedRowCount, DestinationRowCount,
+                       UnexplainedDifference, ReconciliationStatus
+                FROM ctl.MddImportEvidenceAudit
+                WHERE ImportBatchId = %s
+                ORDER BY EvidenceFamily
+                """,
+                (batch_id,),
+            )
+            evidence_audits = [dict(row) if isinstance(row, Mapping) else row for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS source_row_count,
+                       SUM(CASE WHEN RowStatus = 'INSERTED' THEN 1 ELSE 0 END) AS inserted_lineage_count,
+                       SUM(CASE WHEN RowStatus = 'OVERLAP' THEN 1 ELSE 0 END) AS overlap_lineage_count,
+                       COUNT(DISTINCT NULLIF(DestinationObjectName, '')) AS destination_object_count,
+                       COUNT(DISTINCT NULLIF(DestinationKey, '')) AS destination_key_count
+                FROM ctl.MddImportSourceRow
+                WHERE ImportBatchId = %s
+                """,
+                (batch_id,),
+            )
+            source_summary = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT DISTINCT DestinationObjectName
+                FROM ctl.MddImportSourceRow
+                WHERE ImportBatchId = %s AND DestinationObjectName IS NOT NULL
+                ORDER BY DestinationObjectName
+                """,
+                (batch_id,),
+            )
+            destination_objects = [
+                str(_row_value(row, "DestinationObjectName", 0))
+                for row in cursor.fetchall()
+                if _row_value(row, "DestinationObjectName", 0) is not None
+            ]
+            inserted_lineage_count = int(_row_value(source_summary, "inserted_lineage_count", 1) or 0)
+            overlap_lineage_count = int(_row_value(source_summary, "overlap_lineage_count", 2) or 0)
+            destination_key_count = int(_row_value(source_summary, "destination_key_count", 4) or 0)
+            partial_evidence = inserted_lineage_count > 0
+            # A source-lineage row is unique across all batches for this exact
+            # source SHA.  That makes a subsequent run a reconciliation/resume
+            # operation, provided no INSERTED lineage row lost its destination.
+            inconsistent_inserted_rows = sum(
+                1
+                for row in table_audits
+                if isinstance(row, Mapping)
+                and str(row.get("ReconciliationStatus")) == "FAIL"
+                and int(row.get("InsertedRowCount") or 0) > int(row.get("DestinationRowCount") or 0)
+            )
+            audited.append(
+                {
+                    "import_batch_id": str(batch_id),
+                    "started_at": _row_value(batch, "ImportStartedAtUtc", 1),
+                    "completed_at": _row_value(batch, "ImportCompletedAtUtc", 2),
+                    "failure_reason": _row_value(batch, "FailureReason", 3),
+                    "source_counts": _json_object(_row_value(batch, "SourceCountsJson", 4)),
+                    "inserted_counts": _json_object(_row_value(batch, "InsertedCountsJson", 5)),
+                    "duplicate_counts": _json_object(_row_value(batch, "DuplicateCountsJson", 6)),
+                    "overlap_counts": _json_object(_row_value(batch, "OverlapCountsJson", 7)),
+                    "reconciliation_result": _json_object(_row_value(batch, "ReconciliationResultJson", 8)),
+                    "importer_version": _row_value(batch, "ImporterVersion", 9),
+                    "source_row_count": int(_row_value(source_summary, "source_row_count", 0) or 0),
+                    "inserted_lineage_count": inserted_lineage_count,
+                    "overlap_lineage_count": overlap_lineage_count,
+                    "destination_objects_touched": destination_objects,
+                    "destination_key_count": destination_key_count,
+                    "table_audits": table_audits,
+                    "evidence_audits": evidence_audits,
+                    "partial_destination_evidence_committed": partial_evidence,
+                    "resume_reconcile_safe": inconsistent_inserted_rows == 0,
+                    "history_immutable": True,
+                }
+            )
+        return {
+            "status": "READ_ONLY_COMPLETE",
+            "source_sha256": source_sha256,
+            "failed_batch_count": len(audited),
+            "failed_batches": audited,
+            "all_failed_batches_immutable": True,
+            "resume_reconcile_safe": all(item["resume_reconcile_safe"] for item in audited),
+        }
+    finally:
+        connection.close()
+
+
+def read_only_capacity_audit(settings: MssqlConnectionSettings, proof: SQLiteSourceProof) -> dict[str, Any]:
+    """Run the complete read-only SQL Server capacity preflight."""
+
+    connection = connect_mssql(settings)
+    try:
+        cursor = connection.cursor()
+        # Keep the tuple fallback order aligned with _capacity_file_row().
+        cursor.execute(
+            """
+            SELECT
+                CAST(f.size AS bigint) * 8192 AS allocated_bytes,
+                FILEPROPERTY(f.name, 'SpaceUsed') AS space_used_pages,
+                f.physical_name,
+                v.volume_mount_point,
+                f.name AS logical_name,
+                CASE WHEN f.max_size = -1 THEN NULL ELSE CAST(f.max_size AS bigint) * 8192 END AS max_size_bytes,
+                f.growth,
+                f.is_percent_growth,
+                v.total_bytes,
+                v.available_bytes
             FROM sys.database_files AS f
-            CROSS APPLY sys.dm_os_volume_stats(DB_ID(), f.file_id) AS vs
+            CROSS APPLY sys.dm_os_volume_stats(DB_ID(), f.file_id) AS v
             WHERE f.type_desc = 'ROWS'
+            ORDER BY f.file_id
             """
         )
-        rows = cursor.fetchall()
-        if not rows:
-            raise SQLiteImportError("SQL Server returned no row-volume capacity rows")
-        available = min(int(_row_value(row, "available_bytes", 1) or 0) for row in rows)
-        total = min(int(_row_value(row, "total_bytes", 2) or 0) for row in rows)
-        # The SQLite file contains both normalized evidence and source JSON;
-        # require conservative two-file-size headroom before starting a batch
-        # so a capacity failure cannot leave a half-imported source.
-        required = proof.byte_size * 2
-        result = {
-            "status": "PASS" if available >= required else "FAIL",
-            "volumes": [
-                {
-                    "mount_point": str(_row_value(row, "volume_mount_point", 0)),
-                    "available_bytes": int(_row_value(row, "available_bytes", 1) or 0),
-                    "total_bytes": int(_row_value(row, "total_bytes", 2) or 0),
-                }
-                for row in rows
-            ],
-            "minimum_available_bytes": available,
-            "minimum_total_bytes": total,
-            "source_byte_size": proof.byte_size,
-            "required_headroom_bytes": required,
-        }
-        if result["status"] != "PASS":
-            raise SQLiteImportError(
-                "SQL Server row-volume headroom is insufficient for the proven source; "
-                f"available={available} bytes, required={required} bytes"
-            )
-        return result
+        rows_files = [_capacity_file_row(row, file_type="ROWS") for row in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT
+                CAST(f.size AS bigint) * 8192 AS allocated_bytes,
+                NULL AS space_used_pages,
+                f.physical_name,
+                v.volume_mount_point,
+                f.name AS logical_name,
+                CASE WHEN f.max_size = -1 THEN NULL ELSE CAST(f.max_size AS bigint) * 8192 END AS max_size_bytes,
+                f.growth,
+                f.is_percent_growth,
+                v.total_bytes,
+                v.available_bytes
+            FROM sys.database_files AS f
+            CROSS APPLY sys.dm_os_volume_stats(DB_ID(), f.file_id) AS v
+            WHERE f.type_desc = 'LOG'
+            ORDER BY f.file_id
+            """
+        )
+        log_files = [_capacity_file_row(row, file_type="LOG") for row in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT d.recovery_model_desc, d.log_reuse_wait_desc,
+                   CAST(u.total_log_size_in_bytes AS bigint) AS total_log_size_in_bytes,
+                   CAST(u.used_log_space_in_bytes AS bigint) AS used_log_space_in_bytes,
+                   CAST(u.used_log_space_in_percent AS decimal(18,6)) AS used_log_space_in_percent
+            FROM sys.databases AS d
+            CROSS JOIN sys.dm_db_log_space_usage AS u
+            WHERE d.database_id = DB_ID()
+            """
+        )
+        usage_row = cursor.fetchone()
+        if usage_row is None:
+            raise SQLiteImportError("SQL Server returned no transaction-log capacity row")
+        log_usage = (
+            dict(usage_row)
+            if isinstance(usage_row, Mapping)
+            else {
+                "recovery_model_desc": _row_value(usage_row, "recovery_model_desc", 0),
+                "log_reuse_wait_desc": _row_value(usage_row, "log_reuse_wait_desc", 1),
+                "total_log_size_in_bytes": _row_value(usage_row, "total_log_size_in_bytes", 2),
+                "used_log_space_in_bytes": _row_value(usage_row, "used_log_space_in_bytes", 3),
+                "used_log_space_in_percent": _row_value(usage_row, "used_log_space_in_percent", 4),
+            }
+        )
+        return _capacity_report(
+            proof=proof,
+            rows_files=rows_files,
+            log_files=log_files,
+            log_usage=log_usage,
+        )
     finally:
         connection.close()
 
@@ -1847,6 +2315,7 @@ def read_only_capacity_audit(settings: MssqlConnectionSettings, proof: SQLiteSou
 __all__ = [
     "EXPECTED_SQL_DATABASE",
     "EXPECTED_SQLITE_SCHEMA_VERSION",
+    "CONSERVATIVE_IMPORT_MULTIPLIER",
     "FULL_IMPORT_TABLES",
     "IMPORTER_VERSION",
     "ImportCounters",
@@ -1857,5 +2326,6 @@ __all__ = [
     "SourceTableInventory",
     "inspect_sqlite_source",
     "read_only_capacity_audit",
+    "read_only_failed_import_audit",
     "read_only_overlap_audit",
 ]

@@ -2,11 +2,11 @@
 
 This document describes the prepared Python collector path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
-database. The additive SQL contract is applied and live-validated, but the
-historical SQLite import is currently blocked by SQL Server row-volume disk
-headroom. The existing Windows collector has not been disabled, no macOS
-scheduler has been loaded, no Tiered50 collection has been started, and no
-live MDD request is authorized by this change.
+database. The additive SQL contract is applied and live-validated, and the
+proven historical SQLite source has been imported and reconciled. The existing
+Windows collector has not been disabled, so the macOS scheduler remains
+disabled; no Tiered50 collection has been started and no new Mac MDD request
+has been issued.
 
 The durable historical source is explicitly
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`. Its
@@ -42,16 +42,17 @@ requires IDs 1–7 and the existing StopPointRef mapping, and uses those rows as
 the only target scope. It does not use the deferred 50-target manifest as a
 live target list and does not create a new sampling era.
 
-The current runtime gate remains unresolved: historical evidence identifies
-the task name `\Cologne Transit Realtime Collector`, principal
-`DATAANALYST-VM\Somaye`, and the historical PowerShell entrypoint, but a
-current Windows Task Scheduler state, last/next/result state, and process
-inspection were not captured. The reachable SSH endpoint used during the
-audit was a separate Linux host, so it was not treated as Windows evidence.
-The cutover procedure has no manually authorized Heumarkt probe gate. Existing
+The current runtime gate is positively identified but not retired: Task
+Scheduler operational events identify `\Cologne Transit Realtime Collector`,
+principal `DATAANALYST-VM\Somaye`, a `powershell.exe` action, a five-minute
+trigger, and successful result code 0. The SQL Server service account could
+not enumerate or disable that user-owned task object, so the exact task was
+left unchanged. The latest post-attempt SQL run was still Windows-era
+`CollectorRunId 40390` at `2026-10-07T13:28:53Z`. An interactive/administrative
+Windows Task Scheduler context is required before enabling launchd. Existing
 SQLite evidence is reconciled offline; the first new Mac request, if later
 authorized, must be an ordinary scheduler heartbeat over the existing Legacy7
-scope.
+scope, with no manually targeted Heumarkt request.
 
 ## Old and prepared flow
 
@@ -152,12 +153,14 @@ evidence; timing, ServiceSection, RecordedAtTime, Situation, Attribute,
 response-error, and parser-gap projections retain their source fields and
 lineage.
 
-The schema migration and live read-only validation are complete. The import is
-not complete: the SQL Server row volume had only 10,260,480 bytes available
-against a conservative 1,150,083,072-byte preflight requirement. Three failed
-import batches are retained with `FAILED` status. No rows were deleted to
-make space; the next retry is intentionally blocked until the SQL Server
-volume is expanded or otherwise given sufficient headroom.
+The schema migration, fresh capacity preflight, six-hour import, exact
+idempotency rerun, and read-only post-import reconciliation are complete. Four
+failed import batches remain retained and auditable, including the interrupted
+partial batch; no failed history was deleted. The final report records 70
+snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, 121 parser
+gaps, zero unexplained differences, and zero source `RecordedAtTime` values.
+The remaining cutover blocker is Windows task retirement, not SQL row-volume
+capacity. See the [operational record](operational/s98-live-research-import-and-cutover.md).
 
 ## Timing and RecordedAtTime
 

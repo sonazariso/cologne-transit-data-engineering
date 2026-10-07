@@ -6,6 +6,21 @@ Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
 ### Added
+- S98 operational completion work: added a fresh ROWS/LOG/volume capacity
+  preflight, immutable failed-batch audit, explicit source proof, resumable
+  six-hour LIVE_RESEARCH SQLite import, exact idempotency validation, and a
+  reusable read-only post-import validator. The import reconciles 70 snapshots,
+  38,120 calls, 72,190 timings, 1,400 ServiceSections, and 121 parser gaps
+  with zero unexplained differences. Windows Task Scheduler evidence confirms
+  the existing five-minute collector remains active; exact task retirement was
+  attempted without changing an ambiguous/user-owned task, so launchd remains
+  disabled pending administrative Windows access.
+- Final legacy SQL Server archive removal: after a fresh dependency gate and
+  verified external-USB archive confirmation, removed `NRWTransportDW` from the
+  Windows VM. No required Köln asset was migrated; `CologneTransitIntelligence`
+  remains the only project SQL Server database, the verified `.bak`/ZIP remain
+  recoverable, and no import, MDD, collector, launchd, Power BI, or unrelated
+  database operation was started.
 - Stage 14 S81 final offline correction: corrected SQLite and Stage 15
   RecordedAtTime reporting to use the exact leaf source path, preserved NULL
   latest-path semantics, added explicit schema-4-to-5 reporting-view

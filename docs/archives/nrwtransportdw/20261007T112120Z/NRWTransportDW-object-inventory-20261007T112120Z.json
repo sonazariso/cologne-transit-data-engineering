@@ -1,0 +1,1982 @@
+{
+  "foreign_keys": [
+    {
+      "foreign_key_name": "FK_FactRealtimeStopPerformance_FactTripStop",
+      "is_disabled": false,
+      "parent_schema": "dw",
+      "parent_table": "FactRealtimeStopPerformance",
+      "referenced_schema": "dw",
+      "referenced_table": "FactTripStop"
+    },
+    {
+      "foreign_key_name": "FK_FactTripStop_DimDate",
+      "is_disabled": false,
+      "parent_schema": "dw",
+      "parent_table": "FactTripStop",
+      "referenced_schema": "dw",
+      "referenced_table": "DimDate"
+    },
+    {
+      "foreign_key_name": "FK_FactTripStop_DimRoute",
+      "is_disabled": false,
+      "parent_schema": "dw",
+      "parent_table": "FactTripStop",
+      "referenced_schema": "dw",
+      "referenced_table": "DimRoute"
+    },
+    {
+      "foreign_key_name": "FK_FactTripStop_DimStop",
+      "is_disabled": false,
+      "parent_schema": "dw",
+      "parent_table": "FactTripStop",
+      "referenced_schema": "dw",
+      "referenced_table": "DimStop"
+    }
+  ],
+  "functions": [],
+  "indexes": [
+    {
+      "index_name": "PK_DbRealtimeStation",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DbRealtimeStation",
+      "schema_name": "cfg",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "PK_dw_DimDate",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DimDate",
+      "schema_name": "dw",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UQ_dw_DimDate_FullDate",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "DimDate",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_dw_DimRoute",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DimRoute",
+      "schema_name": "dw",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UQ_dw_DimRoute_RouteId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "DimRoute",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_dw_DimStop",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DimStop",
+      "schema_name": "dw",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UQ_dw_DimStop_StopId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "DimStop",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_dw_FactRealtimeStopPerformance",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "FactRealtimeStopPerformance",
+      "schema_name": "dw",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UQ_FactRealtimeStopPerformance_DbEventId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "FactRealtimeStopPerformance",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "UQ_FactRealtimeStopPerformance_FactTripStopKey",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "FactRealtimeStopPerformance",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_dw_FactTripStop",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "FactTripStop",
+      "schema_name": "dw",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "IX_FactTripStop_DateRouteStop",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "FactTripStop",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "IX_FactTripStop_TripInstance",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "FactTripStop",
+      "schema_name": "dw",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_stg_DbRealtimeStopObservation",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DbRealtimeStopObservation",
+      "schema_name": "stg",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "IX_DbRealtimeStopObservation_EventCaptured",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "DbRealtimeStopObservation",
+      "schema_name": "stg",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "IX_DbRealtimeStopObservation_StationCaptured",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "DbRealtimeStopObservation",
+      "schema_name": "stg",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "IX_stg_StopTimes_TripId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "StopTimes",
+      "schema_name": "stg",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_DbStationGtfsMapping",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "DbStationGtfsMapping",
+      "schema_name": "wrk",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UQ_DbStationGtfsMapping_GtfsParentStationId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "DbStationGtfsMapping",
+      "schema_name": "wrk",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "PK_wrk_Phase1TripStops",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "Phase1TripStops",
+      "schema_name": "wrk",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "PK_wrk_RouteClassification",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "RouteClassification",
+      "schema_name": "wrk",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "PK_wrk_ServiceDates",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "ServiceDates",
+      "schema_name": "wrk",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "PK_wrk_TripInstances",
+      "is_disabled": false,
+      "is_primary_key": true,
+      "is_unique": true,
+      "object_name": "TripInstances",
+      "schema_name": "wrk",
+      "type_desc": "CLUSTERED"
+    },
+    {
+      "index_name": "UX_wrk_TripInstances_TripId_ServiceDate",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": true,
+      "object_name": "TripInstances",
+      "schema_name": "wrk",
+      "type_desc": "NONCLUSTERED"
+    },
+    {
+      "index_name": "IX_wrk_TripInstances_RouteId_TripId",
+      "is_disabled": false,
+      "is_primary_key": false,
+      "is_unique": false,
+      "object_name": "TripInstances",
+      "schema_name": "wrk",
+      "type_desc": "NONCLUSTERED"
+    }
+  ],
+  "modules": [
+    {
+      "definition_length": 6653,
+      "definition_sha256": "6d9380b7a9eeb23130cf9313b9dc84d401e61ff322f3cf09416df6e52bd39895",
+      "object_name": "usp_LoadFactRealtimeStopPerformance",
+      "references_nrwtransportdw": false,
+      "schema_name": "dw",
+      "type_desc": "SQL_STORED_PROCEDURE"
+    },
+    {
+      "definition_length": 778,
+      "definition_sha256": "8bd5fce0f319469234b5043f09e9ea1ad722539c2a296eb3f2754c3dda36e4c4",
+      "object_name": "vTripStopAnalytics",
+      "references_nrwtransportdw": false,
+      "schema_name": "dw",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 3123,
+      "definition_sha256": "6d18b336a4516f267d18225e1fb73a20634cf32fd8fa15e44b04ba24533a630a",
+      "object_name": "vDbRealtimeGtfsStrongMatch",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 1097,
+      "definition_sha256": "e13ef520aec78097ec3301cb03816a9a3035262336c67e3f85b777ef1664b9bf",
+      "object_name": "vDbRealtimeLatestObservation",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 3489,
+      "definition_sha256": "45fd81b9ab18d5b5b19d51c53e91624cb0cb974fc1c5fd3d367ee4c2ecba1612",
+      "object_name": "vDbRealtimeObservationChangeAnalytics",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 3030,
+      "definition_sha256": "d39100f4fb310be469e603345312741d59ade80b431866d11d174e20d0928598",
+      "object_name": "vDbRealtimeObservationChanges",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 3242,
+      "definition_sha256": "ba087ad5613ade69d809a66e4ad9bf0015939b3ea74c0d830f83ee5bebd6b070",
+      "object_name": "vDbRealtimeStopPerformanceLoadSource",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    },
+    {
+      "definition_length": 1018,
+      "definition_sha256": "5da1a9c5ed38a35295343f486c67ee3df15be608a45893072c87a3d036fa4f39",
+      "object_name": "vPhase1TripStopsNormalized",
+      "references_nrwtransportdw": false,
+      "schema_name": "wrk",
+      "type_desc": "VIEW"
+    }
+  ],
+  "object_counts": {
+    "foreign_keys": 4,
+    "functions": 0,
+    "indexes": 25,
+    "schemas": 17,
+    "stored_procedures": 1,
+    "synonyms": 0,
+    "tables": 21,
+    "views": 7
+  },
+  "schemas": [
+    "cfg",
+    "db_accessadmin",
+    "db_backupoperator",
+    "db_datareader",
+    "db_datawriter",
+    "db_ddladmin",
+    "db_denydatareader",
+    "db_denydatawriter",
+    "db_owner",
+    "db_securityadmin",
+    "dbo",
+    "dw",
+    "guest",
+    "INFORMATION_SCHEMA",
+    "stg",
+    "sys",
+    "wrk"
+  ],
+  "stored_procedures": [
+    {
+      "create_date": "2026-08-22T20:21:38.837000",
+      "modify_date": "2026-08-22T21:10:16.330000",
+      "object_name": "usp_LoadFactRealtimeStopPerformance",
+      "schema_name": "dw"
+    }
+  ],
+  "synonyms": [],
+  "tables": [
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "StationEva",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "IsEnabled",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 3,
+          "column_name": "CreatedAt",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-28T18:40:37.043000",
+      "modify_date": "2026-08-28T18:40:37.043000",
+      "reserved_mb": 0.070312,
+      "row_count": 2,
+      "schema_name": "cfg",
+      "table_name": "DbRealtimeStation",
+      "used_mb": 0.015625
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "DateKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 2,
+          "column_name": "FullDate",
+          "is_nullable": false,
+          "max_length": 3,
+          "type_name": "date"
+        },
+        {
+          "column_id": 3,
+          "column_name": "DayNumber",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 4,
+          "column_name": "DayName",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "DayOfWeek",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 6,
+          "column_name": "WeekNumber",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 7,
+          "column_name": "MonthNumber",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 8,
+          "column_name": "MonthName",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 9,
+          "column_name": "QuarterNumber",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 10,
+          "column_name": "YearNumber",
+          "is_nullable": false,
+          "max_length": 2,
+          "type_name": "smallint"
+        },
+        {
+          "column_id": 11,
+          "column_name": "IsWeekend",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        }
+      ],
+      "create_date": "2026-08-20T23:14:56.027000",
+      "modify_date": "2026-08-20T23:33:37.667000",
+      "reserved_mb": 0.140625,
+      "row_count": 165,
+      "schema_name": "dw",
+      "table_name": "DimDate",
+      "used_mb": 0.046875
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "RouteKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 2,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "RouteShortName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "RouteLongName",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "TransportMode",
+          "is_nullable": false,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "AgencyId",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "OperatorName",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 8,
+          "column_name": "SourceRouteType",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        }
+      ],
+      "create_date": "2026-08-20T23:17:43.933000",
+      "modify_date": "2026-08-20T23:33:38.430000",
+      "reserved_mb": 0.140625,
+      "row_count": 65,
+      "schema_name": "dw",
+      "table_name": "DimRoute",
+      "used_mb": 0.03125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "StopKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 2,
+          "column_name": "StopId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "StopName",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "ParentStationId",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "ParentStationName",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "PlatformCode",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "Latitude",
+          "is_nullable": true,
+          "max_length": 5,
+          "type_name": "decimal"
+        },
+        {
+          "column_id": 8,
+          "column_name": "Longitude",
+          "is_nullable": true,
+          "max_length": 5,
+          "type_name": "decimal"
+        },
+        {
+          "column_id": 9,
+          "column_name": "LocationType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 10,
+          "column_name": "WheelchairBoarding",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        }
+      ],
+      "create_date": "2026-08-20T23:20:49.453000",
+      "modify_date": "2026-08-20T23:33:39.013000",
+      "reserved_mb": 0.578125,
+      "row_count": 1236,
+      "schema_name": "dw",
+      "table_name": "DimStop",
+      "used_mb": 0.3125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "RealtimeStopPerformanceKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 2,
+          "column_name": "FactTripStopKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 3,
+          "column_name": "DbEventId",
+          "is_nullable": false,
+          "max_length": 400,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "LatestObservationKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 5,
+          "column_name": "StationEva",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "TrainName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "DbPlannedArrival",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 8,
+          "column_name": "DbPlannedDeparture",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 9,
+          "column_name": "ChangedArrival",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 10,
+          "column_name": "ArrivalDelayMinutes",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 11,
+          "column_name": "IsArrivalCancelled",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 12,
+          "column_name": "ChangedDeparture",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 13,
+          "column_name": "DepartureDelayMinutes",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 14,
+          "column_name": "IsDepartureCancelled",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 15,
+          "column_name": "PlannedPlatform",
+          "is_nullable": true,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 16,
+          "column_name": "ChangedPlatform",
+          "is_nullable": true,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 17,
+          "column_name": "FirstCapturedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 18,
+          "column_name": "LastCapturedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 19,
+          "column_name": "ObservationCount",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 20,
+          "column_name": "MatchMethod",
+          "is_nullable": false,
+          "max_length": 50,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 21,
+          "column_name": "MatchConfidence",
+          "is_nullable": false,
+          "max_length": 20,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 22,
+          "column_name": "CreatedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 23,
+          "column_name": "UpdatedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-22T20:13:46.590000",
+      "modify_date": "2026-08-22T20:13:46.590000",
+      "reserved_mb": 2.328125,
+      "row_count": 4656,
+      "schema_name": "dw",
+      "table_name": "FactRealtimeStopPerformance",
+      "used_mb": 1.929687
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "FactTripStopKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 2,
+          "column_name": "DateKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 3,
+          "column_name": "RouteKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 4,
+          "column_name": "StopKey",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 5,
+          "column_name": "TripInstanceKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 6,
+          "column_name": "StopSequence",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 7,
+          "column_name": "ScheduledArrivalDateTime",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 8,
+          "column_name": "ScheduledDepartureDateTime",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 9,
+          "column_name": "ArrivalDayOffset",
+          "is_nullable": true,
+          "max_length": 1,
+          "type_name": "tinyint"
+        },
+        {
+          "column_id": 10,
+          "column_name": "DepartureDayOffset",
+          "is_nullable": true,
+          "max_length": 1,
+          "type_name": "tinyint"
+        }
+      ],
+      "create_date": "2026-08-20T23:27:50.473000",
+      "modify_date": "2026-08-22T20:13:46.653000",
+      "reserved_mb": 842.835937,
+      "row_count": 8029550,
+      "schema_name": "dw",
+      "table_name": "FactTripStop",
+      "used_mb": 842.59375
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "AgencyId",
+          "is_nullable": false,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "AgencyName",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "AgencyUrl",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "AgencyTimezone",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "AgencyLang",
+          "is_nullable": true,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "AgencyFareUrl",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "AgencyEmail",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 8,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:31:37.017000",
+      "modify_date": "2026-08-19T20:31:37.017000",
+      "reserved_mb": 0.070312,
+      "row_count": 76,
+      "schema_name": "stg",
+      "table_name": "Agency",
+      "used_mb": 0.03125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "ServiceId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "Monday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 3,
+          "column_name": "Tuesday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 4,
+          "column_name": "Wednesday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 5,
+          "column_name": "Thursday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 6,
+          "column_name": "Friday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 7,
+          "column_name": "Saturday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 8,
+          "column_name": "Sunday",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 9,
+          "column_name": "StartDate",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "char"
+        },
+        {
+          "column_id": 10,
+          "column_name": "EndDate",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "char"
+        },
+        {
+          "column_id": 11,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:39:29.863000",
+      "modify_date": "2026-08-19T20:39:29.863000",
+      "reserved_mb": 0.632812,
+      "row_count": 9430,
+      "schema_name": "stg",
+      "table_name": "Calendar",
+      "used_mb": 0.585937
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "ServiceId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "ServiceDate",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "char"
+        },
+        {
+          "column_id": 3,
+          "column_name": "ExceptionType",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 4,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:40:04.647000",
+      "modify_date": "2026-08-19T20:40:04.647000",
+      "reserved_mb": 22.320312,
+      "row_count": 406747,
+      "schema_name": "stg",
+      "table_name": "CalendarDates",
+      "used_mb": 22.28125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "ObservationKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 2,
+          "column_name": "DbEventId",
+          "is_nullable": false,
+          "max_length": 400,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "StationEva",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "LineName",
+          "is_nullable": true,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "TrainName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "PlannedArrival",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 7,
+          "column_name": "ChangedArrival",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 8,
+          "column_name": "ArrivalDelayMinutes",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 9,
+          "column_name": "IsArrivalCancelled",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 10,
+          "column_name": "PlannedDeparture",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 11,
+          "column_name": "ChangedDeparture",
+          "is_nullable": true,
+          "max_length": 6,
+          "type_name": "datetime2"
+        },
+        {
+          "column_id": 12,
+          "column_name": "DepartureDelayMinutes",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 13,
+          "column_name": "IsDepartureCancelled",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 14,
+          "column_name": "PlannedPlatform",
+          "is_nullable": true,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 15,
+          "column_name": "ChangedPlatform",
+          "is_nullable": true,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 16,
+          "column_name": "CapturedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-22T12:34:40.357000",
+      "modify_date": "2026-08-22T12:35:41.377000",
+      "reserved_mb": 22.03125,
+      "row_count": 59687,
+      "schema_name": "stg",
+      "table_name": "DbRealtimeStopObservation",
+      "used_mb": 20.695312
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "FeedPublisherName",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "FeedPublisherUrl",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "FeedLang",
+          "is_nullable": true,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "DefaultLang",
+          "is_nullable": true,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "FeedStartDate",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "char"
+        },
+        {
+          "column_id": 6,
+          "column_name": "FeedEndDate",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "char"
+        },
+        {
+          "column_id": 7,
+          "column_name": "FeedVersion",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 8,
+          "column_name": "FeedContactEmail",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 9,
+          "column_name": "FeedContactUrl",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 10,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:40:33.860000",
+      "modify_date": "2026-08-19T20:40:33.860000",
+      "reserved_mb": 0.0,
+      "row_count": 0,
+      "schema_name": "stg",
+      "table_name": "FeedInfo",
+      "used_mb": 0.0
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "AgencyId",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "RouteShortName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "RouteLongName",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "RouteType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 6,
+          "column_name": "RouteColor",
+          "is_nullable": true,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "RouteTextColor",
+          "is_nullable": true,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 8,
+          "column_name": "NvbwDlid",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 9,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:27:46.250000",
+      "modify_date": "2026-08-19T20:27:46.250000",
+      "reserved_mb": 1.445312,
+      "row_count": 5949,
+      "schema_name": "stg",
+      "table_name": "Routes",
+      "used_mb": 1.414062
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "StopId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "StopCode",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "StopName",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "StopLat",
+          "is_nullable": true,
+          "max_length": 5,
+          "type_name": "decimal"
+        },
+        {
+          "column_id": 5,
+          "column_name": "StopLon",
+          "is_nullable": true,
+          "max_length": 5,
+          "type_name": "decimal"
+        },
+        {
+          "column_id": 6,
+          "column_name": "StopUrl",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "LocationType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 8,
+          "column_name": "ParentStation",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 9,
+          "column_name": "WheelchairBoarding",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 10,
+          "column_name": "PlatformCode",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 11,
+          "column_name": "NvbwHstDhid",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 12,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:35:55.403000",
+      "modify_date": "2026-08-19T20:35:55.403000",
+      "reserved_mb": 17.570312,
+      "row_count": 104632,
+      "schema_name": "stg",
+      "table_name": "Stops",
+      "used_mb": 17.539062
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "TripId",
+          "is_nullable": false,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "ArrivalTime",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "DepartureTime",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "StopId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "StopSequence",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 6,
+          "column_name": "StopHeadsign",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "PickupType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 8,
+          "column_name": "DropOffType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 9,
+          "column_name": "ShapeDistTraveled",
+          "is_nullable": true,
+          "max_length": 9,
+          "type_name": "decimal"
+        },
+        {
+          "column_id": 10,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:37:07.260000",
+      "modify_date": "2026-08-20T22:30:46.820000",
+      "reserved_mb": 3187.84375,
+      "row_count": 10907141,
+      "schema_name": "stg",
+      "table_name": "StopTimes",
+      "used_mb": 3187.265625
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "TripId",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "ArrivalTime",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "DepartureTime",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "StopId",
+          "is_nullable": true,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "StopSequence",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 6,
+          "column_name": "StopHeadsign",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "PickupType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 8,
+          "column_name": "DropOffType",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 9,
+          "column_name": "ShapeDistTraveled",
+          "is_nullable": true,
+          "max_length": 9,
+          "type_name": "decimal"
+        }
+      ],
+      "create_date": "2026-08-19T22:05:52.717000",
+      "modify_date": "2026-08-19T22:05:52.717000",
+      "reserved_mb": 1946.882812,
+      "row_count": 10907141,
+      "schema_name": "stg",
+      "table_name": "StopTimesImport",
+      "used_mb": 1946.84375
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "ServiceId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "TripId",
+          "is_nullable": false,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "ShapeId",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "TripHeadsign",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "TripShortName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "DirectionId",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 8,
+          "column_name": "WheelchairAccessible",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 9,
+          "column_name": "LoadDateTime",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-19T20:35:01.213000",
+      "modify_date": "2026-08-19T20:35:01.213000",
+      "reserved_mb": 87.507812,
+      "row_count": 474978,
+      "schema_name": "stg",
+      "table_name": "Trips",
+      "used_mb": 87.5
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "StationEva",
+          "is_nullable": false,
+          "max_length": 40,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "GtfsParentStationId",
+          "is_nullable": false,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "StationName",
+          "is_nullable": false,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 4,
+          "column_name": "CreatedAt",
+          "is_nullable": false,
+          "max_length": 6,
+          "type_name": "datetime2"
+        }
+      ],
+      "create_date": "2026-08-22T19:51:43.987000",
+      "modify_date": "2026-08-22T19:51:43.987000",
+      "reserved_mb": 0.140625,
+      "row_count": 2,
+      "schema_name": "wrk",
+      "table_name": "DbStationGtfsMapping",
+      "used_mb": 0.03125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "TripStopKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 2,
+          "column_name": "TripInstanceKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 3,
+          "column_name": "ServiceDate",
+          "is_nullable": false,
+          "max_length": 3,
+          "type_name": "date"
+        },
+        {
+          "column_id": 4,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "TransportMode",
+          "is_nullable": false,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "StopId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 7,
+          "column_name": "StopSequence",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 8,
+          "column_name": "ScheduledArrival",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        },
+        {
+          "column_id": 9,
+          "column_name": "ScheduledDeparture",
+          "is_nullable": true,
+          "max_length": 8,
+          "type_name": "varchar"
+        }
+      ],
+      "create_date": "2026-08-20T22:57:34.030000",
+      "modify_date": "2026-08-20T22:57:34.030000",
+      "reserved_mb": 1009.265625,
+      "row_count": 8029550,
+      "schema_name": "wrk",
+      "table_name": "Phase1TripStops",
+      "used_mb": 1009.125
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "RouteShortName",
+          "is_nullable": true,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "RouteType",
+          "is_nullable": false,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 4,
+          "column_name": "TransportMode",
+          "is_nullable": false,
+          "max_length": 100,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "IsPhase1",
+          "is_nullable": false,
+          "max_length": 1,
+          "type_name": "bit"
+        },
+        {
+          "column_id": 6,
+          "column_name": "ClassificationRule",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        }
+      ],
+      "create_date": "2026-08-20T22:53:17.403000",
+      "modify_date": "2026-08-20T22:53:17.403000",
+      "reserved_mb": 0.070312,
+      "row_count": 175,
+      "schema_name": "wrk",
+      "table_name": "RouteClassification",
+      "used_mb": 0.054687
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "ServiceId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 2,
+          "column_name": "ServiceDate",
+          "is_nullable": false,
+          "max_length": 3,
+          "type_name": "date"
+        }
+      ],
+      "create_date": "2026-08-20T21:46:10.267000",
+      "modify_date": "2026-08-20T21:46:10.267000",
+      "reserved_mb": 15.945312,
+      "row_count": 406747,
+      "schema_name": "wrk",
+      "table_name": "ServiceDates",
+      "used_mb": 15.796875
+    },
+    {
+      "columns": [
+        {
+          "column_id": 1,
+          "column_name": "TripInstanceKey",
+          "is_nullable": false,
+          "max_length": 8,
+          "type_name": "bigint"
+        },
+        {
+          "column_id": 2,
+          "column_name": "TripId",
+          "is_nullable": false,
+          "max_length": 200,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 3,
+          "column_name": "ServiceDate",
+          "is_nullable": false,
+          "max_length": 3,
+          "type_name": "date"
+        },
+        {
+          "column_id": 4,
+          "column_name": "RouteId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 5,
+          "column_name": "ServiceId",
+          "is_nullable": false,
+          "max_length": 510,
+          "type_name": "nvarchar"
+        },
+        {
+          "column_id": 6,
+          "column_name": "DirectionId",
+          "is_nullable": true,
+          "max_length": 4,
+          "type_name": "int"
+        },
+        {
+          "column_id": 7,
+          "column_name": "TripHeadsign",
+          "is_nullable": true,
+          "max_length": 1000,
+          "type_name": "nvarchar"
+        }
+      ],
+      "create_date": "2026-08-20T22:10:44.690000",
+      "modify_date": "2026-08-20T23:01:28.380000",
+      "reserved_mb": 11708.226562,
+      "row_count": 26356341,
+      "schema_name": "wrk",
+      "table_name": "TripInstances",
+      "used_mb": 11707.890625
+    }
+  ],
+  "views": [
+    {
+      "create_date": "2026-08-20T23:36:34.327000",
+      "modify_date": "2026-08-20T23:36:34.327000",
+      "object_name": "vTripStopAnalytics",
+      "schema_name": "dw"
+    },
+    {
+      "create_date": "2026-08-22T19:55:05.060000",
+      "modify_date": "2026-08-22T19:55:05.060000",
+      "object_name": "vDbRealtimeGtfsStrongMatch",
+      "schema_name": "wrk"
+    },
+    {
+      "create_date": "2026-08-22T19:25:03.500000",
+      "modify_date": "2026-08-22T19:25:03.500000",
+      "object_name": "vDbRealtimeLatestObservation",
+      "schema_name": "wrk"
+    },
+    {
+      "create_date": "2026-08-22T19:20:48.170000",
+      "modify_date": "2026-08-22T19:20:48.170000",
+      "object_name": "vDbRealtimeObservationChangeAnalytics",
+      "schema_name": "wrk"
+    },
+    {
+      "create_date": "2026-08-22T19:18:51.130000",
+      "modify_date": "2026-08-22T19:18:51.130000",
+      "object_name": "vDbRealtimeObservationChanges",
+      "schema_name": "wrk"
+    },
+    {
+      "create_date": "2026-08-22T20:16:26.560000",
+      "modify_date": "2026-08-22T21:03:20.710000",
+      "object_name": "vDbRealtimeStopPerformanceLoadSource",
+      "schema_name": "wrk"
+    },
+    {
+      "create_date": "2026-08-20T23:11:35.260000",
+      "modify_date": "2026-08-20T23:11:35.260000",
+      "object_name": "vPhase1TripStopsNormalized",
+      "schema_name": "wrk"
+    }
+  ]
+}

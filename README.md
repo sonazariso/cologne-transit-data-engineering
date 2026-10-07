@@ -93,7 +93,9 @@ stabilization gate, not collector activation or a new collection stage.
   The retained PostgreSQL migration/design files remain legacy/deferred
   cleanup. Power BI semantic design is approved, while PBIP/Desktop work
   remains deferred.
-- The legacy collector/database remains untouched.
+- The retained legacy collector/runtime remains untouched. The separately
+  archived `NRWTransportDW` database was removed after its verified native
+  backup and ZIP were confirmed; see the [removal evidence](docs/archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-evidence-20261007T120030Z.json).
 - Confirmed Actual Time is unavailable; Actual Delay and prediction accuracy
   against confirmed actual timing remain unapproved/unavailable.
 
@@ -114,11 +116,12 @@ Its additive schema is applied and live-validated; the pinned DB-API
 dependency, explicit SQLite-to-SQL Server importer, six-context timing tests,
 Situation/Attribute/parser-gap tests, atomic migration checks, and disabled
 `launchd` artifact are documented in
-[the macOS persistence contract](docs/macos-mssql-collector.md). This is
-implementation/cutover readiness only: the current Windows runtime remains
-unconfirmed, the historical SQLite import is blocked by SQL Server disk
-headroom, the Mac scheduler is disabled, and no repeated Mac collection is
-active. Offline SQLite reconciliation replaces any manual Heumarkt probe.
+[the macOS persistence contract](docs/macos-mssql-collector.md). The proven
+historical SQLite source is now imported and reconciled with an exact
+idempotency rerun. The Windows task is still active and could not be disabled
+from the SQL service account, so the Mac scheduler remains disabled and no
+repeated Mac collection is active. Offline SQLite reconciliation replaces any
+manual Heumarkt probe.
 
 ## Repository principles
 

@@ -27,8 +27,13 @@ Do not create a separate Git clone on Windows under the current workflow.
 The existing collector runtime, SQLite research database path, PostgreSQL
 contracts, Windows scheduled-task material, and historical realtime files remain
 untouched and are marked for deferred cleanup only. S87 does not migrate,
-delete, or rewrite them. `NRWTransportDW` is an existing SQL Server
-`LEGACY_REFERENCE` database and must remain untouched.
+delete, or rewrite them. The S87 stabilization work left `NRWTransportDW`
+untouched; it was later classified
+`LEGACY_SAFE_TO_ARCHIVE` and was removed from the SQL Server instance on
+2026-10-07 after the verified native backup and ZIP were confirmed on external
+USB storage. The `.bak` and ZIP remain preserved under `CologneTransitData` as
+the recovery source; `CologneTransitIntelligence` is the only project SQL
+Server database now attached to the VM.
 
 ## Prepared direct database path
 
@@ -52,11 +57,12 @@ The explicit historical source is
 SHA-256 is
 `0edc9b1a56cb6128ac5bed6508e5c37b9b4d1ab18c1d78092e6fcb1ac9b674fc` and its
 role/context are `LIVE_RESEARCH` / `LIVE_RESEARCH_SINGLE_1`. The source proof
-and overlap audit are read-only. Import currently stops before opening a new
-batch because the SQL Server row volume has 10,260,480 bytes free, below the
-conservative 1,150,083,072-byte requirement; no rows are deleted to recover
-space. No manual Heumarkt request is required: offline reconciliation is the
-gate, and the first future Mac request must be a normal scheduler heartbeat.
+and overlap audit are read-only. The source passed a fresh conservative
+capacity gate, was imported into additive `ctl.MddImport*`/`stg.MddMac*`
+lineage, and passed an exact idempotency rerun. No manual Heumarkt request was
+made or required. The Mac launchd definition remains disabled because the
+exact Windows task is still producing `ctl.MddCollectorRun` rows and requires
+interactive/administrative Windows Task Scheduler access to retire.
 
 ## Secrets
 

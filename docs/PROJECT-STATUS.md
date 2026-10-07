@@ -35,6 +35,14 @@ database is `CologneTransitIntelligence` on the current Windows VM. Future
 collectors and pipelines are planned as Python on macOS, SQL Server remains on
 the VM, and Power BI consumes SQL Server analytical/warehouse data.
 
+The legacy `NRWTransportDW` database was classified
+`LEGACY_SAFE_TO_ARCHIVE`. The verified archive was confirmed on external USB
+storage, no required Köln asset needed migration, and the database was removed
+from the Windows VM on 2026-10-07. The verified native backup and ZIP remain
+the recovery source; the [removal evidence](archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-evidence-20261007T120030Z.json)
+records the pre-drop files, dependency gate, drop result, recovered capacity,
+and post-removal validation.
+
 The Stage 1 SQL Server stabilization is **COMPLETE**. Fresh 2026-10-07
 evidence is captured in the [stabilization record](stages/01-sql-server-stabilization.md)
 and [evidence JSON](stages/01-sql-server-stabilization-evidence.json):
@@ -49,8 +57,9 @@ unconfirmed.
 
 PostgreSQL, SQLite, Ubuntu, and Docker are not active architecture. Their
 existing documents and code remain historical/deferred-cleanup material and
-were not removed or modified. `NRWTransportDW` remains an untouched
-`LEGACY_REFERENCE` database.
+were not removed or modified. `CologneTransitIntelligence` is now the only
+project SQL Server database; `NRWTransportDW` is no longer attached to the
+instance and remains recoverable from the verified archive.
 
 ### Current cutover transition status
 
@@ -72,14 +81,21 @@ offline import source only and is not relabeled as Mac, Windows, Legacy7, or
 Tiered50 production evidence.
 
 The read-only overlap audit found no Windows-era rows in that interval and did
-not merge or deduplicate anything. The import is blocked before a new batch is
-opened because the SQL Server row volume has only 10,260,480 bytes free,
-versus a conservative 1,150,083,072-byte requirement. Three failed import
-attempts remain auditable as `FAILED`; no source rows were deleted. Current
-Windows Task Scheduler identity/state is still not positively confirmed, so
-the Windows task has not been changed. Offline reconciliation replaces any
-manual Heumarkt validation request; the first future Mac request, if approved,
-must be a normal scheduled Legacy7 heartbeat.
+not merge or deduplicate anything. A fresh capacity gate passed, the complete
+source was imported, and an exact rerun inserted zero new rows. Four failed
+import attempts remain auditable as `FAILED`, including one interrupted
+partial batch; no source rows were deleted. Post-import reconciliation passed
+for 70 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, and
+121 parser gaps, with zero unexplained differences and zero source
+`RecordedAtTime` values. Task Scheduler operational evidence now positively
+identifies the Windows task, but the SQL Server service account cannot access
+the user-owned task object to disable it; later Windows runs confirm it remains
+active. The Mac scheduler therefore remains disabled. Offline reconciliation
+replaces any manual Heumarkt validation request; the first future Mac request,
+if approved, must be a normal scheduled Legacy7 heartbeat.
+
+See the [operational import and cutover record](operational/s98-live-research-import-and-cutover.md)
+and the reusable [read-only validator](../scripts/validate_sqlite_import.py).
 
 ### Current Stage 3 substage
 

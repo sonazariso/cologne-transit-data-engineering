@@ -1,0 +1,25 @@
+NRWTransportDW native backup restore instructions
+===============================================
+
+Package timestamp (UTC): 20261007T112120Z
+Backup member: NRWTransportDW-Archive-20261007T112120Z.bak
+
+This is a SQL Server FULL COPY_ONLY backup created with COMPRESSION and
+CHECKSUM.  The source database was not dropped, detached, moved, shrunk, or
+otherwise destructively modified.
+
+Before restoring, copy the .bak to a location readable by the SQL Server
+service, then inspect it:
+
+RESTORE HEADERONLY FROM DISK = N'<path-to-NRWTransportDW-Archive-20261007T112120Z.bak>';
+RESTORE FILELISTONLY FROM DISK = N'<path-to-NRWTransportDW-Archive-20261007T112120Z.bak>';
+RESTORE VERIFYONLY FROM DISK = N'<path-to-NRWTransportDW-Archive-20261007T112120Z.bak>' WITH CHECKSUM;
+
+Restore only after confirming the target instance/database policy.  If the
+original physical paths are not appropriate, use RESTORE DATABASE ... WITH
+MOVE based on the FILELISTONLY logical names.  Do not restore over
+CologneTransitIntelligence.
+
+The sidecar SHA-256 recorded next to the ZIP is the integrity value for the
+ZIP package.  The archive manifest records the exact SHA-256 and byte size of
+the native .bak member.
