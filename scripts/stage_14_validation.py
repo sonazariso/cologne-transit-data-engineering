@@ -32,6 +32,7 @@ BANNED_IMPORTS = {
     "winreg",
 }
 BANNED_TEXT = ("powershell", "sql server", "windows task scheduler", "windows\\")
+MSSQL_ADAPTER = ROOT / "src" / "cologne_transit_collector" / "mssql_persistence.py"
 
 
 def architecture_check() -> list[str]:
@@ -40,6 +41,8 @@ def architecture_check() -> list[str]:
     for path in package.glob("*.py"):
         source = path.read_text(encoding="utf-8")
         lowered = source.lower()
+        if "pymssql" in lowered and path != MSSQL_ADAPTER:
+            errors.append(f"{path}: optional database client is confined to the direct adapter")
         for term in BANNED_TEXT:
             if term in lowered:
                 errors.append(f"{path}: banned architecture text {term!r}")
@@ -56,17 +59,36 @@ def architecture_check() -> list[str]:
             else:
                 continue
             for name in names:
-                if name in BANNED_IMPORTS:
+                if name in BANNED_IMPORTS and not (path == MSSQL_ADAPTER and name == "pymssql"):
                     errors.append(f"{path}: banned import {name}")
         if any(marker in source for marker in ("C:\\", "D:\\", "\\\\vmware-host")):
             errors.append(f"{path}: hardcoded platform path")
     return errors
 
 
+def direct_adapter_check() -> list[str]:
+    errors: list[str] = []
+    if not MSSQL_ADAPTER.exists():
+        return [f"missing direct persistence adapter: {MSSQL_ADAPTER}"]
+    source = MSSQL_ADAPTER.read_text(encoding="utf-8")
+    lowered = source.lower()
+    for marker in (
+        "class mssqlpersistence",
+        'importlib.import_module("pymssql")',
+        "stg.usppersistmddmacsnapshot",
+        "raw_retention_hours = 24",
+    ):
+        if marker not in lowered:
+            errors.append(f"direct adapter is missing required marker: {marker}")
+    if any(term in lowered for term in ("sqlite", "psycopg", "pyodbc")):
+        errors.append("direct adapter contains a prohibited intermediary/runtime dependency")
+    return errors
+
+
 def run_checks() -> dict[str, object]:
     manifest = load_default_manifest(ROOT)
     reconciliation = schedule_reconciliation(manifest.targets)
-    errors = architecture_check()
+    errors = architecture_check() + direct_adapter_check()
     if len(manifest.targets) != 50:
         errors.append("manifest target count is not 50")
     if len(manifest.legacy7_targets) != 7:

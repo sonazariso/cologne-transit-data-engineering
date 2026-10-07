@@ -20,6 +20,14 @@ from .domain import (
     INTERRUPTED_SHUTDOWN,
     LIVE_RESEARCH_COLLECTION_CONTEXT,
     LIVE_RESEARCH_TARGET_ID,
+    MAC_SQL_COLLECTION_CONTEXT,
+    MAC_SQL_CUTOVER_APPROVED_ENV,
+    MAC_SQL_ENABLED_ENV,
+    MAC_SQL_REQUIRED_RUNTIME_STATE,
+    MAC_SQL_REQUIRED_TARGET_SCOPE,
+    MAC_SQL_RUNTIME_STATE_ENV,
+    MAC_SQL_TARGET_SCOPE_ENV,
+    SamplingEra,
     MAX_ATTEMPTS,
     MAXIMUM_CONCURRENCY,
     RETRY_SKIPPED_HEARTBEAT_BUDGET,
@@ -285,8 +293,8 @@ class Collector:
         allow_live: bool = False,
         pilot_target: str | None = None,
     ) -> CollectorRunResult:
-        if mode not in {"dry-run", "simulate", "live", "live-research"}:
-            raise ValueError("run_once mode must be dry-run, simulate, live, or live-research")
+        if mode not in {"dry-run", "simulate", "live", "live-research", "mac-sql"}:
+            raise ValueError("run_once mode must be dry-run, simulate, live, live-research, or mac-sql")
         if mode == "live":
             raise LiveModeBlocked(
                 "live mode is blocked in Stage 14 implementation: production persistence and cutover are deferred"
@@ -301,7 +309,26 @@ class Collector:
                     "live-research requires the explicit Heumarkt pilot target"
                 )
             self._live_research_preflight()
-        if mode != "live-research" and getattr(self.mdd_client, "offline_safe", True) is False:
+        if mode == "mac-sql":
+            if not allow_live:
+                raise LiveModeBlocked("mac-sql requires explicit cutover approval and allow_live=True")
+            if os.environ.get(MAC_SQL_ENABLED_ENV) != "1":
+                raise LiveModeBlocked("mac-sql is disabled; no network request performed")
+            if os.environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+                raise LiveModeBlocked("current Windows collector runtime is not confirmed retired; no network request performed")
+            if os.environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
+                raise LiveModeBlocked("mac-sql cutover approval is not present; no network request performed")
+            if os.environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
+                raise LiveModeBlocked("mac-sql requires explicit Legacy7 target-scope approval; no network request performed")
+            if validate_api_key_format(os.environ.get("MDD_API_KEY")) != "VALID":
+                raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
+            if not getattr(self.persistence, "is_production_ready", False):
+                raise LiveModeBlocked("mac-sql requires a production-ready direct persistence adapter")
+            if getattr(self.persistence, "collection_context", None) != MAC_SQL_COLLECTION_CONTEXT:
+                raise LiveModeBlocked("mac-sql requires the direct persistence collection context")
+            if not self.manifest.targets or any(target.sampling_era is not SamplingEra.LEGACY7 for target in self.manifest.targets):
+                raise LiveModeBlocked("mac-sql refuses Tiered50 or mixed target manifests")
+        if mode not in {"live-research", "mac-sql"} and getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
         now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -309,6 +336,8 @@ class Collector:
         collection_context = (
             LIVE_RESEARCH_COLLECTION_CONTEXT
             if mode == "live-research"
+            else MAC_SQL_COLLECTION_CONTEXT
+            if mode == "mac-sql"
             else "OFFLINE_DEVELOPMENT"
         )
         identifier = run_id or str(uuid.uuid4())

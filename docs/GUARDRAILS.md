@@ -383,16 +383,21 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's historical implementation status is `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`. The SQLite research profile is retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. Stage 15A readiness is in progress; Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
-117. The Stage 14 runtime is a Python, cross-platform, standard-library-first
-     collector package. Its core must not import PostgreSQL/SQL-driver modules,
-     platform-specific APIs, shell orchestration, or hardcoded platform paths.
-     Deployment scheduling and host selection remain outside the package.
+116. Stage 14's historical implementation status is `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`. The SQLite research profile is retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is prepared but not activated. Stage 15A readiness is in progress; Stage 15B live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+117. The offline Stage 14 runtime remains a Python, cross-platform,
+     standard-library-first collector package. Its offline core must not import
+     PostgreSQL/SQL-driver modules, platform-specific APIs, shell orchestration,
+     or hardcoded platform paths. The isolated optional direct adapter is the
+     sole exception for the prepared macOS path; it uses the pinned DB-API
+     dependency and creates no local shadow database. Deployment scheduling and
+     host selection remain outside the package.
 118. The versioned Stage 14 manifest is the authoritative offline runtime
-     configuration until a future approved persistence/configuration adapter
-     exists. It contains exactly 50 targets, fixed Stage 13 phase indexes, and
-     no fabricated future `SamplingTargetId` values. Manifest phase changes
-     fail closed against Stage 13 evidence.
+     configuration. The prepared direct runner separately reads the unchanged
+     seven existing SQL sampling targets, requires IDs 1–7 and their exact
+     StopPointRef mapping, and refuses the deferred Tiered50 target list. The
+     offline manifest still contains exactly 50 targets, fixed Stage 13 phase
+     indexes, and no fabricated future `SamplingTargetId` values. Manifest
+     phase changes fail closed against Stage 13 evidence.
 119. The production claim identity remains `(SamplingTargetId,
      LogicalDueBucket)`. A disposable local backend may use the explicitly
      labeled development identity `(panel_version, source_parent_station_id,
@@ -403,13 +408,13 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      from UTC wall-clock time, executes only that bucket, and never replays
      missed buckets or fabricates missed snapshots. It must not become a
      permanent internal scheduler loop.
-121. SQLite has two explicit active profiles: `DEVELOPMENT` is disposable
+121. SQLite has two retained historical profiles: `DEVELOPMENT` is disposable
      local development/test state, while `LIVE_RESEARCH` is durable,
      non-disposable evidence outside the repository. `LIVE_RESEARCH` retains
      parsed history indefinitely, bounds sanitized raw forensic evidence to at
      most 24 hours, and preserves three validated daily backups. It is not a
-     Tiered50 production cutover and does not authorize a database server or
-     PostgreSQL adapter during Stage 14.
+     Tiered50 production cutover. The prepared macOS path uses direct
+     persistence and must not route through either SQLite profile.
 122. The real MDD client must be POST/TRIAS 1.2, arrival-scoped, per-target
      result-limited, 30-second per-attempt, environment-secret-only, and
      explicitly opted in. Importing or initializing the client must not issue
@@ -436,12 +441,14 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      fault injection, restart/crash visibility, failure isolation, and
      whitespace/diff review. No validation step may consume MDD quota or issue
      DNS activity.
-126. The production cutover remains gated on repeated stable live-research
-     evidence followed by a separate durable-storage decision, production
-     target-ID materialization, real sampling-era timestamp, final heartbeat
-     safety margin, deployment platform, authorized live dry-run, Tiered50
-     activation, and post-activation smoke validation. PostgreSQL host/runtime
-     and adapter selection are not an active Stage 14 completion gate.
+126. Tiered50 production cutover remains gated on a real sampling-era
+     timestamp, production target-ID materialization, final heartbeat safety
+     margin, deployment platform, authorized live dry-run, Tiered50 activation,
+     and post-activation smoke validation. The prepared existing-seven-target
+     macOS path has separate gates: current Windows runtime identification and
+     retirement, explicit cutover approval, direct-database schema validation,
+     and one manually authorized live Heumarkt validation. PostgreSQL
+     host/runtime is not active architecture.
 
 ## Stage 15A validation-readiness guardrails
 
@@ -450,7 +457,9 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      live-network activity, install/configure PostgreSQL, create production
      database objects, materialize the 43 new production targets, create a
      sampling-era cutover timestamp, deploy a scheduler, modify Power BI, or
-     alter Stage 12/13 evidence.
+     alter Stage 12/13 evidence. The separately documented additive prepared
+     adapter/migration is not Stage 15A validation and does not constitute
+     production cutover.
 129. The version-controlled Stage 15 validation contract may encode automatic
      PASS/FAIL only for already approved invariants. Design-only production
      checks are `NOT_APPLICABLE` or `INSUFFICIENT_EVIDENCE` when their evidence

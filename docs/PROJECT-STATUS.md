@@ -433,8 +433,9 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
 S87 supersedes the previously discussed PostgreSQL and SQLite-first directions
 for the active roadmap. The official database is SQL Server
 `CologneTransitIntelligence`; the live-research SQLite profile and PostgreSQL
-contracts remain historical/deferred-cleanup evidence only. No S87 collector
-runtime or persistence change was made.
+contracts remain historical/deferred-cleanup evidence only. A prepared,
+additive macOS direct-persistence adapter and migration now exist, but the
+Windows runtime gate, scheduler, and controlled cutover remain unresolved.
 
 ### Stage 14 collector implementation — retained legacy research; SQL Server cutover deferred
 
@@ -445,7 +446,8 @@ runtime or persistence change was made.
 - The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. Production `live` remains blocked; `live-research` is a separate one-heartbeat Heumarkt mode with explicit storage, credential, target, and quota preconditions.
 - SQLite has two explicit profiles: disposable `DEVELOPMENT` state under `.local/` and durable, non-disposable `LIVE_RESEARCH` state under the configured live root. The live profile preserves claims, audits, parsed snapshots, append-only `timing_observations`, the `LatestSourceRecordedAtTime`/`LastObservedRecordedAtTime` reporting projection, RecordedAtTime evidence, Attribute/GeneralAttribute, Situation, parser-gap, quota, and raw-evidence lineage; parsed history is indefinite, raw forensic bodies are bounded to 24 hours, and three validated daily backups remain required. It is not a production cutover and does not authorize PostgreSQL work.
 - Live research defaults to `~/cologne-transit-data/live-research/collector.sqlite3` when an explicit live root is supplied, with protected `backups/` and `raw-evidence/` directories. Parsed history is retained indefinitely; raw forensic bodies are sanitized, indexed, and retained for at most 24 hours. Validated SQLite online backups retain the three most recent UTC date versions.
-- The offline repository suite reports 157 tests per run and passed with `ResourceWarning` promoted to an error; the Stage 14 validator and compilation/static checks passed.
+- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 186 tests per run with `ResourceWarning` promoted to an error; the Stage 14 validator and compilation/static checks pass.
+- The prepared direct path is documented in [the macOS persistence contract](macos-mssql-collector.md). It uses `pymssql==2.3.2`, additive `ctl.MddMac*`/`stg.MddMac*` objects, source-faithful timing/Situation/Attribute/gap rows, and a disabled `launchd` artifact. It does not alter the historical tables or Power BI boundary, and it does not authorize live MDD collection.
 - One explicitly authorized S78 research heartbeat ran at `2026-10-01T11:30:00Z` for Köln Heumarkt (`de:05315:11110`): one HTTP 200, 20 parsed results, one persisted snapshot, one confirmed provider attempt, no retry, and 121 historical parser-gap fields retained with sanitized raw evidence. S80 then migrated the same live SQLite file offline from schema 2 to 4 without rewriting snapshot JSON, inserted 995 timing rows and 20 ServiceSection rows, and passed integrity, backup, and RecordedAtTime reconciliation checks. S81 migrated that file offline from schema 4 to 5 at `2026-10-01T15:15:16.410851Z`, kept all required row counts unchanged, validated the corrected reporting views, and refreshed the current-day backup. This remains lineage-separated research evidence, not production cutover evidence; no production `live` request, recurring scheduling, production target activation, or real Tiered50 cutover timestamp was performed.
 
 ### Stage 15A post-cutover validation readiness — in progress; Stage 15B not started

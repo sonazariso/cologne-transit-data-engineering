@@ -106,6 +106,18 @@ the repository.
 
 See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/stages/00-project-definition.md), and [Roadmap](docs/ROADMAP.md).
 
+## Prepared direct-persistence collector
+
+The current checkout also contains a controlled macOS Python path that writes
+source-faithful MDD/TRIAS evidence directly to the authoritative database.
+Its additive schema, pinned DB-API dependency, six-context timing tests,
+Situation/Attribute/parser-gap tests, transaction checks, and disabled
+`launchd` artifact are documented in
+[the macOS persistence contract](docs/macos-mssql-collector.md). This is
+implementation readiness only: the current Windows runtime remains
+unconfirmed, the Mac scheduler is disabled, and no Tiered50 or repeated Mac
+collection is active.
+
 ## Repository principles
 
 1. Review before implementation.

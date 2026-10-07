@@ -30,19 +30,35 @@ untouched and are marked for deferred cleanup only. S87 does not migrate,
 delete, or rewrite them. `NRWTransportDW` is an existing SQL Server
 `LEGACY_REFERENCE` database and must remain untouched.
 
+## Prepared direct database path
+
+The prepared macOS collector uses the pinned `pymssql==2.3.2` DB-API wheel and
+opens short-lived direct connections to `CologneTransitIntelligence`. It does
+not create a local SQLite shadow, use PostgreSQL, or route evidence through an
+intermediary database. The additive `ctl.MddMac*` and `stg.MddMac*` contract is
+separate from the existing Windows collector tables and is documented in
+[`docs/macos-mssql-collector.md`](macos-mssql-collector.md).
+
+The future `launchd` definition is present at
+`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist` but
+is explicitly disabled. The Windows task has not been changed. Direct Mac
+collection remains blocked until the current Windows runtime is identified and
+the controlled cutover is separately approved.
+
 ## Secrets
 
 API keys, connection strings containing credentials, tokens, and passwords must not be committed. The exact secret-management approach for the new collector is a later implementation decision.
 
-The tracked `.env.example` file contains historical non-secret placeholders.
-PostgreSQL, SQLite, Ubuntu, and Docker values in it are not active runtime
-configuration. SQL Server credentials remain local/secret and must never be
-committed.
+The tracked `.env.example` file contains the active non-secret names for the
+prepared direct adapter as well as historical placeholders. SQL Server
+credentials remain local/secret and must never be committed. The launchd
+artifact contains no API key or database credential.
 
 ## Collector and pipeline runtime
 
-The future collector/pipeline runtime is Python on macOS with SQL Server as its
+The collector/pipeline direction is Python on macOS with SQL Server as its
 only official persistence platform. SQL Server remains on the Windows VM, and
-Power BI consumes SQL Server analytical/warehouse data. The current Stage 14
-Python/SQLite implementation is retained historical research evidence;
-production connection, scheduling, and cutover are not part of S87.
+Power BI consumes SQL Server analytical/warehouse data. The historical
+Stage 14 Python/SQLite implementation remains retained research evidence; the
+new direct adapter and migration are prepared, while production scheduling and
+cutover remain disabled.
