@@ -61,6 +61,15 @@ LOGGER = logging.getLogger(__name__)
 CLIENT_EXECUTION_FAILURE = "CLIENT_EXECUTION_FAILURE"
 
 
+def _mdd_credential_status(client: object) -> str:
+    """Return credential status without requiring production secrets in env."""
+
+    status_method = getattr(client, "credential_status", None)
+    if callable(status_method):
+        return str(status_method())
+    return validate_api_key_format(os.environ.get("MDD_API_KEY"))
+
+
 def replace_run_maintenance(result: CollectorRunResult, maintenance: Mapping[str, Any]) -> CollectorRunResult:
     return replace(result, maintenance=dict(maintenance))
 
@@ -257,7 +266,7 @@ class Collector:
             raise LiveResearchModeBlocked(
                 "live-research requires a live MDD client; offline clients are not eligible"
             )
-        if validate_api_key_format(os.environ.get("MDD_API_KEY")) != "VALID":
+        if _mdd_credential_status(self.mdd_client) != "VALID":
             raise LiveResearchModeBlocked(
                 "MDD_API_KEY is missing or has an invalid format; zero network requests performed"
             )
@@ -320,7 +329,7 @@ class Collector:
                 raise LiveModeBlocked("mac-sql cutover approval is not present; no network request performed")
             if os.environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
                 raise LiveModeBlocked("mac-sql requires explicit Legacy7 target-scope approval; no network request performed")
-            if validate_api_key_format(os.environ.get("MDD_API_KEY")) != "VALID":
+            if _mdd_credential_status(self.mdd_client) != "VALID":
                 raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
             if not getattr(self.persistence, "is_production_ready", False):
                 raise LiveModeBlocked("mac-sql requires a production-ready direct persistence adapter")

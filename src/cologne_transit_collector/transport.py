@@ -151,6 +151,7 @@ class LiveMddClient:
         endpoint: str,
         *,
         requestor_ref: str = "CologneTransitIntelligence",
+        api_key: str | None = None,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
         urlopen_fn: Callable[..., object] | None = None,
         opener_factory: Callable[[], object] | None = None,
@@ -158,10 +159,20 @@ class LiveMddClient:
     ) -> None:
         self.endpoint = endpoint
         self.requestor_ref = requestor_ref
+        # Production launchd resolves the credential from Keychain and keeps
+        # it in this process object.  ``None`` preserves the existing
+        # environment-variable path for tests, CI, and explicit diagnostics.
+        self._api_key = api_key
         self.max_response_bytes = max_response_bytes
         self._urlopen = urlopen_fn
         self._opener_factory = opener_factory or (lambda: build_opener(NoRedirectHandler()))
         self.enabled = bool(enabled)
+
+    def credential_status(self) -> str:
+        """Return only the API credential status, never the credential."""
+
+        api_key = self._api_key if self._api_key is not None else os.environ.get(MDD_API_KEY_ENV)
+        return validate_api_key_format(api_key)
 
     def fetch(
         self,
@@ -173,8 +184,8 @@ class LiveMddClient:
     ) -> HttpResponse | TransportFailure:
         if not self.enabled:
             raise MddLiveDisabled("live MDD HTTP requires explicit enabled=True opt-in")
-        api_key = os.environ.get(MDD_API_KEY_ENV)
-        credential_status = validate_api_key_format(api_key)
+        api_key = self._api_key if self._api_key is not None else os.environ.get(MDD_API_KEY_ENV)
+        credential_status = self.credential_status()
         if credential_status != "VALID":
             return TransportFailure(
                 credential_status,

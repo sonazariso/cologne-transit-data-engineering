@@ -1,7 +1,9 @@
 # LIVE_RESEARCH import and cutover record
 
 Captured 2026-10-07. This record is operational evidence, not a new project
-stage or production Tiered50 activation.
+stage or production Tiered50 activation. The import and Windows-gate sections
+below describe the pre-activation state; the current post-retirement and
+Legacy7 activation addendum is at the end of the record.
 
 ## Source and capacity
 
@@ -63,7 +65,7 @@ Windows-era row was merged, deleted, reseeded, or relabeled as Mac runtime
 evidence. The SQL Server database remains the sole authoritative database;
 Power BI, Tiered50, and the active SQLite runtime were not changed.
 
-## Windows runtime gate
+## Windows runtime gate before operator retirement
 
 The Task Scheduler operational log positively identifies the exact task
 `\Cologne Transit Realtime Collector`, principal `DATAANALYST-VM\Somaye`,
@@ -83,3 +85,41 @@ the user-owned task object; the SQL service account alone is insufficient.
 The reusable read-only checks are in
 [`scripts/capacity_preflight.py`](../../scripts/capacity_preflight.py) and
 [`scripts/validate_sqlite_import.py`](../../scripts/validate_sqlite_import.py).
+
+## Current post-retirement and Legacy7 activation evidence
+
+The operator manually disabled the exact task `\Cologne Transit Realtime
+Collector`. The final read-only SQL confirmation recorded:
+
+- task state: `DISABLED`;
+- authoritative final Windows `CollectorRunId`: `40393`;
+- final Windows completion: `2026-10-07T13:43:56Z`;
+- final Windows observation: `2026-10-07T13:43:55Z`;
+- read-only evidence boundary: `2026-10-07T16:37:17.988028Z` (not an
+  invented operator-disable timestamp);
+- two post-retirement read-only boundaries with zero newer Windows runs and
+  zero newer Windows observations.
+
+No SQL-side task disable operation was used for the final retirement. The Mac
+production preflight passed against `CologneTransitIntelligence` using
+`/Library/Developer/CommandLineTools/usr/bin/python3` and `pymssql==2.3.2`,
+with Keychain-backed secrets, exact Legacy7 IDs 1–7, no active SQLite runtime,
+and no PostgreSQL runtime.
+
+The generated user-local LaunchAgent is active at
+`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`;
+the tracked plist remains safe-by-default and disabled. Its installed SHA-256
+is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
+Three normal scheduled runs completed successfully:
+
+| RunId | Logical bucket | Target audits | HTTP attempts | Snapshots | Status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `127809b0-70fa-4770-9943-664942be5fc3` | 5971301 | 7/7 | 7 | 7 | `COMPLETE` |
+| `83c3f261-5bf0-484e-8de6-b6f0e0724a49` | 5971302 | 7/7 | 7 | 7 | `COMPLETE` |
+| `5a7e014c-6266-421c-b402-98c4f1cb89b6` | 5971303 | 7/7 | 7 | 7 | `COMPLETE` |
+
+No manual Heumarkt request was made. Tiered50 target materialization and
+activation remain deferred, and Power BI was not changed. The runtime reuses
+the existing approved SQL login; read-only inspection identifies it as
+`sa`/sysadmin, with no new login or permission grant made. A least-privilege
+runtime login remains a follow-up.

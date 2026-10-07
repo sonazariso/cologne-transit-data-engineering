@@ -1,12 +1,18 @@
 # Prepared macOS direct-persistence collector
 
-This document describes the prepared Python collector path that writes
+This document describes the macOS Legacy7 collector path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
-database. The additive SQL contract is applied and live-validated, and the
-proven historical SQLite source has been imported and reconciled. The existing
-Windows collector has not been disabled, so the macOS scheduler remains
-disabled; no Tiered50 collection has been started and no new Mac MDD request
-has been issued.
+database. The additive SQL contract is applied and live-validated, the proven
+historical SQLite source has been imported and reconciled, and the exact
+Windows task was manually disabled by the operator on 2026-10-07. The normal
+Legacy7 `launchd` job is active; Tiered50 remains inactive.
+
+The first three untouched scheduled Mac runs completed successfully:
+`127809b0-70fa-4770-9943-664942be5fc3` (bucket `5971301`),
+`83c3f261-5bf0-484e-8de6-b6f0e0724a49` (bucket `5971302`), and
+`5a7e014c-6266-421c-b402-98c4f1cb89b6` (bucket `5971303`). Each run had
+seven successful target audits, seven HTTP attempts, seven parsed snapshots,
+and no duplicate target/bucket keys.
 
 The durable historical source is explicitly
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`. Its
@@ -21,13 +27,22 @@ never relabeled as Mac, Windows, Legacy7, or Tiered50 production evidence.
 ## Runtime boundary
 
 The macOS working copy contains the parser, direct DB-API adapter, migration,
-offline tests, and a disabled `launchd` definition. The adapter uses the
-pinned `pymssql==2.3.2` wheel because the actual Python 3.9 x86_64 environment
-has no installed ODBC client. Credentials are read only from environment
-variables (`MSSQL_*` or the existing `SQL_SERVER_*` aliases); they are never
-stored in the repository or emitted in diagnostics.
+offline tests, and a safe-by-default tracked `launchd` template. The active
+user-local LaunchAgent is generated from that template and runs from the
+owner-only runtime bundle under
+`~/Library/Application Support/CologneTransitIntelligence/`. The adapter uses
+the pinned `pymssql==2.3.2` wheel because the actual Python 3.9 x86_64
+environment has no installed ODBC client.
 
-The future runner is fail-closed. It requires all of the following before it
+Non-secret SQL/endpoint settings are stored in the owner-only local runtime
+configuration at
+`~/Library/Application Support/CologneTransitIntelligence/runtime.json`
+(mode `0600`, parent directory `0700`). `MDD_API_KEY` and the SQL password are
+resolved from macOS Keychain generic-password items at runtime; they are never
+stored in the repository, plist, runtime JSON, or diagnostics. Explicit
+environment values remain supported as one-process overrides.
+
+The runner is fail-closed. It requires all of the following before it
 can construct an enabled MDD client:
 
 - `COLLECTOR_MAC_SQL_ENABLED=1`;
@@ -42,27 +57,31 @@ requires IDs 1–7 and the existing StopPointRef mapping, and uses those rows as
 the only target scope. It does not use the deferred 50-target manifest as a
 live target list and does not create a new sampling era.
 
-The current runtime gate is positively identified but not retired: Task
-Scheduler operational events identify `\Cologne Transit Realtime Collector`,
-principal `DATAANALYST-VM\Somaye`, a `powershell.exe` action, a five-minute
-trigger, and successful result code 0. The SQL Server service account could
-not enumerate or disable that user-owned task object, so the exact task was
-left unchanged. The latest post-attempt SQL run was still Windows-era
-`CollectorRunId 40390` at `2026-10-07T13:28:53Z`. An interactive/administrative
-Windows Task Scheduler context is required before enabling launchd. Existing
-SQLite evidence is reconciled offline; the first new Mac request, if later
-authorized, must be an ordinary scheduler heartbeat over the existing Legacy7
-scope, with no manually targeted Heumarkt request.
+The exact task `\Cologne Transit Realtime Collector` is now operator-confirmed
+`DISABLED`. Read-only SQL confirmation captured two post-retirement boundaries
+with zero newer Windows runs or realtime observations. The proof boundary was
+`2026-10-07T16:37:17.988028Z`; this is an evidence boundary, not an invented
+operator-disable timestamp. The authoritative final Windows run is
+`CollectorRunId 40393`, completed at `2026-10-07T13:43:56Z`, and the final
+Windows observation is at `2026-10-07T13:43:55Z`. No SQL-side task disable
+operation was used for the final retirement. Existing SQLite evidence was
+reconciled offline; no manual Heumarkt request was made or required.
+
+The runtime reuses the existing approved SQL login from the migration
+configuration. Read-only inspection identifies that login as `sa`/sysadmin;
+no login or permission grant was created or broadened. Replacing that existing
+credential with a least-privilege runtime login remains an explicit security
+follow-up.
 
 ## Old and prepared flow
 
 ```text
-existing Windows collector
+retired Windows collector
         │
         ├── unchanged ctl.MddCollectorRun / stg.MddRealtime* history
         └── existing Power BI-facing views
 
-prepared macOS runner (disabled)
+active macOS Legacy7 runner
         │  current-bucket, no catch-up, direct DB-API connection
         ▼
 ctl.MddMac* claims/audit/quota ── transaction ──► stg.MddMac* source evidence
@@ -198,7 +217,7 @@ are not persisted.
 
 ## Scheduling, retry, and retention controls
 
-- The future scheduler interval is five minutes with `StartInterval=300`,
+- The installed scheduler interval is five minutes with `StartInterval=300`,
   `ThrottleInterval=300`, no `RunAtLoad`, and no missed-bucket replay.
 - Dispatcher and target claims are durable and stale claims are observable.
 - Initial quota reservations are durable. Because Windows provider-wide usage
@@ -211,12 +230,12 @@ are not persisted.
 
 ## Connectivity and validation evidence
 
-The configured SQL Server is reachable and the selected database is
-`CologneTransitIntelligence`. The additive migration was applied in one
-DB-API transaction and revalidated read-only: 49 SQL batches completed, all
-23 additive tables and 3 procedures/views are present, and the existing
-realtime baseline and sampling-target IDs 1–7 were unchanged. No MDD call was
-made as part of connectivity, migration, source proof, or overlap validation.
+The pre-activation SQL validation established reachability to
+`172.16.192.128:1433`, selected database `CologneTransitIntelligence`, all 23
+additive tables and 3 procedures/views, and unchanged sampling-target IDs 1–7.
+The production preflight used the same path and passed without issuing an MDD
+request. Three subsequent normal scheduled Legacy7 runs then proved live
+Mac-to-SQL persistence.
 
 The read-only overlap audit found zero Windows-era collector runs, Heumarkt
 stop observations, or situation observations in the historical six-hour
@@ -225,11 +244,10 @@ same-event different snapshots remain `NOT_PROVABLE` without legacy payload
 hashes/source-event identities. No destructive merge or timestamp-based
 deduplication was performed.
 
-The SQL Server row volume currently has only 10,260,480 bytes available on
-`C:\`; the importer requires conservative headroom of 1,150,083,072 bytes for
-this 575,041,536-byte source. The import therefore remains blocked before a
-new batch is opened. Existing failed attempts are recorded as `FAILED`, and
-no database rows were deleted to make space.
+The historical pre-import capacity gate was satisfied before import. The
+post-import evidence recorded 46,185,209,856 bytes of free `C:\` volume space
+and 45,050,331,136 bytes of projected reserve. Four failed import batches
+remain retained as immutable `FAILED` history; no source rows were deleted.
 
 The migration is applied by `scripts/apply_mssql_migration.py` only with an
 explicit `--apply`. It is batch-aware, atomic, refuses a different database
@@ -240,23 +258,27 @@ validation. The direct adapter, importer, and parser tests use fixtures and
 fake connections; they do not write fixture rows into the authoritative
 database.
 
-## Cutover and rollback
+## Current operation and rollback
 
-Cutover remains a separate user-approved decision and is currently blocked:
+The controlled cutover is complete for the existing Legacy7 scope. The tracked
+plist remains safe-by-default and disabled; the active machine-specific plist
+is the generated owner-local artifact at
+`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`.
+It uses the exact interpreter
+`/Library/Developer/CommandLineTools/usr/bin/python3`, `StartInterval=300`,
+`RunAtLoad=false`, and the five approved non-secret gates. Its recorded SHA-256
+is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
 
-1. Capture current Windows task identity/state/process evidence and resolve the
-   `WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED` blocker.
-2. Review the applied migration/schema, source proof, overlap audit, and
-   read-only baseline; expand the SQL Server row volume before importing.
-3. Run the importer with the explicit source path, reconcile every source
-   table/evidence family to zero unexplained differences, and rerun the exact
-   same source to prove idempotency.
-4. Obtain explicit approval to stop the positively identified Windows task,
-   enable the Mac runner, and begin repeated collection. The environment gates
-   must be changed together; the launchd artifact remains disabled until then.
-5. The first new MDD request must be a normal scheduled Legacy7 heartbeat.
-   Offline SQLite reconciliation replaces any manual Heumarkt validation
-   probe; no extra live Heumarkt request is required.
+Rollback is scheduler-level and additive: unload or disable only the Mac job,
+leave all new evidence intact for diagnosis, and resume the Windows task only
+after an operator confirms its state. No migration rollback should drop the
+new objects or delete historical rows. Tiered50 activation, new production
+target IDs, and Power BI changes remain out of scope.
+
+At final verification the Windows SQL VM was subsequently powered off. The
+next scheduled LaunchAgent invocation exited during SQL connectivity preflight
+before opening a SQL run or issuing an MDD request. The LaunchAgent remains
+loaded; the VM must be running for subsequent intervals to collect.
 
 Rollback is scheduler-level and additive: stop/unload the Mac job, leave all
 new evidence intact for diagnosis, and resume the previously approved Windows
@@ -269,8 +291,12 @@ rollback step.
 
 - Migration: [`sql/mdd-mac-collector/create-source-faithful-persistence.sql`](../sql/mdd-mac-collector/create-source-faithful-persistence.sql)
 - Adapter: [`src/cologne_transit_collector/mssql_persistence.py`](../src/cologne_transit_collector/mssql_persistence.py)
-- Future gated runner: [`src/cologne_transit_collector/macos_runner.py`](../src/cologne_transit_collector/macos_runner.py)
-- Disabled scheduler: [`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist`](../deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist)
+- Mac runner: [`src/cologne_transit_collector/macos_runner.py`](../src/cologne_transit_collector/macos_runner.py)
+- Safe tracked scheduler template: [`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist`](../deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist)
+- Runtime configuration: [`scripts/configure_macos_runtime.py`](../scripts/configure_macos_runtime.py)
+- LaunchAgent installer: [`scripts/install_macos_launch_agent.py`](../scripts/install_macos_launch_agent.py)
+- Production preflight: [`scripts/macos_production_preflight.py`](../scripts/macos_production_preflight.py)
+- Windows retirement confirmation: [`scripts/confirm_windows_retirement.py`](../scripts/confirm_windows_retirement.py)
 - Static/live migration validator: [`scripts/validate_mssql_migration.py`](../scripts/validate_mssql_migration.py)
 - Additive migration runner: [`scripts/apply_mssql_migration.py`](../scripts/apply_mssql_migration.py)
 - Explicit SQLite importer: [`scripts/import_live_research_sqlite.py`](../scripts/import_live_research_sqlite.py)

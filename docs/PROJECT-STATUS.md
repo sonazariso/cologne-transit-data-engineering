@@ -23,12 +23,38 @@
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
-| 14 | Collector Implementation and Controlled 50-Station Cutover | HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED |
-| 15 | Post-Cutover Validation | IN PROGRESS — READINESS; LIVE NOT STARTED |
+| 14 | Collector Implementation and Controlled 50-Station Cutover | LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 DEFERRED |
+| 15 | Post-Cutover Validation | IN PROGRESS — TIERED50 LIVE VALIDATION NOT STARTED |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
 
 ## Current active architecture
+
+### Current operational cutover — 2026-10-07
+
+The operator manually disabled the exact Windows Task Scheduler task
+`\Cologne Transit Realtime Collector`. Read-only SQL confirmation captured two
+post-retirement boundaries with zero newer Windows collector runs or realtime
+observations. The authoritative final Windows run is `CollectorRunId 40393`,
+completed at `2026-10-07T13:43:56Z`; the final Windows observation is at
+`2026-10-07T13:43:55Z`.
+
+The approved Legacy7 Mac runtime is active through the generated user-local
+LaunchAgent at `~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`.
+It uses `/Library/Developer/CommandLineTools/usr/bin/python3`, `pymssql==2.3.2`,
+the owner-only runtime JSON and macOS Keychain, a five-minute interval, and no
+`RunAtLoad`. The first three untouched scheduled runs all completed
+successfully with seven target audits and seven parsed snapshots each. Their
+run IDs are recorded in [the direct-persistence collector record](macos-mssql-collector.md).
+
+The tracked plist remains safe-by-default and disabled; the installed plist
+contains no credentials. The runtime uses the existing approved SQL login
+from the migration configuration. Read-only inspection identifies that login
+as `sa`/sysadmin; no login or permission grant was created or broadened. A
+least-privilege runtime login remains an explicit follow-up.
+
+Tiered50 remains inactive: no new production target IDs or sampling era were
+created, no manual Heumarkt request was made, and Power BI was not changed.
 
 Microsoft SQL Server is the sole authoritative project database. The official
 database is `CologneTransitIntelligence` on the current Windows VM. Future
@@ -64,10 +90,10 @@ instance and remains recoverable from the verified archive.
 ### Current cutover transition status
 
 The additive SQL Server contract is applied to `CologneTransitIntelligence`
-and passes live read-only validation: 23 tables and 3 routines/views are
-present, while the existing seven sampling-target IDs and Windows-era realtime
-counts remain unchanged. The direct launchd artifact remains disabled and now
-uses the validated absolute interpreter
+passes live read-only validation: 23 tables and 3 routines/views are present,
+and the existing seven sampling-target IDs and Windows-era realtime counts
+remain unchanged. The safe tracked plist is disabled by design; the generated
+user-local LaunchAgent is active and uses the validated absolute interpreter
 `/Library/Developer/CommandLineTools/usr/bin/python3`.
 
 The durable SQLite source is
@@ -87,12 +113,9 @@ import attempts remain auditable as `FAILED`, including one interrupted
 partial batch; no source rows were deleted. Post-import reconciliation passed
 for 70 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, and
 121 parser gaps, with zero unexplained differences and zero source
-`RecordedAtTime` values. Task Scheduler operational evidence now positively
-identifies the Windows task, but the SQL Server service account cannot access
-the user-owned task object to disable it; later Windows runs confirm it remains
-active. The Mac scheduler therefore remains disabled. Offline reconciliation
-replaces any manual Heumarkt validation request; the first future Mac request,
-if approved, must be a normal scheduled Legacy7 heartbeat.
+`RecordedAtTime` values. Offline reconciliation replaced any manual Heumarkt
+validation request. The operator then retired the exact Windows task, and the
+Mac Legacy7 scheduler was activated after production preflight passed.
 
 See the [operational import and cutover record](operational/s98-live-research-import-and-cutover.md)
 and the reusable [read-only validator](../scripts/validate_sqlite_import.py).
@@ -482,9 +505,9 @@ contracts remain historical/deferred-cleanup evidence only. A prepared,
 additive macOS direct-persistence adapter and migration now exist, but the
 Windows runtime gate, scheduler, and controlled cutover remain unresolved.
 
-### Stage 14 collector implementation — retained legacy research; SQL Server cutover deferred
+### Stage 14 collector implementation — historical SQLite profile; Legacy7 SQL runtime active
 
-- **Overall status:** `HISTORICAL IMPLEMENTATION RETAINED — SQL SERVER CUTOVER DEFERRED`.
+- **Overall status:** `HISTORICAL SQLITE PROFILE RETAINED; LEGACY7 SQL RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`.
 - **Implementation status:** `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. S76's final source-contract retention correction is complete: JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction remain independent, candidate identity extensions retain source paths, service-only mode/display/origin/destination semantics are enforced, Attribute/GeneralAttribute and affected-entity evidence is retained without causal inference, and recognized-but-unmapped relevant fields become bounded parser-gap evidence. The accepted S75 call-scope and `CLIENT_EXECUTION_FAILURE` behavior remains intact. The package under `src/cologne_transit_collector/`, thin CLI `scripts/stage_14_collector.py`, fixed manifest `config/tiered50_runtime_manifest.json`, offline validation script, sanitized fixtures, and Stage 14 tests are source-controlled.
 - The manifest contains exactly 50 targets, split 7 Legacy7 members / 43 new Tiered50 members, with approved 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits, persisted phase indexes, and no fabricated production SamplingTargetIds. Stage 13 phase evidence is reconciled at load time.
 - Pure UTC bucket scheduling reproduces `[19,18,18,18,19,18]`, 110 executions per 30-minute super-cycle, and 220/hour. The dispatcher is scheduler-neutral, cap-2, MaxAttempts 2, failure-isolated, and deadline-aware.

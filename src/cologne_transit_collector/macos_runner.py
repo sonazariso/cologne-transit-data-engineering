@@ -32,8 +32,20 @@ from .domain import (
     SamplingEra,
 )
 from .manifest import load_default_manifest
-from .mssql_persistence import MssqlDependencyError, MssqlPersistence, MssqlSafetyError, MssqlSchemaError
+from .mssql_persistence import (
+    MssqlConnectionSettings,
+    MssqlDependencyError,
+    MssqlPersistence,
+    MssqlSafetyError,
+    MssqlSchemaError,
+)
 from .quota import QuotaGuard
+from .runtime_configuration import (
+    EXPECTED_SQL_DATABASE,
+    SecretRequired,
+    merge_non_secret_runtime_values,
+    resolve_required_secrets,
+)
 from .transport import LiveMddClient, validate_api_key_format
 
 
@@ -67,6 +79,23 @@ def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
         raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
 
 
+def _require_nonsecret_cutover_gate(environ: dict[str, str]) -> None:
+    """Check gates before touching Keychain secrets."""
+
+    if environ.get(MAC_SQL_ENABLED_ENV) != "1":
+        raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
+    if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+        raise LiveModeBlocked("current Windows collector runtime is not confirmed retired; no network request performed")
+    if environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
+        raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
+    if environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
+        raise LiveModeBlocked("explicit existing-seven-target scope approval is missing; no network request performed")
+    if environ.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+        raise LiveModeBlocked(
+            "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one explicitly approved direct-database MDD heartbeat.")
     parser.add_argument("--at", dest="at_utc", help="UTC ISO-8601 time for deterministic validation")
@@ -75,12 +104,24 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    root = Path(__file__).resolve().parents[2]
+    configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
+    root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
     try:
-        require_cutover_gate()
+        base_configuration = merge_non_secret_runtime_values()
+        _require_nonsecret_cutover_gate(dict(base_configuration.values))
+        configuration = resolve_required_secrets(base_configuration)
+        runtime_values = dict(configuration.values)
+        require_cutover_gate(runtime_values)
+        mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
+        if mssql_settings.database != EXPECTED_SQL_DATABASE:
+            raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
         at_utc = _parse_utc(args.at_utc)
         base_manifest = load_default_manifest(root)
-        persistence = MssqlPersistence(collection_context=MAC_SQL_COLLECTION_CONTEXT)
+        persistence = MssqlPersistence(
+            settings=mssql_settings,
+            raw_evidence_directory=runtime_values.get("MSSQL_RAW_EVIDENCE_DIR"),
+            collection_context=MAC_SQL_COLLECTION_CONTEXT,
+        )
         schema = persistence.validate_schema()
         targets = persistence.load_existing_sampling_targets()
         manifest = replace(
@@ -91,11 +132,16 @@ def main(argv: list[str] | None = None) -> int:
             activation_status="EXPLICIT_CUTOVER_APPROVED",
             targets=targets,
         )
-        settings = CollectorSettings.for_repository(root)
+        settings = CollectorSettings.for_repository(root, environ=runtime_values)
         collector = Collector(
             manifest=manifest,
             persistence=persistence,
-            mdd_client=LiveMddClient(settings.endpoint, requestor_ref=settings.requestor_ref, enabled=True),
+            mdd_client=LiveMddClient(
+                settings.endpoint,
+                requestor_ref=settings.requestor_ref,
+                api_key=runtime_values["MDD_API_KEY"],
+                enabled=True,
+            ),
             quota_guard=QuotaGuard(persistence, reservation_scope="LIVE_PROVIDER"),
             safety_margin_seconds=settings.safety_margin_seconds,
         )
@@ -126,6 +172,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0 if result.status in {"COMPLETE", "DUPLICATE_NO_WORK"} else 1
+    except SecretRequired as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except (LiveModeBlocked, MssqlDependencyError, MssqlSafetyError, MssqlSchemaError) as exc:
         print(
             json.dumps(

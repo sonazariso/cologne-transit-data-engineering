@@ -19,16 +19,15 @@ sufficient recorded/actual timing evidence.
 
 S87 is the active architecture decision: **Microsoft SQL Server is the sole
 authoritative project database**, and the expected database is
-`CologneTransitIntelligence` on the current Windows VM. Future collectors and
-pipelines are planned as Python running on macOS and connecting to that SQL
-Server; Power BI consumes SQL Server analytical/warehouse data. The existing
-PostgreSQL contracts and SQLite collector/research implementation remain
-historical/legacy artifacts for deferred cleanup. S87 is a baseline
-stabilization gate, not collector activation or a new collection stage.
+`CologneTransitIntelligence` on the current Windows VM. The approved Legacy7
+collector now runs as Python on macOS and connects directly to that SQL Server;
+Power BI is unchanged. The existing PostgreSQL contracts and SQLite
+collector/research implementation remain historical/legacy artifacts for
+deferred cleanup. Tiered50 remains inactive.
 
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
-- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **COMPLETE**. Fresh 2026-10-07 evidence confirms `CologneTransitIntelligence` is ONLINE; the native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH CHECKSUM`; and full read-only `DBCC CHECKDB` reports no corruption errors. The verified 606,586,880-byte backup and matching SHA-256 Mac safety copy are retained on the user-provided `CologneTransitData` share. The low-space `C:` volume was not used as the backup destination, and the existing Windows collector remains operationally unconfirmed at the Task Scheduler/process level.
+- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **COMPLETE**. Fresh 2026-10-07 evidence confirms `CologneTransitIntelligence` is ONLINE; the native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH CHECKSUM`; and full read-only `DBCC CHECKDB` reports no corruption errors. The verified 606,586,880-byte backup and matching SHA-256 Mac safety copy are retained on the user-provided `CologneTransitData` share. The low-space `C:` volume was not used as the backup destination. The stabilization capture preceded the later operator-confirmed Windows-task retirement documented in the current cutover record.
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
   technical-closure package remains the approved baseline. The previous host
   run completed the five S15 historical requests, and S16 performed zero MDD
@@ -47,8 +46,8 @@ stabilization gate, not collector activation or a new collection stage.
 - Stage 11 — [Power BI Model](docs/stages/11-power-bi-model-design.md): **COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED**. The semantic subject areas, table grains, physical-fact versus semantic Scheduled Trip relationship boundary, relationship/filter-direction contract, governed Date strategy, static-versus-canonical identity boundary, DAX measure contract, service-date-scoped matching coverage with separate missing-service-date evidence, threshold/NULL semantics, terminology, and sampling/coverage/reporting limits are approved. `Dim Sampling Era` currently filters only the `Fact Matching Decision` population; Data Quality classifications carried by those decisions inherit that context, while the independent `Fact Data Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in the base model. Sampling Era is not an operational KPI slicer until validated operational-event lineage exists. [Completion decision](docs/stages/11-power-bi-model-completion-decision.md).
 - Stage 12 — [50-Station Selection](docs/stages/12-50-station-selection.md): **COMPLETE — APPROVED FIXED 50-STATION PANEL**. `TIERED50_PANEL_V1` contains exactly 50 unique validated VRS parent stations, preserves all seven Legacy7 continuity anchors, measures current core-mode representation and geographic concentration, and passes a bounded sequential MDD compatibility probe with 50 HTTP 200/parseable application responses and source `StopPointRef` evidence. The complete sanitized 864-candidate population is retained in [candidate evidence](docs/stages/12-50-station-candidate-evidence.json), and the authoritative selector reproduces the fixed panel offline without the ZIP, network, MDD, or credentials. See the [completion decision](docs/stages/12-50-station-selection-completion-decision.md) and [sanitized evidence artifact](docs/stages/12-50-station-selection-evidence.json).
 - Stage 13 — [Tiered Collector Readiness](docs/stages/13-tiered-collector-readiness.md): **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**. Explicit approval recorded in `prompts/S68.md` finalizes `TIERED50_PANEL_V1` as exactly 50 fixed stations with density ranks 1–8 / 9–28 / 29–50 for Tier A/B/C, cadence 5/15/30 minutes, 110 requests per 30-minute super-cycle, Tier A/B/C `NumberOfResults` 20/30/30, bounded concurrency 2, and `MaxAttempts=2` with one approved transient retry. Static support is 50/50 at the approved tier-specific limits; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The 182,980 / 189,076 conservative shared-credential totals are valid safely below the 210,000 normal operational maximum and 207,500 automatic-retry protection boundary; the 31-day guardrail example is 189,076 with 18,424 headroom, while the Tiered50-only component is 180,048. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days. See the [completion decision](docs/stages/13-tiered-collector-readiness-completion-decision.md) and [evidence artifact](docs/stages/13-tiered-collector-readiness-evidence.json).
-- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **HISTORICAL IMPLEMENTATION — ACTIVE RUNTIME/DATABASE CUTOVER DEFERRED**. The Python/SQLite research implementation and its evidence remain source-controlled and untouched; S87 does not change the collector runtime. Any later cleanup or SQL Server persistence connection requires a separate approved stage.
-- Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The analyzer may inspect `LIVE_RESEARCH_SINGLE_1` read-only, but that context cannot satisfy the production sampling-era transition. Stage 15B live post-cutover validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**; no real cutover timestamp or production evidence is claimed.
+- Stage 14 — [Collector Implementation and Offline Cutover Readiness](docs/stages/14-collector-implementation.md): **LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 CUTOVER DEFERRED**. The historical Python/SQLite research implementation remains source-controlled and untouched; the active Legacy7 path uses the additive SQL Server contract and the existing seven target IDs.
+- Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The three successful Mac Legacy7 SQL heartbeats validate the active runtime but are not Tiered50 transition evidence. Stage 15B live Tiered50 validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**.
 - Stage 4 evidence: [approved reference snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The approved reference contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Approved reference ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`. The separate Stage 9 current official snapshot is `VERSION__20260929_0106` with SHA-256 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` and passed all 17 Stage 4 revalidation checks.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
 - Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history or approve GTFS-RT for production; Stage 3A now separately validates current disruption evidence.
@@ -113,15 +112,14 @@ See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/
 The current checkout also contains a controlled macOS Python path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative database.
 Its additive schema is applied and live-validated; the pinned DB-API
-dependency, explicit SQLite-to-SQL Server importer, six-context timing tests,
-Situation/Attribute/parser-gap tests, atomic migration checks, and disabled
-`launchd` artifact are documented in
+dependency, explicit SQLite-to-SQL Server importer, Keychain-backed runtime
+configuration, safe tracked `launchd` template, installed LaunchAgent, and
+three successful scheduled Legacy7 heartbeats are documented in
 [the macOS persistence contract](docs/macos-mssql-collector.md). The proven
-historical SQLite source is now imported and reconciled with an exact
-idempotency rerun. The Windows task is still active and could not be disabled
-from the SQL service account, so the Mac scheduler remains disabled and no
-repeated Mac collection is active. Offline SQLite reconciliation replaces any
-manual Heumarkt probe.
+historical SQLite source is reconciled with an exact idempotency rerun. The
+operator disabled the exact Windows task, and read-only SQL proof shows no
+later Windows writer activity. Offline SQLite reconciliation replaces any
+manual Heumarkt probe; Tiered50 and Power BI remain unchanged.
 
 ## Repository principles
 

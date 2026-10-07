@@ -13,8 +13,8 @@ Planned path:
 Role: host for the official Microsoft SQL Server instance and optional Power BI
 tooling. The authoritative project database is
 `CologneTransitIntelligence`; the SQL Server instance remains on this VM.
-Future collectors and pipelines are planned as Python on macOS and connect to
-SQL Server here.
+The active Legacy7 collector runs as Python on macOS and connects to SQL
+Server here. Tiered50 remains inactive; Power BI is unchanged.
 
 Access the same macOS working tree through VMware Shared Folders:
 
@@ -35,7 +35,7 @@ USB storage. The `.bak` and ZIP remain preserved under `CologneTransitData` as
 the recovery source; `CologneTransitIntelligence` is the only project SQL
 Server database now attached to the VM.
 
-## Prepared direct database path
+## Active direct database path
 
 The prepared macOS collector uses the pinned `pymssql==2.3.2` DB-API wheel and
 opens short-lived direct connections to `CologneTransitIntelligence`. It does
@@ -44,13 +44,13 @@ intermediary database. The additive `ctl.MddMac*` and `stg.MddMac*` contract is
 separate from the existing Windows collector tables and is documented in
 [`docs/macos-mssql-collector.md`](macos-mssql-collector.md).
 
-The future `launchd` definition is present at
-`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist` but
-is explicitly disabled and invokes
-`/Library/Developer/CommandLineTools/usr/bin/python3` directly. The Windows
-task has not been changed. Direct Mac collection remains blocked until the
-current Windows runtime is identified, the proven historical SQLite source is
-reconciled/imported, and the controlled cutover is separately approved.
+The tracked `launchd` definition at
+`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist` is a
+safe-by-default disabled template. The active generated artifact is
+`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`
+and invokes `/Library/Developer/CommandLineTools/usr/bin/python3` from an
+owner-only runtime bundle. It uses a five-minute interval, no `RunAtLoad`, and
+the approved Legacy7 cutover gates.
 
 The explicit historical source is
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`; its
@@ -60,13 +60,20 @@ role/context are `LIVE_RESEARCH` / `LIVE_RESEARCH_SINGLE_1`. The source proof
 and overlap audit are read-only. The source passed a fresh conservative
 capacity gate, was imported into additive `ctl.MddImport*`/`stg.MddMac*`
 lineage, and passed an exact idempotency rerun. No manual Heumarkt request was
-made or required. The Mac launchd definition remains disabled because the
-exact Windows task is still producing `ctl.MddCollectorRun` rows and requires
-interactive/administrative Windows Task Scheduler access to retire.
+made or required. The exact Windows task
+`\Cologne Transit Realtime Collector` was manually disabled by the operator.
+Read-only SQL confirmation saw zero newer Windows runs or observations across
+two boundaries; the authoritative final Windows run is 40393, completed at
+`2026-10-07T13:43:56Z`.
 
 ## Secrets
 
-API keys, connection strings containing credentials, tokens, and passwords must not be committed. The exact secret-management approach for the new collector is a later implementation decision.
+API keys, connection strings containing credentials, tokens, and passwords must
+not be committed. The active collector stores non-secret runtime settings in
+`~/Library/Application Support/CologneTransitIntelligence/runtime.json`
+(`0600`, parent `0700`) and resolves `MDD_API_KEY` plus the SQL password from
+macOS Keychain generic-password items. The installed plist and logs contain no
+secret values.
 
 The tracked `.env.example` file contains the active non-secret names for the
 prepared direct adapter as well as historical placeholders. SQL Server
@@ -79,5 +86,5 @@ The collector/pipeline direction is Python on macOS with SQL Server as its
 only official persistence platform. SQL Server remains on the Windows VM, and
 Power BI consumes SQL Server analytical/warehouse data. The historical
 Stage 14 Python/SQLite implementation remains retained research evidence; the
-new direct adapter and migration are prepared, while production scheduling and
-cutover remain disabled.
+active direct adapter writes Legacy7 evidence to the additive `ctl.MddMac*` /
+`stg.MddMac*` contract. Tiered50 production activation remains deferred.

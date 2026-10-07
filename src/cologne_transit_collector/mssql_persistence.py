@@ -29,6 +29,12 @@ from .quota import (
     PENDING_AUTHORIZATION,
     RELEASED_NO_NETWORK,
 )
+from .runtime_configuration import (
+    MSSQL_CREDENTIAL,
+    SecretProvider,
+    merge_non_secret_runtime_values,
+    resolve_secret,
+)
 from .timing import iter_timing_observations
 from .trias import iter_service_section_observations
 
@@ -74,8 +80,13 @@ class MssqlConnectionSettings:
     query_timeout_seconds: int = 30
 
     @classmethod
-    def from_environment(cls, environ: Mapping[str, str] | None = None) -> "MssqlConnectionSettings":
-        values = dict(os.environ if environ is None else environ)
+    def from_environment(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        secret_provider: SecretProvider | None = None,
+    ) -> "MssqlConnectionSettings":
+        values = dict(merge_non_secret_runtime_values(environ).values)
 
         def first(*names: str, default: str | None = None) -> str | None:
             for name in names:
@@ -90,6 +101,8 @@ class MssqlConnectionSettings:
         database = first("MSSQL_DATABASE", "SQL_SERVER_DB", default="CologneTransitIntelligence")
         user = first("MSSQL_USER", "SQL_SERVER_USER")
         password = first("MSSQL_PASSWORD", "SQL_SERVER_PASSWORD")
+        if password is None:
+            password = resolve_secret(values, credential_type=MSSQL_CREDENTIAL, provider=secret_provider)
         try:
             port = int(first("MSSQL_PORT", "SQL_SERVER_CONTAINER_PORT", default="1433") or "1433")
             login_timeout = int(first("MSSQL_LOGIN_TIMEOUT_SECONDS", default="8") or "8")
@@ -905,6 +918,7 @@ class MssqlPersistence:
                     (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_DISPATCHER_CLAIM", existing_status),
                 )
                 event_id = int(_row_value(cursor.fetchone(), "DispatcherClaimEventId", 0))
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -959,6 +973,7 @@ class MssqlPersistence:
                     (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_CLAIM", existing_status),
                 )
                 event_id = int(_row_value(cursor.fetchone(), "TargetClaimEventId", 0))
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1038,6 +1053,7 @@ class MssqlPersistence:
                     """,
                     (_utc(started_at), target.panel_version, target.source_parent_station_id, int(logical_due_bucket)),
                 )
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1179,6 +1195,7 @@ class MssqlPersistence:
                         finalized_at=finalized_at or completed_at,
                         live_client_invocation=bool(fields["live_client_invocation"]),
                     )
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1265,6 +1282,7 @@ class MssqlPersistence:
                     cursor.fetchall()
                 except Exception:
                     pass
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1320,6 +1338,7 @@ class MssqlPersistence:
                     """,
                     (claim_status, _utc(completed_at), int(audit_id)),
                 )
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1347,6 +1366,7 @@ class MssqlPersistence:
                     """,
                     (str(status), _utc(completed_at), str(run_id)),
                 )
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -1522,6 +1542,7 @@ class MssqlPersistence:
                     finalized_at=at_utc or datetime.now(timezone.utc),
                     live_client_invocation=live_client_invocation,
                 )
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
                 connection.rollback()

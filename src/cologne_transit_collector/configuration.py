@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from .domain import (
     HEARTBEAT_SECONDS,
@@ -14,6 +15,7 @@ from .domain import (
     PersistenceProfile,
     REQUEST_TIMEOUT_SECONDS,
 )
+from .runtime_configuration import merge_non_secret_runtime_values
 
 
 DEFAULT_ENDPOINT = "https://mdd.gorheinland.com/delfi"
@@ -65,23 +67,31 @@ class CollectorSettings:
         *,
         state_path: str | Path | None = None,
         safety_margin_seconds: float | None = None,
+        environ: Mapping[str, str] | None = None,
     ) -> "CollectorSettings":
         root = Path(repository_root).resolve()
-        configured_state = state_path or os.environ.get("COLLECTOR_STATE_PATH")
+        runtime_values = merge_non_secret_runtime_values(environ).values
+        configured_state = state_path or runtime_values.get("COLLECTOR_STATE_PATH")
         local_state = Path(configured_state) if configured_state else root / ".local" / "stage14" / "collector.sqlite3"
         if not local_state.is_absolute():
             local_state = root / local_state
         margin_value = (
             float(safety_margin_seconds)
             if safety_margin_seconds is not None
-            else float(os.environ.get("COLLECTOR_HEARTBEAT_SAFETY_MARGIN_SECONDS", DEFAULT_SAFETY_MARGIN_SECONDS))
+            else float(
+                runtime_values.get(
+                    "COLLECTOR_HEARTBEAT_SAFETY_MARGIN_SECONDS",
+                    DEFAULT_SAFETY_MARGIN_SECONDS,
+                )
+            )
         )
         return cls(
             repository_root=root,
             manifest_path=root / "config" / "tiered50_runtime_manifest.json",
             stage13_evidence_path=root / "docs" / "stages" / "13-tiered-collector-readiness-evidence.json",
             state_path=local_state,
-            endpoint=os.environ.get("COLLECTOR_MDD_ENDPOINT", DEFAULT_ENDPOINT),
+            endpoint=runtime_values.get("COLLECTOR_MDD_ENDPOINT", DEFAULT_ENDPOINT),
+            requestor_ref=runtime_values.get("COLLECTOR_REQUESTOR_REF", DEFAULT_REQUESTOR_REF),
             safety_margin_seconds=margin_value,
         )
 
