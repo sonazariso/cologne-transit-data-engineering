@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         ):
             raise MssqlSafetyError("Mac Legacy7 runtime login has a prohibited broad privilege")
-        schema = persistence.validate_schema()
+        schema = persistence.validate_runtime_schema()
         approved_targets = persistence.load_existing_sampling_targets()
         selected_target = persistence.select_existing_legacy7_target(
             at_utc=at_utc,

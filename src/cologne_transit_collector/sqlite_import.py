@@ -1944,7 +1944,7 @@ class SQLiteToMssqlImporter:
                 + _canonical_json(blockers)
             )
         adapter = MssqlPersistence(self.settings)
-        schema = adapter.validate_schema()
+        schema = adapter.validate_full_schema()
         before = adapter.baseline()
         overlap = read_only_overlap_audit(self.settings, self.proof)
         # Reopen the exact proven file through SQLite's read-only URI.  The

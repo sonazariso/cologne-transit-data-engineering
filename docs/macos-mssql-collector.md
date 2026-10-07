@@ -22,12 +22,13 @@ snapshots:
 Review identified this as a bounded seven-target-per-heartbeat oversampling
 window, not the approved one-target-per-five-minute Legacy7 cadence. The rows
 remain unchanged and must be excluded from simple Windows-versus-Mac cadence
-volume comparisons. A fresh read-only SQL probe must confirm the counts before
-the append-only methodology evidence records actual 21, historical-equivalent
-3, and excess 18 initial attempts. The current machine has the LaunchAgent
-unloaded and disabled; the SQL VM is not reachable until it is interactively
-unlocked, so no new MDD request or SQL evidence write has been made in this
-review.
+volume comparisons. A fresh read-only SQL probe confirmed the counts and the
+append-only methodology evidence recorded actual 21,
+historical-equivalent 3, and excess 18 initial attempts. The additive lineage
+migration also passed live validation. The current machine has the LaunchAgent
+unloaded and disabled; the SQL VM became unreachable during dedicated-login
+provisioning, so no new MDD request was made and login/preflight/reactivation
+remain pending.
 
 Corrected future Mac audits use `MAC_LEGACY7_PRODUCTION`, preserve
 `SamplingTargetId`, `SamplingSlot`, `LogicalDueBucket`, and
@@ -38,23 +39,55 @@ before reactivation. The exact grants for the dedicated database role are
 listed in [`scripts/provision_macos_runtime_login.py`](../scripts/provision_macos_runtime_login.py)
 and contain no secret material.
 
-The one-time administrator provisioning grants this exact role/object set:
+The one-time administrator provisioning grants this exact role/object set.
+It is generated from the code-backed heartbeat permission matrix in
+[`scripts/provision_macos_runtime_login.py`](../scripts/provision_macos_runtime_login.py):
 
 | Permission | Object |
 | --- | --- |
-| `SELECT` | `ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot`, `ctl.MddCollectorRun`, `stg.MddRealtimeStopObservation`, `stg.MddRealtimeSituationObservation`, `stg.MddRealtimeStopSituationLink`, `ctl.MddMacSamplingEra`, `ctl.MddMacMethodologyEvidence`, `analytics.vwMddMacRecordedAtTimeHistory`, `analytics.vwMddMacSourceFieldCoverage` |
-| `EXECUTE`, `VIEW DEFINITION` | `ctl.uspGetMddRealtimeSamplingTarget` |
-| `SELECT, INSERT, UPDATE` | `ctl.MddMacCollectorRun`, `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit`, `ctl.MddMacQuotaPermit` |
+| `SELECT` | `ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot` |
+| `EXECUTE, VIEW DEFINITION` | `ctl.uspGetMddRealtimeSamplingTarget` |
+| `VIEW DEFINITION` | `ctl.MddMacTargetAudit` (lineage-column validation only) |
+| `INSERT, UPDATE` | `ctl.MddMacCollectorRun` |
+| `SELECT, INSERT, UPDATE` | `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit` |
 | `INSERT` | `ctl.MddMacDispatcherClaimEvent`, `ctl.MddMacTargetClaimEvent`, `ctl.MddMacHttpAttempt`, `ctl.MddMacQuotaAudit` |
+| `SELECT, INSERT, UPDATE` | `ctl.MddMacQuotaPermit` |
 | `EXECUTE` | `stg.uspPersistMddMacSnapshot` |
 
 The runtime role receives no `DELETE`, schema, migration, broad server-role,
 database-owner, or datareader/datawriter permission. Provisioning verifies the
-positive target/selector path and metadata-based denials for server
-administration, table control/alter/delete, database creation, and unrelated
-`msdb` reads before writing the owner-only username and Keychain password.
+positive target/selector and runtime-schema path, plus metadata-based denials
+for server administration, table control/alter/delete, database creation, and
+direct reads of unrelated import/source-evidence/analytics objects. The
+runtime role does not receive direct permission on
+`stg.MddRealtimeStopObservation`, `stg.MddRealtimeSituationObservation`,
+`stg.MddRealtimeStopSituationLink`, `ctl.MddMacSamplingEra`,
+`ctl.MddMacMethodologyEvidence`, `analytics.vwMddMacRecordedAtTimeHistory`, or
+`analytics.vwMddMacSourceFieldCoverage`; administrator/import/diagnostic tools
+use an administrator credential for those reads.
 
-The first three untouched scheduled Mac runs completed successfully:
+Schema validation is split deliberately. `MssqlPersistence.validate_full_schema()`
+is an administrator/migration/import path and may inspect the complete additive
+surface, including import tables, all `ctl.MddMac*`/`stg.MddMac*` evidence
+objects, and analytics views. `validate_runtime_schema()` is the production
+path used by the runner, preflight, and dedicated-login positive validation;
+it checks only the target/slot objects, runtime claim/audit/quota objects,
+the two runtime procedures, and the `SamplingSlot`/
+`SelectionPolicyVersion` lineage columns. It never requires metadata visibility
+over unrelated migration objects and does not grant database-level
+`VIEW DEFINITION`.
+
+Dedicated-login provisioning is recovery-safe. The candidate password is
+stored first in the owner-only pending Keychain item
+`MSSQL_PASSWORD_PENDING`, the SQL login is created or explicitly rotated, and
+positive/negative checks run using that exact candidate. Finalization promotes
+the same value to `MSSQL_PASSWORD`, writes only non-secret runtime JSON, and
+removes the pending item last. A post-commit failure returns
+`CREDENTIAL_FINALIZATION_RECOVERY_REQUIRED`, leaves the LaunchAgent disabled,
+retains the pending item, and can be resumed with `--resume` without generating
+another password.
+
+The three preserved cutover-validation Mac runs completed successfully:
 `127809b0-70fa-4770-9943-664942be5fc3` (bucket `5971301`),
 `83c3f261-5bf0-484e-8de6-b6f0e0724a49` (bucket `5971302`), and
 `5a7e014c-6266-421c-b402-98c4f1cb89b6` (bucket `5971303`). Each run had

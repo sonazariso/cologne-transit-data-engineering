@@ -40,6 +40,8 @@ KEYCHAIN_SERVICE_MDD_API = "com.cologne-transit-intelligence.mdd-api-key"
 KEYCHAIN_ACCOUNT_MDD_API = MDD_API_KEY_ENV
 KEYCHAIN_SERVICE_MSSQL = "com.cologne-transit-intelligence.mssql-password"
 KEYCHAIN_ACCOUNT_MSSQL = MSSQL_PASSWORD_ENV
+KEYCHAIN_SERVICE_MSSQL_PENDING = "com.cologne-transit-intelligence.mssql-password.pending"
+KEYCHAIN_ACCOUNT_MSSQL_PENDING = "MSSQL_PASSWORD_PENDING"
 
 MDD_API_CREDENTIAL = "MDD_API_KEY"
 MSSQL_CREDENTIAL = "MSSQL_PASSWORD"
@@ -271,6 +273,57 @@ def _native_keychain_store(*, service: str, account: str, secret: str) -> int | 
         _release_keychain_item(item_ref)
 
 
+def _native_keychain_delete(*, service: str, account: str) -> int | None:
+    """Delete one generic password with Security.framework when available."""
+
+    framework = _security_framework()
+    if framework is None:
+        return None
+    service_bytes = service.encode("utf-8")
+    account_bytes = account.encode("utf-8")
+    password_length = ctypes.c_uint32(0)
+    password_data = ctypes.c_void_p()
+    item_ref = ctypes.c_void_p()
+    find = framework.SecKeychainFindGenericPassword
+    find.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_char_p,
+        ctypes.c_uint32,
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_uint32),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    find.restype = ctypes.c_int32
+    status = find(
+        None,
+        len(service_bytes),
+        service_bytes,
+        len(account_bytes),
+        account_bytes,
+        ctypes.byref(password_length),
+        ctypes.byref(password_data),
+        ctypes.byref(item_ref),
+    )
+    try:
+        if status == _ERR_SEC_ITEM_NOT_FOUND:
+            return _ERR_SEC_SUCCESS
+        if status != _ERR_SEC_SUCCESS or not item_ref.value:
+            return int(status)
+        delete = framework.SecKeychainItemDelete
+        delete.argtypes = [ctypes.c_void_p]
+        delete.restype = ctypes.c_int32
+        return int(delete(item_ref))
+    finally:
+        free_content = getattr(framework, "SecKeychainItemFreeContent", None)
+        if free_content is not None and password_data.value:
+            free_content.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            free_content.restype = ctypes.c_int32
+            free_content(None, password_data)
+        _release_keychain_item(item_ref)
+
+
 @dataclass(frozen=True)
 class RuntimeConfiguration:
     """Merged environment view used by one production process.
@@ -495,6 +548,35 @@ def store_keychain_secret(*, service: str, account: str, secret: str) -> None:
         raise RuntimeConfigurationError("Keychain update failed")
 
 
+def delete_keychain_secret(*, service: str, account: str) -> None:
+    """Delete one exact generic-password item without exposing a secret."""
+
+    native_status = _native_keychain_delete(service=service, account=account)
+    if native_status is not None:
+        if native_status != _ERR_SEC_SUCCESS:
+            raise RuntimeConfigurationError("Keychain pending-item cleanup failed")
+        return
+    try:
+        completed = subprocess.run(
+            [
+                MacOSKeychainSecretProvider.security_path,
+                "delete-generic-password",
+                "-a",
+                account,
+                "-s",
+                service,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeConfigurationError("Keychain pending-item cleanup failed") from exc
+    if completed.returncode != 0:
+        raise RuntimeConfigurationError("Keychain pending-item cleanup failed")
+
+
 def write_local_runtime_config(path: str | Path, values: Mapping[str, object]) -> Path:
     """Write only approved non-secret values with owner-only permissions."""
 
@@ -533,8 +615,10 @@ __all__ = [
     "EXPECTED_SQL_DATABASE",
     "KEYCHAIN_ACCOUNT_MDD_API",
     "KEYCHAIN_ACCOUNT_MSSQL",
+    "KEYCHAIN_ACCOUNT_MSSQL_PENDING",
     "KEYCHAIN_SERVICE_MDD_API",
     "KEYCHAIN_SERVICE_MSSQL",
+    "KEYCHAIN_SERVICE_MSSQL_PENDING",
     "MDD_API_CREDENTIAL",
     "MDD_API_KEY_ENV",
     "MSSQL_CREDENTIAL",
@@ -550,6 +634,7 @@ __all__ = [
     "resolve_required_secrets",
     "resolve_secret",
     "runtime_config_path",
+    "delete_keychain_secret",
     "store_keychain_secret",
     "write_local_runtime_config",
 ]

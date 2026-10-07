@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cologne_transit_collector.configuration import CollectorSettings  # noqa: E402
+from cologne_transit_collector.domain import MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT  # noqa: E402
 from cologne_transit_collector.manifest import LEGACY7_SAMPLING_TARGET_IDS  # noqa: E402
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlConnectionSettings,
@@ -44,6 +45,7 @@ from cologne_transit_collector.transport import validate_api_key_format  # noqa:
 
 INSTALLED_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.cologne-transit-intelligence.mdd-collector.plist"
 SECRET_MARKERS = ("MDD_API_KEY", "MSSQL_PASSWORD", "SQL_SERVER_PASSWORD", "password", "secret", "token")
+EXPECTED_PYMSSQL_VERSION = "2.3.2"
 
 
 def _database_name(settings: MssqlConnectionSettings) -> str:
@@ -107,6 +109,9 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
 
     import cologne_transit_collector  # noqa: F401
     import pymssql
+    pymssql_version = str(getattr(pymssql, "__version__", "UNKNOWN"))
+    if pymssql_version != EXPECTED_PYMSSQL_VERSION:
+        raise RuntimeError(f"pymssql must be pinned to {EXPECTED_PYMSSQL_VERSION}")
 
     base = merge_non_secret_runtime_values()
     configuration = resolve_required_secrets(base)
@@ -136,7 +141,7 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
         or login_status["is_db_datawriter"]
     ):
         raise RuntimeError("active Mac runtime login has a prohibited broad role")
-    schema = persistence.validate_schema()
+    schema = persistence.validate_runtime_schema()
     targets = persistence.load_existing_sampling_targets()
     selected_target = persistence.select_existing_legacy7_target(
         at_utc=datetime.now(timezone.utc),
@@ -161,7 +166,7 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
     return {
         "status": "PASS",
         "interpreter": sys.executable,
-        "pymssql_version": str(getattr(pymssql, "__version__", "UNKNOWN")),
+        "pymssql_version": pymssql_version,
         "collector_import": "PASS",
         "runtime_config": configuration.redacted(),
         "keychain_secret_resolution": "PASS",
@@ -169,7 +174,7 @@ def run_preflight(*, plist_path: Path = INSTALLED_PLIST) -> dict[str, Any]:
         "mdd_network_calls": 0,
         "sql_database": database_name,
         "sql_login_status": login_status,
-        "mac_sql_collection_context": "MAC_LEGACY7_PRODUCTION",
+        "mac_sql_collection_context": MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT,
         "schema": schema,
         "sampling_target_ids": target_ids,
         "legacy7_mapping": target_mapping,

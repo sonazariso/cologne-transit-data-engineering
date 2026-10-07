@@ -80,6 +80,67 @@ class MssqlSafetyError(RuntimeError):
     """Raised when a prepared collector operation would cross its safety gate."""
 
 
+# These lists are deliberately separate.  The full list belongs to an
+# administrator/migration context; the runtime list is the smallest object
+# surface used by one normal Mac Legacy7 heartbeat and its read-only startup
+# validation.  In particular, the runtime list does not contain import,
+# historical realtime, source-evidence, or analytics objects.
+FULL_SCHEMA_TABLES = (
+    "ctl.MddRealtimeSamplingTarget",
+    "ctl.MddRealtimeSamplingSlot",
+    "ctl.MddMacCollectorRun",
+    "ctl.MddMacDispatcherClaim",
+    "ctl.MddMacDispatcherClaimEvent",
+    "ctl.MddMacTargetClaim",
+    "ctl.MddMacTargetClaimEvent",
+    "ctl.MddMacTargetAudit",
+    "ctl.MddMacHttpAttempt",
+    "ctl.MddMacQuotaPermit",
+    "ctl.MddMacQuotaAudit",
+    "ctl.MddMacSamplingEra",
+    "ctl.MddMacMethodologyEvidence",
+    "stg.MddMacSourceSnapshot",
+    "stg.MddMacCallObservation",
+    "stg.MddMacTimingObservation",
+    "stg.MddMacSituationEvidence",
+    "stg.MddMacServiceSectionEvidence",
+    "stg.MddMacAttributeEvidence",
+    "stg.MddMacResponseError",
+    "stg.MddMacParserGap",
+    "ctl.MddImportBatch",
+    "ctl.MddImportTableAudit",
+    "ctl.MddImportEvidenceAudit",
+    "ctl.MddImportSourceRow",
+    "ctl.MddImportOverlap",
+)
+
+FULL_SCHEMA_ROUTINES = (
+    "ctl.uspGetMddRealtimeSamplingTarget",
+    "stg.uspPersistMddMacSnapshot",
+    "analytics.vwMddMacRecordedAtTimeHistory",
+    "analytics.vwMddMacSourceFieldCoverage",
+)
+
+RUNTIME_SCHEMA_TABLES = (
+    "ctl.MddRealtimeSamplingTarget",
+    "ctl.MddRealtimeSamplingSlot",
+    "ctl.MddMacCollectorRun",
+    "ctl.MddMacDispatcherClaim",
+    "ctl.MddMacDispatcherClaimEvent",
+    "ctl.MddMacTargetClaim",
+    "ctl.MddMacTargetClaimEvent",
+    "ctl.MddMacTargetAudit",
+    "ctl.MddMacHttpAttempt",
+    "ctl.MddMacQuotaPermit",
+    "ctl.MddMacQuotaAudit",
+)
+
+RUNTIME_SCHEMA_ROUTINES = (
+    "ctl.uspGetMddRealtimeSamplingTarget",
+    "stg.uspPersistMddMacSnapshot",
+)
+
+
 @dataclass(frozen=True)
 class MssqlConnectionSettings:
     """Non-secret connection settings; the password is retained in memory only."""
@@ -721,41 +782,15 @@ class MssqlPersistence:
     def _cursor(connection: Any) -> Any:
         return connection.cursor()
 
-    def validate_schema(self) -> Mapping[str, Any]:
-        expected_tables = (
-            "ctl.MddRealtimeSamplingTarget",
-            "ctl.MddRealtimeSamplingSlot",
-            "ctl.MddMacCollectorRun",
-            "ctl.MddMacDispatcherClaim",
-            "ctl.MddMacDispatcherClaimEvent",
-            "ctl.MddMacTargetClaim",
-            "ctl.MddMacTargetClaimEvent",
-            "ctl.MddMacTargetAudit",
-            "ctl.MddMacHttpAttempt",
-            "ctl.MddMacQuotaPermit",
-            "ctl.MddMacQuotaAudit",
-            "ctl.MddMacSamplingEra",
-            "ctl.MddMacMethodologyEvidence",
-            "stg.MddMacSourceSnapshot",
-            "stg.MddMacCallObservation",
-            "stg.MddMacTimingObservation",
-            "stg.MddMacSituationEvidence",
-            "stg.MddMacServiceSectionEvidence",
-            "stg.MddMacAttributeEvidence",
-            "stg.MddMacResponseError",
-            "stg.MddMacParserGap",
-            "ctl.MddImportBatch",
-            "ctl.MddImportTableAudit",
-            "ctl.MddImportEvidenceAudit",
-            "ctl.MddImportSourceRow",
-            "ctl.MddImportOverlap",
-        )
-        expected_routines = (
-            "ctl.uspGetMddRealtimeSamplingTarget",
-            "stg.uspPersistMddMacSnapshot",
-            "analytics.vwMddMacRecordedAtTimeHistory",
-            "analytics.vwMddMacSourceFieldCoverage",
-        )
+    def validate_full_schema(self) -> Mapping[str, Any]:
+        """Validate the complete additive schema under an admin context.
+
+        This path intentionally includes historical-import and source-evidence
+        objects.  It is for migration application, migration validation,
+        administrator diagnostics, and import tooling only; production runtime
+        callers must use :meth:`validate_runtime_schema`.
+        """
+
         with self._connection() as connection:
             cursor = self._cursor(connection)
             cursor.execute(
@@ -783,7 +818,7 @@ class MssqlPersistence:
             )
             column_rows = cursor.fetchall()
         names = {str(_row_value(row, "object_name", 0)) for row in rows}
-        missing = [name for name in expected_tables + expected_routines if name not in names]
+        missing = [name for name in FULL_SCHEMA_TABLES + FULL_SCHEMA_ROUTINES if name not in names]
         if missing:
             raise MssqlSchemaError("additive collector objects are missing: " + ", ".join(missing))
         observed_columns = {str(_row_named(row, "column_name", index=1)) for row in column_rows}
@@ -795,11 +830,111 @@ class MssqlPersistence:
             )
         return {
             "status": "PASS",
-            "expected_table_count": len(expected_tables),
-            "expected_routine_count": len(expected_routines),
+            "validation_scope": "FULL_ADMIN",
+            "expected_table_count": len(FULL_SCHEMA_TABLES),
+            "expected_routine_count": len(FULL_SCHEMA_ROUTINES),
             "required_legacy7_audit_columns": sorted(required_columns),
             "missing": [],
         }
+
+    def validate_runtime_schema(self) -> Mapping[str, Any]:
+        """Validate only the direct production runtime object surface.
+
+        Database metadata visibility is permission-scoped.  A dedicated
+        collector login is intentionally not able to inspect import tables,
+        historical realtime staging, source-evidence tables, or analytics
+        views.  Query only the exact runtime objects and the two lineage
+        columns needed by the collector so absence of unrelated metadata cannot
+        make a valid runtime login fail preflight.
+        """
+
+        runtime_names = RUNTIME_SCHEMA_TABLES + RUNTIME_SCHEMA_ROUTINES
+        ctl_tables = tuple(name.split(".", 1)[1] for name in RUNTIME_SCHEMA_TABLES if name.startswith("ctl."))
+        ctl_routines = tuple(name.split(".", 1)[1] for name in RUNTIME_SCHEMA_ROUTINES if name.startswith("ctl."))
+        stg_routines = tuple(name.split(".", 1)[1] for name in RUNTIME_SCHEMA_ROUTINES if name.startswith("stg."))
+
+        def _sql_names(values: Sequence[str]) -> str:
+            return ", ".join("N'" + value.replace("'", "''") + "'" for value in values)
+
+        predicates = [
+            f"(s.name = N'ctl' AND o.name IN ({_sql_names(ctl_tables)}))",
+            f"(s.name = N'ctl' AND o.name IN ({_sql_names(ctl_routines)}))",
+            f"(s.name = N'stg' AND o.name IN ({_sql_names(stg_routines)}))",
+        ]
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT s.name + N'.' + o.name AS object_name, o.type AS object_type
+                FROM sys.objects AS o
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE """
+                + " OR ".join(predicates)
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT c.name AS column_name
+                FROM sys.columns AS c
+                INNER JOIN sys.objects AS o ON o.object_id = c.object_id
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE s.name = N'ctl'
+                  AND o.name = N'MddMacTargetAudit'
+                  AND c.name IN (N'SamplingSlot', N'SelectionPolicyVersion')
+                """
+            )
+            column_rows = cursor.fetchall()
+
+        observed_objects = {
+            str(_row_value(row, "object_name", 0)): str(_row_named(row, "object_type", index=1) or "")
+            for row in rows
+        }
+        missing = [name for name in runtime_names if name not in observed_objects]
+        if missing:
+            raise MssqlSchemaError(
+                "production runtime objects are missing or not visible to the dedicated login: "
+                + ", ".join(missing)
+            )
+        wrong_types = [
+            name
+            for name in RUNTIME_SCHEMA_TABLES
+            if observed_objects.get(name) not in {"U", "U "}
+        ] + [
+            name
+            for name in RUNTIME_SCHEMA_ROUTINES
+            if observed_objects.get(name) not in {"P", "P "}
+        ]
+        if wrong_types:
+            raise MssqlSchemaError(
+                "production runtime objects have unexpected SQL types: " + ", ".join(wrong_types)
+            )
+        observed_columns = {str(_row_named(row, "column_name", index=0)) for row in column_rows}
+        required_columns = {"SamplingSlot", "SelectionPolicyVersion"}
+        missing_columns = sorted(required_columns - observed_columns)
+        if missing_columns:
+            raise MssqlSchemaError(
+                "Legacy7 audit lineage columns are missing or not visible to the dedicated login: "
+                + ", ".join(missing_columns)
+            )
+        return {
+            "status": "PASS",
+            "validation_scope": "PRODUCTION_RUNTIME",
+            "expected_table_count": len(RUNTIME_SCHEMA_TABLES),
+            "expected_routine_count": len(RUNTIME_SCHEMA_ROUTINES),
+            "required_legacy7_audit_columns": sorted(required_columns),
+            "unrelated_import_objects_required": False,
+            "missing": [],
+        }
+
+    def validate_schema(self) -> Mapping[str, Any]:
+        """Backward-compatible alias for full/admin validation.
+
+        New code must choose the explicit ``validate_full_schema`` or
+        ``validate_runtime_schema`` path.  Keeping this alias avoids silently
+        changing older administrator/import callers.
+        """
+
+        return self.validate_full_schema()
 
     def baseline(self) -> Mapping[str, Any]:
         """Read-only baseline for cutover evidence; no migration or writes."""
@@ -1095,6 +1230,67 @@ class MssqlPersistence:
             selected_sampling_slot=sampling_slot,
             selection_policy_version=LEGACY7_SELECTION_POLICY_VERSION,
         )
+
+    def reconcile_live_legacy7_selector(
+        self,
+        *,
+        reference_bucket: int | None = None,
+        targets: Sequence[Target] | None = None,
+    ) -> Mapping[str, Any]:
+        """Prove the live SQL bucket rule against ten adjacent buckets.
+
+        The live procedure is authoritative.  This read-only gate calls it
+        with ten explicit bucket instants (for a one-parameter contract) and
+        compares the returned target/slot to the offline rule.  A parameterless
+        procedure cannot be tested for arbitrary buckets without waiting for
+        wall-clock rollover, so it fails closed rather than claiming that the
+        repository constant was live evidence.
+        """
+
+        metadata = self.legacy7_selector_definition()
+        parameters = metadata["parameters"]
+        if len(parameters) != 1:
+            raise MssqlSafetyError(
+                "live Legacy7 selector reconciliation requires exactly one explicit bucket/time parameter"
+            )
+        target_rows = tuple(targets or self.load_existing_sampling_targets())
+        base_bucket = int(
+            reference_bucket
+            if reference_bucket is not None
+            else datetime.now(timezone.utc).timestamp() // 300
+        )
+        observations: list[dict[str, Any]] = []
+        for offset in range(10):
+            bucket = base_bucket + offset
+            selected = self.select_existing_legacy7_target(
+                at_utc=datetime.fromtimestamp(bucket * 300, tz=timezone.utc),
+                targets=target_rows,
+            )
+            observations.append(
+                {
+                    "logical_due_bucket": bucket,
+                    "sampling_slot": selected.selected_sampling_slot,
+                    "sampling_target_id": selected.legacy_sampling_target_id,
+                    "expected_sampling_slot": legacy7_selection_for_bucket(bucket).sampling_slot,
+                    "expected_sampling_target_id": legacy7_selection_for_bucket(bucket).sampling_target_id,
+                }
+            )
+        if any(
+            row["sampling_slot"] != row["expected_sampling_slot"]
+            or row["sampling_target_id"] != row["expected_sampling_target_id"]
+            for row in observations
+        ):
+            raise MssqlSafetyError("live Legacy7 selector arithmetic differs from the approved UTC bucket rule")
+        return {
+            "status": "PASS",
+            "procedure_name": metadata["procedure_name"],
+            "parameter_metadata": metadata["parameters"],
+            "procedure_definition": metadata["definition"],
+            "offline_rule_label": LEGACY7_BUCKET_SLOT_RULE,
+            "reference_bucket": base_bucket,
+            "observed_bucket_to_slot": observations,
+            "authoritative_mapping": dict(LEGACY7_SLOT_TO_SAMPLING_TARGET_ID),
+        }
 
     def start_collector_run(
         self,
@@ -1861,7 +2057,7 @@ class MssqlPersistence:
         actual_initial_attempts: int | None = None,
         historical_equivalent_initial_attempts: int | None = None,
         excess_initial_attempts: int | None = None,
-    ) -> None:
+    ) -> int:
         """Append bounded methodology evidence without touching collection rows."""
 
         with self._connection() as connection:
@@ -1873,6 +2069,7 @@ class MssqlPersistence:
                      WindowEndUtc, MethodologyVersion, ActualInitialAttempts,
                      HistoricalEquivalentInitialAttempts, ExcessInitialAttempts,
                      RunIdsJson, EvidenceJson)
+                OUTPUT INSERTED.MethodologyEvidenceId
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
@@ -1889,7 +2086,9 @@ class MssqlPersistence:
                     json.dumps(_safe_document(dict(evidence)), ensure_ascii=False, sort_keys=True, default=str),
                 ),
             )
+            evidence_id = int(_row_value(cursor.fetchone(), "MethodologyEvidenceId", 0))
             connection.commit()
+        return evidence_id
 
     def list_stale_claims(self, *, now_utc: datetime) -> list[dict[str, Any]]:
         with self._connection() as connection:
@@ -1937,6 +2136,8 @@ class MssqlPersistence:
 
 
 __all__ = [
+    "FULL_SCHEMA_ROUTINES",
+    "FULL_SCHEMA_TABLES",
     "MAC_COLLECTION_CONTEXT",
     "MssqlClaimResult",
     "MssqlConnectionSettings",
@@ -1944,6 +2145,8 @@ __all__ = [
     "MssqlPersistence",
     "MssqlSafetyError",
     "MssqlSchemaError",
+    "RUNTIME_SCHEMA_ROUTINES",
+    "RUNTIME_SCHEMA_TABLES",
     "WINDOWS_RUNTIME_UNCONFIRMED",
     "build_mssql_snapshot_rows",
     "connect_mssql",

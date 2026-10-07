@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED; CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -400,10 +400,11 @@ source-contract corrections and S78 live-research safety controls. SQL Server
 is the sole official database and the direct Mac Legacy7 path uses the
 existing seven target IDs, one target per deterministic UTC five-minute slot,
 with `MAC_LEGACY7_PRODUCTION` reserved for corrected future audits. The
-LaunchAgent is safety-stopped pending live selector, lineage-migration,
-least-privilege-login, and corrected-heartbeat gates. Tiered50 activation and
-Stage 15B live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**;
-Stage 15A readiness is in progress below.
+LaunchAgent is safety-stopped after live selector, lineage-migration, and
+bounded oversampling-evidence gates passed; dedicated-login, preflight, and
+corrected-heartbeat gates remain pending. Tiered50 activation and Stage 15B
+live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A
+readiness is in progress below.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,

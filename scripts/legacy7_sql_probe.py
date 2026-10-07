@@ -63,6 +63,7 @@ def run_probe(*, at_utc: datetime) -> dict[str, Any]:
     definition = adapter.legacy7_selector_definition()
     targets = adapter.load_existing_sampling_targets()
     selected = adapter.select_existing_legacy7_target(at_utc=at_utc, targets=targets)
+    selector_reconciliation = adapter.reconcile_live_legacy7_selector(targets=targets)
 
     connection = connect_mssql(settings)
     try:
@@ -138,6 +139,7 @@ def run_probe(*, at_utc: datetime) -> dict[str, Any]:
         "target_rows": target_rows,
         "slot_rows": slot_rows,
         "selector": definition,
+        "selector_reconciliation": selector_reconciliation,
         "selected_target": {
             "sampling_slot": selected.selected_sampling_slot,
             "sampling_target_id": selected.legacy_sampling_target_id,

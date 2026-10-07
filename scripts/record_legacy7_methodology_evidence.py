@@ -104,7 +104,7 @@ def record_oversampling(*, at_utc: datetime, allow_administrator: bool) -> dict[
     login_status = _review_login_status(adapter, allow_administrator=allow_administrator)
     starts = [_as_utc(row.get("StartedAtUtc")) for row in shape if row.get("StartedAtUtc") is not None]
     completes = [_as_utc(row.get("CompletedAtUtc")) for row in shape if row.get("CompletedAtUtc") is not None]
-    adapter.record_methodology_evidence(
+    methodology_evidence_id = adapter.record_methodology_evidence(
         era_code=OVERSAMPLING_ERA,
         panel_version=LEGACY7_PANEL_VERSION,
         collection_context="MAC_PYTHON_MSSQL_PREPARED",
@@ -123,6 +123,7 @@ def record_oversampling(*, at_utc: datetime, allow_administrator: bool) -> dict[
             "run_shape": shape,
             "slot_mapping": probe.get("slot_rows"),
             "selector": probe.get("selector"),
+            "selector_reconciliation": probe.get("selector_reconciliation"),
             "login_status": login_status,
         },
     )
@@ -133,6 +134,7 @@ def record_oversampling(*, at_utc: datetime, allow_administrator: bool) -> dict[
         "actual_initial_attempts": actual,
         "historical_equivalent_initial_attempts": expected,
         "excess_initial_attempts": excess,
+        "methodology_evidence_id": methodology_evidence_id,
         "login_name": login_status.get("login_name"),
         "collection_context_preserved": "MAC_PYTHON_MSSQL_PREPARED",
         "rows_mutated": 0,

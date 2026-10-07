@@ -16,14 +16,15 @@ sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
+- Stage 14 overall: `LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
 - Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`
 
-The Mac Legacy7 runtime is currently safety-stopped while the corrected
-ten-slot selector, additive lineage migration, and least-privilege SQL login
-are validated. This does not activate Tiered50 or start Stage 15B.
+The Mac Legacy7 runtime is currently safety-stopped after the corrected
+ten-slot selector, additive lineage migration, and bounded methodology
+evidence passed. Dedicated-login provisioning and the remaining production
+gates are still pending. This does not activate Tiered50 or start Stage 15B.
 
 ## 15A — Pre-cutover validation framework/readiness
 

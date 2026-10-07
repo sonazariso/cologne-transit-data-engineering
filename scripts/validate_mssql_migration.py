@@ -85,7 +85,7 @@ def validate_static(path: Path = MIGRATION) -> dict[str, object]:
 
 def validate_live() -> dict[str, object]:
     adapter = MssqlPersistence(MssqlConnectionSettings.from_environment())
-    schema = adapter.validate_schema()
+    schema = adapter.validate_full_schema()
     baseline = adapter.baseline()
     return {"status": "PASS", "schema": schema, "baseline": baseline}
 

@@ -118,7 +118,7 @@ def apply_migration() -> dict[str, object]:
             connection.close()
         raise
     connection.close()
-    schema = adapter.validate_schema()
+    schema = adapter.validate_full_schema()
     after = adapter.baseline()
     preserved = {
         key: int(after[key]) >= int(before[key])
@@ -146,7 +146,7 @@ def read_only_check() -> dict[str, object]:
     if static["status"] != "PASS":
         return {"status": "FAIL", "static": static}
     adapter = MssqlPersistence(MssqlConnectionSettings.from_environment())
-    return {"status": "PASS", "static": static, "schema": adapter.validate_schema(), "baseline": adapter.baseline()}
+    return {"status": "PASS", "static": static, "schema": adapter.validate_full_schema(), "baseline": adapter.baseline()}
 
 
 def main(argv: list[str] | None = None) -> int:

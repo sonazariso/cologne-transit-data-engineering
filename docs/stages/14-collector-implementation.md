@@ -8,14 +8,15 @@
 
 Overall Stage 14 status:
 
-`LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
+`LEGACY7 SQL SERVER RUNTIME SAFETY-STOPPED — CORRECTED REACTIVATION PENDING; TIERED50 DEFERRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
-The current production path is the additive macOS-to-SQL Server Legacy7
-runtime. The historical SQLite research profile remains immutable,
+The corrected production path is the additive macOS-to-SQL Server Legacy7
+runtime, but it is currently safety-stopped pending live reactivation gates.
+The historical SQLite research profile remains immutable,
 lineage-separated evidence. The corrected runtime selects one target from the
 authoritative ten-slot SQL rotation per current UTC five-minute bucket; it
 does not replay missed buckets or use an in-memory counter. Tiered50 target
@@ -31,9 +32,10 @@ affected runs are preserved unchanged and are excluded from simple
 Windows-versus-Mac cadence-volume comparisons. The corrected runtime uses
 `MAC_LEGACY7_PRODUCTION`, records `SamplingSlot` and
 `SelectionPolicyVersion` additively on future target audits, and requires the
-dedicated least-privilege `CologneTransitCollector` SQL login. The LaunchAgent
-is safety-stopped while the live slot definition, additive migration, login
-boundary, and corrected scheduled heartbeats are validated.
+dedicated least-privilege `CologneTransitCollector` SQL login. The live slot
+definition, additive migration, and bounded 21/3/18 methodology evidence are
+validated; the LaunchAgent remains safety-stopped while login, preflight, and
+corrected scheduled-heartbeat gates are completed.
 
 This document records the Stage 14 Python collector implementation requested
 by S73, hardened by S74, and source-contract-corrected by S75 and S76. It does not reopen the approved Stage 13 panel, tiers, cadence, result
@@ -385,7 +387,7 @@ target IDs.
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 216 tests per run and
+repository suite passed in five consecutive runs with 226 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
