@@ -163,16 +163,20 @@ class MssqlRuntimeTests(unittest.TestCase):
 
         interpreter = "/Library/Developer/CommandLineTools/usr/bin/python3"
         self.assertEqual(plist["ProgramArguments"][0], interpreter)
+        self.assertTrue(Path(interpreter).is_absolute())
         self.assertNotEqual(plist["ProgramArguments"][0], "/usr/bin/env")
-        environment = dict(os.environ)
-        environment["PYTHONPATH"] = str(ROOT / "src")
-        completed = subprocess.run(
-            [interpreter, "-c", "import cologne_transit_collector, pymssql"],
-            env=environment,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        if sys.platform == "darwin":
+            self.assertTrue(Path(interpreter).is_file())
+            self.assertTrue(os.access(interpreter, os.X_OK))
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = str(ROOT / "src")
+            completed = subprocess.run(
+                [interpreter, "-c", "import cologne_transit_collector, pymssql"],
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_migration_commits_once_after_required_object_validation(self) -> None:
         rows = [{"ObjectName": name} for name in REQUIRED_MIGRATION_OBJECTS]
