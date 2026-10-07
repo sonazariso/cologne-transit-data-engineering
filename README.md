@@ -125,7 +125,8 @@ must not be used as normal Legacy7 cadence. The operator disabled the exact
 Windows task, and the Mac LaunchAgent is active on the corrected five-minute
 schedule after dedicated-login, preflight, and three corrected-heartbeat
 validations passed. The tracked template remains disabled by design. Tiered50
-and Power BI remain unchanged.
+and Power BI remain unchanged. The sanitized machine-readable closeout record
+is [available here](docs/operational/legacy7-production-transition-closeout-evidence.json).
 
 ## Repository principles
 

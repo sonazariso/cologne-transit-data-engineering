@@ -104,7 +104,7 @@ def record_oversampling(*, at_utc: datetime, allow_administrator: bool) -> dict[
     login_status = _review_login_status(adapter, allow_administrator=allow_administrator)
     starts = [_as_utc(row.get("StartedAtUtc")) for row in shape if row.get("StartedAtUtc") is not None]
     completes = [_as_utc(row.get("CompletedAtUtc")) for row in shape if row.get("CompletedAtUtc") is not None]
-    methodology_evidence_id = adapter.record_methodology_evidence(
+    methodology_result = adapter.record_methodology_evidence_idempotent(
         era_code=OVERSAMPLING_ERA,
         panel_version=LEGACY7_PANEL_VERSION,
         collection_context="MAC_PYTHON_MSSQL_PREPARED",
@@ -134,10 +134,13 @@ def record_oversampling(*, at_utc: datetime, allow_administrator: bool) -> dict[
         "actual_initial_attempts": actual,
         "historical_equivalent_initial_attempts": expected,
         "excess_initial_attempts": excess,
-        "methodology_evidence_id": methodology_evidence_id,
+        "methodology_evidence_id": methodology_result["methodology_evidence_id"],
+        "recording_action": methodology_result["action"],
         "login_name": login_status.get("login_name"),
         "collection_context_preserved": "MAC_PYTHON_MSSQL_PREPARED",
         "rows_mutated": 0,
+        "rows_written": methodology_result["rows_written"],
+        "rows_appended": methodology_result["rows_written"],
     }
 
 
@@ -148,7 +151,7 @@ def record_corrected_era(*, effective_at_utc: datetime, allow_administrator: boo
         raise MssqlSafetyError("corrected-era boundary lacks a live selected Legacy7 target/slot")
     adapter = MssqlPersistence(raw_evidence_directory=None)
     login_status = _review_login_status(adapter, allow_administrator=allow_administrator)
-    adapter.record_sampling_era_cutover(
+    era_result = adapter.record_sampling_era_cutover_idempotent(
         era_code=MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT,
         panel_version=LEGACY7_PANEL_VERSION,
         effective_at_utc=effective_at_utc,
@@ -161,10 +164,13 @@ def record_corrected_era(*, effective_at_utc: datetime, allow_administrator: boo
         "operation": "RECORD_CORRECTED_LEGACY7_ERA",
         "era_code": MAC_LEGACY7_PRODUCTION_COLLECTION_CONTEXT,
         "effective_at_utc": effective_at_utc,
+        "sampling_era_id": era_result["sampling_era_id"],
+        "recording_action": era_result["action"],
         "selected_target": selected,
         "login_name": login_status.get("login_name"),
         "rows_mutated": 0,
-        "rows_appended": 1,
+        "rows_written": era_result["rows_written"],
+        "rows_appended": era_result["rows_written"],
     }
 
 

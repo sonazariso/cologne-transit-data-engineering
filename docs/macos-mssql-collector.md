@@ -105,6 +105,9 @@ and status `COMPLETE` under `MAC_LEGACY7_PRODUCTION`. The append-only sampling
 era `MAC_LEGACY7_PRODUCTION` is effective at the first corrected heartbeat,
 `2026-10-07T19:51:46.041Z`; it is not a Tiered50 cutover.
 
+The durable sanitized machine-readable closeout record is
+[`docs/operational/legacy7-production-transition-closeout-evidence.json`](operational/legacy7-production-transition-closeout-evidence.json).
+
 The durable historical source is explicitly
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`. Its
 read-only proof is: 575,041,536 bytes, SHA-256

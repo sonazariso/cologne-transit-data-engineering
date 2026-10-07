@@ -171,6 +171,9 @@ and received HTTP 200. The corrected sampling era
 retired Windows task remains disabled; no manual Heumarkt request was made;
 Tiered50 target materialization/cutover and Power BI changes remain deferred.
 
+The sanitized machine-readable transition closeout is recorded in
+[`legacy7-production-transition-closeout-evidence.json`](legacy7-production-transition-closeout-evidence.json).
+
 Two interrupted pre-activation diagnostic runs were separately finalized as
 `FAILED` through the existing run-finalization procedure after scheduler
 restart recovery. They are excluded from the three-heartbeat success gate; no

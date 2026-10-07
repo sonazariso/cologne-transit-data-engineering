@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE; TIERED50 CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening

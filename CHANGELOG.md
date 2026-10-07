@@ -5,6 +5,17 @@
 Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
+### Current closeout
+- Legacy7 production transition closeout: retired the Windows collector after
+  preserving/importing the six-hour SQLite source; documented the temporary
+  bounded seven-target oversampling discovery and its 21/3/18 methodology
+  evidence; confirmed corrected ten-slot, one-target Legacy7 behavior under
+  the dedicated least-privilege `CologneTransitCollector` login with
+  Keychain-backed secret handling; recorded the active corrected LaunchAgent,
+  three corrected scheduled heartbeat validations, and the
+  `MAC_LEGACY7_PRODUCTION` era. Tiered50 remains deferred and Power BI is
+  unchanged.
+
 ### Added
 - S98 operational completion work: added a fresh ROWS/LOG/volume capacity
   preflight, immutable failed-batch audit, explicit source proof, resumable

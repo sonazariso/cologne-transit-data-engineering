@@ -270,6 +270,47 @@ def _iso(value: datetime | None) -> str | None:
     return _utc(value).isoformat().replace("+00:00", "Z")
 
 
+def _optional_utc(value: Any) -> datetime | None:
+    """Normalize a database or caller timestamp for append-only comparisons."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("sampling-era evidence contains an invalid timestamp") from exc
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _canonical_run_ids(run_ids: Sequence[str]) -> tuple[str, ...]:
+    """Return the exact run-set identity used for methodology deduplication."""
+
+    normalized = tuple(str(run_id) for run_id in run_ids)
+    if not normalized or any(not run_id.strip() for run_id in normalized):
+        raise MssqlSafetyError("methodology evidence requires a non-empty affected run set")
+    if len(set(normalized)) != len(normalized):
+        raise MssqlSafetyError("methodology evidence affected run set contains duplicate RunIds")
+    return tuple(sorted(normalized))
+
+
+def _stored_run_ids(value: Any) -> tuple[str, ...]:
+    """Decode a stored RunIdsJson value, failing closed on malformed history."""
+
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise MssqlSafetyError("existing methodology evidence has invalid RunIdsJson") from exc
+    if not isinstance(parsed, list) or not parsed or any(not isinstance(item, str) or not item.strip() for item in parsed):
+        raise MssqlSafetyError("existing methodology evidence has an invalid affected run set")
+    normalized = tuple(str(item) for item in parsed)
+    if len(set(normalized)) != len(normalized):
+        raise MssqlSafetyError("existing methodology evidence has duplicate affected RunIds")
+    return tuple(sorted(normalized))
+
+
 def _month_key(value: datetime) -> str:
     return _utc(value).strftime("%Y-%m")
 
@@ -2026,20 +2067,139 @@ class MssqlPersistence:
     def release_quota_attempt(self, *, permit_id: Any) -> None:
         self.finalize_quota_permit_no_network(permit_id=permit_id)
 
-    def record_sampling_era_cutover(self, *, era_code: str, panel_version: str, effective_at_utc: datetime | None = None, timestamp_kind: str = "NOT_RECORDED", is_active: bool = False, is_synthetic: bool = False) -> None:
-        if is_active and str(era_code) == "Tiered50":
+    def record_sampling_era_cutover(
+        self,
+        *,
+        era_code: str,
+        panel_version: str,
+        effective_at_utc: datetime | None = None,
+        timestamp_kind: str = "NOT_RECORDED",
+        is_active: bool = False,
+        is_synthetic: bool = False,
+    ) -> int:
+        """Record an era without duplicating or mutating append-only history."""
+
+        result = self.record_sampling_era_cutover_idempotent(
+            era_code=era_code,
+            panel_version=panel_version,
+            effective_at_utc=effective_at_utc,
+            timestamp_kind=timestamp_kind,
+            is_active=is_active,
+            is_synthetic=is_synthetic,
+        )
+        return int(result["sampling_era_id"])
+
+    def record_sampling_era_cutover_idempotent(
+        self,
+        *,
+        era_code: str,
+        panel_version: str,
+        effective_at_utc: datetime | None = None,
+        timestamp_kind: str = "NOT_RECORDED",
+        is_active: bool = False,
+        is_synthetic: bool = False,
+    ) -> Mapping[str, Any]:
+        """Return an equivalent non-synthetic era or append exactly one row.
+
+        The history table deliberately has no mutable update path.  A locked
+        read inside the same transaction as the optional insert makes an
+        operator rerun safe while still failing closed if the corrected
+        production era has conflicting or duplicate history.
+        """
+
+        normalized_era_code = str(era_code)
+        normalized_panel_version = str(panel_version)
+        normalized_timestamp_kind = str(timestamp_kind)
+        normalized_effective_at = _utc(effective_at_utc) if effective_at_utc else None
+        if is_active and normalized_era_code.casefold() == "tiered50":
             raise MssqlSafetyError("Tiered50 activation is not permitted by the prepared collector contract")
+
         with self._connection() as connection:
             cursor = self._cursor(connection)
+            cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+            existing_rows: list[Any] = []
+            if not is_synthetic:
+                cursor.execute(
+                    """
+                    SELECT SamplingEraId, EraCode, PanelVersion, EffectiveAtUtc,
+                           TimestampKind, IsActive, IsSynthetic
+                    FROM ctl.MddMacSamplingEra WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IsSynthetic = 0
+                    ORDER BY SamplingEraId
+                    """
+                )
+                existing_rows = list(cursor.fetchall())
+
+                same_code = [
+                    row
+                    for row in existing_rows
+                    if str(_row_named(row, "EraCode", index=1) or "") == normalized_era_code
+                ]
+                exact = [
+                    row
+                    for row in same_code
+                    if str(_row_named(row, "PanelVersion", index=2) or "") == normalized_panel_version
+                    and _optional_utc(_row_named(row, "EffectiveAtUtc", index=3)) == _optional_utc(normalized_effective_at)
+                    and str(_row_named(row, "TimestampKind", index=4) or "") == normalized_timestamp_kind
+                    and bool(_row_named(row, "IsActive", index=5)) == bool(is_active)
+                ]
+                if len(exact) > 1:
+                    raise MssqlSafetyError(
+                        "duplicate corrected-production sampling era exists for " + normalized_era_code
+                    )
+                if len(exact) == 1:
+                    if len(same_code) != 1:
+                        raise MssqlSafetyError(
+                            "conflicting corrected-production sampling era exists for " + normalized_era_code
+                        )
+                    era_id = int(_row_named(exact[0], "SamplingEraId", index=0))
+                    connection.commit()
+                    return {
+                        "sampling_era_id": era_id,
+                        "action": "REUSED",
+                        "rows_written": 0,
+                    }
+                if same_code:
+                    raise MssqlSafetyError(
+                        "conflicting corrected-production sampling era exists for " + normalized_era_code
+                    )
+
+                if is_active:
+                    active_same_panel = [
+                        row
+                        for row in existing_rows
+                        if str(_row_named(row, "PanelVersion", index=2) or "") == normalized_panel_version
+                        and bool(_row_named(row, "IsActive", index=5))
+                    ]
+                    if active_same_panel:
+                        raise MssqlSafetyError(
+                            "another active non-synthetic sampling era exists for panel "
+                            + normalized_panel_version
+                        )
+
             cursor.execute(
                 """
                 INSERT INTO ctl.MddMacSamplingEra
                     (EraCode, PanelVersion, EffectiveAtUtc, TimestampKind, IsActive, IsSynthetic)
+                OUTPUT INSERTED.SamplingEraId
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (era_code, panel_version, _utc(effective_at_utc) if effective_at_utc else None, timestamp_kind, int(is_active), int(is_synthetic)),
+                (
+                    normalized_era_code,
+                    normalized_panel_version,
+                    normalized_effective_at,
+                    normalized_timestamp_kind,
+                    int(is_active),
+                    int(is_synthetic),
+                ),
             )
+            era_id = int(_row_value(cursor.fetchone(), "SamplingEraId", 0))
             connection.commit()
+        return {
+            "sampling_era_id": era_id,
+            "action": "INSERTED",
+            "rows_written": 1,
+        }
 
     def record_methodology_evidence(
         self,
@@ -2056,10 +2216,106 @@ class MssqlPersistence:
         historical_equivalent_initial_attempts: int | None = None,
         excess_initial_attempts: int | None = None,
     ) -> int:
-        """Append bounded methodology evidence without touching collection rows."""
+        """Record bounded methodology evidence without duplicating history."""
+
+        result = self.record_methodology_evidence_idempotent(
+            era_code=era_code,
+            panel_version=panel_version,
+            collection_context=collection_context,
+            methodology_version=methodology_version,
+            run_ids=run_ids,
+            evidence=evidence,
+            window_start_utc=window_start_utc,
+            window_end_utc=window_end_utc,
+            actual_initial_attempts=actual_initial_attempts,
+            historical_equivalent_initial_attempts=historical_equivalent_initial_attempts,
+            excess_initial_attempts=excess_initial_attempts,
+        )
+        return int(result["methodology_evidence_id"])
+
+    def record_methodology_evidence_idempotent(
+        self,
+        *,
+        era_code: str,
+        panel_version: str,
+        collection_context: str,
+        methodology_version: str,
+        run_ids: Sequence[str],
+        evidence: Mapping[str, Any],
+        window_start_utc: datetime | None = None,
+        window_end_utc: datetime | None = None,
+        actual_initial_attempts: int | None = None,
+        historical_equivalent_initial_attempts: int | None = None,
+        excess_initial_attempts: int | None = None,
+    ) -> Mapping[str, Any]:
+        """Return equivalent methodology history or append exactly one row.
+
+        Run-set identity is compared from decoded JSON rather than raw JSON
+        text, so harmless ordering differences cannot create a duplicate.  A
+        same-run-set conflict or duplicate matching history is an explicit
+        safety failure; no existing row is ever updated or deleted.
+        """
+
+        normalized_run_ids = tuple(str(run_id) for run_id in run_ids)
+        canonical_run_ids = _canonical_run_ids(normalized_run_ids)
+        run_ids_json = json.dumps(list(normalized_run_ids), ensure_ascii=False, sort_keys=True)
+        evidence_json = json.dumps(_safe_document(dict(evidence)), ensure_ascii=False, sort_keys=True, default=str)
+        normalized_identity = {
+            "EraCode": str(era_code),
+            "PanelVersion": str(panel_version),
+            "CollectionContext": str(collection_context),
+            "MethodologyVersion": str(methodology_version),
+            "ActualInitialAttempts": actual_initial_attempts,
+            "HistoricalEquivalentInitialAttempts": historical_equivalent_initial_attempts,
+            "ExcessInitialAttempts": excess_initial_attempts,
+        }
 
         with self._connection() as connection:
             cursor = self._cursor(connection)
+            cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+            cursor.execute(
+                """
+                SELECT MethodologyEvidenceId, EraCode, PanelVersion, CollectionContext,
+                       MethodologyVersion, ActualInitialAttempts,
+                       HistoricalEquivalentInitialAttempts, ExcessInitialAttempts,
+                       RunIdsJson
+                FROM ctl.MddMacMethodologyEvidence WITH (UPDLOCK, HOLDLOCK)
+                ORDER BY MethodologyEvidenceId
+                """
+            )
+            existing_rows = list(cursor.fetchall())
+            matching_rows: list[Any] = []
+            conflicting_rows: list[Any] = []
+            for row in existing_rows:
+                if _stored_run_ids(_row_named(row, "RunIdsJson", index=8)) != canonical_run_ids:
+                    continue
+                same_identity = all(
+                    _row_named(row, key, index=index) == value
+                    for key, index, value in (
+                        ("EraCode", 1, normalized_identity["EraCode"]),
+                        ("PanelVersion", 2, normalized_identity["PanelVersion"]),
+                        ("CollectionContext", 3, normalized_identity["CollectionContext"]),
+                        ("MethodologyVersion", 4, normalized_identity["MethodologyVersion"]),
+                        ("ActualInitialAttempts", 5, normalized_identity["ActualInitialAttempts"]),
+                        ("HistoricalEquivalentInitialAttempts", 6, normalized_identity["HistoricalEquivalentInitialAttempts"]),
+                        ("ExcessInitialAttempts", 7, normalized_identity["ExcessInitialAttempts"]),
+                    )
+                )
+                (matching_rows if same_identity else conflicting_rows).append(row)
+
+            if len(matching_rows) > 1:
+                raise MssqlSafetyError("duplicate historical methodology evidence exists for the affected RunIds")
+            if conflicting_rows:
+                raise MssqlSafetyError("conflicting methodology evidence exists for the affected RunIds")
+            if matching_rows:
+                evidence_id = int(_row_named(matching_rows[0], "MethodologyEvidenceId", index=0))
+                connection.commit()
+                return {
+                    "methodology_evidence_id": evidence_id,
+                    "action": "REUSED",
+                    "rows_written": 0,
+                }
+
             cursor.execute(
                 """
                 INSERT INTO ctl.MddMacMethodologyEvidence
@@ -2080,13 +2336,17 @@ class MssqlPersistence:
                     actual_initial_attempts,
                     historical_equivalent_initial_attempts,
                     excess_initial_attempts,
-                    json.dumps([str(run_id) for run_id in run_ids], ensure_ascii=False, sort_keys=True),
-                    json.dumps(_safe_document(dict(evidence)), ensure_ascii=False, sort_keys=True, default=str),
+                    run_ids_json,
+                    evidence_json,
                 ),
             )
             evidence_id = int(_row_value(cursor.fetchone(), "MethodologyEvidenceId", 0))
             connection.commit()
-        return evidence_id
+        return {
+            "methodology_evidence_id": evidence_id,
+            "action": "INSERTED",
+            "rows_written": 1,
+        }
 
     def list_stale_claims(self, *, now_utc: datetime) -> list[dict[str, Any]]:
         with self._connection() as connection:

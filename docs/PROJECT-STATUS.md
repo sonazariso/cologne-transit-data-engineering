@@ -140,11 +140,16 @@ partial batch; no source rows were deleted. Post-import reconciliation passed
 for 70 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, and
 121 parser gaps, with zero unexplained differences and zero source
 `RecordedAtTime` values. Offline reconciliation replaced any manual Heumarkt
-validation request. The operator then retired the exact Windows task. Mac
-scheduler activation is paused until the corrected Legacy7 live gates pass.
+validation request. The operator then retired the exact Windows task. Dedicated-
+login provisioning passed, the corrected Mac Legacy7 LaunchAgent is active, and
+three corrected scheduled heartbeats passed. One target is selected per
+historical Legacy7 heartbeat; Tiered50 remains deferred.
 
 See the [operational import and cutover record](operational/s98-live-research-import-and-cutover.md)
 and the reusable [read-only validator](../scripts/validate_sqlite_import.py).
+The durable sanitized [Legacy7 transition closeout evidence](operational/legacy7-production-transition-closeout-evidence.json)
+contains the machine-readable SQL, runtime, scheduler, heartbeat, and
+least-privilege audit record.
 
 ### Current Stage 3 substage
 
@@ -540,7 +545,7 @@ Legacy7 runtime collection; Tiered50 cutover remains unresolved.
 - The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. Production `live` remains blocked; `live-research` is a separate one-heartbeat Heumarkt mode with explicit storage, credential, target, and quota preconditions.
 - SQLite has two explicit profiles: disposable `DEVELOPMENT` state under `.local/` and durable, non-disposable `LIVE_RESEARCH` state under the configured live root. The live profile preserves claims, audits, parsed snapshots, append-only `timing_observations`, the `LatestSourceRecordedAtTime`/`LastObservedRecordedAtTime` reporting projection, RecordedAtTime evidence, Attribute/GeneralAttribute, Situation, parser-gap, quota, and raw-evidence lineage; parsed history is indefinite, raw forensic bodies are bounded to 24 hours, and three validated daily backups remain required. It is not a production cutover and does not authorize PostgreSQL work.
 - Live research defaults to `~/cologne-transit-data/live-research/collector.sqlite3` when an explicit live root is supplied, with protected `backups/` and `raw-evidence/` directories. Parsed history is retained indefinitely; raw forensic bodies are sanitized, indexed, and retained for at most 24 hours. Validated SQLite online backups retain the three most recent UTC date versions.
-- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 226 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, and provisioning-recovery regressions. The live login, preflight, Windows-retirement, scheduler, corrected-era, and three-heartbeat gates passed; the final five-run offline suite and validators are rerun during this closeout.
+- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 235 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, provisioning-recovery, append-only idempotency, sanitized-evidence, and documentation-drift regressions. The live login, preflight, Windows-retirement, scheduler, corrected-era, and three-heartbeat gates passed; the final five-run offline suite and validators are rerun during this closeout.
 - The prepared direct path is documented in [the macOS persistence contract](macos-mssql-collector.md). It uses `pymssql==2.3.2`, additive `ctl.MddMac*`/`stg.MddMac*` objects, source-faithful timing/Situation/Attribute/gap rows, and an active generated user-local `launchd` artifact while the tracked template remains disabled. It does not alter the historical tables or Power BI boundary, and it does not authorize Tiered50 live collection.
 - The corrected Legacy7 runtime selects one SQL-approved target per ten-slot cycle, retains `SamplingSlot`/policy lineage, uses `MAC_LEGACY7_PRODUCTION`, and requires `CologneTransitCollector` rather than `sa`. The generated LaunchAgent is active after live SQL migration, selector, login, and scheduled-heartbeat gates passed.
 - One explicitly authorized S78 research heartbeat ran at `2026-10-01T11:30:00Z` for Köln Heumarkt (`de:05315:11110`): one HTTP 200, 20 parsed results, one persisted snapshot, one confirmed provider attempt, no retry, and 121 historical parser-gap fields retained with sanitized raw evidence. S80 then migrated the same live SQLite file offline from schema 2 to 4 without rewriting snapshot JSON, inserted 995 timing rows and 20 ServiceSection rows, and passed integrity, backup, and RecordedAtTime reconciliation checks. S81 migrated that file offline from schema 4 to 5 at `2026-10-01T15:15:16.410851Z`, kept all required row counts unchanged, validated the corrected reporting views, and refreshed the current-day backup. This remains lineage-separated research evidence, not production cutover evidence; no production `live` request, recurring scheduling, production target activation, or real Tiered50 cutover timestamp was performed.
