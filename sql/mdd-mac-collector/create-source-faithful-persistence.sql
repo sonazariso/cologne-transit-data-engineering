@@ -1068,6 +1068,7 @@ WITH LatestObservation AS
 (
     SELECT
         t.*,
+        s.ObservedAtUtc AS ObservedAtUtc,
         ROW_NUMBER() OVER
         (
             PARTITION BY t.SourceEventIdentity, t.TimingContext
@@ -1181,4 +1182,205 @@ LEFT JOIN stg.MddMacAttributeEvidence AS attr ON attr.SnapshotId = s.SnapshotId
 LEFT JOIN stg.MddMacSituationEvidence AS sit ON sit.SnapshotId = s.SnapshotId
 LEFT JOIN stg.MddMacParserGap AS gap ON gap.SnapshotId = s.SnapshotId
 GROUP BY s.SnapshotId, s.RunId, s.TargetIdentity, s.ObservedAtUtc;
+GO
+
+/*
+    Historical SQLite import lineage is deliberately additive and generic.
+    These objects describe a migration/import; they do not claim that the
+    historical rows were collected by the Mac SQL runtime.
+*/
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'DurationMs') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD DurationMs DECIMAL(18,6) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'SkipReason') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD SkipReason VARCHAR(120) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'RetryDecision') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD RetryDecision VARCHAR(120) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetAudit', N'RetryOutcome') IS NULL
+    ALTER TABLE ctl.MddMacTargetAudit ADD RetryOutcome VARCHAR(120) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'ReleasedAtUtc') IS NULL
+    ALTER TABLE ctl.MddMacQuotaPermit ADD ReleasedAtUtc DATETIME2(7) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'FinalizationReason') IS NULL
+    ALTER TABLE ctl.MddMacQuotaPermit ADD FinalizationReason VARCHAR(120) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'SourceRepresentationJson') IS NULL
+    ALTER TABLE ctl.MddMacQuotaPermit ADD SourceRepresentationJson NVARCHAR(MAX) NULL;
+GO
+
+IF OBJECT_ID(N'ctl.MddImportBatch', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddImportBatch
+    (
+        ImportBatchId UNIQUEIDENTIFIER NOT NULL
+            CONSTRAINT PK_ctl_MddImportBatch PRIMARY KEY CLUSTERED,
+        SourceDatabaseSha256 CHAR(64) NOT NULL,
+        SourceByteSize BIGINT NOT NULL,
+        SourceSchemaVersion INT NOT NULL,
+        SourceDatabaseRole VARCHAR(40) NOT NULL,
+        SourceCollectionContext VARCHAR(80) NOT NULL,
+        SourceSessionStartUtc DATETIME2(7) NULL,
+        SourceSessionEndUtc DATETIME2(7) NULL,
+        SourcePathLineage NVARCHAR(400) NULL,
+        ImportStartedAtUtc DATETIME2(7) NOT NULL,
+        ImportCompletedAtUtc DATETIME2(7) NULL,
+        Status VARCHAR(20) NOT NULL
+            CONSTRAINT DF_ctl_MddImportBatch_Status DEFAULT ('IN_PROGRESS'),
+        SourceCountsJson NVARCHAR(MAX) NOT NULL,
+        InsertedCountsJson NVARCHAR(MAX) NULL,
+        DuplicateCountsJson NVARCHAR(MAX) NULL,
+        OverlapCountsJson NVARCHAR(MAX) NULL,
+        ReconciliationResultJson NVARCHAR(MAX) NULL,
+        ImporterVersion VARCHAR(80) NOT NULL,
+        FailureReason NVARCHAR(2000) NULL,
+        CONSTRAINT CK_ctl_MddImportBatch_Status
+            CHECK (Status IN ('IN_PROGRESS', 'COMPLETE', 'FAILED')),
+        CONSTRAINT CK_ctl_MddImportBatch_SourceByteSize
+            CHECK (SourceByteSize >= 0),
+        CONSTRAINT CK_ctl_MddImportBatch_SourceSha256
+            CHECK (SourceDatabaseSha256 NOT LIKE '%[^0-9A-Fa-f]%')
+    );
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddImportBatch')
+      AND name = N'IX_ctl_MddImportBatch_Source_Status'
+)
+    CREATE INDEX IX_ctl_MddImportBatch_Source_Status
+        ON ctl.MddImportBatch (SourceDatabaseSha256, Status, ImportStartedAtUtc DESC);
+GO
+
+IF OBJECT_ID(N'ctl.MddImportTableAudit', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddImportTableAudit
+    (
+        ImportTableAuditId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddImportTableAudit PRIMARY KEY CLUSTERED,
+        ImportBatchId UNIQUEIDENTIFIER NOT NULL,
+        SourceTableName NVARCHAR(128) NOT NULL,
+        Classification VARCHAR(50) NOT NULL,
+        ExplicitReason NVARCHAR(1000) NULL,
+        SourceRowCount BIGINT NOT NULL,
+        EligibleRowCount BIGINT NOT NULL,
+        InsertedRowCount BIGINT NOT NULL,
+        DuplicateRowCount BIGINT NOT NULL,
+        OverlapClassifiedRowCount BIGINT NOT NULL,
+        DestinationRowCount BIGINT NOT NULL,
+        UnexplainedDifference BIGINT NOT NULL,
+        ReconciliationStatus VARCHAR(30) NOT NULL,
+        SourceTableDigestSha256 CHAR(64) NULL,
+        CONSTRAINT UQ_ctl_MddImportTableAudit_Batch_Table
+            UNIQUE (ImportBatchId, SourceTableName),
+        CONSTRAINT FK_ctl_MddImportTableAudit_Batch
+            FOREIGN KEY (ImportBatchId) REFERENCES ctl.MddImportBatch (ImportBatchId),
+        CONSTRAINT CK_ctl_MddImportTableAudit_Classification
+            CHECK (Classification IN ('FULL_IMPORT', 'LINEAGE_ONLY', 'NOT_IMPORTED_WITH_EXPLICIT_REASON')),
+        CONSTRAINT CK_ctl_MddImportTableAudit_ReconciliationStatus
+            CHECK (ReconciliationStatus IN ('PENDING', 'PASS', 'FAIL', 'NOT_APPLICABLE'))
+    );
+END;
+GO
+
+IF OBJECT_ID(N'ctl.MddImportEvidenceAudit', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddImportEvidenceAudit
+    (
+        ImportEvidenceAuditId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddImportEvidenceAudit PRIMARY KEY CLUSTERED,
+        ImportBatchId UNIQUEIDENTIFIER NOT NULL,
+        EvidenceFamily NVARCHAR(128) NOT NULL,
+        SourceRowCount BIGINT NOT NULL,
+        EligibleRowCount BIGINT NOT NULL,
+        InsertedRowCount BIGINT NOT NULL,
+        DuplicateRowCount BIGINT NOT NULL,
+        OverlapClassifiedRowCount BIGINT NOT NULL,
+        DestinationRowCount BIGINT NOT NULL,
+        UnexplainedDifference BIGINT NOT NULL,
+        ReconciliationStatus VARCHAR(30) NOT NULL,
+        CONSTRAINT UQ_ctl_MddImportEvidenceAudit_Batch_Family
+            UNIQUE (ImportBatchId, EvidenceFamily),
+        CONSTRAINT FK_ctl_MddImportEvidenceAudit_Batch
+            FOREIGN KEY (ImportBatchId) REFERENCES ctl.MddImportBatch (ImportBatchId),
+        CONSTRAINT CK_ctl_MddImportEvidenceAudit_ReconciliationStatus
+            CHECK (ReconciliationStatus IN ('PENDING', 'PASS', 'FAIL', 'NOT_APPLICABLE'))
+    );
+END;
+GO
+
+IF OBJECT_ID(N'ctl.MddImportSourceRow', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddImportSourceRow
+    (
+        ImportSourceRowId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddImportSourceRow PRIMARY KEY CLUSTERED,
+        ImportBatchId UNIQUEIDENTIFIER NOT NULL,
+        SourceDatabaseSha256 CHAR(64) NOT NULL,
+        SourceTableName NVARCHAR(128) NOT NULL,
+        SourcePrimaryKey NVARCHAR(1000) NOT NULL,
+        SourceIdentityHash CHAR(64) NOT NULL,
+        SourceRowHashSha256 CHAR(64) NULL,
+        Classification VARCHAR(50) NOT NULL,
+        RowStatus VARCHAR(30) NOT NULL,
+        OverlapClassification VARCHAR(80) NULL,
+        DestinationObjectName NVARCHAR(256) NULL,
+        DestinationKey NVARCHAR(1000) NULL,
+        SourceRowJson NVARCHAR(MAX) NULL,
+        CreatedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddImportSourceRow_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT UQ_ctl_MddImportSourceRow_Source_Lineage
+            UNIQUE (SourceDatabaseSha256, SourceTableName, SourceIdentityHash),
+        CONSTRAINT FK_ctl_MddImportSourceRow_Batch
+            FOREIGN KEY (ImportBatchId) REFERENCES ctl.MddImportBatch (ImportBatchId),
+        CONSTRAINT CK_ctl_MddImportSourceRow_Classification
+            CHECK (Classification IN ('FULL_IMPORT', 'LINEAGE_ONLY', 'NOT_IMPORTED_WITH_EXPLICIT_REASON')),
+        CONSTRAINT CK_ctl_MddImportSourceRow_RowStatus
+            CHECK (RowStatus IN ('INSERTED', 'DUPLICATE', 'OVERLAP', 'LINEAGE_ONLY', 'NOT_IMPORTED'))
+    );
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddImportSourceRow')
+      AND name = N'IX_ctl_MddImportSourceRow_Batch_Table_Status'
+)
+    CREATE INDEX IX_ctl_MddImportSourceRow_Batch_Table_Status
+        ON ctl.MddImportSourceRow (ImportBatchId, SourceTableName, RowStatus);
+GO
+
+IF OBJECT_ID(N'ctl.MddImportOverlap', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddImportOverlap
+    (
+        ImportOverlapId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddImportOverlap PRIMARY KEY CLUSTERED,
+        ImportBatchId UNIQUEIDENTIFIER NOT NULL,
+        EvidenceFamily NVARCHAR(128) NOT NULL,
+        SourceIdentityHash CHAR(64) NOT NULL,
+        Classification VARCHAR(80) NOT NULL,
+        ExistingObjectName NVARCHAR(256) NULL,
+        ExistingKey NVARCHAR(1000) NULL,
+        DetailsJson NVARCHAR(MAX) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddImportOverlap_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT UQ_ctl_MddImportOverlap_Batch_Family_Source
+            UNIQUE (ImportBatchId, EvidenceFamily, SourceIdentityHash),
+        CONSTRAINT FK_ctl_MddImportOverlap_Batch
+            FOREIGN KEY (ImportBatchId) REFERENCES ctl.MddImportBatch (ImportBatchId)
+    );
+END;
 GO

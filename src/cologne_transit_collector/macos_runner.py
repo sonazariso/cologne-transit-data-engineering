@@ -25,8 +25,10 @@ from .domain import (
     MAC_SQL_ENABLED_ENV,
     MAC_SQL_REQUIRED_RUNTIME_STATE,
     MAC_SQL_REQUIRED_TARGET_SCOPE,
+    MAC_SQL_REQUIRED_VALIDATION_POLICY,
     MAC_SQL_RUNTIME_STATE_ENV,
     MAC_SQL_TARGET_SCOPE_ENV,
+    MAC_SQL_VALIDATION_POLICY_ENV,
     SamplingEra,
 )
 from .manifest import load_default_manifest
@@ -57,6 +59,10 @@ def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
         raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
     if values.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
         raise LiveModeBlocked("explicit existing-seven-target scope approval is missing; no network request performed")
+    if values.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+        raise LiveModeBlocked(
+            "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+        )
     if validate_api_key_format(values.get("MDD_API_KEY")) != "VALID":
         raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
 

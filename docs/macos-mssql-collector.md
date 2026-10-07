@@ -2,10 +2,21 @@
 
 This document describes the prepared Python collector path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
-database. It is implementation-ready but not activated. The existing Windows
-collector has not been disabled, no macOS scheduler has been loaded, no
-Tiered50 collection has been started, and no live MDD request is authorized by
-this change.
+database. The additive SQL contract is applied and live-validated, but the
+historical SQLite import is currently blocked by SQL Server row-volume disk
+headroom. The existing Windows collector has not been disabled, no macOS
+scheduler has been loaded, no Tiered50 collection has been started, and no
+live MDD request is authorized by this change.
+
+The durable historical source is explicitly
+`/Users/admin/cologne-transit-data/live-research/collector.sqlite3`. Its
+read-only proof is: 575,041,536 bytes, SHA-256
+`0edc9b1a56cb6128ac5bed6508e5c37b9b4d1ab18c1d78092e6fcb1ac9b674fc`,
+SQLite application schema 5, role `LIVE_RESEARCH`, context
+`LIVE_RESEARCH_SINGLE_1`, integrity/quick checks `ok`, and one contiguous
+5.9306-hour source session from `2026-10-01T16:59:32.654121Z` through
+`2026-10-01T22:55:22.809977Z`. This is historical research evidence and is
+never relabeled as Mac, Windows, Legacy7, or Tiered50 production evidence.
 
 ## Runtime boundary
 
@@ -22,7 +33,8 @@ can construct an enabled MDD client:
 - `COLLECTOR_MAC_SQL_ENABLED=1`;
 - `COLLECTOR_WINDOWS_RUNTIME_STATE=CONFIRMED_RETIRED`;
 - `COLLECTOR_CUTOVER_APPROVED=1`;
-- `COLLECTOR_MAC_SQL_TARGET_SCOPE=LEGACY7_EXPLICIT_APPROVAL`; and
+- `COLLECTOR_MAC_SQL_TARGET_SCOPE=LEGACY7_EXPLICIT_APPROVAL`;
+- `COLLECTOR_MAC_SQL_VALIDATION_POLICY=OFFLINE_RECONCILIATION_ONLY`; and
 - a valid `MDD_API_KEY`.
 
 It then reads the unchanged seven rows from `ctl.MddRealtimeSamplingTarget`,
@@ -36,6 +48,10 @@ the task name `\Cologne Transit Realtime Collector`, principal
 current Windows Task Scheduler state, last/next/result state, and process
 inspection were not captured. The reachable SSH endpoint used during the
 audit was a separate Linux host, so it was not treated as Windows evidence.
+The cutover procedure has no manually authorized Heumarkt probe gate. Existing
+SQLite evidence is reconciled offline; the first new Mac request, if later
+authorized, must be an ordinary scheduler heartbeat over the existing Legacy7
+scope.
 
 ## Old and prepared flow
 
@@ -94,6 +110,55 @@ duplicate and returns the existing snapshot without inserting another child
 set. A parser/persistence exception rolls back the snapshot and all child
 rows; the collector then completes the audit as failed.
 
+## Historical SQLite import and reconciliation
+
+The separate importer is `scripts/import_live_research_sqlite.py`. The source
+argument is mandatory; there is no source auto-discovery. Without `--apply` it
+performs only read-only proofing. The apply path first runs the read-only
+Windows-history overlap audit, then writes a generic import batch and durable
+source-lineage rows. It never deduplicates on station plus rounded timestamp,
+never overwrites Windows rows, and never relabels research rows as runtime
+rows.
+
+The proven source inventory is:
+
+- `FULL_IMPORT`: `collector_runs` (75), `dispatcher_claims` (75),
+  `dispatcher_claim_events` (75), `target_claims` (75), `claim_events` (75),
+  `target_audits` (75), `http_attempts` (73), `quota_permits` (73),
+  `quota_audit` (76), `parsed_snapshots` (70), `timing_observations` (72,190),
+  `recorded_at_time_evidence` (0), and `service_section_observations` (1,400).
+- `LINEAGE_ONLY`: `database_metadata` (6), `manifest_targets` (50),
+  `sampling_eras` (0), `shared_usage` (1), `raw_evidence` (4), and SQLite's
+  `sqlite_sequence` (9). The two SQLite reporting aliases are views and are
+  not durable import tables; their source timing rows are imported instead.
+- `NOT_IMPORTED_WITH_EXPLICIT_REASON`: none.
+
+The exact dry-run and apply commands are:
+
+```text
+PYTHONPATH=src python3 scripts/import_live_research_sqlite.py \
+  --source /Users/admin/cologne-transit-data/live-research/collector.sqlite3
+
+PYTHONPATH=src python3 scripts/import_live_research_sqlite.py \
+  --source /Users/admin/cologne-transit-data/live-research/collector.sqlite3 \
+  --apply
+```
+
+Each batch is `IN_PROGRESS`, `COMPLETE`, or `FAILED`; a failed batch is never
+reported as complete. The source SHA-256/table/source-key uniqueness contract
+makes an exact rerun idempotent and records duplicates explicitly. Snapshot
+JSON is passed through the same source-faithful SQL procedure as native Mac
+evidence; timing, ServiceSection, RecordedAtTime, Situation, Attribute,
+response-error, and parser-gap projections retain their source fields and
+lineage.
+
+The schema migration and live read-only validation are complete. The import is
+not complete: the SQL Server row volume had only 10,260,480 bytes available
+against a conservative 1,150,083,072-byte preflight requirement. Three failed
+import batches are retained with `FAILED` status. No rows were deleted to
+make space; the next retry is intentionally blocked until the SQL Server
+volume is expanded or otherwise given sufficient headroom.
+
 ## Timing and RecordedAtTime
 
 `TimetabledTimeSourceText`, `EstimatedTimeSourceText`, low/high estimate
@@ -143,38 +208,52 @@ are not persisted.
 
 ## Connectivity and validation evidence
 
-The macOS audit used the real configured database and read-only queries for
-database selection, schema/count baseline, seven target IDs, current run
-state, and the latest realtime observation. At the audit point the latest
-existing observation was `2026-10-07 07:43:48Z`; the existing seven target IDs
-were unchanged. No MDD call was made as part of connectivity or migration
-validation.
+The configured SQL Server is reachable and the selected database is
+`CologneTransitIntelligence`. The additive migration was applied in one
+DB-API transaction and revalidated read-only: 49 SQL batches completed, all
+23 additive tables and 3 procedures/views are present, and the existing
+realtime baseline and sampling-target IDs 1–7 were unchanged. No MDD call was
+made as part of connectivity, migration, source proof, or overlap validation.
 
-The subsequent additive-apply attempt was not completed because the
-configured VM host became unreachable from the Mac (`Host is down`) before
-the migration connection was opened. No partial schema-apply result is
-claimed; rerun the explicit apply/validation scripts after the VM/network is
-available.
+The read-only overlap audit found zero Windows-era collector runs, Heumarkt
+stop observations, or situation observations in the historical six-hour
+interval. That is a count result only; exact equivalence, shared events, and
+same-event different snapshots remain `NOT_PROVABLE` without legacy payload
+hashes/source-event identities. No destructive merge or timestamp-based
+deduplication was performed.
+
+The SQL Server row volume currently has only 10,260,480 bytes available on
+`C:\`; the importer requires conservative headroom of 1,150,083,072 bytes for
+this 575,041,536-byte source. The import therefore remains blocked before a
+new batch is opened. Existing failed attempts are recorded as `FAILED`, and
+no database rows were deleted to make space.
 
 The migration is applied by `scripts/apply_mssql_migration.py` only with an
-explicit `--apply`. It is batch-aware, refuses a different database name,
-captures pre/post row-count baselines, and rejects any decrease or target-ID
-change. `scripts/validate_mssql_migration.py` provides static and read-only
-live validation. The direct adapter and parser tests use fixtures and fake
-connections; they do not write fixture rows into the authoritative database.
+explicit `--apply`. It is batch-aware, atomic, refuses a different database
+name, validates required objects before the single commit, captures pre/post
+row-count baselines, and rejects any decrease or target-ID change.
+`scripts/validate_mssql_migration.py` provides static and read-only live
+validation. The direct adapter, importer, and parser tests use fixtures and
+fake connections; they do not write fixture rows into the authoritative
+database.
 
 ## Cutover and rollback
 
-Cutover remains a separate user-approved decision:
+Cutover remains a separate user-approved decision and is currently blocked:
 
 1. Capture current Windows task identity/state/process evidence and resolve the
    `WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED` blocker.
-2. Review the migration/schema and read-only baseline.
-3. Obtain explicit approval to stop the Windows task, enable the Mac runner,
-   and begin repeated collection. The runner's four environment gates must be
-   changed together; the launchd artifact itself remains disabled until then.
-4. Validate one manually authorized Heumarkt response, then validate the
-   controlled seven-target path and quota/audit evidence.
+2. Review the applied migration/schema, source proof, overlap audit, and
+   read-only baseline; expand the SQL Server row volume before importing.
+3. Run the importer with the explicit source path, reconcile every source
+   table/evidence family to zero unexplained differences, and rerun the exact
+   same source to prove idempotency.
+4. Obtain explicit approval to stop the positively identified Windows task,
+   enable the Mac runner, and begin repeated collection. The environment gates
+   must be changed together; the launchd artifact remains disabled until then.
+5. The first new MDD request must be a normal scheduled Legacy7 heartbeat.
+   Offline SQLite reconciliation replaces any manual Heumarkt validation
+   probe; no extra live Heumarkt request is required.
 
 Rollback is scheduler-level and additive: stop/unload the Mac job, leave all
 new evidence intact for diagnosis, and resume the previously approved Windows
@@ -191,4 +270,5 @@ rollback step.
 - Disabled scheduler: [`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist`](../deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist)
 - Static/live migration validator: [`scripts/validate_mssql_migration.py`](../scripts/validate_mssql_migration.py)
 - Additive migration runner: [`scripts/apply_mssql_migration.py`](../scripts/apply_mssql_migration.py)
-- Offline contract tests: [`tests/test_mssql_persistence.py`](../tests/test_mssql_persistence.py) and [`tests/test_mssql_runtime.py`](../tests/test_mssql_runtime.py)
+- Explicit SQLite importer: [`scripts/import_live_research_sqlite.py`](../scripts/import_live_research_sqlite.py)
+- Offline contract tests: [`tests/test_mssql_persistence.py`](../tests/test_mssql_persistence.py), [`tests/test_mssql_runtime.py`](../tests/test_mssql_runtime.py), and [`tests/test_s91_sqlite_import.py`](../tests/test_s91_sqlite_import.py)

@@ -447,8 +447,11 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      and post-activation smoke validation. The prepared existing-seven-target
      macOS path has separate gates: current Windows runtime identification and
      retirement, explicit cutover approval, direct-database schema validation,
-     and one manually authorized live Heumarkt validation. PostgreSQL
-     host/runtime is not active architecture.
+     read-only reconciliation/import of the proven `LIVE_RESEARCH_SINGLE_1`
+     source, and idempotency proof. A manually authorized live Heumarkt probe
+     is not a gate; the first new request must be a normal scheduled Legacy7
+     heartbeat after all gates pass. PostgreSQL host/runtime is not active
+     architecture.
 
 ## Stage 15A validation-readiness guardrails
 

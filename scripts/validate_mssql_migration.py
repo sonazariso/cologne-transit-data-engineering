@@ -35,6 +35,11 @@ REQUIRED_MARKERS = (
     "stg.MddMacServiceSectionEvidence",
     "stg.MddMacAttributeEvidence",
     "stg.MddMacParserGap",
+    "ctl.MddImportBatch",
+    "ctl.MddImportTableAudit",
+    "ctl.MddImportEvidenceAudit",
+    "ctl.MddImportSourceRow",
+    "ctl.MddImportOverlap",
     "stg.uspPersistMddMacSnapshot",
     "analytics.vwMddMacRecordedAtTimeHistory",
 )
@@ -55,14 +60,18 @@ def validate_static(path: Path = MIGRATION) -> dict[str, object]:
         if marker not in text:
             errors.append(f"migration is missing required marker: {marker}")
     batches = split_batches(text)
-    if len(batches) < 10:
-        errors.append("migration does not contain the expected batch structure")
+    if len(batches) < 20:
+        errors.append("migration does not contain the expected additive batch structure")
     if "CREATE OR ALTER PROCEDURE stg.uspPersistMddMacSnapshot" not in text:
         errors.append("persistence procedure is not idempotent")
     if "CREATE OR ALTER VIEW analytics.vwMddMacRecordedAtTimeHistory" not in text:
         errors.append("RecordedAtTime reporting view is not idempotent")
     if "RecordedAtTimeSourceText" not in text or "RecordedAtTimeSourcePath" not in text:
         errors.append("RecordedAtTime lexical value/path columns are missing")
+    if "CHECK (Status IN ('IN_PROGRESS', 'COMPLETE', 'FAILED'))" not in text:
+        errors.append("import-batch status lifecycle is not explicit")
+    if "UQ_ctl_MddImportSourceRow_Source_Lineage" not in text:
+        errors.append("durable source-lineage uniqueness is missing")
     return {
         "status": "PASS" if not errors else "FAIL",
         "migration": str(path),

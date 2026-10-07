@@ -24,6 +24,22 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 from validate_mssql_migration import split_batches, validate_static  # noqa: E402
 
 
+REQUIRED_MIGRATION_OBJECTS = (
+    "ctl.MddMacCollectorRun",
+    "stg.MddMacSourceSnapshot",
+    "stg.MddMacTimingObservation",
+    "stg.MddMacSituationEvidence",
+    "stg.MddMacServiceSectionEvidence",
+    "stg.MddMacAttributeEvidence",
+    "stg.MddMacParserGap",
+    "ctl.MddImportBatch",
+    "ctl.MddImportTableAudit",
+    "ctl.MddImportEvidenceAudit",
+    "ctl.MddImportSourceRow",
+    "ctl.MddImportOverlap",
+)
+
+
 def _drain(cursor: object) -> None:
     fetchall = getattr(cursor, "fetchall", None)
     if not callable(fetchall):
@@ -32,6 +48,54 @@ def _drain(cursor: object) -> None:
         fetchall()
     except Exception:
         pass
+
+
+def _validate_required_objects_in_transaction(cursor: object) -> None:
+    """Verify the migration objects before the single transaction commits."""
+
+    names = ", ".join(
+        "N'" + object_name.replace("'", "''") + "'" for object_name in REQUIRED_MIGRATION_OBJECTS
+    )
+    cursor.execute(
+        """
+        SELECT CONCAT(SCHEMA_NAME(o.schema_id), N'.', o.name) AS ObjectName
+        FROM sys.objects AS o
+        WHERE CONCAT(SCHEMA_NAME(o.schema_id), N'.', o.name) IN (%s)
+        """ % names
+    )
+    rows = cursor.fetchall()
+    found = {str(row[0] if not isinstance(row, dict) else row["ObjectName"]) for row in rows}
+    missing = sorted(set(REQUIRED_MIGRATION_OBJECTS) - found)
+    if missing:
+        raise RuntimeError("migration transaction is missing required objects: " + ", ".join(missing))
+
+
+def execute_batches_atomically(connection: object, batches: list[str]) -> int:
+    """Execute every batch and validate objects before one final commit."""
+
+    cursor = connection.cursor()
+    # pymssql with autocommit disabled opens one implicit transaction for the
+    # connection.  Adding BEGIN TRANSACTION here would nest it; a single
+    # commit would then leave the outer transaction open and the close would
+    # roll the migration back.  Keep the DB-API transaction as the one atomic
+    # unit and enable SQL Server's fail-fast rollback behavior.
+    cursor.execute("SET XACT_ABORT ON;")
+    _drain(cursor)
+    executed = 0
+    try:
+        for batch in batches:
+            cursor.execute(batch)
+            _drain(cursor)
+            executed += 1
+        _validate_required_objects_in_transaction(cursor)
+        _drain(cursor)
+        connection.commit()
+        return executed
+    except BaseException:
+        try:
+            connection.rollback()
+        finally:
+            raise
 
 
 def apply_migration() -> dict[str, object]:
@@ -45,12 +109,7 @@ def apply_migration() -> dict[str, object]:
     batches = split_batches((ROOT / "sql" / "mdd-mac-collector" / "create-source-faithful-persistence.sql").read_text(encoding="utf-8"))
     executed = 0
     try:
-        cursor = connection.cursor()
-        for batch in batches:
-            cursor.execute(batch)
-            _drain(cursor)
-            connection.commit()
-            executed += 1
+        executed = execute_batches_atomically(connection, batches)
     except BaseException:
         try:
             connection.rollback()

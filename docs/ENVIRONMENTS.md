@@ -41,9 +41,22 @@ separate from the existing Windows collector tables and is documented in
 
 The future `launchd` definition is present at
 `deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist` but
-is explicitly disabled. The Windows task has not been changed. Direct Mac
-collection remains blocked until the current Windows runtime is identified and
-the controlled cutover is separately approved.
+is explicitly disabled and invokes
+`/Library/Developer/CommandLineTools/usr/bin/python3` directly. The Windows
+task has not been changed. Direct Mac collection remains blocked until the
+current Windows runtime is identified, the proven historical SQLite source is
+reconciled/imported, and the controlled cutover is separately approved.
+
+The explicit historical source is
+`/Users/admin/cologne-transit-data/live-research/collector.sqlite3`; its
+SHA-256 is
+`0edc9b1a56cb6128ac5bed6508e5c37b9b4d1ab18c1d78092e6fcb1ac9b674fc` and its
+role/context are `LIVE_RESEARCH` / `LIVE_RESEARCH_SINGLE_1`. The source proof
+and overlap audit are read-only. Import currently stops before opening a new
+batch because the SQL Server row volume has 10,260,480 bytes free, below the
+conservative 1,150,083,072-byte requirement; no rows are deleted to recover
+space. No manual Heumarkt request is required: offline reconciliation is the
+gate, and the first future Mac request must be a normal scheduler heartbeat.
 
 ## Secrets
 

@@ -110,13 +110,15 @@ See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/
 
 The current checkout also contains a controlled macOS Python path that writes
 source-faithful MDD/TRIAS evidence directly to the authoritative database.
-Its additive schema, pinned DB-API dependency, six-context timing tests,
-Situation/Attribute/parser-gap tests, transaction checks, and disabled
+Its additive schema is applied and live-validated; the pinned DB-API
+dependency, explicit SQLite-to-SQL Server importer, six-context timing tests,
+Situation/Attribute/parser-gap tests, atomic migration checks, and disabled
 `launchd` artifact are documented in
 [the macOS persistence contract](docs/macos-mssql-collector.md). This is
-implementation readiness only: the current Windows runtime remains
-unconfirmed, the Mac scheduler is disabled, and no Tiered50 or repeated Mac
-collection is active.
+implementation/cutover readiness only: the current Windows runtime remains
+unconfirmed, the historical SQLite import is blocked by SQL Server disk
+headroom, the Mac scheduler is disabled, and no repeated Mac collection is
+active. Offline SQLite reconciliation replaces any manual Heumarkt probe.
 
 ## Repository principles
 

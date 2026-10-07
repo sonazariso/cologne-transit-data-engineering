@@ -703,6 +703,11 @@ class MssqlPersistence:
             "stg.MddMacAttributeEvidence",
             "stg.MddMacResponseError",
             "stg.MddMacParserGap",
+            "ctl.MddImportBatch",
+            "ctl.MddImportTableAudit",
+            "ctl.MddImportEvidenceAudit",
+            "ctl.MddImportSourceRow",
+            "ctl.MddImportOverlap",
         )
         expected_routines = (
             "stg.uspPersistMddMacSnapshot",
@@ -717,7 +722,7 @@ class MssqlPersistence:
                 FROM sys.objects AS o
                 INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
                 WHERE s.name IN ('ctl', 'stg', 'analytics')
-                  AND (o.name LIKE 'MddMac%' OR o.name IN ('uspPersistMddMacSnapshot', 'vwMddMacRecordedAtTimeHistory', 'vwMddMacSourceFieldCoverage'))
+                  AND (o.name LIKE 'MddMac%' OR o.name LIKE 'MddImport%' OR o.name IN ('uspPersistMddMacSnapshot', 'vwMddMacRecordedAtTimeHistory', 'vwMddMacSourceFieldCoverage'))
                 """
             )
             rows = cursor.fetchall()

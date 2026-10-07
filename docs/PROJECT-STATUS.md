@@ -52,6 +52,35 @@ existing documents and code remain historical/deferred-cleanup material and
 were not removed or modified. `NRWTransportDW` remains an untouched
 `LEGACY_REFERENCE` database.
 
+### Current cutover transition status
+
+The additive SQL Server contract is applied to `CologneTransitIntelligence`
+and passes live read-only validation: 23 tables and 3 routines/views are
+present, while the existing seven sampling-target IDs and Windows-era realtime
+counts remain unchanged. The direct launchd artifact remains disabled and now
+uses the validated absolute interpreter
+`/Library/Developer/CommandLineTools/usr/bin/python3`.
+
+The durable SQLite source is
+`/Users/admin/cologne-transit-data/live-research/collector.sqlite3` (575,041,536
+bytes; SHA-256
+`0edc9b1a56cb6128ac5bed6508e5c37b9b4d1ab18c1d78092e6fcb1ac9b674fc`). It
+proves `LIVE_RESEARCH_SINGLE_1`, schema 5, intact SQLite checks, and the
+contiguous 5.9306-hour historical session from
+`2026-10-01T16:59:32.654121Z` to `2026-10-01T22:55:22.809977Z`. It is an
+offline import source only and is not relabeled as Mac, Windows, Legacy7, or
+Tiered50 production evidence.
+
+The read-only overlap audit found no Windows-era rows in that interval and did
+not merge or deduplicate anything. The import is blocked before a new batch is
+opened because the SQL Server row volume has only 10,260,480 bytes free,
+versus a conservative 1,150,083,072-byte requirement. Three failed import
+attempts remain auditable as `FAILED`; no source rows were deleted. Current
+Windows Task Scheduler identity/state is still not positively confirmed, so
+the Windows task has not been changed. Offline reconciliation replaces any
+manual Heumarkt validation request; the first future Mac request, if approved,
+must be a normal scheduled Legacy7 heartbeat.
+
 ### Current Stage 3 substage
 
 - **Stage 3 — COMPLETE** as a source-evidence, collection/cadence-design, and
