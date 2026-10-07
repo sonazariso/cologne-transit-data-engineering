@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-10-05
+**Status date:** 2026-10-07
 
 ## Authoritative status
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 0 | Project Definition | APPROVED |
 | 1 | Source Inventory & Permission | APPROVED |
-| 1A | SQL Server Stabilization (S87) | BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED |
+| 1A | SQL Server Stabilization (S87) | COMPLETE |
 | 2 | MDD/TRIAS Source-Contract Audit | APPROVED |
 | 3 | Static GTFS Profile / Realtime Evidence Validation | COMPLETE |
 | 4 | Cologne Scope & Mode Classification | COMPLETE — APPROVED |
@@ -35,14 +35,17 @@ database is `CologneTransitIntelligence` on the current Windows VM. Future
 collectors and pipelines are planned as Python on macOS, SQL Server remains on
 the VM, and Power BI consumes SQL Server analytical/warehouse data.
 
-The Stage 1 SQL Server baseline is captured in the [stabilization record](stages/01-sql-server-stabilization.md)
-and [evidence JSON](stages/01-sql-server-stabilization-evidence.json). The
-database is ONLINE and readable for the captured inventory, but the stage is
-BLOCKED: the current recheck found no FULL-backup history, only `C:` visible
-to SQL Server with 1,598 MB free, and no validated alternate destination. The
-existing `.bak` candidate remains historical/unverified because SQL Server
-could not open its VMware Shared Folder path for `RESTORE HEADERONLY` or
-`RESTORE VERIFYONLY WITH CHECKSUM`.
+The Stage 1 SQL Server stabilization is **COMPLETE**. Fresh 2026-10-07
+evidence is captured in the [stabilization record](stages/01-sql-server-stabilization.md)
+and [evidence JSON](stages/01-sql-server-stabilization-evidence.json):
+`CologneTransitIntelligence` is ONLINE, the new native `COPY_ONLY`, compressed,
+`CHECKSUM` FULL backup passes HEADERONLY, FILELISTONLY, and VERIFYONLY, and a
+full read-only `DBCC CHECKDB` reports no corruption errors. The verified
+606,586,880-byte VM backup and matching Mac safety copy are retained on the
+user-provided `CologneTransitData` share. Only `C:` is visible as a fixed SQL
+volume and its headroom remains low, so the share remains the safe backup
+destination; the Windows collector's Task Scheduler/process state is explicitly
+unconfirmed.
 
 PostgreSQL, SQLite, Ubuntu, and Docker are not active architecture. Their
 existing documents and code remain historical/deferred-cleanup material and

@@ -16,12 +16,15 @@ warehouse data. PostgreSQL, SQLite, Ubuntu, and Docker are not active target
 architecture. Their existing documents and code remain historical/deferred
 cleanup and are not deleted in this stage.
 
-Stage 1 SQL Server stabilization is **BLOCKED** until a native SQL Server FULL
-backup is physically accessible and passes `RESTORE VERIFYONLY WITH CHECKSUM`.
-The live inventory and blocker are recorded in
-[the S87 stabilization evidence](stages/01-sql-server-stabilization.md).
+Stage 1 SQL Server stabilization is **COMPLETE**. Fresh live evidence confirms
+that a new native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup is physically
+accessible and passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and
+`RESTORE VERIFYONLY WITH CHECKSUM`; full read-only `DBCC CHECKDB` also passes.
+The live inventory and closeout evidence are recorded in
+[the stabilization evidence](stages/01-sql-server-stabilization.md).
 No collector, MDD/API request, GTFS load, Power BI change, schema redesign, or
-historical-data cleanup is authorized by this gate.
+historical-data cleanup was authorized by this gate, and no macOS collector is
+started automatically.
 
 ## Stage 0 — Project Definition — APPROVED
 Define business questions, portfolio goal, geography, modes, System Performance, audience, and explicit exclusions.

@@ -4,7 +4,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 
 | ID | Date | Decision | Status |
 |---|---|---|---|
-| D-060 | 2026-10-05 | S87 SQL Server stabilization: Microsoft SQL Server is the sole authoritative project database; `CologneTransitIntelligence` is the official database, PostgreSQL/SQLite/Ubuntu/Docker are not active architecture, and the current Windows-VM SQL Server baseline must be backed up and verified before collector/pipeline connection | IN PROGRESS — BLOCKED: no verifiable FULL backup; see [Stage 1 evidence](stages/01-sql-server-stabilization-evidence.json) |
+| D-060 | 2026-10-05 | S87 SQL Server stabilization: Microsoft SQL Server is the sole authoritative project database; `CologneTransitIntelligence` is the official database, PostgreSQL/SQLite/Ubuntu/Docker are not active architecture, and the current Windows-VM SQL Server baseline must be backed up and verified before collector/pipeline connection | COMPLETE — current native FULL backup, restore verification, and DBCC CHECKDB passed; see [Stage 1 evidence](stages/01-sql-server-stabilization-evidence.json) |
 | D-001 | 2026-09-25 | New project name: **Cologne Transport Intelligence** | Approved |
 | D-002 | 2026-09-25 | New GitHub repository: `sonazariso/cologne-transit-intelligence` | Approved |
 | D-003 | 2026-09-25 | Legacy repository remains reference/evidence and is not bulk-copied | Approved |
@@ -65,7 +65,7 @@ This file indexes approved project-level decisions. Detailed records may later b
 
 ## D-060 — S87 SQL Server Stabilization
 
-**Status:** IN PROGRESS — BLOCKED: verified native FULL backup required
+**Status:** COMPLETE — verified native FULL backup and integrity gate passed
 
 Microsoft SQL Server is the sole authoritative project database. The official
 database is `CologneTransitIntelligence` on the current Windows VM. Future
@@ -79,12 +79,18 @@ The live database is ONLINE and its read-only inventory is captured in the
 architecture and the SQLite research runtime remain version-controlled
 historical/deferred-cleanup material; no code cleanup occurs in S87.
 
-The stage is blocked because `msdb` has no FULL-backup history for the official
-database, the existing `.bak` candidate could not be opened by SQL Server for
-`RESTORE HEADERONLY` or `RESTORE VERIFYONLY WITH CHECKSUM`, and the only
-visible SQL Server volume reached 175 MB free during the audit (1,489 MB after
-the uninitiated VM restart). No backup, schema change, data change,
-collector/API request, GTFS load, or Power BI change was made.
+Fresh 2026-10-07 evidence found only `C:` visible as a fixed SQL Server volume,
+but verified the user-provided `\\vmware-host\Shared Folders\CologneTransitData`
+destination by an actual SQL Server service-account native backup write. The
+new timestamped `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes
+`RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH
+CHECKSUM`; its 606,586,880-byte VM file and separate Mac safety copy have the
+same SHA-256. Full read-only `DBCC CHECKDB` reports no corruption errors.
+The September 30 candidate was not reused or overwritten. No schema change,
+project-data DML, collector activation, MDD/API request, GTFS load, or Power BI
+change was made by this work. Existing Windows collector appends observed during
+the window are recorded separately, and its current Task Scheduler/process
+state remains `WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED`.
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 

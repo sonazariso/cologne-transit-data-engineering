@@ -28,7 +28,7 @@ stabilization gate, not collector activation or a new collection stage.
 
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
-- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **BLOCKED — VERIFIED NATIVE FULL BACKUP REQUIRED**. The authoritative database remains ONLINE; the 2026-10-05 recheck captured 12,887.63 MB allocated, 3,594.38 MB data used, 9,039.63 MB log allocated with 23.18 MB used, zero FULL-backup history rows, and only `C:` visible with 1,598 MB free. The September 30 `.bak` remains historical/unverified evidence, and no current backup was started without a safe SQL-Server-writable destination.
+- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **COMPLETE**. Fresh 2026-10-07 evidence confirms `CologneTransitIntelligence` is ONLINE; the native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH CHECKSUM`; and full read-only `DBCC CHECKDB` reports no corruption errors. The verified 606,586,880-byte backup and matching SHA-256 Mac safety copy are retained on the user-provided `CologneTransitData` share. The low-space `C:` volume was not used as the backup destination, and the existing Windows collector remains operationally unconfirmed at the Task Scheduler/process level.
 - Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
   technical-closure package remains the approved baseline. The previous host
   run completed the five S15 historical requests, and S16 performed zero MDD
