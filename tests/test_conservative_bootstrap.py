@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 )
 from register_mdd_conservative_bootstrap import run as run_bootstrap_registration  # noqa: E402
 from register_mdd_quota_reset_contract import run as run_reset_contract_registration  # noqa: E402
+import register_mdd_quota_reset_contract as reset_contract_script  # noqa: E402
 
 
 PROPOSAL = ROOT / "docs" / "operational" / "mdd-october-conservative-bootstrap-proposal.json"
@@ -215,10 +218,76 @@ class AutomaticRolloverTests(unittest.TestCase):
                 approved_at_utc=datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
             )
 
+    def test_rollover_registration_retains_approval_provenance_without_changing_source_hash(self) -> None:
+        contract = build_reset_contract(
+            evidence={
+                "reset_contract_status": "VERIFIED",
+                "provider_reset_boundary_verified": True,
+                "credential_exclusivity_confirmed": True,
+                "source_evidence_hash": "d" * 64,
+            },
+            contract_key="MDD-RESET-PROVENANCE-1",
+            reset_timezone="Europe/Berlin",
+            effective_from_utc=datetime(2026, 10, 31, 23, 0, tzinfo=timezone.utc),
+            approved_at_utc=APPROVED_AT,
+        )
+        self.assertEqual(contract["source_evidence_hash"], "d" * 64)
+        self.assertEqual(contract["approval_provenance"]["approved_at_utc"], "2026-10-08T12:00:00Z")
+        self.assertIn("registration_approval", json.loads(contract["evidence_json"]))
+
     def test_reset_contract_cli_reports_unresolved_dependency_without_sql_write(self) -> None:
         result = run_reset_contract_registration()
         self.assertEqual(result["status"], "AWAITING_PROVIDER_RESET_EVIDENCE")
         self.assertEqual(result["sql_writes_performed"], 0)
+
+    def test_reset_contract_registration_uses_the_separate_administrator_connection(self) -> None:
+        evidence = {
+            "reset_contract_status": "VERIFIED",
+            "provider_reset_boundary_verified": True,
+            "credential_exclusivity_confirmed": True,
+            "source_evidence_hash": "c" * 64,
+        }
+        captured: dict[str, object] = {}
+
+        class Persistence:
+            def __init__(self, *, settings) -> None:  # type: ignore[no-untyped-def]
+                captured["settings"] = settings
+
+            def register_quota_reset_contract(self, *, contract):  # type: ignore[no-untyped-def]
+                captured["contract"] = contract
+                return {"status": "APPLIED", "writes_performed": 1}
+
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "reset-evidence.json"
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            with patch.object(
+                reset_contract_script,
+                "resolve_administrator_connection_settings",
+                return_value=(
+                    MssqlConnectionSettings(
+                        host="admin-host",
+                        database="CologneTransitIntelligence",
+                        user="separate-admin",
+                        password="admin-secret",
+                    ),
+                    "MSSQL_ADMIN_*_KEYCHAIN",
+                ),
+            ), patch.object(reset_contract_script, "MssqlPersistence", Persistence):
+                result = run_reset_contract_registration(
+                    evidence_path=evidence_path,
+                    contract_key="MDD-RESET-ADMIN-BOUND-1",
+                    reset_timezone="Europe/Berlin",
+                    effective_from=datetime(2026, 10, 31, 23, 0, tzinfo=timezone.utc),
+                    approved_at=APPROVED_AT,
+                    apply=True,
+                    approve=True,
+                )
+        settings = captured["settings"]
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["administrator_credential_source"], "MSSQL_ADMIN_*_KEYCHAIN")
+        self.assertEqual(settings.user, "separate-admin")  # type: ignore[union-attr]
+        self.assertNotEqual(settings.user, "CologneTransitCollector")  # type: ignore[union-attr]
+        self.assertNotIn("admin-secret", json.dumps(result))
 
     def test_runtime_rollover_calls_guarded_sql_procedure_with_contract_locking(self) -> None:
         contract = self._contract()
@@ -272,6 +341,24 @@ class AutomaticRolloverTests(unittest.TestCase):
         procedure = migration[migration.index("CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod") :]
         self.assertIn("UPDLOCK", procedure)
         self.assertIn("HOLDLOCK", procedure)
+        self.assertIn("sp_getapplock", procedure)
+        self.assertIn("@LockOwner = N'Transaction'", procedure)
+        self.assertIn("@LockMode = N'Exclusive'", procedure)
+
+    def test_sql_rollover_boundary_uses_sql_server_utc_not_caller_clock(self) -> None:
+        migration = (
+            Path(__file__).parents[1]
+            / "sql"
+            / "mdd-mac-collector"
+            / "create-source-faithful-persistence.sql"
+        ).read_text(encoding="utf-8")
+        procedure = migration[migration.index("CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod") :]
+        self.assertIn("DECLARE @server_utc DATETIME2(7) = SYSUTCDATETIME();", procedure)
+        self.assertIn("@server_utc < @ProviderPeriodStartUtc", procedure)
+        self.assertIn("@server_utc >= @ProviderPeriodEndUtc", procedure)
+        self.assertIn("@server_utc < DATEADD(SECOND, @activation_delay_seconds", procedure)
+        self.assertIn("@ProviderPeriodStartUtc >= @ProviderPeriodEndUtc", procedure)
+        self.assertNotIn("IF @AtUtc < DATEADD(SECOND, @activation_delay_seconds", procedure)
 
     def test_bounded_calendar_month_policy_waits_for_latest_supported_timezone(self) -> None:
         period = bounded_provider_period_for_instant(

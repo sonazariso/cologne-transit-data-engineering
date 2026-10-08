@@ -76,6 +76,9 @@ from .trias import iter_service_section_observations
 MAC_COLLECTION_CONTEXT = MAC_SQL_COLLECTION_CONTEXT
 WINDOWS_RUNTIME_UNCONFIRMED = "WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED"
 RAW_RETENTION_HOURS = 24
+QUOTA_PERMIT_STALE_AFTER_SECONDS = 300
+MAX_QUOTA_PERMIT_STALE_AFTER_SECONDS = 86_400
+QUOTA_ROLLOVER_LOCK_RESOURCE = "CologneTransitIntelligence:MDD:QUOTA_ROLLOVER"
 
 _SECRET_NAMES = frozenset(
     {
@@ -1064,6 +1067,53 @@ class MssqlPersistence:
     @staticmethod
     def _cursor(connection: Any) -> Any:
         return connection.cursor()
+
+    @staticmethod
+    def _bounded_quota_permit_stale_after_seconds(value: int) -> int:
+        """Validate the bounded crash-recovery window used by SQL updates."""
+
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("quota permit stale-recovery window must be an integer") from exc
+        if not 1 <= seconds <= MAX_QUOTA_PERMIT_STALE_AFTER_SECONDS:
+            raise MssqlSafetyError(
+                "quota permit stale-recovery window must be between 1 second and 24 hours"
+            )
+        return seconds
+
+    @staticmethod
+    def _acquire_quota_rollover_lock(cursor: Any) -> None:
+        """Serialize durable permit recovery with automatic period creation."""
+
+        cursor.execute(
+            """
+            DECLARE @LockResult INT;
+            EXEC @LockResult = sys.sp_getapplock
+                @Resource = %s,
+                @LockMode = N'Exclusive',
+                @LockOwner = N'Transaction',
+                @LockTimeout = 0;
+            SELECT @LockResult AS LockResult;
+            """,
+            (QUOTA_ROLLOVER_LOCK_RESOURCE,),
+        )
+        row = cursor.fetchone()
+        result = _row_named(row, "LockResult", index=0)
+        try:
+            lock_result = int(result)
+        except (TypeError, ValueError) as exc:
+            raise MssqlSafetyError("SQL quota rollover coordination lock result is unavailable") from exc
+        if lock_result < 0:
+            raise MssqlSafetyError("SQL quota rollover coordination lock could not be acquired")
+
+    @staticmethod
+    def _is_quota_rollover_wait_error(exc: BaseException) -> bool:
+        message = str(exc).casefold()
+        return (
+            "prior-period quota permit is still pending" in message
+            or "quota rollover coordination lock could not be acquired" in message
+        )
 
     def _authoritative_authorization_time(self, fallback: datetime, *, cursor: Any | None = None) -> datetime:
         """Read the SQL Server clock for live permit authorization.
@@ -2950,71 +3000,75 @@ class MssqlPersistence:
             )
             connection.commit()
 
-    def recover_stale_quota_permits(
+    def _recover_stale_quota_permits_durable(
         self,
         *,
-        at_utc: datetime | None = None,
-        stale_after_seconds: int = 300,
+        requested_at: datetime,
+        stale_after_seconds: int,
     ) -> Mapping[str, Any]:
-        """Conservatively settle permits left pending by a crashed process.
+        """Recover every safely stale pending permit in one SQL transaction.
 
-        A pending permit is never silently returned to the headroom pool after
-        a process boundary.  Once it is older than the bounded request/claim
-        window, the safest durable interpretation is an unknown provider
-        attempt.  The update is idempotent because only pending rows qualify.
+        The permit's durable ``MonthKey`` is never changed.  Recovery is
+        serialized with rollover by a transaction-scoped application lock and
+        uses SQL Server UTC for both the cutoff and finalization timestamp.
+        A rollback leaves every pending permit untouched, so an interrupted
+        recovery can be retried without creating or releasing quota.
         """
 
-        requested_at = _utc(at_utc or datetime.now(timezone.utc))
-        at = self._authoritative_authorization_time(requested_at)
-        cutoff = at - timedelta(seconds=max(1, int(stale_after_seconds)))
-        self.ensure_automatic_quota_rollover(at_utc=at)
+        stale_seconds = self._bounded_quota_permit_stale_after_seconds(stale_after_seconds)
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
-                candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
-                month: str | None = None
-                if len(candidates) == 1:
-                    month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
-                elif not candidates:
-                    bootstrap_candidates = self._conservative_bootstrap_candidates(cursor, at=at, lock=True)
-                    if len(bootstrap_candidates) == 1:
-                        month = str(_row_named(bootstrap_candidates[0], "MonthKey", index=2) or "")
-                if not month:
-                    cursor.execute("COMMIT TRANSACTION;")
-                    connection.commit()
-                    return {
-                        "status": "NOT_AVAILABLE",
-                        "reason": (
-                            "current provider billing period is missing or ambiguous; "
-                            "stale permit recovery remains fail-closed"
-                        ),
-                        "month_key": None,
-                        "recovered_permits": 0,
-                        "cutoff_utc": _iso(cutoff),
-                    }
+                self._acquire_quota_rollover_lock(cursor)
+                at = self._authoritative_authorization_time(requested_at, cursor=cursor)
+                cutoff = at - timedelta(seconds=stale_seconds)
                 cursor.execute(
                     """
-                    UPDATE ctl.MddMacQuotaPermit
-                    SET Status = %s,
-                        FinalizedAtUtc = %s,
-                        ReleasedAtUtc = NULL,
-                        FinalizationReason = %s,
-                        LiveClientInvocation = 1
-                    WHERE MonthKey = %s
-                      AND Status = %s
+                    SELECT PermitId, MonthKey, Amount, ReservedAtUtc, Status
+                    FROM ctl.MddMacQuotaPermit WITH (UPDLOCK, HOLDLOCK)
+                    WHERE Status = %s
                       AND ReservedAtUtc < %s
+                    ORDER BY ReservedAtUtc, PermitId
                     """,
-                    (
-                        CONSERVATIVE_LIVE_ATTEMPT,
-                        at,
-                        "CRASH_RECOVERY_CONSERVATIVE",
-                        month,
-                        PENDING_AUTHORIZATION,
-                        cutoff,
-                    ),
+                    (PENDING_AUTHORIZATION, cutoff),
                 )
-                recovered = int(getattr(cursor, "rowcount", 0) or 0)
+                candidates = list(cursor.fetchall())
+                recovered_by_month: dict[str, int] = {}
+                recovered_attempts = 0
+                for row in candidates:
+                    month = str(_row_named(row, "MonthKey", index=1) or "")
+                    amount = int(_row_named(row, "Amount", index=2) or 0)
+                    if not month or amount <= 0:
+                        raise MssqlSafetyError("durable pending quota permit has an invalid month or amount")
+                    recovered_by_month[month] = recovered_by_month.get(month, 0) + 1
+                    recovered_attempts += amount
+
+                if candidates:
+                    cursor.execute(
+                        """
+                        UPDATE ctl.MddMacQuotaPermit
+                        SET Status = %s,
+                            FinalizedAtUtc = %s,
+                            ReleasedAtUtc = NULL,
+                            FinalizationReason = %s,
+                            LiveClientInvocation = 1
+                        WHERE Status = %s
+                          AND ReservedAtUtc < %s
+                        """,
+                        (
+                            CONSERVATIVE_LIVE_ATTEMPT,
+                            at,
+                            "CRASH_RECOVERY_CONSERVATIVE",
+                            PENDING_AUTHORIZATION,
+                            cutoff,
+                        ),
+                    )
+                    rowcount = int(getattr(cursor, "rowcount", -1) or -1)
+                    if rowcount >= 0 and rowcount != len(candidates):
+                        raise MssqlSafetyError(
+                            "durable quota permit recovery changed a different number of rows than it locked"
+                        )
                 cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
@@ -3022,10 +3076,67 @@ class MssqlPersistence:
                 raise
         return {
             "status": "PASS",
-            "month_key": month,
-            "recovered_permits": recovered,
+            "authorization_at_utc": at,
             "cutoff_utc": _iso(cutoff),
+            "recovered_permits": len(candidates),
+            "recovered_attempts": recovered_attempts,
+            "recovered_by_month": recovered_by_month,
+            "stale_after_seconds": stale_seconds,
         }
+
+    def recover_stale_quota_permits(
+        self,
+        *,
+        at_utc: datetime | None = None,
+        stale_after_seconds: int = QUOTA_PERMIT_STALE_AFTER_SECONDS,
+    ) -> Mapping[str, Any]:
+        """Conservatively settle crashed permits before attempting rollover.
+
+        This ordering is deliberate: a stale permit from the prior billing
+        period is finalized first, then the guarded SQL rollover procedure is
+        allowed to create the next period.  Recent pending permits remain
+        pending and therefore continue to block rollover.  The durable SQL
+        query and update are idempotent and preserve each permit's original
+        billing-period identity.
+        """
+
+        requested_at = _utc(at_utc or datetime.now(timezone.utc))
+        recovery = self._recover_stale_quota_permits_durable(
+            requested_at=requested_at,
+            stale_after_seconds=stale_after_seconds,
+        )
+        at = _utc(recovery["authorization_at_utc"])
+        rollover = self.ensure_automatic_quota_rollover(
+            at_utc=at,
+            stale_after_seconds=int(recovery["stale_after_seconds"]),
+        )
+        cutoff = str(recovery["cutoff_utc"])
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
+            month: str | None = None
+            if len(candidates) == 1:
+                month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
+            elif not candidates:
+                bootstrap_candidates = self._conservative_bootstrap_candidates(cursor, at=at, lock=False)
+                if len(bootstrap_candidates) == 1:
+                    month = str(_row_named(bootstrap_candidates[0], "MonthKey", index=2) or "")
+        result = {
+            "status": "PASS" if month else "NOT_AVAILABLE",
+            "month_key": month,
+            "recovered_permits": int(recovery["recovered_permits"]),
+            "recovered_attempts": int(recovery["recovered_attempts"]),
+            "recovered_by_month": dict(recovery["recovered_by_month"]),
+            "cutoff_utc": cutoff,
+            "stale_after_seconds": int(recovery["stale_after_seconds"]),
+            "automatic_rollover": dict(rollover),
+        }
+        if not month:
+            result["reason"] = (
+                "current provider billing period is missing or ambiguous; "
+                "stale permit recovery remains conservative and fail-closed"
+            )
+        return result
 
     @staticmethod
     def _provider_period_baseline_candidates(
@@ -3194,7 +3305,12 @@ class MssqlPersistence:
             "untracked_research_attempt_contexts": sorted(set(untracked_research_contexts)),
         }
 
-    def ensure_automatic_quota_rollover(self, *, at_utc: datetime) -> Mapping[str, Any]:
+    def ensure_automatic_quota_rollover(
+        self,
+        *,
+        at_utc: datetime,
+        stale_after_seconds: int = QUOTA_PERMIT_STALE_AFTER_SECONDS,
+    ) -> Mapping[str, Any]:
         """Create the next verified provider period atomically when eligible.
 
         October's bounded bootstrap is intentionally independent.  After its
@@ -3206,6 +3322,7 @@ class MssqlPersistence:
         """
 
         at = _utc(at_utc)
+        stale_seconds = self._bounded_quota_permit_stale_after_seconds(stale_after_seconds)
         if at < BOOTSTRAP_LATEST_STOP_UTC:
             return {
                 "status": "NOT_APPLICABLE",
@@ -3252,23 +3369,35 @@ class MssqlPersistence:
                     }
                 raise MssqlSafetyError(message) from exc
 
-            cursor.execute(
-                """
-                EXEC ctl.uspEnsureMddMacQuotaPeriod
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s
-                """,
-                (
-                    period["contract_key"],
-                    period["month_key"],
-                    period["provider_period_timezone"],
-                    _optional_utc(period["provider_period_start_utc"]),
-                    _optional_utc(period["provider_period_end_utc"]),
-                    _optional_utc(period["local_usage_included_through_utc"]),
-                    _optional_utc(period["at_utc"]),
-                    period["source_evidence_hash"],
-                    period["reconciliation_key"],
-                ),
-            )
+            try:
+                cursor.execute(
+                    """
+                    EXEC ctl.uspEnsureMddMacQuotaPeriod
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    """,
+                    (
+                        period["contract_key"],
+                        period["month_key"],
+                        period["provider_period_timezone"],
+                        _optional_utc(period["provider_period_start_utc"]),
+                        _optional_utc(period["provider_period_end_utc"]),
+                        _optional_utc(period["local_usage_included_through_utc"]),
+                        _optional_utc(period["at_utc"]),
+                        period["source_evidence_hash"],
+                        period["reconciliation_key"],
+                        stale_seconds,
+                    ),
+                )
+            except BaseException as exc:
+                if self._is_quota_rollover_wait_error(exc):
+                    return {
+                        "status": "BLOCKED_PENDING_PRIOR_PERIOD_PERMITS",
+                        "reason": "a recent prior-period quota permit remains unresolved",
+                        "contract_key": period["contract_key"],
+                        "month_key": period["month_key"],
+                        "mdd_requests_issued": 0,
+                    }
+                raise
             fetchall = getattr(cursor, "fetchall", None)
             if callable(fetchall):
                 try:
@@ -3283,6 +3412,7 @@ class MssqlPersistence:
             "provider_period_start_utc": period["provider_period_start_utc"],
             "provider_period_end_utc": period["provider_period_end_utc"],
             "activation_not_before_utc": period["activation_not_before_utc"],
+            "stale_after_seconds": stale_seconds,
             "mdd_requests_issued": 0,
         }
 
@@ -4120,7 +4250,7 @@ class MssqlPersistence:
     def register_quota_reset_contract(self, *, contract: Mapping[str, Any]) -> Mapping[str, Any]:
         """Register one verified future-month reset contract idempotently."""
 
-        self.quota_administrator_context()
+        administrator_context = dict(self.quota_administrator_context())
         key = str(contract.get("contract_key") or "")
         provider_name = str(contract.get("provider_name") or "")
         reset_model = str(contract.get("reset_model") or "")
@@ -4197,6 +4327,7 @@ class MssqlPersistence:
                             "status": "IDEMPOTENT",
                             "contract_key": key,
                             "writes_performed": 0,
+                            "administrator_context": administrator_context,
                         }
                     raise MssqlSafetyError("reset contract key already exists with conflicting or revoked evidence")
 
@@ -4248,6 +4379,7 @@ class MssqlPersistence:
             "status": "APPLIED",
             "contract_key": key,
             "writes_performed": 1,
+            "administrator_context": administrator_context,
         }
 
     def register_shared_quota_baseline(

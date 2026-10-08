@@ -366,6 +366,15 @@ def build_reset_contract(
     source_hash = str(evidence.get("source_evidence_hash") or "")
     if not _SHA256.fullmatch(source_hash):
         source_hash = canonical_evidence_hash(evidence)
+    approval_provenance = {
+        "approved_at_utc": _iso(approved),
+        "approval_basis": "VERIFIED_PROVIDER_RESET_BOUNDARY" if exact_verified else "APPROVED_BOUNDED_TIMEZONE_ASSUMPTION",
+        "bounded_assumption_approved": bounded_approved,
+        "contract_key": key,
+        "source_evidence_hash": source_hash,
+    }
+    evidence_payload = dict(evidence)
+    evidence_payload["registration_approval"] = approval_provenance
     return {
         "contract_key": key,
         "provider_name": "MDD NRW",
@@ -381,7 +390,8 @@ def build_reset_contract(
         "supported_reset_timezones": list(timezone_names),
         "supported_reset_timezones_json": json.dumps(list(timezone_names), ensure_ascii=False, sort_keys=True),
         "source_evidence_hash": source_hash,
-        "evidence_json": json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        "evidence_json": json.dumps(evidence_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        "approval_provenance": approval_provenance,
         "contract_status": AUTOMATIC_ROLLOVER_STATUS,
         "approved_at_utc": _iso(approved),
     }

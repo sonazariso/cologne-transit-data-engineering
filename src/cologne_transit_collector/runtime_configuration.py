@@ -42,6 +42,8 @@ KEYCHAIN_SERVICE_MSSQL = "com.cologne-transit-intelligence.mssql-password"
 KEYCHAIN_ACCOUNT_MSSQL = MSSQL_PASSWORD_ENV
 KEYCHAIN_SERVICE_MSSQL_PENDING = "com.cologne-transit-intelligence.mssql-password.pending"
 KEYCHAIN_ACCOUNT_MSSQL_PENDING = "MSSQL_PASSWORD_PENDING"
+ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+ADMIN_MISSING_FIELDS_MARKER = "__ADMIN_MISSING_FIELDS__"
 
 MDD_API_CREDENTIAL = "MDD_API_KEY"
 MSSQL_CREDENTIAL = "MSSQL_PASSWORD"
@@ -456,6 +458,93 @@ def resolve_secret(
     return resolved
 
 
+def resolve_administrator_environment(
+    environ: Mapping[str, str] | None = None,
+    *,
+    secret_provider: SecretProvider | None = None,
+) -> tuple[dict[str, str], str]:
+    """Resolve the explicitly configured administrator connection contract.
+
+    Administrator access is intentionally a separate credential domain.  The
+    resolver only reads ``MSSQL_ADMIN_*`` values and the dedicated Keychain
+    item; it never merges the collector's runtime login or password into the
+    returned mapping.  The returned mapping is suitable for
+    ``MssqlConnectionSettings.from_environment`` and is kept in memory only.
+
+    A partial configuration is returned with a secret-free missing-field
+    marker so read-only evidence workflows can report the exact blocker
+    without attempting a runtime fallback.
+    """
+
+    source = os.environ if environ is None else environ
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for suffix in ("HOST", "DATABASE", "USER"):
+        name = f"MSSQL_ADMIN_{suffix}"
+        value = source.get(name)
+        if value is None or not str(value).strip():
+            missing.append(name)
+        else:
+            values[f"MSSQL_{suffix}"] = str(value).strip()
+
+    password = source.get("MSSQL_ADMIN_PASSWORD")
+    keychain_used = False
+    if password is None or not str(password).strip():
+        account = str(source.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER") or "").strip()
+        service = str(source.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE).strip()
+        password = (secret_provider or MacOSKeychainSecretProvider()).get(
+            service=service,
+            account=account,
+        )
+        keychain_used = password is not None and bool(str(password).strip())
+    if password is None or not str(password).strip():
+        missing.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
+    else:
+        values["MSSQL_PASSWORD"] = str(password)
+
+    for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
+        name = f"MSSQL_ADMIN_{suffix}"
+        value = source.get(name)
+        if value is not None and str(value).strip():
+            values[f"MSSQL_{suffix}"] = str(value).strip()
+
+    if missing:
+        values[ADMIN_MISSING_FIELDS_MARKER] = ",".join(missing)
+        return values, "MSSQL_ADMIN_*_REQUIRED"
+    return values, "MSSQL_ADMIN_*_KEYCHAIN" if keychain_used else "MSSQL_ADMIN_*_EXPLICIT"
+
+
+def resolve_administrator_connection_settings(
+    environ: Mapping[str, str] | None = None,
+    *,
+    secret_provider: SecretProvider | None = None,
+    expected_database: str = EXPECTED_SQL_DATABASE,
+) -> tuple[Any, str]:
+    """Return validated admin SQL settings and the non-secret resolution source.
+
+    The local import avoids a module cycle because the SQL adapter imports
+    this module for ordinary runtime secret resolution.
+    """
+
+    values, source = resolve_administrator_environment(environ, secret_provider=secret_provider)
+    missing = str(values.get(ADMIN_MISSING_FIELDS_MARKER) or "")
+    if missing:
+        raise RuntimeConfigurationError(
+            "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure " + missing
+        )
+    from .mssql_persistence import MssqlConnectionSettings
+
+    clean_values = {key: value for key, value in values.items() if not key.startswith("__")}
+    settings = MssqlConnectionSettings.from_environment(clean_values, secret_provider=secret_provider)
+    if settings.database != expected_database:
+        raise RuntimeConfigurationError(f"target database must be {expected_database}")
+    if str(settings.user or "").casefold() == "colognetransitcollector":
+        raise RuntimeConfigurationError(
+            "administrator SQL access requires a separate login from CologneTransitCollector"
+        )
+    return settings, source
+
+
 def resolve_required_secrets(
     configuration: RuntimeConfiguration,
     *,
@@ -616,6 +705,8 @@ __all__ = [
     "KEYCHAIN_ACCOUNT_MDD_API",
     "KEYCHAIN_ACCOUNT_MSSQL",
     "KEYCHAIN_ACCOUNT_MSSQL_PENDING",
+    "ADMIN_KEYCHAIN_SERVICE",
+    "ADMIN_MISSING_FIELDS_MARKER",
     "KEYCHAIN_SERVICE_MDD_API",
     "KEYCHAIN_SERVICE_MSSQL",
     "KEYCHAIN_SERVICE_MSSQL_PENDING",
@@ -632,6 +723,8 @@ __all__ = [
     "load_local_runtime_values",
     "merge_non_secret_runtime_values",
     "resolve_required_secrets",
+    "resolve_administrator_connection_settings",
+    "resolve_administrator_environment",
     "resolve_secret",
     "runtime_config_path",
     "delete_keychain_secret",

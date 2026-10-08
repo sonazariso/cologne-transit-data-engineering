@@ -49,11 +49,13 @@ from cologne_transit_collector.conservative_bootstrap import (  # noqa: E402
     validate_stored_bootstrap_row,
 )
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    ADMIN_KEYCHAIN_SERVICE as RUNTIME_ADMIN_KEYCHAIN_SERVICE,
     EXPECTED_SQL_DATABASE,
     MacOSKeychainSecretProvider,
     MSSQL_CREDENTIAL,
     RUNTIME_CONFIG_PATH_ENV,
     load_local_runtime_values,
+    resolve_administrator_connection_settings,
     resolve_secret,
 )
 from install_macos_launch_agent import (  # noqa: E402
@@ -77,7 +79,7 @@ RESUME_EVENT_TABLE = "ctl.MddMacProductionResumeEvent"
 EXPECTED_TIERED50_TARGET_IDS = frozenset(range(8, 51))
 DEFAULT_RESUME_KEY = "TIERED50_PANEL_V1:RESUME:CURRENT_SAMPLING_ERA"
 RESUME_APP_LOCK_RESOURCE = "CologneTransitIntelligence:TIERED50:RESUME"
-ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+ADMIN_KEYCHAIN_SERVICE = RUNTIME_ADMIN_KEYCHAIN_SERVICE
 RESUME_STOPPED_EXISTING_EVENT_STATUS = "IDEMPOTENT_EVENT_RECORDED_SERVICE_STOPPED"
 RESUME_LOADED_EXISTING_EVENT_STATUS = "IDEMPOTENT_ALREADY_LOADED_NOT_VALIDATED"
 
@@ -158,38 +160,10 @@ def _administrator_connection_settings() -> MssqlConnectionSettings:
     value is consulted for any missing administrator field.
     """
 
-    values: dict[str, str] = {}
-    missing: list[str] = []
-    for suffix in ("HOST", "DATABASE", "USER"):
-        name = f"MSSQL_ADMIN_{suffix}"
-        value = os.environ.get(name)
-        if value is None or not value.strip():
-            missing.append(name)
-        else:
-            values[f"MSSQL_{suffix}"] = value
-    password = os.environ.get("MSSQL_ADMIN_PASSWORD")
-    if password is None or not password.strip():
-        account = os.environ.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER", "")
-        service = os.environ.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE
-        password = MacOSKeychainSecretProvider().get(service=service, account=account)
-    if password is None or not password.strip():
-        missing.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
-    else:
-        values["MSSQL_PASSWORD"] = password
-    for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
-        name = f"MSSQL_ADMIN_{suffix}"
-        value = os.environ.get(name)
-        if value is not None and value.strip():
-            values[f"MSSQL_{suffix}"] = value
-    if missing:
-        raise RuntimeError(
-            "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure " + ",".join(missing)
-        )
-    settings = MssqlConnectionSettings.from_environment(values)
-    if settings.database != EXPECTED_SQL_DATABASE:
-        raise RuntimeError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
-    if str(settings.user or "").casefold() == "colognetransitcollector":
-        raise RuntimeError("Tiered50 lifecycle writes require a separately authorized administrator connection")
+    settings, _source = resolve_administrator_connection_settings(
+        os.environ,
+        secret_provider=MacOSKeychainSecretProvider(),
+    )
     return settings
 
 

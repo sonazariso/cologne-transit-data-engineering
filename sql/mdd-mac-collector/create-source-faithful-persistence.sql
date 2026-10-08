@@ -780,6 +780,10 @@ GO
     prior pending permits before inserting a zero-based COMPLETE row.  The
     application computes DST-aware UTC bounds from the contract's IANA
     timezone; SQL validates the same immutable contract hash and interval.
+    SQL Server UTC, rather than the caller's @AtUtc, is authoritative for
+    activation and current-period eligibility.  Safely stale prior-period
+    permits are conservatively finalized inside the same guarded transaction
+    before the unresolved-permit boundary is checked.
 */
 
 CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod
@@ -791,7 +795,8 @@ CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod
     @LocalUsageIncludedThroughUtc DATETIME2(7),
     @AtUtc DATETIME2(7),
     @SourceEvidenceHash CHAR(64),
-    @ReconciliationKey NVARCHAR(240)
+    @ReconciliationKey NVARCHAR(240),
+    @StaleRecoverySeconds INT = 300
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -810,9 +815,25 @@ BEGIN
     DECLARE @operator_assumption_approved BIT;
     DECLARE @contract_source_hash CHAR(64);
     DECLARE @accounting_model VARCHAR(40);
+    DECLARE @provider_name VARCHAR(80);
+    DECLARE @server_utc DATETIME2(7) = SYSUTCDATETIME();
+    DECLARE @lock_result INT;
+    DECLARE @period_month_start DATE;
+
+    IF @StaleRecoverySeconds IS NULL OR @StaleRecoverySeconds NOT BETWEEN 1 AND 86400
+        THROW 51000, 'MDD quota stale-recovery window is outside the approved bound', 1;
+
+    EXEC @lock_result = sys.sp_getapplock
+        @Resource = N'CologneTransitIntelligence:MDD:QUOTA_ROLLOVER',
+        @LockMode = N'Exclusive',
+        @LockOwner = N'Transaction',
+        @LockTimeout = 0;
+    IF @lock_result < 0
+        THROW 51000, 'MDD quota rollover coordination lock could not be acquired', 1;
 
     SELECT TOP (1)
         @contract_id = ContractId,
+        @provider_name = ProviderName,
         @reset_model = ResetModel,
         @reset_timezone = ResetTimezone,
         @effective_from_utc = EffectiveFromUtc,
@@ -829,30 +850,63 @@ BEGIN
 
     IF @contract_id IS NULL
         THROW 51000, 'no active verified MDD quota reset contract exists', 1;
-    IF @reset_model NOT IN ('CALENDAR_MONTH_PROVIDER_TIMEZONE', 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY')
+    IF @provider_name IS NULL OR @provider_name <> 'MDD NRW'
+        THROW 51000, 'MDD quota reset contract provider identity is invalid', 1;
+    IF @reset_model IS NULL
+       OR @reset_model NOT IN ('CALENDAR_MONTH_PROVIDER_TIMEZONE', 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY')
         THROW 51000, 'MDD quota reset contract model is not an approved calendar-month policy', 1;
-    IF @credential_exclusivity_confirmed <> 1 OR @calendar_month_reset_model_established <> 1
+    IF @credential_exclusivity_confirmed IS NULL OR @credential_exclusivity_confirmed <> 1
+       OR @calendar_month_reset_model_established IS NULL OR @calendar_month_reset_model_established <> 1
         THROW 51000, 'MDD quota reset contract is not approved for exclusive calendar-month operation', 1;
     IF @reset_model = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
-       AND (@provider_reset_boundary_verified <> 1 OR @operator_assumption_approved <> 0)
+       AND (
+           @provider_reset_boundary_verified IS NULL OR @provider_reset_boundary_verified <> 1
+           OR @operator_assumption_approved IS NULL OR @operator_assumption_approved <> 0
+       )
         THROW 51000, 'exact MDD quota reset contract is not verified', 1;
     IF @reset_model = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
-       AND (@provider_reset_boundary_verified <> 0 OR @operator_assumption_approved <> 1)
+       AND (
+           @provider_reset_boundary_verified IS NULL OR @provider_reset_boundary_verified <> 0
+           OR @operator_assumption_approved IS NULL OR @operator_assumption_approved <> 1
+       )
         THROW 51000, 'bounded MDD quota reset policy lacks explicit operator approval', 1;
-    IF @provider_quota_ceiling <> 250000 OR @SourceEvidenceHash <> @contract_source_hash
+    IF @provider_quota_ceiling IS NULL OR @provider_quota_ceiling <> 250000
+       OR @SourceEvidenceHash IS NULL OR @contract_source_hash IS NULL
+       OR @SourceEvidenceHash <> @contract_source_hash
         THROW 51000, 'MDD quota reset contract evidence hash or ceiling does not match', 1;
-    IF @ProviderPeriodTimezone <> @reset_timezone
+    IF @SourceEvidenceHash IS NULL
+       OR LEN(@SourceEvidenceHash) <> 64
+       OR @SourceEvidenceHash LIKE '%[^0-9a-f]%'
+        THROW 51000, 'MDD quota reset contract evidence hash is malformed', 1;
+    IF @ProviderPeriodTimezone IS NULL OR @reset_timezone IS NULL
+       OR @ProviderPeriodTimezone <> @reset_timezone
         THROW 51000, 'MDD quota reset timezone does not match the registered contract', 1;
+    SET @period_month_start = TRY_CONVERT(DATE, LTRIM(RTRIM(@MonthKey)) + '-01', 23);
+    IF @period_month_start IS NULL
+       OR CONVERT(CHAR(7), @period_month_start, 126) <> LTRIM(RTRIM(@MonthKey))
+        THROW 51000, 'MDD quota period key is not a canonical calendar month', 1;
+    IF @ReconciliationKey IS NULL
+       OR @ReconciliationKey <> CONCAT(N'AUTO-ROLLOVER:', @ContractKey, N':', LTRIM(RTRIM(@MonthKey)))
+        THROW 51000, 'MDD quota reconciliation identity does not match the registered contract and period', 1;
     SET @accounting_model = CASE
         WHEN @reset_model = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
             THEN 'AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED'
         ELSE 'AUTOMATIC_MONTHLY_ROLLOVER'
     END;
+    IF @ProviderPeriodStartUtc IS NULL OR @ProviderPeriodEndUtc IS NULL
+       OR @LocalUsageIncludedThroughUtc IS NULL
+        THROW 51000, 'MDD quota period boundaries are required', 1;
     IF @ProviderPeriodStartUtc >= @ProviderPeriodEndUtc
         THROW 51000, 'MDD quota period interval is invalid', 1;
-    IF @ProviderPeriodStartUtc < @effective_from_utc
+    IF @effective_from_utc IS NULL OR @ProviderPeriodStartUtc < @effective_from_utc
         THROW 51000, 'MDD quota reset contract is not effective for this period', 1;
-    IF @AtUtc < DATEADD(SECOND, @activation_delay_seconds, @ProviderPeriodStartUtc)
+    IF @activation_delay_seconds IS NULL OR @activation_delay_seconds NOT BETWEEN 0 AND 86400
+        THROW 51000, 'MDD quota reset contract activation delay is outside the approved bound', 1;
+    IF @server_utc < @ProviderPeriodStartUtc
+        THROW 51000, 'MDD quota period is not yet applicable at SQL Server UTC', 1;
+    IF @server_utc >= @ProviderPeriodEndUtc
+        THROW 51000, 'MDD quota period has expired at SQL Server UTC', 1;
+    IF @server_utc < DATEADD(SECOND, @activation_delay_seconds, @ProviderPeriodStartUtc)
         THROW 51000, 'MDD quota period is inside the conservative activation delay', 1;
     IF @LocalUsageIncludedThroughUtc <> @ProviderPeriodStartUtc
         THROW 51000, 'automatic rollover local cutoff must equal the verified period start', 1;
@@ -863,13 +917,21 @@ BEGIN
     DECLARE @existing_start DATETIME2(7);
     DECLARE @existing_end DATETIME2(7);
     DECLARE @existing_hash CHAR(64);
+    DECLARE @existing_timezone VARCHAR(80);
+    DECLARE @existing_ceiling INT;
+    DECLARE @existing_normal_max INT;
+    DECLARE @existing_retry_boundary INT;
     SELECT TOP (1)
         @existing_status = AccountingStatus,
         @existing_model = AccountingModel,
         @existing_reconciliation_key = ReconciliationKey,
         @existing_start = ProviderPeriodStartUtc,
         @existing_end = ProviderPeriodEndUtc,
-        @existing_hash = SourceEvidenceHash
+        @existing_hash = SourceEvidenceHash,
+        @existing_timezone = ProviderPeriodTimezone,
+        @existing_ceiling = ProviderQuotaCeiling,
+        @existing_normal_max = NormalOperationalMaximum,
+        @existing_retry_boundary = RetryProtectionBoundary
     FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
     WHERE MonthKey = @MonthKey;
 
@@ -882,6 +944,10 @@ BEGIN
            AND @existing_start = @ProviderPeriodStartUtc
            AND @existing_end = @ProviderPeriodEndUtc
            AND @existing_hash = @SourceEvidenceHash
+           AND @existing_timezone = @ProviderPeriodTimezone
+           AND @existing_ceiling = 250000
+           AND @existing_normal_max = 210000
+           AND @existing_retry_boundary = 207500
         BEGIN
             COMMIT TRANSACTION;
             RETURN;
@@ -892,11 +958,44 @@ BEGIN
     IF EXISTS
     (
         SELECT 1
+        FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
+        WHERE MonthKey <> @MonthKey
+          AND ProviderPeriodStartUtc IS NOT NULL
+          AND ProviderPeriodEndUtc IS NOT NULL
+          AND ProviderPeriodStartUtc < @ProviderPeriodEndUtc
+          AND ProviderPeriodEndUtc > @ProviderPeriodStartUtc
+    )
+        THROW 51000, 'MDD quota period overlaps an existing accounting interval', 1;
+
+    /*
+       A worker can crash after reserving a permit and before its final
+       provider-attempt row is durable.  Once the bounded stale window has
+       elapsed, the only safe interpretation is a conservative provider
+       attempt.  MonthKey and ReservedAtUtc are intentionally untouched.
+    */
+    UPDATE ctl.MddMacQuotaPermit
+    SET Status = 'CONSERVATIVE_LIVE_ATTEMPT',
+        FinalizedAtUtc = @server_utc,
+        ReleasedAtUtc = NULL,
+        FinalizationReason = 'CRASH_RECOVERY_CONSERVATIVE',
+        LiveClientInvocation = 1
+    WHERE Status = 'PENDING_AUTHORIZATION'
+      AND ReservedAtUtc < @ProviderPeriodStartUtc
+      AND ReservedAtUtc < DATEADD(SECOND, -@StaleRecoverySeconds, @server_utc);
+
+    IF EXISTS
+    (
+        SELECT 1
         FROM ctl.MddMacQuotaPermit WITH (UPDLOCK, HOLDLOCK)
         WHERE ReservedAtUtc < @ProviderPeriodStartUtc
           AND Status = 'PENDING_AUTHORIZATION'
     )
+    BEGIN
+        /* Keep safe stale finalizations durable even when a recent permit
+           correctly keeps the new period blocked. */
+        COMMIT TRANSACTION;
         THROW 51000, 'a prior-period quota permit is still pending at rollover', 1;
+    END;
 
     IF EXISTS
     (
@@ -908,7 +1007,10 @@ BEGIN
           AND h.NetworkAttempted = 1
           AND h.QuotaPermitId IS NULL
     )
+    BEGIN
+        COMMIT TRANSACTION;
         THROW 51000, 'a prior Tiered50 network attempt has no durable quota permit', 1;
+    END;
 
     INSERT INTO ctl.MddMacSharedQuotaAccounting
     (
@@ -924,7 +1026,7 @@ BEGIN
     VALUES
     (
         @MonthKey, 250000, 210000, 207500, 0, 0, 0, 'COMPLETE', 1,
-        @ProviderPeriodStartUtc, @LocalUsageIncludedThroughUtc,
+        @server_utc, @LocalUsageIncludedThroughUtc,
         N'Automatic approved MDD calendar-month rollover; no provider requests are inferred before this period',
         @accounting_model, @ProviderPeriodStartUtc,
         @ProviderPeriodEndUtc, @SourceEvidenceHash, @ReconciliationKey,

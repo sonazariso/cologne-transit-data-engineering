@@ -17,6 +17,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from cologne_transit_collector.mssql_persistence import MssqlConnectionSettings  # noqa: E402
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    ADMIN_KEYCHAIN_SERVICE,
+    ADMIN_MISSING_FIELDS_MARKER,
     DEFAULT_RUNTIME_CONFIG_PATH,
     KEYCHAIN_SERVICE_MDD_API,
     KEYCHAIN_SERVICE_MSSQL,
@@ -29,6 +31,8 @@ from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     MacOSKeychainSecretProvider,
     merge_non_secret_runtime_values,
     resolve_required_secrets,
+    resolve_administrator_connection_settings,
+    resolve_administrator_environment,
     resolve_secret,
     store_keychain_secret,
     write_local_runtime_config,
@@ -47,6 +51,62 @@ class _Provider:
 
 
 class RuntimeConfigurationTests(unittest.TestCase):
+    def test_administrator_resolution_rejects_runtime_only_and_partial_credentials(self) -> None:
+        runtime_only = {
+            "MSSQL_HOST": "runtime-host",
+            "MSSQL_DATABASE": "CologneTransitIntelligence",
+            "MSSQL_USER": "CologneTransitCollector",
+            "MSSQL_PASSWORD": "runtime-secret",
+        }
+        values, source = resolve_administrator_environment(runtime_only, secret_provider=_Provider({}))
+        self.assertEqual(source, "MSSQL_ADMIN_*_REQUIRED")
+        self.assertIn("MSSQL_ADMIN_HOST", values[ADMIN_MISSING_FIELDS_MARKER])
+        self.assertNotIn("MSSQL_HOST", values)
+        self.assertNotIn("MSSQL_PASSWORD", values)
+        with self.assertRaisesRegex(RuntimeConfigurationError, "MSSQL_ADMIN_HOST"):
+            resolve_administrator_connection_settings(runtime_only, secret_provider=_Provider({}))
+
+        partial = {
+            "MSSQL_HOST": "runtime-host",
+            "MSSQL_PASSWORD": "runtime-secret",
+            "MSSQL_ADMIN_HOST": "admin-host",
+        }
+        with self.assertRaisesRegex(RuntimeConfigurationError, "MSSQL_ADMIN_DATABASE"):
+            resolve_administrator_connection_settings(partial, secret_provider=_Provider({}))
+
+    def test_administrator_resolution_uses_only_admin_keychain_item(self) -> None:
+        provider = _Provider({(ADMIN_KEYCHAIN_SERVICE, "separate-admin"): "admin-secret"})
+        values, source = resolve_administrator_environment(
+            {
+                "MSSQL_HOST": "runtime-host",
+                "MSSQL_USER": "CologneTransitCollector",
+                "MSSQL_PASSWORD": "runtime-secret",
+                "MSSQL_ADMIN_HOST": "admin-host",
+                "MSSQL_ADMIN_DATABASE": "CologneTransitIntelligence",
+                "MSSQL_ADMIN_USER": "separate-admin",
+            },
+            secret_provider=provider,
+        )
+        self.assertEqual(source, "MSSQL_ADMIN_*_KEYCHAIN")
+        self.assertEqual(values["MSSQL_HOST"], "admin-host")
+        self.assertEqual(values["MSSQL_USER"], "separate-admin")
+        self.assertEqual(values["MSSQL_PASSWORD"], "admin-secret")
+        self.assertNotIn("runtime-secret", json.dumps(values))
+        self.assertEqual(provider.calls, [(ADMIN_KEYCHAIN_SERVICE, "separate-admin")])
+
+        settings, source = resolve_administrator_connection_settings(
+            {
+                "MSSQL_ADMIN_HOST": "admin-host",
+                "MSSQL_ADMIN_DATABASE": "CologneTransitIntelligence",
+                "MSSQL_ADMIN_USER": "separate-admin",
+                "MSSQL_ADMIN_PASSWORD": "admin-secret",
+            },
+            secret_provider=provider,
+        )
+        self.assertEqual(source, "MSSQL_ADMIN_*_EXPLICIT")
+        self.assertEqual(settings.user, "separate-admin")
+        self.assertEqual(settings.password, "admin-secret")
+
     def test_environment_values_win_over_local_non_secret_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runtime.json"

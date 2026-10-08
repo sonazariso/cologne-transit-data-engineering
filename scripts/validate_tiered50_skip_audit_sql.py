@@ -34,10 +34,14 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     build_skipped_target_audit_merge_statement,
     connect_mssql,
 )
-from cologne_transit_collector.runtime_configuration import MacOSKeychainSecretProvider  # noqa: E402
+from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    ADMIN_KEYCHAIN_SERVICE as RUNTIME_ADMIN_KEYCHAIN_SERVICE,
+    MacOSKeychainSecretProvider,
+    resolve_administrator_connection_settings,
+)
 
 
-ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+ADMIN_KEYCHAIN_SERVICE = RUNTIME_ADMIN_KEYCHAIN_SERVICE
 
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
@@ -53,36 +57,10 @@ def _sanitize(value: Any) -> str:
 
 
 def _admin_settings() -> MssqlConnectionSettings:
-    values: dict[str, str] = {}
-    missing: list[str] = []
-    for suffix in ("HOST", "DATABASE", "USER"):
-        name = f"MSSQL_ADMIN_{suffix}"
-        value = os.environ.get(name)
-        if value is None or not value.strip():
-            missing.append(name)
-        else:
-            values[f"MSSQL_{suffix}"] = value
-    password = os.environ.get("MSSQL_ADMIN_PASSWORD")
-    if password is None or not password.strip():
-        password = MacOSKeychainSecretProvider().get(
-            service=os.environ.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE,
-            account=os.environ.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER", ""),
-        )
-    if password is None or not password.strip():
-        missing.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
-    else:
-        values["MSSQL_PASSWORD"] = password
-    for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
-        value = os.environ.get(f"MSSQL_ADMIN_{suffix}")
-        if value is not None and value.strip():
-            values[f"MSSQL_{suffix}"] = value
-    if missing:
-        raise RuntimeError(
-            "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure " + ",".join(missing)
-        )
-    settings = MssqlConnectionSettings.from_environment(values)
-    if str(settings.user or "").casefold() == "colognetransitcollector":
-        raise RuntimeError("skip-audit SQL validation cannot use the restricted runtime account")
+    settings, _source = resolve_administrator_connection_settings(
+        os.environ,
+        secret_provider=MacOSKeychainSecretProvider(),
+    )
     return settings
 
 

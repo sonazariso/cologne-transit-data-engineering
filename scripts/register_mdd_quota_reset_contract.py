@@ -23,11 +23,12 @@ from cologne_transit_collector.quota_rollover import (  # noqa: E402
     QuotaRolloverError,
     build_reset_contract,
 )
-from cologne_transit_collector.mssql_persistence import (  # noqa: E402
-    MssqlConnectionSettings,
-    MssqlPersistence,
-)
+from cologne_transit_collector.mssql_persistence import MssqlPersistence  # noqa: E402
 from cologne_transit_collector.quota_baseline import load_evidence_file  # noqa: E402
+from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    MacOSKeychainSecretProvider,
+    resolve_administrator_connection_settings,
+)
 
 
 EVIDENCE = ROOT / "docs" / "operational" / "mdd-quota-reset-contract.json"
@@ -86,7 +87,10 @@ def run(
         supported_reset_timezones=supported_reset_timezones,
         approve_bounded_assumption=approve_bounded_assumption,
     )
-    persistence = MssqlPersistence(settings=MssqlConnectionSettings.from_environment())
+    administrator_settings, administrator_source = resolve_administrator_connection_settings(
+        secret_provider=MacOSKeychainSecretProvider(),
+    )
+    persistence = MssqlPersistence(settings=administrator_settings)
     result = dict(persistence.register_quota_reset_contract(contract=contract))
     return {
         "status": "PASS",
@@ -97,6 +101,7 @@ def run(
         "effective_from_utc": contract["effective_from_utc"],
         "activation_delay_seconds": activation_delay_seconds,
         "application": result,
+        "administrator_credential_source": administrator_source,
         "sql_writes_performed": int(result.get("writes_performed", 0) or 0),
         "mdd_requests_issued": 0,
     }

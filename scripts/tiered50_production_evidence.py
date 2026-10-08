@@ -29,8 +29,10 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 )
 from cologne_transit_collector.domain import APPROVED_SUPER_CYCLE_COUNTS  # noqa: E402
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    ADMIN_KEYCHAIN_SERVICE as RUNTIME_ADMIN_KEYCHAIN_SERVICE,
     EXPECTED_SQL_DATABASE,
     MacOSKeychainSecretProvider,
+    resolve_administrator_environment,
 )
 from cologne_transit_collector.admin_evidence import (  # noqa: E402
     EVIDENCE_ARTIFACT_VERSION,
@@ -47,7 +49,7 @@ LEGACY_LABEL = "com.cologne-transit-intelligence.mdd-collector"
 TIERED_LABEL = "com.cologne-transit-intelligence.mdd-tiered50-collector"
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
 MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS = "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS"
-ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+ADMIN_KEYCHAIN_SERVICE = RUNTIME_ADMIN_KEYCHAIN_SERVICE
 
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
@@ -66,35 +68,10 @@ def _role_environment(role: str) -> tuple[dict[str, str], str]:
     """
 
     if role == "admin":
-        values: dict[str, str] = {}
-        required: list[str] = []
-        for suffix in ("HOST", "DATABASE", "USER"):
-            name = f"MSSQL_ADMIN_{suffix}"
-            value = os.environ.get(name)
-            if value is None or not value.strip():
-                required.append(name)
-                continue
-            values[f"MSSQL_{suffix}"] = value
-        password = os.environ.get("MSSQL_ADMIN_PASSWORD")
-        keychain_used = False
-        if password is None or not password.strip():
-            account = os.environ.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER", "")
-            service = os.environ.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE
-            password = MacOSKeychainSecretProvider().get(service=service, account=account)
-            keychain_used = password is not None and bool(password.strip())
-        if password is None or not password.strip():
-            required.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
-        else:
-            values["MSSQL_PASSWORD"] = password
-        for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
-            name = f"MSSQL_ADMIN_{suffix}"
-            value = os.environ.get(name)
-            if value is not None and value.strip():
-                values[f"MSSQL_{suffix}"] = value
-        if required:
-            values["__ADMIN_MISSING_FIELDS__"] = ",".join(required)
-            return values, "MSSQL_ADMIN_*_REQUIRED"
-        return values, "MSSQL_ADMIN_*_KEYCHAIN" if keychain_used else "MSSQL_ADMIN_*_EXPLICIT"
+        return resolve_administrator_environment(
+            os.environ,
+            secret_provider=MacOSKeychainSecretProvider(),
+        )
 
     values = dict(os.environ)
     prefix = role.upper()
