@@ -29,6 +29,7 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddMacProductionLease",
     "ctl.MddMacProductionLeaseEvent",
     "ctl.MddMacSharedQuotaAccounting",
+    "ctl.MddMacSharedQuotaReconciliation",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
     "stg.MddMacSourceSnapshot",

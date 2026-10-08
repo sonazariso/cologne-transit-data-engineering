@@ -18,6 +18,7 @@ from .domain import (
     ABSOLUTE_PROVIDER_CEILING,
     AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
     NORMAL_OPERATIONAL_MAXIMUM,
+    approved_quota_boundary,
 )
 from .ports import UsageProvider
 
@@ -188,7 +189,7 @@ class InMemoryUsageProvider:
         key = str(authorization_key) if authorization_key else None
         if key is not None and len(key) > 240:
             raise ValueError("authorization_key must be at most 240 characters")
-        effective_boundary = min(int(boundary), ABSOLUTE_PROVIDER_CEILING)
+        effective_boundary = approved_quota_boundary(decision_kind, boundary)
         with self._lock:
             if key is not None:
                 for existing_id, existing_permit in self._permits.items():
@@ -235,7 +236,7 @@ class InMemoryUsageProvider:
                         "decision": "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
                         "proposed_attempts": amount,
                         "known_total": None,
-                        "boundary": int(boundary),
+                        "boundary": effective_boundary,
                         "reason": "safe shared-credential state is unavailable",
                         "permit_id": None,
                     }
@@ -428,9 +429,14 @@ class QuotaGuard:
         reservation_scope: str = "LIVE_PROVIDER",
     ) -> None:
         self.usage_provider = usage_provider
-        self.retry_boundary = int(retry_boundary)
-        self.normal_maximum = int(normal_maximum)
-        self.provider_ceiling = int(provider_ceiling)
+        self.retry_boundary = approved_quota_boundary("RETRY", retry_boundary)
+        self.normal_maximum = approved_quota_boundary("INITIAL", normal_maximum)
+        # The provider ceiling is a fixed safety invariant.  A custom lower
+        # ceiling remains useful for tests or a stricter operator policy, but
+        # no adapter may raise the approved absolute cap.
+        self.provider_ceiling = min(int(provider_ceiling), ABSOLUTE_PROVIDER_CEILING)
+        if self.provider_ceiling <= 0:
+            raise ValueError("provider_ceiling must be positive")
         self.reservation_scope = str(reservation_scope)
 
     def _snapshot(self, at_utc: datetime | None) -> UsageSnapshot | None:
@@ -467,7 +473,10 @@ class QuotaGuard:
         if callable(reserve):
             # Keep the atomic backend contract safe even if a future adapter
             # is configured with a boundary above the absolute provider cap.
-            effective_boundary = min(int(boundary), self.provider_ceiling)
+            effective_boundary = min(
+                approved_quota_boundary(decision_kind, boundary),
+                self.provider_ceiling,
+            )
             result = reserve(
                 decision_kind=decision_kind,
                 boundary=effective_boundary,
@@ -499,7 +508,7 @@ class QuotaGuard:
                 decision="INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
                 proposed_attempts=proposed_attempts,
                 known_total=None,
-                boundary=self.normal_maximum,
+                boundary=approved_quota_boundary("INITIAL", self.normal_maximum),
                 reason="initial scheduled request is not silently converted into a retry",
             )
         if decision_kind == "RETRY" and snapshot is None:
@@ -508,11 +517,15 @@ class QuotaGuard:
                 decision="RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
                 proposed_attempts=proposed_attempts,
                 known_total=None,
-                boundary=self.retry_boundary,
+                boundary=approved_quota_boundary("RETRY", self.retry_boundary),
                 reason="safe shared-credential state is unavailable",
             )
         assert snapshot is not None
         projected = snapshot.known_total + int(proposed_attempts)
+        effective_boundary = min(
+            approved_quota_boundary(decision_kind, boundary),
+            self.provider_ceiling,
+        )
         if projected > self.provider_ceiling:
             return QuotaDecision(
                 False,
@@ -522,13 +535,13 @@ class QuotaGuard:
                 self.provider_ceiling,
                 "provider ceiling would be exceeded",
             )
-        if projected > boundary:
+        if projected > effective_boundary:
             return QuotaDecision(
                 False,
                 "INITIAL_DENIED_NORMAL_OPERATIONAL_MAXIMUM" if decision_kind == "INITIAL" else "RETRY_DENIED_PROTECTION_BOUNDARY",
                 proposed_attempts,
                 snapshot.known_total,
-                boundary,
+                effective_boundary,
                 "quota boundary would be exceeded",
             )
         return QuotaDecision(
@@ -536,7 +549,7 @@ class QuotaGuard:
             "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
             proposed_attempts,
             snapshot.known_total,
-            boundary,
+            effective_boundary,
             "within quota headroom",
         )
 

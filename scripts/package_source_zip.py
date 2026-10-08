@@ -46,6 +46,18 @@ RUNTIME_STATE_SUFFIXES = frozenset(
         ".key",
     }
 )
+NON_SOURCE_DIRECTORY_NAMES = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "__pycache__",
+        ".tox",
+        ".venv",
+        "venv",
+    }
+)
 
 
 def is_macos_metadata(relative_path: str | Path) -> bool:
@@ -81,16 +93,25 @@ def is_forbidden_source_member(relative_path: str | Path) -> bool:
 
 
 def git_visible_paths(repository_root: str | Path) -> tuple[Path, ...]:
-    """Return tracked plus non-ignored working-tree files in stable order."""
+    """Return source paths from Git, or from a sanitized extracted tree.
+
+    A real working tree keeps the existing Git-visible behavior, including
+    tracked edits and non-ignored additions.  A source ZIP extracted without
+    ``.git`` is still a legitimate review input, so the fallback walks only
+    regular files and applies the same source/runtime filters.
+    """
 
     root = Path(repository_root).resolve()
-    result = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        cwd=root,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return _filesystem_visible_paths(root)
     paths: list[Path] = []
     for item in result.stdout.decode("utf-8").split("\0"):
         if not item:
@@ -102,6 +123,21 @@ def git_visible_paths(repository_root: str | Path) -> tuple[Path, ...]:
             continue
         if candidate.is_file() and not is_forbidden_source_member(candidate.relative_to(root)):
             paths.append(candidate)
+    return tuple(sorted(set(paths), key=lambda path: path.relative_to(root).as_posix()))
+
+
+def _filesystem_visible_paths(root: Path) -> tuple[Path, ...]:
+    """Enumerate a sanitized source tree when Git metadata is unavailable."""
+
+    paths: list[Path] = []
+    for candidate in root.rglob("*"):
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        relative = candidate.relative_to(root)
+        if any(part in NON_SOURCE_DIRECTORY_NAMES for part in relative.parts):
+            continue
+        if not is_forbidden_source_member(relative):
+            paths.append(candidate.resolve())
     return tuple(sorted(set(paths), key=lambda path: path.relative_to(root).as_posix()))
 
 

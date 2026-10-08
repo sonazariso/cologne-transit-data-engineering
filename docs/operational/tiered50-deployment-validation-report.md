@@ -30,6 +30,33 @@ and SQL persistence, RecordedAtTime lineage, Situation/Attribute evidence,
 and zero MDD requests. The first real Tiered50 cycle is **NOT RUN** because
 activation is blocked.
 
+## October quota-baseline reconciliation
+
+The provider-wide source required for October 2026 was **not available in this
+checkout**. No provider usage value, reset period, timezone, external-consumer
+reservation, or remaining headroom has been fabricated. The existing SQL HTTP
+attempts, quota permits, collector activity, and prior reconciliation history
+are read as separate evidence by
+[`scripts/reconcile_mdd_shared_quota.py`](../../scripts/reconcile_mdd_shared_quota.py),
+but they cannot establish provider-wide consumption by themselves.
+
+The tool requires a sanitized provider report or explicit provider confirmation
+containing cumulative usage, confirmed/unknown components, an explicit
+unexplained-discrepancy count, measurement cutoff, billing-period timezone and
+bounds, shared-consumer coverage, operating-model evidence, and a future
+staleness deadline. It is read-only by default;
+`--apply --approve` is the only registration path, and SQL registration is
+restricted to a separately authorized administrator. The append-only
+`ctl.MddMacSharedQuotaReconciliation` history preserves the evidence hash,
+timestamps, local cutoff, permit reconciliation, and conservative result.
+
+The recorded SQL identity is `sa` and is administrative evidence only; it is
+not proof that the deployed runtime can use `CologneTransitCollector`. The
+actual limited-login, schema, privilege, quota, and LaunchAgent checks are
+activation gates and were not claimed as passed here. Until the provider
+report and those gates are verified, the baseline remains unavailable, both
+permit classes fail closed, and Tiered50 remains inactive.
+
 Power BI and analytics permissions were not modified. No manual Heumarkt
 request was issued. Full sanitized machine-readable evidence is in
 [`tiered50-production-evidence.json`](tiered50-production-evidence.json) and

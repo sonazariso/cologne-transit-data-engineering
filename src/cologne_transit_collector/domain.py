@@ -92,6 +92,27 @@ MAC_TIERED50_REQUIRED_TARGET_SCOPE = "TIERED50_PANEL_V1"
 MAC_TIERED50_REQUIRED_VALIDATION_POLICY = "OFFLINE_RECONCILIATION_ONLY"
 
 
+def approved_quota_boundary(decision_kind: str, requested_boundary: int) -> int:
+    """Cap a caller-supplied boundary at the approved operational policy.
+
+    The durable SQL authorization layer repeats this rule.  Keeping the pure
+    policy here also prevents an in-memory or alternate adapter from treating
+    a caller-provided 250,000 boundary as a valid INITIAL limit.
+    """
+
+    if decision_kind not in {"INITIAL", "RETRY"}:
+        raise ValueError("decision_kind must be INITIAL or RETRY")
+    requested = int(requested_boundary)
+    if requested <= 0:
+        raise ValueError("quota boundary must be positive")
+    approved = (
+        NORMAL_OPERATIONAL_MAXIMUM
+        if decision_kind == "INITIAL"
+        else AUTOMATIC_RETRY_PROTECTION_BOUNDARY
+    )
+    return min(requested, approved, ABSOLUTE_PROVIDER_CEILING)
+
+
 @dataclass(frozen=True)
 class Target:
     """One immutable approved runtime target from the versioned manifest."""

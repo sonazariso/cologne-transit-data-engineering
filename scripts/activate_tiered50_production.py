@@ -2,9 +2,9 @@
 """Explicitly activate the already-materialized Tiered50 SQL configuration.
 
 The default command is read-only. ``--apply`` requires an operator-supplied
-real UTC boundary; it retires and verifies the exact Legacy7 LaunchAgent
-before entering the SQL transaction, never sends an MDD request, and records
-an outage if a later gate blocks activation.
+real UTC boundary, a current provider-wide quota baseline, and a separately
+validated dedicated runtime login.  Legacy7 is already retired and is never
+mutated by this command.  No MDD request is issued here.
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cologne_transit_collector.domain import (  # noqa: E402
+    ABSOLUTE_PROVIDER_CEILING,
+    AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
     MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    NORMAL_OPERATIONAL_MAXIMUM,
     SamplingEra,
 )
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
@@ -29,8 +32,19 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlPersistence,
     connect_mssql,
 )
-from cologne_transit_collector.runtime_configuration import EXPECTED_SQL_DATABASE  # noqa: E402
-from install_macos_launch_agent import retire_legacy7  # noqa: E402
+from cologne_transit_collector.quota_baseline import validate_stored_baseline_row  # noqa: E402
+from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    EXPECTED_SQL_DATABASE,
+    MSSQL_CREDENTIAL,
+    load_local_runtime_values,
+    resolve_secret,
+)
+from install_macos_launch_agent import (  # noqa: E402
+    TIERED50_MODE,
+    bootstrap as bootstrap_launch_agent,
+    build_installed_plist,
+    install as install_launch_agent,
+)
 
 
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
@@ -64,6 +78,89 @@ def _utc_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _installed_runtime_connection() -> tuple[MssqlConnectionSettings, str]:
+    """Resolve the same limited SQL login used by the installed LaunchAgent."""
+
+    local_values, config_path, loaded = load_local_runtime_values()
+    if not loaded:
+        raise RuntimeError("installed Tiered50 runtime configuration is not available")
+    values = dict(local_values)
+    configured_user = str(values.get("MSSQL_USER", values.get("SQL_SERVER_USER", "")) or "")
+    if configured_user.casefold() != "colognetransitcollector":
+        raise RuntimeError("installed Tiered50 runtime must use CologneTransitCollector")
+    values["MSSQL_PASSWORD"] = resolve_secret(values, credential_type=MSSQL_CREDENTIAL)
+    settings = MssqlConnectionSettings.from_environment(values)
+    if settings.database != EXPECTED_SQL_DATABASE:
+        raise RuntimeError(f"installed Tiered50 runtime database must be {EXPECTED_SQL_DATABASE}")
+    return settings, str(config_path)
+
+
+def _validate_limited_runtime(*, now: datetime) -> dict[str, Any]:
+    settings, config_path = _installed_runtime_connection()
+    persistence = MssqlPersistence(
+        settings=settings,
+        collection_context=MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    )
+    login = dict(persistence.runtime_login_status())
+    if str(login.get("database_name") or "") != EXPECTED_SQL_DATABASE:
+        raise RuntimeError("dedicated runtime connection reached the wrong database")
+    if str(login.get("login_name") or "").casefold() != "colognetransitcollector":
+        raise RuntimeError("dedicated runtime connection did not use CologneTransitCollector")
+    if any(
+        bool(login.get(name))
+        for name in (
+            "is_sysadmin",
+            "is_serveradmin",
+            "is_securityadmin",
+            "is_db_owner",
+            "is_db_datareader",
+            "is_db_datawriter",
+        )
+    ):
+        raise RuntimeError("dedicated runtime connection has a prohibited broad privilege")
+    privilege_boundary = persistence.runtime_privilege_boundary()
+    schema = persistence.validate_runtime_schema()
+    tiered_schema = persistence.validate_tiered50_runtime_schema()
+    quota = persistence.current_month_usage(at_utc=now)
+    if not quota or not bool(quota.get("state_available")):
+        raise RuntimeError("dedicated runtime cannot read a current provider-wide quota baseline")
+    return {
+        "config_path": config_path,
+        "settings": settings.redacted(),
+        "login": login,
+        "privilege_boundary": privilege_boundary,
+        "runtime_schema": schema,
+        "tiered50_schema": tiered_schema,
+        "quota": dict(quota),
+    }
+
+
+def _validate_launch_agent_template(*, runtime_config_path: str) -> dict[str, Any]:
+    """Validate the exact production plist without loading or invoking it."""
+
+    rendered = build_installed_plist(
+        activate=True,
+        runtime_config_path=runtime_config_path,
+        mode=TIERED50_MODE,
+    )
+    if rendered.get("Disabled") or rendered.get("RunAtLoad"):
+        raise RuntimeError("Tiered50 LaunchAgent activation template is not a scheduled production bundle")
+    if rendered.get("StartInterval") != 300:
+        raise RuntimeError("Tiered50 LaunchAgent interval is not the approved five-minute schedule")
+    environment = dict(rendered.get("EnvironmentVariables", {}))
+    if environment.get("COLLECTOR_MAC_TIERED50_ENABLED") != "1":
+        raise RuntimeError("Tiered50 LaunchAgent enable gate is not set in the approved render")
+    if any(marker in json.dumps(rendered, ensure_ascii=False) for marker in ("MDD_API_KEY", "MSSQL_PASSWORD", "SQL_SERVER_PASSWORD")):
+        raise RuntimeError("Tiered50 LaunchAgent render contains a prohibited secret marker")
+    return {
+        "label": rendered.get("Label"),
+        "start_interval_seconds": rendered.get("StartInterval"),
+        "runtime_config_path": runtime_config_path,
+        "secret_free": True,
+        "activation_gate": "VALIDATED",
+    }
 
 
 def read_only_status() -> dict[str, object]:
@@ -108,7 +205,10 @@ def read_only_status() -> dict[str, object]:
                    RetryProtectionBoundary, ConfirmedProviderAttempts,
                    ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                    AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
-                   LocalUsageIncludedThroughUtc, SourceDescription
+                   LocalUsageIncludedThroughUtc, SourceDescription,
+                   AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                   SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                   ProviderPeriodStartUtc, ProviderPeriodEndUtc
             FROM ctl.MddMacSharedQuotaAccounting
             WHERE MonthKey = %s
             """,
@@ -161,6 +261,14 @@ def read_only_status() -> dict[str, object]:
             "baseline_as_of_utc": _row_value(quota_baseline, "BaselineAsOfUtc", 9),
             "local_usage_included_through_utc": _row_value(quota_baseline, "LocalUsageIncludedThroughUtc", 10),
             "source_description": str(_row_value(quota_baseline, "SourceDescription", 11) or ""),
+            "accounting_model": str(_row_value(quota_baseline, "AccountingModel", 12) or ""),
+            "provider_measurement_cutoff_utc": _row_value(quota_baseline, "ProviderMeasurementCutoffUtc", 13),
+            "stale_after_utc": _row_value(quota_baseline, "StaleAfterUtc", 14),
+            "source_evidence_hash": str(_row_value(quota_baseline, "SourceEvidenceHash", 15) or ""),
+            "reconciliation_key": str(_row_value(quota_baseline, "ReconciliationKey", 16) or ""),
+            "provider_period_timezone": str(_row_value(quota_baseline, "ProviderPeriodTimezone", 17) or ""),
+            "provider_period_start_utc": _row_value(quota_baseline, "ProviderPeriodStartUtc", 18),
+            "provider_period_end_utc": _row_value(quota_baseline, "ProviderPeriodEndUtc", 19),
         }
         if quota_baseline is not None
         else None
@@ -229,14 +337,19 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
     if effective_at < now - timedelta(seconds=5):
         raise RuntimeError("Tiered50 effective boundary may not be backdated")
 
-    retirement = retire_legacy7()
-
     manifest = load_default_manifest(ROOT)
     settings = MssqlConnectionSettings.from_environment()
     if settings.database != EXPECTED_SQL_DATABASE:
         raise RuntimeError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
+    limited_runtime = _validate_limited_runtime(now=now)
+    launch_agent = _validate_launch_agent_template(runtime_config_path=str(limited_runtime["config_path"]))
     connection = connect_mssql(settings)
-    evidence: dict[str, object] = {"legacy7_retirement": retirement}
+    evidence: dict[str, object] = {
+        "legacy7_status": "ALREADY_RETIRED_NOT_MUTATED",
+        "limited_runtime": limited_runtime,
+        "launch_agent_template": launch_agent,
+        "requested_effective_at_utc": effective_at.isoformat().replace("+00:00", "Z"),
+    }
     try:
         cursor = connection.cursor()
         cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
@@ -270,14 +383,21 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
             FROM ctl.MddMacCollectorRun WITH (UPDLOCK, HOLDLOCK)
             WHERE Status IN ('RUNNING', 'CLAIMED')
-              AND CollectionContext = %s
+              AND CollectionContext IN (%s, %s)
             GROUP BY CollectionContext
             """,
-            ("MAC_LEGACY7_PRODUCTION",),
+            ("MAC_LEGACY7_PRODUCTION", MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT),
         )
         competing = list(cursor.fetchall())
         if any(int(_row_value(row, "RunningCount", 1) or 0) for row in competing):
-            raise RuntimeError("Legacy7 production writer is still running")
+            raise RuntimeError("a production collector writer is still running")
+        evidence["competing_writers"] = [
+            {
+                "collection_context": str(_row_value(row, "CollectionContext", 0) or ""),
+                "running_count": int(_row_value(row, "RunningCount", 1) or 0),
+            }
+            for row in competing
+        ]
 
         month_key = effective_at.strftime("%Y-%m")
         cursor.execute(
@@ -286,25 +406,81 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
                    RetryProtectionBoundary, ConfirmedProviderAttempts,
                    ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                    AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
-                   LocalUsageIncludedThroughUtc, SourceDescription
+                   LocalUsageIncludedThroughUtc, SourceDescription,
+                   AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                   SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                   ProviderPeriodStartUtc, ProviderPeriodEndUtc
             FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
             WHERE MonthKey = %s
             """,
             (month_key,),
         )
         baseline = cursor.fetchone()
-        baseline_valid = bool(
-            baseline
-            and int(_row_value(baseline, "ProviderQuotaCeiling", 0) or 0) == 250000
-            and int(_row_value(baseline, "NormalOperationalMaximum", 1) or 0) == 210000
-            and int(_row_value(baseline, "RetryProtectionBoundary", 2) or 0) == 207500
-            and str(_row_value(baseline, "AccountingStatus", 6) or "") == "COMPLETE"
-            and bool(_row_value(baseline, "IncludesAllSharedConsumers", 7))
-            and (_utc_datetime(_row_value(baseline, "BaselineAsOfUtc", 8)) or now) <= now
-            and (_utc_datetime(_row_value(baseline, "LocalUsageIncludedThroughUtc", 9)) or now) <= now
+        baseline_mapping = (
+            {
+                "ProviderQuotaCeiling": _row_value(baseline, "ProviderQuotaCeiling", 0),
+                "NormalOperationalMaximum": _row_value(baseline, "NormalOperationalMaximum", 1),
+                "RetryProtectionBoundary": _row_value(baseline, "RetryProtectionBoundary", 2),
+                "ConfirmedProviderAttempts": _row_value(baseline, "ConfirmedProviderAttempts", 3),
+                "ConservativeUnknownAttempts": _row_value(baseline, "ConservativeUnknownAttempts", 4),
+                "ExplicitSharedConsumerReservedAttempts": _row_value(baseline, "ExplicitSharedConsumerReservedAttempts", 5),
+                "AccountingStatus": _row_value(baseline, "AccountingStatus", 6),
+                "IncludesAllSharedConsumers": _row_value(baseline, "IncludesAllSharedConsumers", 7),
+                "BaselineAsOfUtc": _row_value(baseline, "BaselineAsOfUtc", 8),
+                "LocalUsageIncludedThroughUtc": _row_value(baseline, "LocalUsageIncludedThroughUtc", 9),
+                "SourceDescription": _row_value(baseline, "SourceDescription", 10),
+                "AccountingModel": _row_value(baseline, "AccountingModel", 11),
+                "ProviderMeasurementCutoffUtc": _row_value(baseline, "ProviderMeasurementCutoffUtc", 12),
+                "StaleAfterUtc": _row_value(baseline, "StaleAfterUtc", 13),
+                "SourceEvidenceHash": _row_value(baseline, "SourceEvidenceHash", 14),
+                "ReconciliationKey": _row_value(baseline, "ReconciliationKey", 15),
+                "ProviderPeriodTimezone": _row_value(baseline, "ProviderPeriodTimezone", 16),
+                "ProviderPeriodStartUtc": _row_value(baseline, "ProviderPeriodStartUtc", 17),
+                "ProviderPeriodEndUtc": _row_value(baseline, "ProviderPeriodEndUtc", 18),
+            }
+            if baseline is not None
+            else None
+        )
+        baseline_valid, baseline_reason = validate_stored_baseline_row(
+            baseline_mapping,
+            at_utc=now,
         )
         if not baseline_valid:
-            raise RuntimeError("complete provider-wide shared-credential quota baseline is unavailable")
+            raise RuntimeError(f"complete current provider-wide shared-credential quota baseline is unavailable: {baseline_reason}")
+
+        local_cutoff = _utc_datetime(baseline_mapping["LocalUsageIncludedThroughUtc"])
+        assert local_cutoff is not None
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN Status IN ('HTTP_PROVIDER_ATTEMPT_CONFIRMED', 'CONSERVATIVE_LIVE_ATTEMPT', 'PENDING_AUTHORIZATION')
+                                  AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS local_after_cutoff
+            FROM ctl.MddMacQuotaPermit WITH (UPDLOCK, HOLDLOCK)
+            WHERE MonthKey = %s
+            """,
+            (local_cutoff, month_key),
+        )
+        local_quota = cursor.fetchone()
+        baseline_total = (
+            int(baseline_mapping["ConfirmedProviderAttempts"] or 0)
+            + int(baseline_mapping["ConservativeUnknownAttempts"] or 0)
+            + int(baseline_mapping["ExplicitSharedConsumerReservedAttempts"] or 0)
+        )
+        current_accounted = baseline_total + int(_row_value(local_quota, "local_after_cutoff", 0) or 0)
+        if current_accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
+            raise RuntimeError(
+                "shared-credential quota does not leave the approved automatic-retry protection headroom"
+            )
+        if current_accounted >= NORMAL_OPERATIONAL_MAXIMUM or current_accounted >= ABSOLUTE_PROVIDER_CEILING:
+            raise RuntimeError("shared-credential quota does not leave approved operational headroom")
+        evidence["quota_headroom"] = {
+            "baseline_total": baseline_total,
+            "local_usage_after_cutoff": int(_row_value(local_quota, "local_after_cutoff", 0) or 0),
+            "current_conservative_accounted_total": current_accounted,
+            "normal_operational_headroom": NORMAL_OPERATIONAL_MAXIMUM - current_accounted,
+            "retry_protection_headroom": AUTOMATIC_RETRY_PROTECTION_BOUNDARY - current_accounted,
+            "provider_ceiling_headroom": ABSOLUTE_PROVIDER_CEILING - current_accounted,
+        }
 
         cursor.execute(
             """
@@ -428,7 +604,7 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
         try:
             _record_cutover_outage(
                 effective_at=effective_at,
-                reason="TIERED50_ACTIVATION_BLOCKED_AFTER_LEGACY7_RETIREMENT",
+                reason="TIERED50_ACTIVATION_BLOCKED_BEFORE_SQL_COMMIT",
                 evidence=evidence,
             )
         except Exception:
@@ -436,6 +612,26 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
         raise
     finally:
         connection.close()
+
+    try:
+        installed = install_launch_agent(
+            activate=True,
+            runtime_config_path=str(limited_runtime["config_path"]),
+            mode=TIERED50_MODE,
+        )
+        bootstrap_launch_agent(activate=True, mode=TIERED50_MODE)
+    except BaseException as exc:
+        evidence["launch_agent_activation_error_type"] = type(exc).__name__
+        try:
+            _record_cutover_outage(
+                effective_at=effective_at,
+                reason="TIERED50_LAUNCHAGENT_START_FAILED_AFTER_SQL_ACTIVATION",
+                evidence=evidence,
+            )
+        except Exception:
+            pass
+        raise RuntimeError("Tiered50 SQL activation committed but the existing LaunchAgent could not be started") from exc
+
     return {
         "status": "PASS",
         "database": EXPECTED_SQL_DATABASE,
@@ -444,7 +640,13 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
         "effective_at_utc": effective_at.isoformat().replace("+00:00", "Z"),
         "mdd_requests_issued": 0,
         "writes_performed": 44 if era_action == "INSERTED" else 43,
-        "legacy7_retirement": retirement,
+        "legacy7_status": "ALREADY_RETIRED_NOT_MUTATED",
+        "launch_agent": {
+            "status": "STARTED",
+            "label": installed.get("label"),
+            "installed_plist_path": installed.get("installed_plist_path"),
+            "runtime_bundle_path": installed.get("runtime_bundle_path"),
+        },
     }
 
 

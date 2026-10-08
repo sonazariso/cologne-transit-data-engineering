@@ -332,9 +332,19 @@ BEGIN
         AuthorizationKey NVARCHAR(240) NULL,
         Status VARCHAR(40) NOT NULL,
         FinalizedAtUtc DATETIME2(7) NULL,
+        ReleasedAtUtc DATETIME2(7) NULL,
+        FinalizationReason VARCHAR(80) NULL,
         LiveClientInvocation BIT NOT NULL
             CONSTRAINT DF_ctl_MddMacQuotaPermit_LiveClientInvocation DEFAULT (0),
-        CONSTRAINT CK_ctl_MddMacQuotaPermit_Amount CHECK (Amount > 0)
+        CONSTRAINT CK_ctl_MddMacQuotaPermit_Amount CHECK (Amount > 0),
+        CONSTRAINT CK_ctl_MddMacQuotaPermit_DecisionKind
+            CHECK (DecisionKind IN ('INITIAL', 'RETRY')),
+        CONSTRAINT CK_ctl_MddMacQuotaPermit_Boundary
+            CHECK
+            (
+                (DecisionKind = 'INITIAL' AND Boundary BETWEEN 1 AND 210000)
+                OR (DecisionKind = 'RETRY' AND Boundary BETWEEN 1 AND 207500)
+            )
     );
 END;
 GO
@@ -366,6 +376,14 @@ BEGIN
         BaselineAsOfUtc DATETIME2(7) NOT NULL,
         LocalUsageIncludedThroughUtc DATETIME2(7) NOT NULL,
         SourceDescription NVARCHAR(1000) NOT NULL,
+        AccountingModel VARCHAR(40) NULL,
+        ProviderMeasurementCutoffUtc DATETIME2(7) NULL,
+        StaleAfterUtc DATETIME2(7) NULL,
+        SourceEvidenceHash CHAR(64) NULL,
+        ReconciliationKey NVARCHAR(240) NULL,
+        ProviderPeriodTimezone VARCHAR(80) NULL,
+        ProviderPeriodStartUtc DATETIME2(7) NULL,
+        ProviderPeriodEndUtc DATETIME2(7) NULL,
         RecordedAtUtc DATETIME2(7) NOT NULL
             CONSTRAINT DF_ctl_MddMacSharedQuotaAccounting_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
         CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_Boundaries
@@ -384,6 +402,146 @@ BEGIN
             CHECK (AccountingStatus IN ('COMPLETE', 'INCOMPLETE', 'SUPERSEDED'))
     );
 END;
+GO
+
+/* Provider-wide baseline history is append-only administrative evidence.  It
+   is intentionally not part of the collector runtime permission contract. */
+
+IF OBJECT_ID(N'ctl.MddMacSharedQuotaReconciliation', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacSharedQuotaReconciliation
+    (
+        ReconciliationId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddMacSharedQuotaReconciliation PRIMARY KEY CLUSTERED,
+        ReconciliationKey NVARCHAR(240) NOT NULL,
+        MonthKey CHAR(7) NOT NULL,
+        AccountingModel VARCHAR(40) NOT NULL,
+        ProviderReportedCumulativeAttempts BIGINT NOT NULL,
+        ProviderReportedConfirmedAttempts BIGINT NOT NULL,
+        ProviderReportedUnknownAttempts BIGINT NOT NULL,
+        UnexplainedDiscrepancyAttempts BIGINT NOT NULL,
+        ProviderIncludesLocalUsage BIT NOT NULL,
+        LocalUsageIncludedThroughUtc DATETIME2(7) NOT NULL,
+        LocalConfirmedAttemptsThroughCutoff BIGINT NOT NULL,
+        LocalUnknownAttemptsThroughCutoff BIGINT NOT NULL,
+        LocalPendingReservationsThroughCutoff BIGINT NOT NULL,
+        LocalConfirmedAttemptsAfterCutoff BIGINT NOT NULL,
+        LocalUnknownAttemptsAfterCutoff BIGINT NOT NULL,
+        LocalPendingReservationsAfterCutoff BIGINT NOT NULL,
+        ExplicitSharedConsumerReservedAttempts BIGINT NOT NULL,
+        ConservativeUnknownAttempts BIGINT NOT NULL,
+        AccountedTotalAtReconciliationUtc BIGINT NOT NULL,
+        ProviderMeasurementCutoffUtc DATETIME2(7) NOT NULL,
+        BaselineAsOfUtc DATETIME2(7) NOT NULL,
+        StaleAfterUtc DATETIME2(7) NOT NULL,
+        ProviderPeriodTimezone VARCHAR(80) NOT NULL,
+        ProviderPeriodStartUtc DATETIME2(7) NOT NULL,
+        ProviderPeriodEndUtc DATETIME2(7) NOT NULL,
+        IncludesAllSharedConsumers BIT NOT NULL,
+        SourceDescription NVARCHAR(1000) NOT NULL,
+        SourceReference NVARCHAR(1000) NOT NULL,
+        SourceEvidenceHash CHAR(64) NOT NULL,
+        OperatingModelEvidence NVARCHAR(2000) NOT NULL,
+        EvidenceJson NVARCHAR(MAX) NOT NULL,
+        AccountingStatus VARCHAR(30) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacSharedQuotaReconciliation_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        AppliedAtUtc DATETIME2(7) NULL,
+        CONSTRAINT UQ_ctl_MddMacSharedQuotaReconciliation_Key UNIQUE (ReconciliationKey),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaReconciliation_Counts CHECK
+        (
+            ProviderReportedCumulativeAttempts >= 0
+            AND ProviderReportedConfirmedAttempts >= 0
+            AND ProviderReportedUnknownAttempts >= 0
+            AND UnexplainedDiscrepancyAttempts >= 0
+            AND LocalConfirmedAttemptsThroughCutoff >= 0
+            AND LocalUnknownAttemptsThroughCutoff >= 0
+            AND LocalPendingReservationsThroughCutoff >= 0
+            AND LocalConfirmedAttemptsAfterCutoff >= 0
+            AND LocalUnknownAttemptsAfterCutoff >= 0
+            AND LocalPendingReservationsAfterCutoff >= 0
+            AND ExplicitSharedConsumerReservedAttempts >= 0
+            AND ConservativeUnknownAttempts >= 0
+            AND AccountedTotalAtReconciliationUtc >= 0
+        ),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaReconciliation_ProviderCounts CHECK
+        (
+            ProviderReportedConfirmedAttempts + ProviderReportedUnknownAttempts
+                = ProviderReportedCumulativeAttempts
+        ),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaReconciliation_Status CHECK
+            (AccountingStatus IN ('APPLIED', 'SUPERSEDED'))
+    );
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacQuotaPermit')
+      AND name = N'CK_ctl_MddMacQuotaPermit_DecisionKind'
+)
+    ALTER TABLE ctl.MddMacQuotaPermit
+        ADD CONSTRAINT CK_ctl_MddMacQuotaPermit_DecisionKind
+            CHECK (DecisionKind IN ('INITIAL', 'RETRY'));
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacQuotaPermit')
+      AND name = N'CK_ctl_MddMacQuotaPermit_Boundary'
+)
+    ALTER TABLE ctl.MddMacQuotaPermit
+        ADD CONSTRAINT CK_ctl_MddMacQuotaPermit_Boundary
+            CHECK
+            (
+                (DecisionKind = 'INITIAL' AND Boundary BETWEEN 1 AND 210000)
+                OR (DecisionKind = 'RETRY' AND Boundary BETWEEN 1 AND 207500)
+            );
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'AccountingModel') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD AccountingModel VARCHAR(40) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderMeasurementCutoffUtc') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderMeasurementCutoffUtc DATETIME2(7) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'StaleAfterUtc') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD StaleAfterUtc DATETIME2(7) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'SourceEvidenceHash') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD SourceEvidenceHash CHAR(64) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ReconciliationKey') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ReconciliationKey NVARCHAR(240) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderPeriodTimezone') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderPeriodTimezone VARCHAR(80) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderPeriodStartUtc') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderPeriodStartUtc DATETIME2(7) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderPeriodEndUtc') IS NULL
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderPeriodEndUtc DATETIME2(7) NULL;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddMacSharedQuotaAccounting')
+      AND name = N'UX_ctl_MddMacSharedQuotaAccounting_ReconciliationKey'
+)
+    CREATE UNIQUE INDEX UX_ctl_MddMacSharedQuotaAccounting_ReconciliationKey
+        ON ctl.MddMacSharedQuotaAccounting (ReconciliationKey)
+        WHERE ReconciliationKey IS NOT NULL;
 GO
 
 IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'AuthorizationKey') IS NULL

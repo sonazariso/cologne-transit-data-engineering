@@ -29,6 +29,7 @@ from .domain import (
     MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
     NORMAL_OPERATIONAL_MAXIMUM,
     AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+    approved_quota_boundary,
     TIERED50_SELECTION_POLICY_VERSION,
     SamplingEra,
     Target,
@@ -47,6 +48,7 @@ from .quota import (
     PENDING_AUTHORIZATION,
     RELEASED_NO_NETWORK,
 )
+from .quota_baseline import validate_stored_baseline_row
 from .runtime_configuration import (
     MSSQL_CREDENTIAL,
     SecretProvider,
@@ -105,6 +107,7 @@ FULL_SCHEMA_TABLES = (
     "ctl.MddMacQuotaPermit",
     "ctl.MddMacQuotaAudit",
     "ctl.MddMacSharedQuotaAccounting",
+    "ctl.MddMacSharedQuotaReconciliation",
     "ctl.MddMacSamplingEra",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
@@ -158,6 +161,28 @@ TIERED50_RUNTIME_SCHEMA_TABLES = RUNTIME_SCHEMA_TABLES + (TIERED50_TARGET_TABLE,
 PRODUCTION_LEASE_NAME = "MDD_MAC_PRODUCTION"
 QUOTA_BASELINE_UNAVAILABLE = "SHARED_PROVIDER_BASELINE_UNAVAILABLE"
 QUOTA_BASELINE_INCOMPLETE = "SHARED_PROVIDER_BASELINE_INCOMPLETE"
+QUOTA_BASELINE_COLUMNS = (
+    "MonthKey",
+    "ProviderQuotaCeiling",
+    "NormalOperationalMaximum",
+    "RetryProtectionBoundary",
+    "ConfirmedProviderAttempts",
+    "ConservativeUnknownAttempts",
+    "ExplicitSharedConsumerReservedAttempts",
+    "AccountingStatus",
+    "IncludesAllSharedConsumers",
+    "BaselineAsOfUtc",
+    "LocalUsageIncludedThroughUtc",
+    "SourceDescription",
+    "AccountingModel",
+    "ProviderMeasurementCutoffUtc",
+    "StaleAfterUtc",
+    "SourceEvidenceHash",
+    "ReconciliationKey",
+    "ProviderPeriodTimezone",
+    "ProviderPeriodStartUtc",
+    "ProviderPeriodEndUtc",
+)
 
 
 @dataclass(frozen=True)
@@ -355,6 +380,15 @@ def _row_named(row: Any, *keys: str, index: int = 0) -> Any:
                 return lowered[key.lower()]
         return None
     return _row_value(row, keys[0] if keys else "", index)
+
+
+def _row_mapping(row: Any, columns: Sequence[str]) -> dict[str, Any]:
+    """Normalize a DB-API row for shared validation helpers."""
+
+    if isinstance(row, Mapping):
+        lowered = {str(key).casefold(): value for key, value in row.items()}
+        return {column: lowered.get(column.casefold()) for column in columns}
+    return {column: _row_value(row, column, index) for index, column in enumerate(columns)}
 
 
 def _json_value(value: Any) -> Any:
@@ -1180,6 +1214,48 @@ class MssqlPersistence:
             "is_db_datareader": bool(_row_named(row, "is_db_datareader", index=6)),
             "is_db_datawriter": bool(_row_named(row, "is_db_datawriter", index=7)),
         }
+
+    def runtime_privilege_boundary(self) -> Mapping[str, Any]:
+        """Verify that the active login has no administrator or unrelated access."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT HAS_PERMS_BY_NAME(NULL, NULL, N'CONTROL SERVER') AS control_server,
+                       HAS_PERMS_BY_NAME(NULL, NULL, N'ALTER ANY LOGIN') AS alter_any_login,
+                       HAS_PERMS_BY_NAME(NULL, NULL, N'CREATE ANY DATABASE') AS create_any_database,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacTargetAudit', N'OBJECT', N'CONTROL') AS audit_control,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacTargetAudit', N'OBJECT', N'ALTER') AS audit_alter,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacTargetAudit', N'OBJECT', N'DELETE') AS audit_delete,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaReconciliation', N'OBJECT', N'SELECT') AS quota_history_select,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaReconciliation', N'OBJECT', N'INSERT') AS quota_history_insert,
+                       HAS_PERMS_BY_NAME(N'analytics.vwMddMacRecordedAtTimeHistory', N'OBJECT', N'SELECT') AS analytics_history_select,
+                       HAS_PERMS_BY_NAME(N'analytics.vwMddMacSourceFieldCoverage', N'OBJECT', N'SELECT') AS analytics_coverage_select,
+                       HAS_PERMS_BY_NAME(N'ctl.MddImportBatch', N'OBJECT', N'SELECT') AS import_batch_select
+                """
+            )
+            row = cursor.fetchone()
+        result = {
+            "control_server": bool(_row_named(row, "control_server", index=0)),
+            "alter_any_login": bool(_row_named(row, "alter_any_login", index=1)),
+            "create_any_database": bool(_row_named(row, "create_any_database", index=2)),
+            "audit_control": bool(_row_named(row, "audit_control", index=3)),
+            "audit_alter": bool(_row_named(row, "audit_alter", index=4)),
+            "audit_delete": bool(_row_named(row, "audit_delete", index=5)),
+            "quota_history_select": bool(_row_named(row, "quota_history_select", index=6)),
+            "quota_history_insert": bool(_row_named(row, "quota_history_insert", index=7)),
+            "analytics_history_select": bool(_row_named(row, "analytics_history_select", index=8)),
+            "analytics_coverage_select": bool(_row_named(row, "analytics_coverage_select", index=9)),
+            "import_batch_select": bool(_row_named(row, "import_batch_select", index=10)),
+        }
+        forbidden = [name for name, granted in result.items() if granted]
+        if forbidden:
+            raise MssqlSafetyError(
+                "dedicated runtime login has prohibited effective permissions: " + ", ".join(sorted(forbidden))
+            )
+        result["status"] = "PASS"
+        return result
 
     def load_existing_sampling_targets(self) -> tuple[Target, ...]:
         """Read the unchanged seven-target and ten-slot Legacy7 contract."""
@@ -2588,7 +2664,10 @@ class MssqlPersistence:
                    RetryProtectionBoundary, ConfirmedProviderAttempts,
                    ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                    AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
-                   LocalUsageIncludedThroughUtc, SourceDescription
+                   LocalUsageIncludedThroughUtc, SourceDescription,
+                   AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                   SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                   ProviderPeriodStartUtc, ProviderPeriodEndUtc
             FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
             WHERE MonthKey = %s
             """,
@@ -2597,18 +2676,9 @@ class MssqlPersistence:
         row = cursor.fetchone()
         if row is None:
             return None
-        status = str(_row_named(row, "AccountingStatus", index=7) or "")
-        includes_all = bool(_row_named(row, "IncludesAllSharedConsumers", index=8))
-        baseline_as_of = _optional_utc(_row_named(row, "BaselineAsOfUtc", index=9))
-        local_cutoff = _optional_utc(_row_named(row, "LocalUsageIncludedThroughUtc", index=10))
-        if (
-            status != "COMPLETE"
-            or not includes_all
-            or baseline_as_of is None
-            or local_cutoff is None
-            or baseline_as_of > at
-            or local_cutoff > at
-        ):
+        mapped = _row_mapping(row, QUOTA_BASELINE_COLUMNS)
+        usable, _reason = validate_stored_baseline_row(mapped, at_utc=at)
+        if not usable:
             return None
         return row
 
@@ -2660,7 +2730,10 @@ class MssqlPersistence:
                            RetryProtectionBoundary, ConfirmedProviderAttempts,
                            ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                            AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
-                           LocalUsageIncludedThroughUtc, SourceDescription
+                           LocalUsageIncludedThroughUtc, SourceDescription,
+                           AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                           SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                           ProviderPeriodStartUtc, ProviderPeriodEndUtc
                     FROM ctl.MddMacSharedQuotaAccounting
                     WHERE MonthKey = %s
                     """,
@@ -2675,25 +2748,18 @@ class MssqlPersistence:
                         "month_key": month,
                         "known_total": None,
                     }
-                status = str(_row_named(baseline, "AccountingStatus", index=7) or "")
-                includes_all = bool(_row_named(baseline, "IncludesAllSharedConsumers", index=8))
-                baseline_as_of = _optional_utc(_row_named(baseline, "BaselineAsOfUtc", index=9))
-                local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
-                if (
-                    status != "COMPLETE"
-                    or not includes_all
-                    or baseline_as_of is None
-                    or local_cutoff is None
-                    or baseline_as_of > at
-                    or local_cutoff > at
-                ):
+                mapped_baseline = _row_mapping(baseline, QUOTA_BASELINE_COLUMNS)
+                usable, reason = validate_stored_baseline_row(mapped_baseline, at_utc=at)
+                if not usable:
                     return {
                         "state_available": False,
                         "source": QUOTA_BASELINE_INCOMPLETE,
-                        "availability_reason": "provider-wide accounting row is incomplete or not valid at the requested timestamp",
+                        "availability_reason": reason,
                         "month_key": month,
                         "known_total": None,
                     }
+                baseline_as_of = _optional_utc(mapped_baseline["BaselineAsOfUtc"])
+                local_cutoff = _optional_utc(mapped_baseline["LocalUsageIncludedThroughUtc"])
                 local = self._quota_usage_totals(cursor, month=month, local_cutoff=local_cutoff)
         except Exception:
             # A schema/permission/connectivity failure is itself unavailable
@@ -2722,7 +2788,541 @@ class MssqlPersistence:
             "month_key": month,
             "baseline_as_of_utc": _iso(baseline_as_of),
             "local_usage_included_through_utc": _iso(local_cutoff),
+            "provider_measurement_cutoff_utc": _iso(_optional_utc(mapped_baseline["ProviderMeasurementCutoffUtc"])),
+            "stale_after_utc": _iso(_optional_utc(mapped_baseline["StaleAfterUtc"])),
+            "accounting_model": str(mapped_baseline["AccountingModel"] or ""),
+            "source_evidence_hash": str(mapped_baseline["SourceEvidenceHash"] or ""),
+            "reconciliation_key": str(mapped_baseline["ReconciliationKey"] or ""),
+            "provider_period_timezone": str(mapped_baseline["ProviderPeriodTimezone"] or ""),
             "known_total": confirmed + conservative + reserved,
+        }
+
+    @staticmethod
+    def _quota_permit_reconciliation_counts(
+        cursor: Any,
+        *,
+        month: str,
+        cutoff: datetime,
+        lock: bool = False,
+    ) -> Mapping[str, int]:
+        """Read permit counts on both sides of the provider measurement cutoff."""
+
+        lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS confirmed_through_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS unknown_through_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS pending_through_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS confirmed_after_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS unknown_after_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS pending_after_cutoff
+            FROM ctl.MddMacQuotaPermit"""
+            + lock_hint
+            + """
+            WHERE MonthKey = %s
+            """,
+            (
+                HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+                cutoff,
+                CONSERVATIVE_LIVE_ATTEMPT,
+                cutoff,
+                PENDING_AUTHORIZATION,
+                cutoff,
+                HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+                cutoff,
+                CONSERVATIVE_LIVE_ATTEMPT,
+                cutoff,
+                PENDING_AUTHORIZATION,
+                cutoff,
+                month,
+            ),
+        )
+        row = cursor.fetchone()
+        return {
+            "confirmed_through_cutoff": int(_row_named(row, "confirmed_through_cutoff", index=0) or 0),
+            "unknown_through_cutoff": int(_row_named(row, "unknown_through_cutoff", index=1) or 0),
+            "pending_through_cutoff": int(_row_named(row, "pending_through_cutoff", index=2) or 0),
+            "confirmed_after_cutoff": int(_row_named(row, "confirmed_after_cutoff", index=3) or 0),
+            "unknown_after_cutoff": int(_row_named(row, "unknown_after_cutoff", index=4) or 0),
+            "pending_after_cutoff": int(_row_named(row, "pending_after_cutoff", index=5) or 0),
+        }
+
+    def read_quota_reconciliation_inputs(
+        self,
+        *,
+        month_key: str,
+        local_usage_included_through_utc: datetime,
+    ) -> Mapping[str, Any]:
+        """Read local quota, HTTP, and collector evidence without writing.
+
+        Permit rows are the accounting source of truth for local consumption.
+        HTTP and run counts are returned as separate reconciliation evidence so
+        they can be compared without adding the same local attempt twice.
+        """
+
+        cutoff = _utc(local_usage_included_through_utc)
+        month_start = datetime.strptime(month_key + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if month_start > cutoff:
+            raise ValueError("local usage cutoff must be within the requested month")
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            permit_counts = self._quota_permit_reconciliation_counts(
+                cursor,
+                month=month_key,
+                cutoff=cutoff,
+                lock=False,
+            )
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS http_attempts,
+                       COALESCE(SUM(CASE WHEN h.NetworkAttempted = 1 THEN 1 ELSE 0 END), 0) AS network_attempts,
+                       COALESCE(SUM(CASE WHEN h.ProviderAttemptConfirmed = 1 THEN 1 ELSE 0 END), 0) AS confirmed_attempts,
+                       COALESCE(SUM(CASE WHEN h.ConservativeQuotaAccounted = 1 THEN 1 ELSE 0 END), 0) AS unknown_attempts,
+                       COALESCE(SUM(CASE WHEN h.QuotaPermitId IS NULL THEN 1 ELSE 0 END), 0) AS attempts_without_permit
+                FROM ctl.MddMacHttpAttempt AS h
+                INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+                WHERE h.CompletedAtUtc <= %s
+                  AND h.CompletedAtUtc >= %s
+                """,
+                (cutoff, month_start),
+            )
+            http_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT CollectionContext, COUNT_BIG(*) AS run_count,
+                       COALESCE(SUM(CASE WHEN Status = 'COMPLETE' THEN 1 ELSE 0 END), 0) AS complete_count,
+                       COALESCE(SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count
+                FROM ctl.MddMacCollectorRun
+                WHERE StartedAtUtc >= %s AND StartedAtUtc <= %s
+                GROUP BY CollectionContext
+                ORDER BY CollectionContext
+                """,
+                (month_start, cutoff),
+            )
+            run_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT DecisionKind, CollectionContext, COUNT_BIG(*) AS decision_count
+                FROM ctl.MddMacQuotaAudit
+                WHERE RecordedAtUtc >= %s AND RecordedAtUtc <= %s
+                GROUP BY DecisionKind, CollectionContext
+                ORDER BY DecisionKind, CollectionContext
+                """,
+                (month_start, cutoff),
+            )
+            quota_audit_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS run_count,
+                       COALESCE(SUM(CASE WHEN Status = 'COMPLETE' THEN 1 ELSE 0 END), 0) AS complete_count,
+                       COALESCE(SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count
+                FROM ctl.MddCollectorRun
+                WHERE (StartedAtUtc >= %s AND StartedAtUtc <= %s)
+                   OR (CompletedAtUtc >= %s AND CompletedAtUtc <= %s)
+                """,
+                (month_start, cutoff, month_start, cutoff),
+            )
+            windows_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT TOP (20) ImportBatchId, SourceDatabaseRole,
+                       SourceCollectionContext, SourceSessionStartUtc,
+                       SourceSessionEndUtc, Status, ImportStartedAtUtc,
+                       ImportCompletedAtUtc
+                FROM ctl.MddImportBatch
+                WHERE COALESCE(SourceSessionEndUtc, ImportCompletedAtUtc, ImportStartedAtUtc) >= %s
+                  AND COALESCE(SourceSessionStartUtc, ImportStartedAtUtc) <= %s
+                ORDER BY ImportStartedAtUtc DESC
+                """,
+                (month_start, cutoff),
+            )
+            import_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT TOP (20) ReconciliationKey, SourceEvidenceHash,
+                       BaselineAsOfUtc, LocalUsageIncludedThroughUtc,
+                       AccountingStatus, RecordedAtUtc
+                FROM ctl.MddMacSharedQuotaReconciliation
+                WHERE MonthKey = %s
+                ORDER BY RecordedAtUtc DESC, ReconciliationId DESC
+                """,
+                (month_key,),
+            )
+            prior_rows = cursor.fetchall()
+        return {
+            "month_key": month_key,
+            "local_usage_included_through_utc": _iso(cutoff),
+            "confirmed_through_cutoff": permit_counts["confirmed_through_cutoff"],
+            "unknown_through_cutoff": permit_counts["unknown_through_cutoff"],
+            "pending_through_cutoff": permit_counts["pending_through_cutoff"],
+            "confirmed_after_cutoff": permit_counts["confirmed_after_cutoff"],
+            "unknown_after_cutoff": permit_counts["unknown_after_cutoff"],
+            "pending_after_cutoff": permit_counts["pending_after_cutoff"],
+            "permit_counts": dict(permit_counts),
+            "http_attempts": {
+                "total": int(_row_named(http_row, "http_attempts", index=0) or 0),
+                "network_attempts": int(_row_named(http_row, "network_attempts", index=1) or 0),
+                "confirmed_attempts": int(_row_named(http_row, "confirmed_attempts", index=2) or 0),
+                "unknown_attempts": int(_row_named(http_row, "unknown_attempts", index=3) or 0),
+                "attempts_without_permit": int(_row_named(http_row, "attempts_without_permit", index=4) or 0),
+            },
+            "collector_activity": [
+                {
+                    "collection_context": str(_row_named(row, "CollectionContext", index=0) or ""),
+                    "run_count": int(_row_named(row, "run_count", index=1) or 0),
+                    "complete_count": int(_row_named(row, "complete_count", index=2) or 0),
+                    "failed_count": int(_row_named(row, "failed_count", index=3) or 0),
+                }
+                for row in run_rows
+            ],
+            "windows_collector_activity": {
+                "run_count": int(_row_named(windows_row, "run_count", index=0) or 0),
+                "complete_count": int(_row_named(windows_row, "complete_count", index=1) or 0),
+                "failed_count": int(_row_named(windows_row, "failed_count", index=2) or 0),
+            },
+            "quota_audit_activity": [
+                {
+                    "decision_kind": str(_row_named(row, "DecisionKind", index=0) or ""),
+                    "collection_context": str(_row_named(row, "CollectionContext", index=1) or ""),
+                    "decision_count": int(_row_named(row, "decision_count", index=2) or 0),
+                }
+                for row in quota_audit_rows
+            ],
+            "imported_research_evidence": [
+                {
+                    "import_batch_id": str(_row_named(row, "ImportBatchId", index=0) or ""),
+                    "source_database_role": str(_row_named(row, "SourceDatabaseRole", index=1) or ""),
+                    "source_collection_context": str(_row_named(row, "SourceCollectionContext", index=2) or ""),
+                    "source_session_start_utc": _row_named(row, "SourceSessionStartUtc", index=3),
+                    "source_session_end_utc": _row_named(row, "SourceSessionEndUtc", index=4),
+                    "status": str(_row_named(row, "Status", index=5) or ""),
+                    "import_started_at_utc": _row_named(row, "ImportStartedAtUtc", index=6),
+                    "import_completed_at_utc": _row_named(row, "ImportCompletedAtUtc", index=7),
+                }
+                for row in import_rows
+            ],
+            "previous_reconciliations": [
+                {
+                    "reconciliation_key": str(_row_named(row, "ReconciliationKey", index=0) or ""),
+                    "source_evidence_hash": str(_row_named(row, "SourceEvidenceHash", index=1) or ""),
+                    "baseline_as_of_utc": _row_named(row, "BaselineAsOfUtc", index=2),
+                    "local_usage_included_through_utc": _row_named(row, "LocalUsageIncludedThroughUtc", index=3),
+                    "accounting_status": str(_row_named(row, "AccountingStatus", index=4) or ""),
+                    "recorded_at_utc": _row_named(row, "RecordedAtUtc", index=5),
+                }
+                for row in prior_rows
+            ],
+        }
+
+    def quota_administrator_context(self) -> Mapping[str, Any]:
+        """Verify that the current connection is an administrative writer."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT SUSER_SNAME() AS login_name,
+                       IS_SRVROLEMEMBER(N'sysadmin') AS is_sysadmin,
+                       IS_ROLEMEMBER(N'db_owner') AS is_db_owner,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaAccounting', N'OBJECT', N'INSERT') AS baseline_insert,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaAccounting', N'OBJECT', N'UPDATE') AS baseline_update,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaReconciliation', N'OBJECT', N'INSERT') AS history_insert
+                """
+            )
+            row = cursor.fetchone()
+        result = {
+            "login_name": str(_row_named(row, "login_name", index=0) or ""),
+            "is_sysadmin": bool(_row_named(row, "is_sysadmin", index=1)),
+            "is_db_owner": bool(_row_named(row, "is_db_owner", index=2)),
+            "baseline_insert": bool(_row_named(row, "baseline_insert", index=3)),
+            "baseline_update": bool(_row_named(row, "baseline_update", index=4)),
+            "history_insert": bool(_row_named(row, "history_insert", index=5)),
+        }
+        if result["login_name"].casefold() == "colognetransitcollector":
+            raise MssqlSafetyError("shared quota baseline registration requires a separate administrator login")
+        if not (result["is_sysadmin"] or result["is_db_owner"]):
+            if not all(result[key] for key in ("baseline_insert", "baseline_update", "history_insert")):
+                raise MssqlSafetyError("current login lacks the explicit shared quota registration privileges")
+        return result
+
+    def register_shared_quota_baseline(
+        self,
+        *,
+        reconciliation: Mapping[str, Any],
+        local_usage: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Atomically register one validated provider-wide baseline.
+
+        Local permit counts are locked before the baseline row and
+        reconciliation history, matching the reservation lock order.
+        Outstanding permits are never deleted, released, or rewritten by this
+        operation.
+        """
+
+        self.quota_administrator_context()
+        month = str(reconciliation.get("month_key") or "")
+        key = str(reconciliation.get("reconciliation_key") or "")
+        source_hash = str(reconciliation.get("source_evidence_hash") or "")
+        cutoff = _optional_utc(reconciliation.get("local_usage_included_through_utc"))
+        if not month or not key or not source_hash or cutoff is None:
+            raise MssqlSafetyError("validated quota reconciliation is missing its immutable identity or cutoff")
+
+        expected_local = dict(reconciliation.get("local_usage") or {})
+        supplied_local = dict(local_usage.get("permit_counts") or local_usage)
+        for name in (
+            "confirmed_through_cutoff",
+            "unknown_through_cutoff",
+            "pending_through_cutoff",
+            "confirmed_after_cutoff",
+            "unknown_after_cutoff",
+            "pending_after_cutoff",
+        ):
+            if int(supplied_local.get(name, 0) or 0) != int(expected_local.get(name, 0) or 0):
+                raise MssqlSafetyError(
+                    f"local SQL evidence does not match the validated reconciliation for {name}"
+                )
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                # Match reserve_quota_attempt's lock order: serialize local
+                # permit accounting before taking the monthly baseline lock.
+                # This prevents a reservation holding a permit row from
+                # deadlocking with a baseline writer holding the accounting
+                # row and waiting for that same permit set.
+                observed_local = self._quota_permit_reconciliation_counts(
+                    cursor,
+                    month=month,
+                    cutoff=cutoff,
+                    lock=True,
+                )
+                cursor.execute(
+                    """
+                    SELECT MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+                           RetryProtectionBoundary, ConfirmedProviderAttempts,
+                           ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
+                           AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
+                           LocalUsageIncludedThroughUtc, SourceDescription,
+                           AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                           SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                           ProviderPeriodStartUtc, ProviderPeriodEndUtc
+                    FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
+                    WHERE MonthKey = %s
+                    """,
+                    (month,),
+                )
+                existing_baseline = cursor.fetchone()
+                cursor.execute(
+                    """
+                    SELECT ReconciliationId, SourceEvidenceHash, ReconciliationKey,
+                           AccountingStatus
+                    FROM ctl.MddMacSharedQuotaReconciliation WITH (UPDLOCK, HOLDLOCK)
+                    WHERE ReconciliationKey = %s
+                    """,
+                    (key,),
+                )
+                existing_history = cursor.fetchone()
+                if existing_history is not None:
+                    old_hash = str(_row_named(existing_history, "SourceEvidenceHash", index=1) or "")
+                    if old_hash != source_hash:
+                        raise MssqlSafetyError("reconciliation key already exists with conflicting evidence")
+                    if existing_baseline is None:
+                        raise MssqlSafetyError("reconciliation history exists but the current baseline row is missing")
+                    current = _row_mapping(existing_baseline, QUOTA_BASELINE_COLUMNS)
+                    if str(current.get("SourceEvidenceHash") or "") != source_hash:
+                        raise MssqlSafetyError("current baseline conflicts with its existing reconciliation history")
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    return {
+                        "status": "IDEMPOTENT",
+                        "month_key": month,
+                        "reconciliation_key": key,
+                        "source_evidence_hash": source_hash,
+                        "writes_performed": 0,
+                    }
+
+                if existing_baseline is not None:
+                    current = _row_mapping(existing_baseline, QUOTA_BASELINE_COLUMNS)
+                    old_cutoff = _optional_utc(current.get("ProviderMeasurementCutoffUtc"))
+                    new_cutoff = _optional_utc(reconciliation.get("provider_measurement_cutoff_utc"))
+                    if old_cutoff is not None and new_cutoff is not None and new_cutoff < old_cutoff:
+                        raise MssqlSafetyError("new provider baseline is older than the current baseline")
+                    old_as_of = _optional_utc(current.get("BaselineAsOfUtc"))
+                    new_as_of = _optional_utc(reconciliation.get("baseline_as_of_utc"))
+                    if old_as_of is not None and new_as_of is not None and new_as_of < old_as_of:
+                        raise MssqlSafetyError("new provider evidence timestamp is older than the current baseline")
+
+                for name in (
+                    "confirmed_through_cutoff",
+                    "unknown_through_cutoff",
+                    "pending_through_cutoff",
+                    "confirmed_after_cutoff",
+                    "unknown_after_cutoff",
+                    "pending_after_cutoff",
+                ):
+                    expected = int(expected_local.get(name, 0) or 0)
+                    if int(observed_local[name]) != expected:
+                        raise MssqlSafetyError(
+                            f"local permit counts changed during reconciliation for {name}; rerun the dry-run"
+                        )
+
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacSharedQuotaReconciliation
+                    (
+                        ReconciliationKey, MonthKey, AccountingModel,
+                        ProviderReportedCumulativeAttempts, ProviderReportedConfirmedAttempts,
+                        ProviderReportedUnknownAttempts, UnexplainedDiscrepancyAttempts,
+                        ProviderIncludesLocalUsage,
+                        LocalUsageIncludedThroughUtc, LocalConfirmedAttemptsThroughCutoff,
+                        LocalUnknownAttemptsThroughCutoff, LocalPendingReservationsThroughCutoff,
+                        LocalConfirmedAttemptsAfterCutoff, LocalUnknownAttemptsAfterCutoff,
+                        LocalPendingReservationsAfterCutoff, ExplicitSharedConsumerReservedAttempts,
+                        ConservativeUnknownAttempts, AccountedTotalAtReconciliationUtc,
+                        ProviderMeasurementCutoffUtc, BaselineAsOfUtc, StaleAfterUtc,
+                        ProviderPeriodTimezone, ProviderPeriodStartUtc, ProviderPeriodEndUtc,
+                        IncludesAllSharedConsumers, SourceDescription, SourceReference,
+                        SourceEvidenceHash, OperatingModelEvidence, EvidenceJson,
+                        AccountingStatus, RecordedAtUtc, AppliedAtUtc
+                    )
+                    VALUES
+                    (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, 'APPLIED', SYSUTCDATETIME(), SYSUTCDATETIME()
+                    )
+                    """,
+                    (
+                        key,
+                        month,
+                        reconciliation["accounting_model"],
+                        int(reconciliation["provider_reported_cumulative_attempts"]),
+                        int(reconciliation["provider_reported_confirmed_attempts"]),
+                        int(reconciliation["provider_reported_unknown_attempts"]),
+                        int(reconciliation["unexplained_discrepancy_attempts"]),
+                        int(bool(reconciliation["provider_includes_local_usage"])),
+                        cutoff,
+                        int(expected_local.get("confirmed_through_cutoff", 0) or 0),
+                        int(expected_local.get("unknown_through_cutoff", 0) or 0),
+                        int(expected_local.get("pending_through_cutoff", 0) or 0),
+                        int(expected_local.get("confirmed_after_cutoff", 0) or 0),
+                        int(expected_local.get("unknown_after_cutoff", 0) or 0),
+                        int(expected_local.get("pending_after_cutoff", 0) or 0),
+                        int(reconciliation["explicit_shared_consumer_reserved_attempts"]),
+                        int(reconciliation["conservative_unknown_attempts"]),
+                        int(reconciliation["current_conservative_accounted_total"]),
+                        _optional_utc(reconciliation["provider_measurement_cutoff_utc"]),
+                        _optional_utc(reconciliation["baseline_as_of_utc"]),
+                        _optional_utc(reconciliation["stale_after_utc"]),
+                        reconciliation["provider_period_timezone"],
+                        _optional_utc(reconciliation["provider_period_start_utc"]),
+                        _optional_utc(reconciliation["provider_period_end_utc"]),
+                        1,
+                        reconciliation["source_description"],
+                        reconciliation["source_reference"],
+                        source_hash,
+                        reconciliation["operating_model_evidence"],
+                        reconciliation["evidence_json"],
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE ctl.MddMacSharedQuotaAccounting
+                    SET ProviderQuotaCeiling = %s,
+                        NormalOperationalMaximum = %s,
+                        RetryProtectionBoundary = %s,
+                        ConfirmedProviderAttempts = %s,
+                        ConservativeUnknownAttempts = %s,
+                        ExplicitSharedConsumerReservedAttempts = %s,
+                        AccountingStatus = 'COMPLETE',
+                        IncludesAllSharedConsumers = 1,
+                        BaselineAsOfUtc = %s,
+                        LocalUsageIncludedThroughUtc = %s,
+                        SourceDescription = %s,
+                        AccountingModel = %s,
+                        ProviderMeasurementCutoffUtc = %s,
+                        StaleAfterUtc = %s,
+                        SourceEvidenceHash = %s,
+                        ReconciliationKey = %s,
+                        ProviderPeriodTimezone = %s,
+                        ProviderPeriodStartUtc = %s,
+                        ProviderPeriodEndUtc = %s,
+                        RecordedAtUtc = SYSUTCDATETIME()
+                    WHERE MonthKey = %s
+                    """,
+                    (
+                        int(reconciliation["provider_quota_ceiling"]),
+                        int(reconciliation["normal_operational_maximum"]),
+                        int(reconciliation["retry_protection_boundary"]),
+                        int(reconciliation["confirmed_provider_attempts"]),
+                        int(reconciliation["conservative_unknown_attempts"]),
+                        int(reconciliation["explicit_shared_consumer_reserved_attempts"]),
+                        _optional_utc(reconciliation["baseline_as_of_utc"]),
+                        cutoff,
+                        reconciliation["source_description"],
+                        reconciliation["accounting_model"],
+                        _optional_utc(reconciliation["provider_measurement_cutoff_utc"]),
+                        _optional_utc(reconciliation["stale_after_utc"]),
+                        source_hash,
+                        key,
+                        reconciliation["provider_period_timezone"],
+                        _optional_utc(reconciliation["provider_period_start_utc"]),
+                        _optional_utc(reconciliation["provider_period_end_utc"]),
+                        month,
+                    ),
+                )
+                if getattr(cursor, "rowcount", 1) == 0:
+                    cursor.execute(
+                        """
+                        INSERT INTO ctl.MddMacSharedQuotaAccounting
+                        (
+                            MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+                            RetryProtectionBoundary, ConfirmedProviderAttempts,
+                            ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
+                            AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
+                            LocalUsageIncludedThroughUtc, SourceDescription, AccountingModel,
+                            ProviderMeasurementCutoffUtc, StaleAfterUtc, SourceEvidenceHash,
+                            ReconciliationKey, ProviderPeriodTimezone, ProviderPeriodStartUtc,
+                            ProviderPeriodEndUtc
+                        )
+                        VALUES
+                        (%s, %s, %s, %s, %s, %s, %s, 'COMPLETE', 1, %s, %s, %s,
+                         %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            month,
+                            int(reconciliation["provider_quota_ceiling"]),
+                            int(reconciliation["normal_operational_maximum"]),
+                            int(reconciliation["retry_protection_boundary"]),
+                            int(reconciliation["confirmed_provider_attempts"]),
+                            int(reconciliation["conservative_unknown_attempts"]),
+                            int(reconciliation["explicit_shared_consumer_reserved_attempts"]),
+                            _optional_utc(reconciliation["baseline_as_of_utc"]),
+                            cutoff,
+                            reconciliation["source_description"],
+                            reconciliation["accounting_model"],
+                            _optional_utc(reconciliation["provider_measurement_cutoff_utc"]),
+                            _optional_utc(reconciliation["stale_after_utc"]),
+                            source_hash,
+                            key,
+                            reconciliation["provider_period_timezone"],
+                            _optional_utc(reconciliation["provider_period_start_utc"]),
+                            _optional_utc(reconciliation["provider_period_end_utc"]),
+                        ),
+                    )
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return {
+            "status": "APPLIED",
+            "month_key": month,
+            "reconciliation_key": key,
+            "source_evidence_hash": source_hash,
+            "writes_performed": 2,
+            "outstanding_permits_preserved": True,
         }
 
     def reserve_quota_attempt(
@@ -2741,7 +3341,7 @@ class MssqlPersistence:
         at = _utc(at_utc or datetime.now(timezone.utc))
         if decision_kind not in {"INITIAL", "RETRY"}:
             raise ValueError("decision_kind must be INITIAL or RETRY")
-        effective_boundary = min(int(boundary), ABSOLUTE_PROVIDER_CEILING)
+        effective_boundary = approved_quota_boundary(decision_kind, boundary)
         key = str(authorization_key) if authorization_key else None
         if key is not None and len(key) > 240:
             raise ValueError("authorization_key must be at most 240 characters")
