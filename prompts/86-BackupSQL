@@ -1,0 +1,335 @@
+Create and execute a safe, read-only-from-the-database backup operation for the two existing SQL Server databases visible through the current VS Code SQL Server connection:
+
+1. CologneTransitIntelligence
+2. NRWTransportDW
+
+The backup date for this operation is exactly:
+
+2026-10-02
+
+Do not perform any PostgreSQL migration yet.
+
+Do not modify database schemas, tables, views, procedures, data, indexes, users, recovery models, or compatibility levels.
+
+Do not stop or restart SQL Server.
+
+Do not enable xp_cmdshell.
+
+Do not alter SQL Server configuration.
+
+Do not delete any existing backup.
+
+Do not use BACPAC as a substitute for the requested native full backup.
+
+The goal is to produce a verified native SQL Server FULL COPY_ONLY backup of both databases and then copy both backup files to the Mac.
+
+Final Mac directory:
+
+~/Documents/CologneTransportBackups/2026-10-02/
+
+Create that Mac directory if it does not already exist.
+
+==================================================
+PRE-BACKUP VALIDATION
+==================================================
+
+Using the existing authenticated SQL Server connection, first query and report:
+
+- SQL Server product version
+- SQL Server edition
+- server/instance name
+- current default SQL Server backup directory
+- database name
+- database state
+- recovery model
+- compatibility level
+- database size
+- last full backup time if one exists
+
+for both:
+
+CologneTransitIntelligence
+NRWTransportDW
+
+Both databases must be ONLINE before continuing.
+
+If either database is not ONLINE:
+
+STOP.
+
+Do not issue BACKUP DATABASE.
+
+Report the problem.
+
+Use SQL Server's actual default backup directory obtained from:
+
+SERVERPROPERTY('InstanceDefaultBackupPath')
+
+Do not invent a Windows backup path.
+
+Verify that both database names exist exactly before backup.
+
+==================================================
+BACKUP FILE NAMES
+==================================================
+
+Generate one UTC timestamp for the operation.
+
+Use filenames equivalent to:
+
+CologneTransitIntelligence_FULL_COPY_ONLY_2026-10-02_<UTC-HHMMSS>.bak
+
+NRWTransportDW_FULL_COPY_ONLY_2026-10-02_<UTC-HHMMSS>.bak
+
+Both files must initially be created inside the SQL Server instance's default backup directory.
+
+Never overwrite an existing backup file.
+
+If the generated filename already exists, generate a new timestamped filename.
+
+==================================================
+NATIVE SQL SERVER BACKUP
+==================================================
+
+For each database execute a native SQL Server backup equivalent to:
+
+BACKUP DATABASE [database]
+TO DISK = <generated backup path>
+WITH
+    COPY_ONLY,
+    CHECKSUM,
+    COMPRESSION,
+    INIT,
+    NAME = <descriptive backup-set name>,
+    DESCRIPTION = <database + full copy-only + 2026-10-02>,
+    STATS = 5;
+
+Do NOT use DIFFERENTIAL.
+
+Do NOT use NO_CHECKSUM.
+
+Do NOT use CONTINUE_AFTER_ERROR.
+
+Do NOT use SKIP.
+
+Do NOT use FORMAT.
+
+BACKUP DATABASE failure for either database must stop the workflow.
+
+Do not proceed as if the backup succeeded.
+
+==================================================
+VERIFY EACH SQL SERVER BACKUP
+==================================================
+
+Immediately after each BACKUP DATABASE succeeds, execute:
+
+RESTORE VERIFYONLY
+FROM DISK = <that exact backup file>
+WITH CHECKSUM;
+
+This must succeed.
+
+Also execute RESTORE HEADERONLY for that backup and capture at minimum:
+
+- DatabaseName
+- BackupType
+- BackupStartDate
+- BackupFinishDate
+- BackupSize
+- CompressedBackupSize
+- ServerName
+- DatabaseVersion
+- CheckpointLSN
+- DatabaseBackupLSN
+- FirstLSN
+- LastLSN
+- HasBackupChecksums
+- IsCopyOnly
+
+Validate:
+
+DatabaseName matches the intended database.
+BackupType represents a full database backup.
+HasBackupChecksums is true.
+IsCopyOnly is true.
+
+If any validation fails:
+
+STOP.
+
+Do not mark the backup valid.
+
+==================================================
+HASH ON THE WINDOWS VM
+==================================================
+
+After successful RESTORE VERIFYONLY, calculate SHA-256 for each .bak file on the Windows VM.
+
+Do not calculate only an MD5/SHA1 hash.
+
+Record:
+
+- full VM backup path
+- filename
+- byte size
+- SHA-256
+- database name
+- backup start
+- backup finish
+- SQL Server version
+- RESTORE VERIFYONLY result
+
+==================================================
+COPY TO MAC
+==================================================
+
+The final required location is:
+
+~/Documents/CologneTransportBackups/2026-10-02/
+
+Do NOT assume that SQL Server can write directly to a Mac filesystem.
+
+First determine which existing safe file-transfer path is already available between the Windows VM and the Mac.
+
+Allowed examples:
+
+- an existing VMware Shared Folder;
+- an already-configured SMB share;
+- an already-configured SCP/SFTP path.
+
+Do not enable a new insecure protocol.
+
+Do not expose SQL Server credentials.
+
+Do not enable xp_cmdshell.
+
+Do not put passwords in source files, shell history, logs, or the repository.
+
+If a usable existing file-transfer path can be established, copy both verified .bak files to:
+
+~/Documents/CologneTransportBackups/2026-10-02/
+
+Copy — do not move.
+
+The verified original backup must remain on the VM until the Mac copy has been independently validated.
+
+If there is NO existing file-transfer path from the VM to the Mac:
+
+do not invent one and do not claim completion.
+
+Leave the verified backups safely on the VM and report exactly:
+
+MAC_TRANSFER_PATH_REQUIRED
+
+along with the VM backup paths.
+
+At that point ask the user only for the preferred transfer mechanism.
+
+==================================================
+VERIFY THE MAC COPY
+==================================================
+
+For each copied .bak file on the Mac calculate SHA-256 locally.
+
+Compare:
+
+VM SHA-256
+versus
+Mac SHA-256
+
+They must match exactly.
+
+Also compare the byte size.
+
+Only after:
+
+- SQL BACKUP succeeded;
+- RESTORE VERIFYONLY WITH CHECKSUM succeeded;
+- backup header validation succeeded;
+- VM SHA-256 was calculated;
+- Mac file exists;
+- Mac SHA-256 matches;
+- byte size matches;
+
+may the backup be marked:
+
+VERIFIED_MAC_COPY
+
+Do not delete the VM copy in this task.
+
+==================================================
+MANIFEST
+==================================================
+
+Create:
+
+~/Documents/CologneTransportBackups/2026-10-02/backup-manifest-2026-10-02.json
+
+The manifest must contain one entry per database with:
+
+database_name
+backup_type = FULL_COPY_ONLY
+backup_date = 2026-10-02
+backup_started_at
+backup_finished_at
+sql_server_version
+sql_server_edition
+source_server
+recovery_model
+compatibility_level
+vm_backup_path
+mac_backup_path
+backup_size_bytes
+compressed_backup_size_bytes if available
+sha256_vm
+sha256_mac
+sha256_match
+restore_verifyonly = PASSED
+has_backup_checksums = true
+is_copy_only = true
+final_status = VERIFIED_MAC_COPY
+
+Do not include:
+
+- SQL passwords
+- MDD API keys
+- connection-string passwords
+- Windows credentials
+
+==================================================
+IMPORTANT POSTGRESQL NOTE
+==================================================
+
+Do not claim these .bak files are directly restorable by PostgreSQL.
+
+They are authoritative SQL Server native rollback backups.
+
+Later, after controlled migration to PostgreSQL, a separate PostgreSQL-native custom-format pg_dump backup will be created.
+
+No PostgreSQL activity is authorized in this task.
+
+==================================================
+FINAL VERIFICATION
+==================================================
+
+At the end explicitly report:
+
+- both exact database names;
+- both database states before backup;
+- SQL Server version;
+- exact VM backup paths;
+- exact Mac backup paths;
+- each backup size;
+- each VM SHA-256;
+- each Mac SHA-256;
+- hash match result;
+- RESTORE VERIFYONLY result for each database;
+- COPY_ONLY result;
+- CHECKSUM result;
+- Mac manifest path;
+- confirmation that no source database/schema/data was modified;
+- confirmation no backup was deleted;
+- confirmation no PostgreSQL activity occurred.
+
+If anything prevents a VERIFIED_MAC_COPY for either database, do not use the word COMPLETE.
