@@ -20,6 +20,7 @@
     }
   ],
   "reset_contract_status": "UNVERIFIED",
+  "registration_status": "NOT_REGISTERED",
   "reset_model": null,
   "reset_timezone": null,
   "effective_from_utc": null,
@@ -64,11 +65,41 @@
       "post_reset_safety_delay_seconds": 1800,
       "authorization_boundary": "12:30 UTC on the first day of a new calendar month, after every supported offset has entered that month",
       "earliest_next_period_risk_boundary": "10:00 UTC on the last UTC date of the preceding month for a following-month UTC+14 midnight",
-      "expected_temporary_collection_gap": "2 hours 30 minutes between the earliest next-period risk boundary and the 12:30 UTC authorization boundary",
+      "safe_period_end_definition": "the earliest possible next-calendar-month boundary across the supported envelope; collection must stop by this UTC instant",
+      "expected_temporary_collection_gap": {
+        "from_utc": "2026-11-30T10:00:00Z",
+        "to_utc": "2026-12-01T12:30:00Z",
+        "hours": 26.5,
+        "duration": "26 hours 30 minutes"
+      },
       "november_2026_example": {
+        "period_month_key": "2026-11",
+        "safe_period_start_utc": "2026-11-01T12:00:00Z",
+        "safe_period_end_utc": "2026-11-30T10:00:00Z",
         "authorization_not_before_utc": "2026-11-01T12:30:00Z",
         "earliest_next_period_risk_boundary_utc": "2026-11-30T10:00:00Z",
-        "temporary_collection_gap": "2 hours 30 minutes"
+        "following_period_month_key": "2026-12",
+        "following_period_authorization_not_before_utc": "2026-12-01T12:30:00Z",
+        "collection_gap": {
+          "previous_period_end_utc": "2026-11-30T10:00:00Z",
+          "next_period_activation_not_before_utc": "2026-12-01T12:30:00Z",
+          "collection_gap_seconds": 95400,
+          "collection_gap_minutes": 1590,
+          "collection_gap_hours": 26.5,
+          "collection_gap_duration": "26 hours 30 minutes"
+        }
+      },
+      "october_bootstrap_to_november_example": {
+        "previous_period_end_utc": "2026-10-30T23:00:00Z",
+        "next_period_activation_not_before_utc": "2026-11-01T12:30:00Z",
+        "collection_gap": {
+          "previous_period_end_utc": "2026-10-30T23:00:00Z",
+          "next_period_activation_not_before_utc": "2026-11-01T12:30:00Z",
+          "collection_gap_seconds": 135000,
+          "collection_gap_minutes": 2250,
+          "collection_gap_hours": 37.5,
+          "collection_gap_duration": "37 hours 30 minutes"
+        }
       },
       "automatic_behavior_after_approval": {
         "period_creation": "SQL creates the zero-based provider period after the bounded boundary and safety delay",
@@ -81,11 +112,12 @@
       "limitations": [
         "The provider has not confirmed a calendar-month reset model or timezone.",
         "The two endpoint zones prove the mathematical offset envelope, not the provider credential's actual billing rule.",
+        "Under this universal envelope, normal month transitions deliberately lose approximately 26.5 hours of collection; the October bootstrap to November candidate transition loses 37.5 hours because the bootstrap hard stop is earlier.",
         "This assumption must not be registered or activated without explicit one-time operator approval."
       ]
     },
     "reason": "The reviewed public sources expose a monthly quota and request history but do not establish that this credential resets on a calendar month or identify a supported provider timezone. The bounded policy is implemented fail-closed, but neither its calendar-month model nor its supported timezone envelope has been approved.",
-    "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its finite supported timezone envelope and delay."
+    "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its finite supported timezone envelope, delay, and disclosed UTC collection gaps."
   },
   "runtime_behavior": {
     "october_bootstrap_hard_stop_utc": "2026-10-30T23:00:00Z",
@@ -94,5 +126,5 @@
     "outstanding_permits": "Recent prior-period pending permits or untracked Tiered50 network attempts block rollover; safely stale pending permits are conservatively finalized without changing their original MonthKey.",
     "idempotence": "The contract, MonthKey, period bounds, and evidence hash are locked and compared before any insert."
   },
-  "unresolved_dependency": "Obtain provider-issued evidence for the exact MDD credential quota reset timezone/boundary and register it through the administrator-only SQL workflow before relying on automatic November or later rollover."
+  "unresolved_dependency": "Obtain provider-issued evidence for the exact MDD credential quota reset timezone/boundary, or obtain the one-time explicit operator approval for the bounded assumption with its 26.5-hour normal transition gap, then register the chosen contract through the administrator-only SQL workflow before relying on automatic November or later rollover."
 }

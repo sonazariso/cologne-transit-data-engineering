@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Validate and optionally register the future MDD quota reset contract.
 
-This is an administrator-only workflow.  It intentionally refuses to create
-the contract from the current ``UNVERIFIED`` evidence artifact.  Once the
-provider supplies an exact reset timezone/boundary, the evidence artifact can
-be updated and this command can be invoked with ``--apply --approve``.  The
-normal collector then performs all later period creation automatically.
+This is an administrator-only workflow.  It refuses to create a contract from
+the current ``UNVERIFIED`` evidence artifact.  The evidence may later be
+updated with either a provider-verified exact reset boundary or an explicitly
+approved bounded operator assumption; only then can this command be invoked
+with ``--apply --approve``.  The normal collector then performs all later
+period creation automatically.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cologne_transit_collector.quota_rollover import (  # noqa: E402
     QuotaRolloverError,
+    RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
     build_reset_contract,
 )
 from cologne_transit_collector.mssql_persistence import MssqlPersistence  # noqa: E402
@@ -52,6 +55,7 @@ def run(
     approved_at: datetime | None = None,
     activation_delay_seconds: int = 1800,
     supported_reset_timezones: list[str] | None = None,
+    sql_server_reset_timezone: str | None = None,
     approve_bounded_assumption: bool = False,
     apply: bool = False,
     approve: bool = False,
@@ -64,9 +68,20 @@ def run(
         }
     evidence = load_evidence_file(evidence_path)
     if not apply:
+        evidence_status = evidence.get("reset_contract_status")
         return {
-            "status": "PASS" if evidence.get("reset_contract_status") == "VERIFIED" else "AWAITING_PROVIDER_RESET_EVIDENCE",
-            "reset_contract_status": evidence.get("reset_contract_status"),
+            "status": (
+                "PASS"
+                if evidence_status
+                in {
+                    "VERIFIED",
+                    RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+                    RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+                }
+                else "AWAITING_PROVIDER_RESET_EVIDENCE"
+            ),
+            "reset_contract_status": evidence_status,
+            "registration_status": evidence.get("registration_status", "NOT_REGISTERED"),
             "automatic_rollover": evidence.get("automatic_rollover_implementation"),
             "unresolved_dependency": evidence.get("unresolved_dependency"),
             "sql_writes_performed": 0,
@@ -77,6 +92,23 @@ def run(
             "reason": "--contract-key, --effective-from, and --approved-at are required for apply",
             "sql_writes_performed": 0,
         }
+    evidence_status = evidence.get("reset_contract_status")
+    if evidence_status not in {
+        "VERIFIED",
+        RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+        RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    }:
+        return {
+            "status": "AWAITING_PROVIDER_RESET_EVIDENCE",
+            "reset_contract_status": evidence_status,
+            "registration_status": evidence.get("registration_status", "NOT_REGISTERED"),
+            "reason": (
+                "exact provider evidence or an explicitly approved bounded operator "
+                "assumption is required before administrator registration"
+            ),
+            "sql_writes_performed": 0,
+            "mdd_requests_issued": 0,
+        }
     contract = build_reset_contract(
         evidence=evidence,
         contract_key=contract_key,
@@ -85,6 +117,7 @@ def run(
         approved_at_utc=approved_at,
         activation_delay_seconds=activation_delay_seconds,
         supported_reset_timezones=supported_reset_timezones,
+        sql_server_reset_timezone=sql_server_reset_timezone,
         approve_bounded_assumption=approve_bounded_assumption,
     )
     administrator_settings, administrator_source = resolve_administrator_connection_settings(
@@ -92,9 +125,13 @@ def run(
     )
     persistence = MssqlPersistence(settings=administrator_settings)
     result = dict(persistence.register_quota_reset_contract(contract=contract))
+    durable_status = str(result.get("reset_contract_status") or contract["contract_verification_status"])
+    registration_status = str(result.get("registration_status") or "ACTIVE")
     return {
         "status": "PASS",
-        "reset_contract_status": "VERIFIED",
+        "reset_contract_status": durable_status,
+        "registration_status": registration_status,
+        "approval_provenance": contract["approval_provenance"],
         "contract_key": contract_key,
         "reset_timezone": reset_timezone,
         "supported_reset_timezones": supported_reset_timezones,
@@ -121,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effective-from")
     parser.add_argument("--approved-at")
     parser.add_argument("--activation-delay-seconds", type=int, default=1800)
+    parser.add_argument(
+        "--sql-server-timezone",
+        dest="sql_server_reset_timezone",
+        help="explicit Windows timezone identifier for an exact provider contract",
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--approve-bounded-assumption", action="store_true")
@@ -134,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
             approved_at=_utc(args.approved_at, field="--approved-at") if args.approved_at else None,
             activation_delay_seconds=args.activation_delay_seconds,
             supported_reset_timezones=args.supported_reset_timezones,
+            sql_server_reset_timezone=args.sql_server_reset_timezone,
             approve_bounded_assumption=args.approve_bounded_assumption,
             apply=args.apply,
             approve=args.approve,

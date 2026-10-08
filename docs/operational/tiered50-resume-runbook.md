@@ -142,15 +142,19 @@ authenticated administrative artifact is available. Monthly provider rollover
 also remains fail-closed: the exact provider reset boundary is unverified, and
 the bounded calendar-month policy is implemented but requires explicit
 operator approval of the global UTC-12 through UTC+14 envelope, a 30-minute
-post-boundary delay, and its documented temporary collection gap before use.
+post-boundary delay, and its documented temporary collection gaps before use.
+That policy deliberately loses 26 hours 30 minutes (26.5 hours) at each normal
+month transition from the previous safe-period end to the next authorization;
+the October-bootstrap-to-November example loses 37 hours 30 minutes.
 
 Explicit one-time approval request (not granted): “I approve the
 `CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY` policy for this shared MDD
 credential, bounded by `UTC-12 through UTC+14` using `Etc/GMT+12` and
 `Etc/GMT-14`, with authorization no earlier than 12:30 UTC on the first day
-of each calendar month, a 30-minute post-boundary safety delay, a 2-hour
-30-minute temporary collection gap at the November 2026 example boundary,
-and all documented pending-permit, SQL-outage, quota, locking, and
-idempotency stop conditions.” This approval must be recorded by the
+of each calendar month, a 30-minute post-boundary safety delay, a 26 hours
+30 minutes normal intermonth collection gap (and a 37 hours 30 minutes
+October-bootstrap-to-November gap), and all documented pending-permit,
+SQL-outage, quota, locking, and idempotency stop conditions.” This approval
+must be recorded by the
 administrator-only SQL registration workflow; it does not waive the need for
 provider-issued evidence or authorize resume by itself.

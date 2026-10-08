@@ -11,7 +11,9 @@ The Tiered50 LaunchAgent is installed in a separate versioned bundle and is
 currently disabled after the first scheduled heartbeat failed its cadence gate.
 The bounded October bootstrap is registered for the observed dashboard value
 and conservative local accounting; future automatic rollover remains
-fail-closed until the provider reset timezone/boundary contract is verified.
+fail-closed until either the provider reset timezone/boundary contract is
+verified and registered or the bounded policy is explicitly approved and
+registered.
 
 ## Current Tiered50 deployment validation
 

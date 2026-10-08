@@ -39,6 +39,7 @@ from tiered50_production_preflight import (  # noqa: E402
     run_preflight,
     validate_claim_identity,
     validate_manifest,
+    validate_quota_rollover_contract,
     validate_schedule,
 )
 from validate_tiered50_migration import validate_static  # noqa: E402
@@ -125,6 +126,17 @@ class Tiered50ProductionTests(unittest.TestCase):
         self.assertEqual(validate_manifest()["observed"]["target_count"], 50)
         self.assertEqual(validate_schedule()["reconciliation"]["super_cycle_total"], 110)
         self.assertEqual(validate_claim_identity()["unique_target_bucket_keys"], 300)
+
+    def test_rollover_evidence_reports_actual_utc_collection_gap(self) -> None:
+        result = validate_quota_rollover_contract()
+        candidate = result["operator_approval_candidate"]
+        november = candidate["november_2026_example"]
+        self.assertEqual(november["collection_gap"]["collection_gap_hours"], 26.5)
+        self.assertEqual(november["collection_gap"]["collection_gap_duration"], "26 hours 30 minutes")
+        self.assertEqual(
+            candidate["october_bootstrap_to_november_example"]["collection_gap"]["collection_gap_duration"],
+            "37 hours 30 minutes",
+        )
 
     def test_static_migration_is_additive_and_exact(self) -> None:
         result = validate_static()

@@ -5,7 +5,8 @@
 > chronology. The current production design is Tiered50-only; the first
 > scheduled Tiered50 heartbeat failed its cadence gate, so the LaunchAgent is
 > stopped and disabled. Legacy7 is retired. Future automatic rollover remains
-> fail-closed pending verified provider reset-period and timezone evidence.
+> fail-closed pending verified provider reset-period/timezone evidence or
+> explicit approval and registration of the bounded policy.
 
 ## Authoritative status
 
@@ -26,7 +27,8 @@ disabled and no stations are active. The historical SQLite research profile
 and Legacy7 SQL evidence remain immutable, lineage-separated records. The
 bounded October bootstrap is registered for 554 dashboard requests plus all
 local evidence through approval, while future automatic rollover remains
-fail-closed until the provider reset contract is verified. Stage 15A readiness
+fail-closed until either the provider reset contract is verified and registered
+or the bounded policy is explicitly approved and registered. Stage 15A readiness
 remains `IN PROGRESS`.
 
 ## Current Legacy7 operational correction
@@ -409,7 +411,7 @@ in SQL while the runtime is stopped; no stations are currently active.
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 337 tests per run and
+repository suite passed in five consecutive runs with 340 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule

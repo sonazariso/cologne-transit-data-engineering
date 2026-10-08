@@ -61,7 +61,11 @@ from .conservative_bootstrap import (
 from .quota_rollover import (
     AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
     QuotaRolloverError,
+    RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+    SQL_RESET_TIMEZONE_FIELD,
     build_automatic_rollover_period,
+    classify_reset_contract_status,
 )
 from .runtime_configuration import (
     MSSQL_CREDENTIAL,
@@ -353,6 +357,7 @@ RESET_CONTRACT_COLUMNS = (
     "ProviderName",
     "ResetModel",
     "ResetTimezone",
+    SQL_RESET_TIMEZONE_FIELD,
     "EffectiveFromUtc",
     "ActivationDelaySeconds",
     "ProviderQuotaCeiling",
@@ -3329,9 +3334,9 @@ class MssqlPersistence:
                 "reason": "October bounded bootstrap remains inside its approved interval",
                 "mdd_requests_issued": 0,
             }
-        select_columns = """
+        select_columns = f"""
             ContractId, ContractKey, ProviderName, ResetModel, ResetTimezone,
-            EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
+            {SQL_RESET_TIMEZONE_FIELD}, EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
             CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
             CalendarMonthResetModelEstablished, OperatorAssumptionApproved,
             SupportedResetTimezonesJson,
@@ -3352,10 +3357,12 @@ class MssqlPersistence:
             if row is None:
                 return {
                     "status": "NOT_CONFIGURED",
+                    "registration_status": "NOT_REGISTERED",
                     "reason": "no verified provider reset contract is registered",
                     "mdd_requests_issued": 0,
                 }
             contract = _row_mapping(row, RESET_CONTRACT_COLUMNS)
+            contract_status = classify_reset_contract_status(contract, now_utc=at)
             try:
                 period = build_automatic_rollover_period(contract=contract, at_utc=at)
             except QuotaRolloverError as exc:
@@ -3363,6 +3370,8 @@ class MssqlPersistence:
                 if "activation delay" in message or "not effective" in message:
                     return {
                         "status": "NOT_READY",
+                        "registration_status": contract_status,
+                        "reset_contract_status": contract_status,
                         "reason": message,
                         "contract_key": str(contract.get("ContractKey") or ""),
                         "mdd_requests_issued": 0,
@@ -3392,6 +3401,8 @@ class MssqlPersistence:
                 if self._is_quota_rollover_wait_error(exc):
                     return {
                         "status": "BLOCKED_PENDING_PRIOR_PERIOD_PERMITS",
+                        "registration_status": "ACTIVE",
+                        "reset_contract_status": contract_status,
                         "reason": "a recent prior-period quota permit remains unresolved",
                         "contract_key": period["contract_key"],
                         "month_key": period["month_key"],
@@ -3406,6 +3417,8 @@ class MssqlPersistence:
                     pass
         return {
             "status": "APPLIED_OR_IDEMPOTENT",
+            "registration_status": "ACTIVE",
+            "reset_contract_status": contract_status,
             "contract_key": period["contract_key"],
             "month_key": period["month_key"],
             "provider_period_timezone": period["provider_period_timezone"],
@@ -4248,13 +4261,14 @@ class MssqlPersistence:
         }
 
     def register_quota_reset_contract(self, *, contract: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Register one verified future-month reset contract idempotently."""
+        """Register one evidence-backed future-month reset contract idempotently."""
 
         administrator_context = dict(self.quota_administrator_context())
         key = str(contract.get("contract_key") or "")
         provider_name = str(contract.get("provider_name") or "")
         reset_model = str(contract.get("reset_model") or "")
         timezone_name = str(contract.get("reset_timezone") or "")
+        sql_server_timezone = str(contract.get("sql_server_reset_timezone") or "").strip() or None
         effective_from = _optional_utc(contract.get("effective_from_utc"))
         source_hash = str(contract.get("source_evidence_hash") or "")
         evidence_json = str(contract.get("evidence_json") or "")
@@ -4279,6 +4293,12 @@ class MssqlPersistence:
             raise MssqlSafetyError("exact reset contract lacks verified boundary evidence")
         if not exact and (provider_verified or not assumption_approved):
             raise MssqlSafetyError("bounded reset contract lacks explicit operator assumption approval")
+        if exact and not sql_server_timezone:
+            raise MssqlSafetyError(
+                "exact reset contract lacks the SQL Server Windows timezone identifier required for server-side boundary validation"
+            )
+        if not exact and sql_server_timezone is not None:
+            raise MssqlSafetyError("bounded reset contract must not carry an exact SQL Server timezone")
         supported_timezones_json = (
             json.dumps(list(contract.get("supported_reset_timezones") or []), ensure_ascii=False, sort_keys=True)
             if not exact
@@ -4289,9 +4309,9 @@ class MssqlPersistence:
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
                 cursor.execute(
-                    """
+                    f"""
                     SELECT TOP (1) ContractKey, ResetModel, ResetTimezone,
-                           EffectiveFromUtc, ActivationDelaySeconds,
+                           {SQL_RESET_TIMEZONE_FIELD}, EffectiveFromUtc, ActivationDelaySeconds,
                            ProviderQuotaCeiling, CredentialExclusivityConfirmed,
                            ProviderResetBoundaryVerified, CalendarMonthResetModelEstablished,
                            OperatorAssumptionApproved, SupportedResetTimezonesJson,
@@ -4307,25 +4327,33 @@ class MssqlPersistence:
                     same = (
                         str(_row_named(existing, "ResetModel", index=1) or "") == reset_model
                         and str(_row_named(existing, "ResetTimezone", index=2) or "") == timezone_name
-                        and _optional_utc(_row_named(existing, "EffectiveFromUtc", index=3)) == effective_from
-                        and int(_row_named(existing, "ActivationDelaySeconds", index=4) or 0)
+                        and str(_row_named(existing, SQL_RESET_TIMEZONE_FIELD, index=3) or "")
+                        == str(sql_server_timezone or "")
+                        and _optional_utc(_row_named(existing, "EffectiveFromUtc", index=4)) == effective_from
+                        and int(_row_named(existing, "ActivationDelaySeconds", index=5) or 0)
                         == int(contract["activation_delay_seconds"])
-                        and int(_row_named(existing, "ProviderQuotaCeiling", index=5) or 0)
+                        and int(_row_named(existing, "ProviderQuotaCeiling", index=6) or 0)
                         == ABSOLUTE_PROVIDER_CEILING
-                        and bool(_row_named(existing, "CredentialExclusivityConfirmed", index=6))
-                        and bool(_row_named(existing, "ProviderResetBoundaryVerified", index=7)) == provider_verified
-                        and bool(_row_named(existing, "CalendarMonthResetModelEstablished", index=8)) == model_established
-                        and bool(_row_named(existing, "OperatorAssumptionApproved", index=9)) == assumption_approved
-                        and str(_row_named(existing, "SupportedResetTimezonesJson", index=10) or "")
+                        and bool(_row_named(existing, "CredentialExclusivityConfirmed", index=7))
+                        and bool(_row_named(existing, "ProviderResetBoundaryVerified", index=8)) == provider_verified
+                        and bool(_row_named(existing, "CalendarMonthResetModelEstablished", index=9)) == model_established
+                        and bool(_row_named(existing, "OperatorAssumptionApproved", index=10)) == assumption_approved
+                        and str(_row_named(existing, "SupportedResetTimezonesJson", index=11) or "")
                         == str(supported_timezones_json or "")
-                        and str(_row_named(existing, "SourceEvidenceHash", index=11) or "") == source_hash
+                        and str(_row_named(existing, "SourceEvidenceHash", index=12) or "") == source_hash
                     )
-                    if same and str(_row_named(existing, "ContractStatus", index=12) or "") == "ACTIVE":
+                    if same and str(_row_named(existing, "ContractStatus", index=13) or "") == "ACTIVE":
                         cursor.execute("COMMIT TRANSACTION;")
                         connection.commit()
                         return {
                             "status": "IDEMPOTENT",
                             "contract_key": key,
+                            "reset_contract_status": (
+                                RESET_CONTRACT_STATUS_VERIFIED_PROVIDER
+                                if exact
+                                else RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION
+                            ),
+                            "registration_status": "ACTIVE",
                             "writes_performed": 0,
                             "administrator_context": administrator_context,
                         }
@@ -4341,23 +4369,24 @@ class MssqlPersistence:
                 if cursor.fetchone() is not None:
                     raise MssqlSafetyError("another active MDD quota reset contract already exists")
                 cursor.execute(
-                    """
+                    f"""
                     INSERT INTO ctl.MddMacQuotaResetContract
                     (
                         ContractKey, ProviderName, ResetModel, ResetTimezone,
-                        EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
+                        {SQL_RESET_TIMEZONE_FIELD}, EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
                         CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
                         CalendarMonthResetModelEstablished, OperatorAssumptionApproved,
                         SupportedResetTimezonesJson, SourceEvidenceHash, EvidenceJson,
                         ContractStatus
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
                     """,
                     (
                         key,
                         provider_name,
                         reset_model,
                         timezone_name,
+                        sql_server_timezone,
                         effective_from,
                         int(contract["activation_delay_seconds"]),
                         ABSOLUTE_PROVIDER_CEILING,
@@ -4378,6 +4407,11 @@ class MssqlPersistence:
         return {
             "status": "APPLIED",
             "contract_key": key,
+            "reset_contract_status": (
+                RESET_CONTRACT_STATUS_VERIFIED_PROVIDER
+                if exact
+                else RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION
+            ),
             "writes_performed": 1,
             "administrator_context": administrator_context,
         }

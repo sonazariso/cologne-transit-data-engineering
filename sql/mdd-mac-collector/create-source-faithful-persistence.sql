@@ -614,6 +614,10 @@ BEGIN
         ProviderName VARCHAR(80) NOT NULL,
         ResetModel VARCHAR(60) NOT NULL,
         ResetTimezone VARCHAR(80) NOT NULL,
+        /* Windows identifier used only for SQL Server's AT TIME ZONE.  It is
+           an explicit representation of an exact provider contract, never an
+           inference from the provider's location. */
+        SqlServerResetTimezone VARCHAR(128) NULL,
         EffectiveFromUtc DATETIME2(7) NOT NULL,
         ActivationDelaySeconds INT NOT NULL
             CONSTRAINT DF_ctl_MddMacQuotaResetContract_ActivationDelaySeconds DEFAULT (1800),
@@ -649,6 +653,7 @@ BEGIN
                     AND ProviderResetBoundaryVerified = 1
                     AND CalendarMonthResetModelEstablished = 1
                     AND OperatorAssumptionApproved = 0
+                    AND SqlServerResetTimezone IS NOT NULL
                 )
                 OR
                 (
@@ -657,6 +662,7 @@ BEGIN
                     AND CalendarMonthResetModelEstablished = 1
                     AND OperatorAssumptionApproved = 1
                     AND SupportedResetTimezonesJson IS NOT NULL
+                    AND SqlServerResetTimezone IS NULL
                 )
             )
             AND LEN(SourceEvidenceHash) = 64
@@ -733,6 +739,10 @@ IF COL_LENGTH(N'ctl.MddMacQuotaResetContract', N'SupportedResetTimezonesJson') I
     ALTER TABLE ctl.MddMacQuotaResetContract ADD SupportedResetTimezonesJson NVARCHAR(2000) NULL;
 GO
 
+IF COL_LENGTH(N'ctl.MddMacQuotaResetContract', N'SqlServerResetTimezone') IS NULL
+    ALTER TABLE ctl.MddMacQuotaResetContract ADD SqlServerResetTimezone VARCHAR(128) NULL;
+GO
+
 IF EXISTS
 (
     SELECT 1 FROM sys.check_constraints
@@ -762,6 +772,7 @@ ALTER TABLE ctl.MddMacQuotaResetContract
                     ResetModel = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
                     AND ProviderResetBoundaryVerified = 1
                     AND OperatorAssumptionApproved = 0
+                    AND SqlServerResetTimezone IS NOT NULL
                 )
                 OR
                 (
@@ -769,6 +780,7 @@ ALTER TABLE ctl.MddMacQuotaResetContract
                     AND ProviderResetBoundaryVerified = 0
                     AND OperatorAssumptionApproved = 1
                     AND SupportedResetTimezonesJson IS NOT NULL
+                    AND SqlServerResetTimezone IS NULL
                 )
             )
         );
@@ -778,12 +790,15 @@ GO
     The procedure is the only runtime write path for automatic rollover.  It
     locks the administrator contract, the period/accounting key, and all
     prior pending permits before inserting a zero-based COMPLETE row.  The
-    application computes DST-aware UTC bounds from the contract's IANA
-    timezone; SQL validates the same immutable contract hash and interval.
-    SQL Server UTC, rather than the caller's @AtUtc, is authoritative for
-    activation and current-period eligibility.  Safely stale prior-period
-    permits are conservatively finalized inside the same guarded transaction
-    before the unresolved-permit boundary is checked.
+    SQL independently derives the expected UTC bounds from the immutable
+    contract.  Exact contracts carry an explicit Windows timezone identifier
+    for AT TIME ZONE; bounded contracts are restricted to the registered
+    UTC-12..UTC+14 envelope and use its fixed conservative UTC bounds.  The
+    caller's period timestamps and @AtUtc are consistency inputs only.
+    SQL Server UTC is authoritative for activation and current-period
+    eligibility.  Safely stale prior-period permits are conservatively
+    finalized inside the same guarded transaction before the unresolved-
+    permit boundary is checked.
 */
 
 CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod
@@ -816,9 +831,13 @@ BEGIN
     DECLARE @contract_source_hash CHAR(64);
     DECLARE @accounting_model VARCHAR(40);
     DECLARE @provider_name VARCHAR(80);
+    DECLARE @sql_server_reset_timezone VARCHAR(128);
+    DECLARE @supported_reset_timezones_json NVARCHAR(2000);
     DECLARE @server_utc DATETIME2(7) = SYSUTCDATETIME();
     DECLARE @lock_result INT;
     DECLARE @period_month_start DATE;
+    DECLARE @expected_period_start_utc DATETIME2(7);
+    DECLARE @expected_period_end_utc DATETIME2(7);
 
     IF @StaleRecoverySeconds IS NULL OR @StaleRecoverySeconds NOT BETWEEN 1 AND 86400
         THROW 51000, 'MDD quota stale-recovery window is outside the approved bound', 1;
@@ -836,6 +855,7 @@ BEGIN
         @provider_name = ProviderName,
         @reset_model = ResetModel,
         @reset_timezone = ResetTimezone,
+        @sql_server_reset_timezone = SqlServerResetTimezone,
         @effective_from_utc = EffectiveFromUtc,
         @activation_delay_seconds = ActivationDelaySeconds,
         @provider_quota_ceiling = ProviderQuotaCeiling,
@@ -843,6 +863,7 @@ BEGIN
         @provider_reset_boundary_verified = ProviderResetBoundaryVerified,
         @calendar_month_reset_model_established = CalendarMonthResetModelEstablished,
         @operator_assumption_approved = OperatorAssumptionApproved,
+        @supported_reset_timezones_json = SupportedResetTimezonesJson,
         @contract_source_hash = SourceEvidenceHash
     FROM ctl.MddMacQuotaResetContract WITH (UPDLOCK, HOLDLOCK)
     WHERE ContractKey = @ContractKey
@@ -868,8 +889,14 @@ BEGIN
        AND (
            @provider_reset_boundary_verified IS NULL OR @provider_reset_boundary_verified <> 0
            OR @operator_assumption_approved IS NULL OR @operator_assumption_approved <> 1
+           OR @sql_server_reset_timezone IS NOT NULL
+           OR @supported_reset_timezones_json IS NULL
+           OR @supported_reset_timezones_json <> N'["Etc/GMT+12", "Etc/GMT-14"]'
        )
         THROW 51000, 'bounded MDD quota reset policy lacks explicit operator approval', 1;
+    IF @reset_model = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+       AND (@sql_server_reset_timezone IS NULL OR LTRIM(RTRIM(@sql_server_reset_timezone)) = '')
+        THROW 51000, 'exact MDD quota reset contract lacks a SQL Server timezone identifier', 1;
     IF @provider_quota_ceiling IS NULL OR @provider_quota_ceiling <> 250000
        OR @SourceEvidenceHash IS NULL OR @contract_source_hash IS NULL
        OR @SourceEvidenceHash <> @contract_source_hash
@@ -902,6 +929,42 @@ BEGIN
         THROW 51000, 'MDD quota reset contract is not effective for this period', 1;
     IF @activation_delay_seconds IS NULL OR @activation_delay_seconds NOT BETWEEN 0 AND 86400
         THROW 51000, 'MDD quota reset contract activation delay is outside the approved bound', 1;
+    IF @AtUtc IS NULL
+       OR ABS(DATEDIFF_BIG(SECOND, @AtUtc, @server_utc)) > 300
+        THROW 51000, 'caller authorization timestamp is stale or unverifiable against SQL Server UTC', 1;
+
+    /*
+       These are the only period bounds SQL will authorize.  Exact contracts
+       use SQL Server's Windows timezone database, including DST transitions.
+       The bounded candidate is deliberately limited to the immutable global
+       civil-time envelope: latest possible start is UTC-12 midnight and the
+       earliest possible next-month start is UTC+14 midnight.
+    */
+    IF @reset_model = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+    BEGIN
+        DECLARE @exact_local_start DATETIME2(7) = CAST(@period_month_start AS DATETIME2(7));
+        DECLARE @exact_local_end DATETIME2(7) = CAST(DATEADD(MONTH, 1, @period_month_start) AS DATETIME2(7));
+        SET @expected_period_start_utc = CONVERT(
+            DATETIME2(7),
+            SWITCHOFFSET(@exact_local_start AT TIME ZONE @sql_server_reset_timezone, '+00:00')
+        );
+        SET @expected_period_end_utc = CONVERT(
+            DATETIME2(7),
+            SWITCHOFFSET(@exact_local_end AT TIME ZONE @sql_server_reset_timezone, '+00:00')
+        );
+    END
+    ELSE
+    BEGIN
+        SET @expected_period_start_utc = DATEADD(
+            HOUR, 12, CAST(@period_month_start AS DATETIME2(7))
+        );
+        SET @expected_period_end_utc = DATEADD(
+            HOUR, -14, CAST(DATEADD(MONTH, 1, @period_month_start) AS DATETIME2(7))
+        );
+    END;
+    IF @ProviderPeriodStartUtc <> @expected_period_start_utc
+       OR @ProviderPeriodEndUtc <> @expected_period_end_utc
+        THROW 51000, 'caller period bounds do not match the registered reset contract', 1;
     IF @server_utc < @ProviderPeriodStartUtc
         THROW 51000, 'MDD quota period is not yet applicable at SQL Server UTC', 1;
     IF @server_utc >= @ProviderPeriodEndUtc

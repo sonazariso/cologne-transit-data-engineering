@@ -24,11 +24,17 @@ from cologne_transit_collector.quota_rollover import (  # noqa: E402
     AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
     CONSERVATIVE_ROLLOVER_MODE,
     QuotaRolloverError,
+    RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
     build_automatic_rollover_period,
     build_reset_contract,
     bounded_provider_period_for_instant,
+    bounded_provider_period_for_month,
+    derive_collection_gap,
     global_utc_offset_envelope_period_for_instant,
+    global_utc_offset_envelope_period_for_month,
     provider_period_for_instant,
+    provider_period_for_month,
 )
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlConnectionSettings,
@@ -232,6 +238,8 @@ class AutomaticRolloverTests(unittest.TestCase):
             approved_at_utc=APPROVED_AT,
         )
         self.assertEqual(contract["source_evidence_hash"], "d" * 64)
+        self.assertEqual(contract["contract_verification_status"], RESET_CONTRACT_STATUS_VERIFIED_PROVIDER)
+        self.assertEqual(contract["sql_server_reset_timezone"], "W. Europe Standard Time")
         self.assertEqual(contract["approval_provenance"]["approved_at_utc"], "2026-10-08T12:00:00Z")
         self.assertIn("registration_approval", json.loads(contract["evidence_json"]))
 
@@ -358,6 +366,14 @@ class AutomaticRolloverTests(unittest.TestCase):
         self.assertIn("@server_utc >= @ProviderPeriodEndUtc", procedure)
         self.assertIn("@server_utc < DATEADD(SECOND, @activation_delay_seconds", procedure)
         self.assertIn("@ProviderPeriodStartUtc >= @ProviderPeriodEndUtc", procedure)
+        self.assertIn("SqlServerResetTimezone", procedure)
+        self.assertIn("AT TIME ZONE @sql_server_reset_timezone", procedure)
+        self.assertIn("@expected_period_start_utc", procedure)
+        self.assertIn("caller period bounds do not match the registered reset contract", procedure)
+        self.assertIn("@AtUtc", procedure)
+        self.assertIn("DATEDIFF_BIG(SECOND, @AtUtc, @server_utc)", procedure)
+        self.assertIn("Etc/GMT+12", procedure)
+        self.assertIn("Etc/GMT-14", procedure)
         self.assertNotIn("IF @AtUtc < DATEADD(SECOND, @activation_delay_seconds", procedure)
 
     def test_bounded_calendar_month_policy_waits_for_latest_supported_timezone(self) -> None:
@@ -399,6 +415,45 @@ class AutomaticRolloverTests(unittest.TestCase):
         self.assertEqual(period.activation_not_before_utc, datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc))
         self.assertEqual(period.end_utc, datetime(2026, 11, 30, 10, 0, tzinfo=timezone.utc))
 
+    def test_collection_gap_is_derived_from_period_boundaries_across_month_lengths_and_years(self) -> None:
+        november = global_utc_offset_envelope_period_for_month("2026-11")
+        december = global_utc_offset_envelope_period_for_month("2026-12")
+        january = global_utc_offset_envelope_period_for_month("2027-01")
+        leap_february = global_utc_offset_envelope_period_for_month("2028-02")
+        leap_march = global_utc_offset_envelope_period_for_month("2028-03")
+
+        for previous, following in (
+            (november, december),
+            (december, january),
+            (leap_february, leap_march),
+        ):
+            gap = derive_collection_gap(previous.end_utc, following.activation_not_before_utc)
+            self.assertEqual(gap["collection_gap_seconds"], 95_400)
+            self.assertEqual(gap["collection_gap_hours"], 26.5)
+            self.assertEqual(gap["collection_gap_duration"], "26 hours 30 minutes")
+
+        self.assertEqual(leap_february.end_utc, datetime(2028, 2, 29, 10, tzinfo=timezone.utc))
+        self.assertEqual(
+            derive_collection_gap(
+                datetime(2026, 10, 30, 23, tzinfo=timezone.utc),
+                november.activation_not_before_utc,
+            )["collection_gap_duration"],
+            "37 hours 30 minutes",
+        )
+
+    def test_exact_timezone_period_handles_dst_and_exact_boundary_instants(self) -> None:
+        before_spring = provider_period_for_month("2026-03", timezone_name="Europe/Berlin")
+        before_fall = provider_period_for_month("2026-10", timezone_name="Europe/Berlin")
+        self.assertEqual(before_spring.start_utc, datetime(2026, 2, 28, 23, tzinfo=timezone.utc))
+        self.assertEqual(before_spring.end_utc, datetime(2026, 3, 31, 22, tzinfo=timezone.utc))
+        self.assertEqual(before_fall.start_utc, datetime(2026, 9, 30, 22, tzinfo=timezone.utc))
+        self.assertEqual(before_fall.end_utc, datetime(2026, 10, 31, 23, tzinfo=timezone.utc))
+        bounded = bounded_provider_period_for_month(
+            "2024-02",
+            timezone_names=("Etc/GMT+12", "Etc/GMT-14"),
+        )
+        self.assertEqual(bounded.end_utc, datetime(2024, 2, 29, 10, tzinfo=timezone.utc))
+
     def test_bounded_policy_requires_explicit_operator_approval(self) -> None:
         evidence = {
             "reset_contract_status": "APPROVED_ASSUMPTION",
@@ -426,6 +481,10 @@ class AutomaticRolloverTests(unittest.TestCase):
         )
         self.assertEqual(contract["reset_model"], CONSERVATIVE_ROLLOVER_MODE)
         self.assertFalse(contract["provider_reset_boundary_verified"])
+        self.assertEqual(
+            contract["contract_verification_status"],
+            RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+        )
 
 
 if __name__ == "__main__":

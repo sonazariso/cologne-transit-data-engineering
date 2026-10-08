@@ -57,7 +57,13 @@ from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
 from cologne_transit_collector.quota_rollover import (  # noqa: E402
     GLOBAL_UTC_OFFSET_ENVELOPE_LABEL,
     GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
-    global_utc_offset_envelope_period_for_instant,
+    RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    RESET_CONTRACT_STATUS_NOT_REGISTERED,
+    RESET_CONTRACT_STATUS_REVOKED,
+    RESET_CONTRACT_STATUS_UNVERIFIED,
+    RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+    derive_collection_gap,
+    global_utc_offset_envelope_period_for_month,
 )
 from package_source_zip import is_forbidden_source_member, source_members  # noqa: E402
 from validate_tiered50_migration import validate_static  # noqa: E402
@@ -178,11 +184,20 @@ def validate_quota_rollover_contract() -> dict[str, Any]:
     document = json.loads(QUOTA_RESET_CONTRACT.read_text(encoding="utf-8"))
     if document.get("provider") != "MDD NRW" or document.get("monthly_quota_ceiling") != ABSOLUTE_PROVIDER_CEILING:
         raise ValueError("quota reset contract artifact has the wrong provider or ceiling")
-    if document.get("reset_contract_status") not in {"UNVERIFIED", "VERIFIED", "APPROVED_ASSUMPTION"}:
+    contract_status = document.get("reset_contract_status")
+    allowed_statuses = {
+        RESET_CONTRACT_STATUS_UNVERIFIED,
+        RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+        RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+        RESET_CONTRACT_STATUS_NOT_REGISTERED,
+        RESET_CONTRACT_STATUS_REVOKED,
+    }
+    if contract_status not in allowed_statuses:
         raise ValueError("quota reset contract status is not explicit")
-    if document.get("provider_reset_boundary_verified") is not (document.get("reset_contract_status") == "VERIFIED"):
+    provider_verified = contract_status == RESET_CONTRACT_STATUS_VERIFIED_PROVIDER
+    if document.get("provider_reset_boundary_verified") is not provider_verified:
         raise ValueError("quota reset contract verification flags are inconsistent")
-    if document.get("reset_contract_status") == "APPROVED_ASSUMPTION" and document.get(
+    if contract_status == RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION and document.get(
         "provider_monthly_reset_model_established"
     ) is not True:
         raise ValueError("approved bounded rollover requires an explicitly established calendar-month model")
@@ -200,21 +215,38 @@ def validate_quota_rollover_contract() -> dict[str, Any]:
         raise ValueError("rollover policy endpoint timezone evidence is incomplete")
     if int(candidate.get("post_reset_safety_delay_seconds", -1)) != 1800:
         raise ValueError("rollover policy safety delay is not the approved 30 minutes")
-    november = global_utc_offset_envelope_period_for_instant(
-        datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc)
+    november = global_utc_offset_envelope_period_for_month("2026-11")
+    december = global_utc_offset_envelope_period_for_month("2026-12")
+    november_to_december_gap = derive_collection_gap(
+        november.end_utc,
+        december.activation_not_before_utc,
+    )
+    october_to_november_gap = derive_collection_gap(
+        datetime(2026, 10, 30, 23, 0, tzinfo=timezone.utc),
+        november.activation_not_before_utc,
     )
     expected_example = candidate.get("november_2026_example")
     if not isinstance(expected_example, dict):
         raise ValueError("rollover policy is missing its reusable November boundary example")
-    if expected_example.get("authorization_not_before_utc") != november.activation_not_before_utc.isoformat().replace(
-        "+00:00", "Z"
-    ) or expected_example.get("earliest_next_period_risk_boundary_utc") != november.end_utc.isoformat().replace(
-        "+00:00", "Z"
+    if (
+        expected_example.get("authorization_not_before_utc")
+        != november.activation_not_before_utc.isoformat().replace("+00:00", "Z")
+        or expected_example.get("earliest_next_period_risk_boundary_utc")
+        != november.end_utc.isoformat().replace("+00:00", "Z")
+        or expected_example.get("safe_period_end_utc")
+        != november.end_utc.isoformat().replace("+00:00", "Z")
+        or expected_example.get("following_period_authorization_not_before_utc")
+        != december.activation_not_before_utc.isoformat().replace("+00:00", "Z")
+        or expected_example.get("collection_gap") != november_to_december_gap
     ):
         raise ValueError("rollover policy boundary example does not match the executable envelope calculation")
+    october_example = candidate.get("october_bootstrap_to_november_example")
+    if not isinstance(october_example, dict) or october_example.get("collection_gap") != october_to_november_gap:
+        raise ValueError("October bootstrap to November collection gap is not derived from its UTC boundaries")
     return {
         "status": "PASS",
-        "contract_status": document["reset_contract_status"],
+        "contract_status": contract_status,
+        "registration_status": document.get("registration_status", RESET_CONTRACT_STATUS_NOT_REGISTERED),
         "reset_model": document.get("reset_model"),
         "reset_timezone": document.get("reset_timezone"),
         "automatic_rollover_implementation": document["automatic_rollover_implementation"],
@@ -498,9 +530,12 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
     else:
         blockers.append("Live Tiered50 materialization is not proven with exactly 43 IDs 8–50.")
     quota_contract = checks["quota_rollover_contract"]
-    if quota_contract["contract_status"] != "VERIFIED":
+    if quota_contract["contract_status"] not in {
+        RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
+        RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
+    } or quota_contract.get("registration_status") != "ACTIVE":
         blockers.append(
-            "Future automatic monthly rollover is implemented but remains fail-closed until the provider supplies and an administrator registers the exact reset timezone/boundary contract."
+            "Future automatic monthly rollover is implemented but remains fail-closed until an exact provider contract or explicitly approved bounded assumption is durably registered."
         )
     if not live_result or not live_result.get("quota_usage", {}).get("state_available", False):
         blockers.append(

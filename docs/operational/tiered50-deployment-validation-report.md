@@ -157,7 +157,8 @@ evidence artifact.
 The provider cutoff, freshness, reset timezone/bounds, counter semantics,
 post-cutoff usage, and external reservations remain unverified. Automatic
 future-month rollover is implemented in SQL and the runtime, but it remains
-fail-closed until an exact provider reset contract is verified and registered.
+fail-closed until either an exact provider reset contract is verified and
+registered or the explicitly approved bounded policy is registered.
 The October policy stop remains `2026-10-30T23:00:00Z` and is not extended by
 rollover.
 
@@ -167,9 +168,16 @@ UTC-12 through UTC+14 envelope, wait 30 minutes after the latest possible
 month start, and authorize no earlier than 12:30 UTC on the first day of a new
 month. For November 2026 this means a latest safe start of
 `2026-11-01T12:00:00Z`, authorization at `2026-11-01T12:30:00Z`, and an
-earliest next-period risk boundary of `2026-11-30T10:00:00Z`; the resulting
-temporary gap is 2 hours 30 minutes. The candidate is not provider-confirmed,
-not operator-approved, and has not been registered or activated.
+earliest next-period risk boundary/safe-period end of
+`2026-11-30T10:00:00Z`. The next authorization is
+`2026-12-01T12:30:00Z`, so the actual normal intermonth collection gap is
+26 hours 30 minutes (26.5 hours), derived from those two UTC period
+boundaries. The already-approved October bootstrap ending at
+`2026-10-30T23:00:00Z` would create a 37 hours 30 minutes gap before the
+proposed November authorization. The candidate is not provider-confirmed,
+not operator-approved, and has not been registered or activated; the full
+machine-readable boundary and gap derivation is in
+[`mdd-quota-reset-contract.json`](mdd-quota-reset-contract.json).
 
 The first scheduled Tiered50 bucket was `5971541`: 18 target audits ran, 2
 succeeded and 16 were skipped by the heartbeat budget, with 2 HTTP responses,
