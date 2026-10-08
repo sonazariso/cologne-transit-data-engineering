@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import plistlib
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,8 @@ from cologne_transit_collector.domain import (  # noqa: E402
 )
 from cologne_transit_collector.admin_evidence import (  # noqa: E402
     AdminEvidenceError,
+    normalize_sql_instance_identity,
+    sql_instance_identities_match,
     validate_admin_evidence_artifact,
 )
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
@@ -46,6 +49,7 @@ from cologne_transit_collector.conservative_bootstrap import (  # noqa: E402
 )
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     EXPECTED_SQL_DATABASE,
+    MacOSKeychainSecretProvider,
     MSSQL_CREDENTIAL,
     RUNTIME_CONFIG_PATH_ENV,
     load_local_runtime_values,
@@ -71,6 +75,8 @@ TIMESTAMP_KIND = "REAL_TIERED50_CUTOVER"
 RESUME_EVENT_TABLE = "ctl.MddMacProductionResumeEvent"
 EXPECTED_TIERED50_TARGET_IDS = frozenset(range(8, 51))
 DEFAULT_RESUME_KEY = "TIERED50_PANEL_V1:RESUME:CURRENT_SAMPLING_ERA"
+RESUME_APP_LOCK_RESOURCE = "CologneTransitIntelligence:TIERED50:RESUME"
+ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
 
 
 def parse_utc(value: str) -> datetime:
@@ -119,17 +125,33 @@ def _installed_runtime_connection() -> tuple[MssqlConnectionSettings, str]:
 
 
 def _administrator_connection_settings() -> MssqlConnectionSettings:
-    """Resolve an explicit administrator path without runtime fallback."""
+    """Resolve an explicit administrator path without runtime fallback.
+
+    The preferred Mac path keeps the password in a user Keychain item.  A
+    one-process ``MSSQL_ADMIN_PASSWORD`` override remains available for an
+    operator-controlled emergency invocation, but it is never written to a
+    file, plist, evidence artifact, or diagnostic.  No ``MSSQL_*`` runtime
+    value is consulted for any missing administrator field.
+    """
 
     values: dict[str, str] = {}
     missing: list[str] = []
-    for suffix in ("HOST", "DATABASE", "USER", "PASSWORD"):
+    for suffix in ("HOST", "DATABASE", "USER"):
         name = f"MSSQL_ADMIN_{suffix}"
         value = os.environ.get(name)
         if value is None or not value.strip():
             missing.append(name)
         else:
             values[f"MSSQL_{suffix}"] = value
+    password = os.environ.get("MSSQL_ADMIN_PASSWORD")
+    if password is None or not password.strip():
+        account = os.environ.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER", "")
+        service = os.environ.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE
+        password = MacOSKeychainSecretProvider().get(service=service, account=account)
+    if password is None or not password.strip():
+        missing.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
+    else:
+        values["MSSQL_PASSWORD"] = password
     for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
         name = f"MSSQL_ADMIN_{suffix}"
         value = os.environ.get(name)
@@ -156,6 +178,16 @@ def _validate_limited_runtime(*, now: datetime) -> dict[str, Any]:
     login = dict(persistence.runtime_login_status())
     if str(login.get("database_name") or "") != EXPECTED_SQL_DATABASE:
         raise RuntimeError("dedicated runtime connection reached the wrong database")
+    runtime_sql_identity = normalize_sql_instance_identity(
+        {
+            "server_name": login.get("server_name"),
+            "machine_name": login.get("machine_name"),
+            "instance_name": login.get("instance_name"),
+            "database_name": login.get("database_name"),
+        }
+    )
+    if not runtime_sql_identity.get("server_name"):
+        raise RuntimeError("authoritative runtime SQL instance identity is unavailable")
     if str(login.get("login_name") or "").casefold() != "colognetransitcollector":
         raise RuntimeError("dedicated runtime connection did not use CologneTransitCollector")
     if any(
@@ -180,6 +212,7 @@ def _validate_limited_runtime(*, now: datetime) -> dict[str, Any]:
         "config_path": config_path,
         "settings": settings.redacted(),
         "login": login,
+        "sql_instance_identity": runtime_sql_identity,
         "privilege_boundary": privilege_boundary,
         "runtime_schema": schema,
         "tiered50_schema": tiered_schema,
@@ -216,6 +249,7 @@ def _validate_operational_evidence(
     *,
     now: datetime,
     require_historical_heartbeat: bool = True,
+    expected_runtime_sql_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Require fresh administrator evidence before changing production state."""
 
@@ -232,6 +266,7 @@ def _validate_operational_evidence(
             now_utc=now,
             expected_database=EXPECTED_SQL_DATABASE,
             public_key_path=os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"),
+            expected_sql_identity=expected_runtime_sql_identity,
         )
     except AdminEvidenceError as exc:
         raise RuntimeError(str(exc)) from exc
@@ -239,6 +274,13 @@ def _validate_operational_evidence(
     sql = evidence.get("sql")
     if not isinstance(host, dict) or not isinstance(sql, dict):
         raise RuntimeError("administrator operational evidence is structurally incomplete")
+    if expected_runtime_sql_identity is not None:
+        evidence_identity = authenticated.get("sql_instance_identity")
+        if not isinstance(evidence_identity, Mapping) or not sql_instance_identities_match(
+            evidence_identity,
+            expected_runtime_sql_identity,
+        ):
+            raise RuntimeError("administrator operational evidence is bound to a different SQL instance")
     admin_authorization = sql.get("admin_authorization")
     if not isinstance(admin_authorization, dict) or admin_authorization.get("status") != "PASS":
         raise RuntimeError("MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: administrative-query authorization is not proven")
@@ -248,22 +290,100 @@ def _validate_operational_evidence(
     backup = sql.get("backup_verifyonly")
     if not isinstance(backup, dict) or backup.get("status") != "PASS":
         raise RuntimeError("latest SQL backup VERIFYONLY evidence is not passing")
+    latest_backup = sql.get("latest_full_backup")
+    if (
+        not isinstance(latest_backup, dict)
+        or latest_backup.get("complete_media_set_proven") is not True
+        or int(latest_backup.get("media_count", 0) or 0) < 1
+        or latest_backup.get("has_backup_checksums") is not True
+    ):
+        raise RuntimeError("latest checksum-bearing full backup media set is not completely proven")
     backup_gate = sql.get("backup_gate")
     if not isinstance(backup_gate, dict) or backup_gate.get("status") != "PASS":
         raise RuntimeError("administrator backup gate is not independently proven")
     volumes = sql.get("volume_capacity")
     if not isinstance(volumes, list) or not any(int(row.get("available_bytes", 0) or 0) > 0 for row in volumes if isinstance(row, dict)):
         raise RuntimeError("SQL database-host volume capacity is not proven")
+    database_files = sql.get("database_files")
+    database_files_evidence = sql.get("database_files_evidence")
+    if (
+        not isinstance(database_files_evidence, dict)
+        or database_files_evidence.get("status") != "PASS"
+        or not isinstance(database_files, list)
+        or not database_files
+    ):
+        raise RuntimeError("SQL database-file capacity is not proven")
     capacity_gate = sql.get("capacity_gate")
     if not isinstance(capacity_gate, dict) or capacity_gate.get("status") != "PASS":
         raise RuntimeError("administrator SQL capacity gate is not independently proven")
     log_space_gate = sql.get("log_space_gate")
     if not isinstance(log_space_gate, dict) or log_space_gate.get("status") != "PASS":
         raise RuntimeError("administrator SQL log-space capacity gate is not independently proven")
+    cutover_history_evidence = sql.get("production_cutover_history_evidence")
+    cutover_history = sql.get("production_cutover_history")
+    if (
+        not isinstance(cutover_history_evidence, dict)
+        or cutover_history_evidence.get("status") != "PASS"
+        or not isinstance(cutover_history, list)
+        or not any(
+            isinstance(row, dict) and row.get("tiered50_activation_status") == "ACTIVATED"
+            for row in cutover_history
+        )
+        or not any(
+            isinstance(row, dict) and row.get("tiered50_activation_status") == "OUTAGE"
+            for row in cutover_history
+        )
+    ):
+        raise RuntimeError("original Tiered50 activation and historical outage evidence is not proven")
+    competing_writer_evidence = sql.get("competing_production_writers_evidence")
+    competing_writers = sql.get("competing_production_writers")
+    if (
+        not isinstance(competing_writer_evidence, dict)
+        or competing_writer_evidence.get("status") != "PASS"
+        or not isinstance(competing_writers, list)
+        or any(isinstance(row, dict) and int(row.get("running_count", 0) or 0) > 0 for row in competing_writers)
+    ):
+        raise RuntimeError("absence of competing production writers is not proven")
+    quota_ledger_evidence = sql.get("current_quota_ledger_evidence")
+    if not isinstance(quota_ledger_evidence, dict) or quota_ledger_evidence.get("status") != "PASS":
+        raise RuntimeError("current SQL quota ledger evidence is not proven by the administrator path")
+    quota_ledger = sql.get("current_quota_ledger")
+    quota_integrity = sql.get("quota_integrity") or sql.get("quota_usage")
+    quota_mode = (
+        str(quota_integrity.get("authorization_mode") or quota_integrity.get("source_kind") or "")
+        if isinstance(quota_integrity, Mapping)
+        else ""
+    )
+    complete_ledger_proven = (
+        isinstance(quota_ledger, list)
+        and len(quota_ledger) == 1
+        and isinstance(quota_ledger[0], dict)
+        and str(quota_ledger[0].get("accounting_status") or "") == "COMPLETE"
+    )
+    bounded_bootstrap_proven = (
+        not quota_ledger
+        and isinstance(quota_integrity, Mapping)
+        and quota_integrity.get("status") == "PASS"
+        and quota_integrity.get("state_available") is True
+        and quota_mode in {BOOTSTRAP_AUTHORIZATION_MODE, "BOUNDED_BOOTSTRAP"}
+    )
+    if not complete_ledger_proven and not bounded_bootstrap_proven:
+        raise RuntimeError("current SQL quota ledger is missing, ambiguous, or not COMPLETE")
     vmware = host.get("vmware")
     vmware_returncode = vmware.get("returncode") if isinstance(vmware, dict) else None
     if not isinstance(vmware, dict) or vmware_returncode is None or int(vmware_returncode) != 0:
         raise RuntimeError("running Windows VM evidence is not proven")
+    windows_disk = sql.get("windows_vm_disk")
+    if (
+        not isinstance(windows_disk, dict)
+        or windows_disk.get("status") != "PASS"
+        or not isinstance(windows_disk.get("volumes"), list)
+        or not any(
+            isinstance(volume, dict) and int(volume.get("free_bytes", 0) or 0) > 0
+            for volume in windows_disk["volumes"]
+        )
+    ):
+        raise RuntimeError("Windows VM disk capacity is not proven")
     plist = host.get("tiered50_plist")
     if (
         not isinstance(plist, dict)
@@ -297,6 +417,7 @@ def _validate_operational_evidence(
         "backup_verifyonly": "PASS",
         "sql_volume_capacity": "PASS",
         "running_windows_vm": "PASS",
+        "windows_vm_disk_capacity": "PASS",
         "installed_tiered50_launchagent": "PRESENT_SECRET_FREE",
         "prior_scheduled_heartbeat_evidence": (
             "SIX_CONSECUTIVE_SUCCESSFUL_HISTORICAL_BUCKETS_READ_ONLY"
@@ -642,20 +763,248 @@ def _launch_agent_loaded() -> bool:
     return result.returncode == 0
 
 
-def _disable_tiered50_after_resume_failure(*, runtime_config_path: str) -> None:
-    """Leave the existing Tiered50 artifact stopped after a partial start."""
+_MISSING_QUOTA_VALUE = object()
+
+
+def _strict_quota_integer(quota: Mapping[str, Any], field: str) -> int:
+    """Parse one SQL quota integer without collapsing NULL or zero."""
+
+    value = quota.get(field, _MISSING_QUOTA_VALUE)
+    if value is _MISSING_QUOTA_VALUE:
+        raise RuntimeError(f"current SQL quota ledger is missing {field}")
+    if value is None:
+        raise RuntimeError(f"current SQL quota ledger has NULL {field}")
+    if isinstance(value, bool):
+        raise RuntimeError(f"current SQL quota ledger has invalid {field}")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(f"current SQL quota ledger has invalid {field}") from exc
+    if isinstance(value, float) and value != parsed:
+        raise RuntimeError(f"current SQL quota ledger has invalid {field}")
+    if parsed < 0:
+        raise RuntimeError(f"current SQL quota ledger has negative {field}")
+    return parsed
+
+
+def _launchctl_state_after_rollback() -> dict[str, Any]:
+    """Read actual launchd state, distinguishing unloaded from unreadable."""
+
+    qualified = f"gui/{os.getuid()}/{TIERED50_LABEL}"
+    domain = f"gui/{os.getuid()}"
+    try:
+        loaded_result = subprocess.run(
+            ["/bin/launchctl", "print", qualified],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "status": "UNREADABLE",
+            "loaded": None,
+            "disabled": None,
+            "error_type": type(exc).__name__,
+            "reason": "launchctl state could not be read",
+        }
+
+    output = f"{loaded_result.stdout}\n{loaded_result.stderr}".casefold()
+    if loaded_result.returncode == 0:
+        loaded: bool | None = True
+    elif any(marker in output for marker in ("could not find service", "no such process", "not found", "unknown service")):
+        loaded = False
+    else:
+        loaded = None
 
     try:
+        disabled_result = subprocess.run(
+            ["/bin/launchctl", "print-disabled", domain],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "status": "UNREADABLE",
+            "loaded": loaded,
+            "disabled": None,
+            "error_type": type(exc).__name__,
+            "reason": "launchctl disabled-state could not be read",
+        }
+    if disabled_result.returncode != 0:
+        return {
+            "status": "UNREADABLE",
+            "loaded": loaded,
+            "disabled": None,
+            "launchctl_print_disabled_returncode": disabled_result.returncode,
+            "reason": "launchctl disabled-state command failed",
+        }
+    disabled_output = f"{disabled_result.stdout}\n{disabled_result.stderr}"
+    match = re.search(
+        rf"[\"']?{re.escape(TIERED50_LABEL)}[\"']?\s*=>\s*(true|false)",
+        disabled_output,
+        flags=re.IGNORECASE,
+    )
+    disabled = bool(match and match.group(1).casefold() == "true")
+    return {
+        "status": "READABLE" if loaded is not None else "UNREADABLE",
+        "loaded": loaded,
+        "disabled": disabled,
+        "launchctl_print_returncode": loaded_result.returncode,
+        "launchctl_print_disabled_returncode": disabled_result.returncode,
+    }
+
+
+def _installed_tiered50_disabled_state() -> dict[str, Any]:
+    try:
+        with TIERED50_INSTALLED_PATH.open("rb") as handle:
+            plist = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException) as exc:
+        return {
+            "status": "UNREADABLE",
+            "exists": TIERED50_INSTALLED_PATH.exists(),
+            "disabled": None,
+            "error_type": type(exc).__name__,
+        }
+    return {
+        "status": "PASS",
+        "exists": True,
+        "disabled": bool(plist.get("Disabled")),
+        "path": str(TIERED50_INSTALLED_PATH),
+    }
+
+
+def _disable_tiered50_after_resume_failure(*, runtime_config_path: str) -> dict[str, Any]:
+    """Stop a partial resume and verify the resulting state before reporting it."""
+
+    rollback_failures: list[dict[str, str]] = []
+    actions: list[str] = []
+    try:
+        actions.append("install_disabled_plist")
         install_launch_agent(
             activate=False,
             runtime_config_path=runtime_config_path,
             mode=TIERED50_MODE,
         )
+    except BaseException as exc:
+        rollback_failures.append(
+            {
+                "action": "install_disabled_plist",
+                "error_type": type(exc).__name__,
+                "reason": str(exc)[:500],
+            }
+        )
+    try:
+        actions.append("bootout_and_disable_launchagent")
         bootstrap_launch_agent(activate=False, mode=TIERED50_MODE)
-    except Exception:
-        # The caller reports the original resume failure.  The artifact was
-        # already safe-by-default and no SQL activation state is rewritten.
-        pass
+    except BaseException as exc:
+        rollback_failures.append(
+            {
+                "action": "bootout_and_disable_launchagent",
+                "error_type": type(exc).__name__,
+                "reason": str(exc)[:500],
+            }
+        )
+
+    launchctl_state = _launchctl_state_after_rollback()
+    plist_state = _installed_tiered50_disabled_state()
+    if launchctl_state.get("loaded") is True:
+        status = "STILL_ACTIVE"
+    elif (
+        launchctl_state.get("status") == "READABLE"
+        and launchctl_state.get("loaded") is False
+        and launchctl_state.get("disabled") is True
+        and plist_state.get("status") == "PASS"
+        and plist_state.get("disabled") is True
+    ):
+        status = "STOPPED_VERIFIED"
+    else:
+        status = "STOP_NOT_VERIFIED"
+    return {
+        "status": status,
+        "critical_operational_blocker": status != "STOPPED_VERIFIED",
+        "actions_attempted": actions,
+        "rollback_failures": rollback_failures,
+        "launchctl_state": launchctl_state,
+        "installed_plist_state": plist_state,
+    }
+
+
+class Tiered50ResumeFailure(RuntimeError):
+    """A resume failure that retains the original and rollback outcomes."""
+
+    def __init__(self, message: str, *, original_failure: BaseException, rollback: Mapping[str, Any]) -> None:
+        self.original_failure_type = type(original_failure).__name__
+        self.original_failure_reason = str(original_failure)[:500]
+        self.rollback = dict(rollback)
+        super().__init__(message)
+
+
+def _resume_failure(
+    message: str,
+    *,
+    original_failure: BaseException,
+    rollback: Mapping[str, Any],
+) -> Tiered50ResumeFailure:
+    rollback_status = str(rollback.get("status") or "STOP_NOT_VERIFIED")
+    if rollback_status == "STOPPED_VERIFIED":
+        detail = f"{message}; rollback_status=STOPPED_VERIFIED"
+    else:
+        detail = (
+            f"{message}; CRITICAL_OPERATIONAL_BLOCKER=RESUME_ROLLBACK_{rollback_status}; "
+            "Tiered50 stop is not verified"
+        )
+    return Tiered50ResumeFailure(detail, original_failure=original_failure, rollback=rollback)
+
+
+def _acquire_resume_operation_lock(connection: Any) -> None:
+    """Acquire a SQL-session application lock for the whole resume transition.
+
+    The lock owner is the SQL session rather than an ordinary row
+    transaction.  Validation rows can therefore be committed before slow
+    launchd work while the exclusive resume transition remains serialized.
+    SQL Server releases a session-owned application lock when this connection
+    closes, including an abnormal process termination.
+    """
+
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SET XACT_ABORT ON;
+            DECLARE @lock_result INT;
+            EXEC @lock_result = sys.sp_getapplock
+                @Resource = %s,
+                @LockMode = N'Exclusive',
+                @LockOwner = N'Session',
+                @LockTimeout = 0;
+            IF @lock_result < 0
+                THROW 51001, 'Tiered50 resume operation is already in progress', 1;
+            """,
+            (RESUME_APP_LOCK_RESOURCE,),
+        )
+        connection.commit()
+    except BaseException as exc:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        if "already in progress" in str(exc).casefold() or "51001" in str(exc):
+            raise RuntimeError("TIERED50_RESUME_ALREADY_IN_PROGRESS") from exc
+        raise RuntimeError("TIERED50_RESUME_COORDINATION_UNAVAILABLE") from exc
+
+
+def _release_resume_operation_lock(connection: Any) -> None:
+    """Release the session application lock, preserving close-time cleanup."""
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "EXEC sys.sp_releaseapplock @Resource = %s, @LockOwner = N'Session';",
+        (RESUME_APP_LOCK_RESOURCE,),
+    )
+    connection.commit()
 
 
 def _record_resume_event(
@@ -664,10 +1013,13 @@ def _record_resume_event(
     resume_key: str,
     lifecycle: Mapping[str, Any],
     evidence: Mapping[str, Any],
+    connection: Any | None = None,
 ) -> dict[str, Any]:
     """Record one actual resume after launchd has successfully started."""
 
-    connection = connect_mssql(settings)
+    owns_connection = connection is None
+    if owns_connection:
+        connection = connect_mssql(settings)
     event: dict[str, Any]
     try:
         cursor = connection.cursor()
@@ -737,7 +1089,8 @@ def _record_resume_event(
         connection.rollback()
         raise
     finally:
-        connection.close()
+        if owns_connection:
+            connection.close()
     return event
 
 
@@ -750,218 +1103,293 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
         raise RuntimeError("resume key is empty, too long, or contains a prohibited marker")
 
     settings = _administrator_connection_settings()
-    limited_runtime = _validate_limited_runtime(now=now)
-    quota = dict(limited_runtime.get("quota") or {})
-    if not quota.get("state_available"):
-        raise RuntimeError("current SQL quota ledger is not available for resume")
-    if int(quota.get("reserved_shared_usage", 0) or 0) != 0:
-        raise RuntimeError("pending quota permits must be zero before resume")
-    accounted = int(quota.get("known_total", -1) or -1)
-    if accounted < 0 or accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
-        raise RuntimeError("current SQL quota ledger does not leave approved retry headroom")
-    launch_agent = _installed_tiered50_resume_readiness(runtime_config_path=str(limited_runtime["config_path"]))
-    operational_evidence = _validate_operational_evidence(now=now, require_historical_heartbeat=False)
-
-    manifest = load_default_manifest(ROOT)
     connection = connect_mssql(settings)
-    lifecycle: dict[str, Any]
-    existing_resume: Any = None
-    latest_resume: Any = None
-    competing_writers: list[dict[str, Any]] = []
+    lock_acquired = False
     try:
+        _acquire_resume_operation_lock(connection)
+        lock_acquired = True
+        limited_runtime = _validate_limited_runtime(now=now)
+        quota = dict(limited_runtime.get("quota") or {})
+        if quota.get("state_available") is not True:
+            raise RuntimeError("current SQL quota ledger is not available for resume")
+        reserved = _strict_quota_integer(quota, "reserved_shared_usage")
+        if reserved != 0:
+            raise RuntimeError("pending quota permits must be zero before resume")
+        accounted = _strict_quota_integer(quota, "known_total")
+        if accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
+            raise RuntimeError("current SQL quota ledger does not leave approved retry headroom")
+        launch_agent = _installed_tiered50_resume_readiness(
+            runtime_config_path=str(limited_runtime["config_path"])
+        )
+        operational_evidence = _validate_operational_evidence(
+            now=now,
+            require_historical_heartbeat=False,
+            expected_runtime_sql_identity=limited_runtime.get("sql_instance_identity")
+            or (limited_runtime.get("login") if isinstance(limited_runtime.get("login"), Mapping) else None),
+        )
+
+        manifest = load_default_manifest(ROOT)
+        lifecycle: dict[str, Any]
+        existing_resume: Any = None
+        latest_resume: Any = None
+        competing_writers: list[dict[str, Any]] = []
         cursor = connection.cursor()
-        cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
-        cursor.execute(
-            f"""
-            SELECT SamplingTargetId, IsEnabled, ActivationStatus,
-                   PanelVersion, SamplingEra, ActivatedAtUtc
-            FROM {TARGET_TABLE} WITH (UPDLOCK, HOLDLOCK)
-            WHERE PanelVersion = %s AND SamplingEra = %s
-            ORDER BY SamplingTargetId
-            """,
-            (manifest.panel_version, SamplingEra.TIERED50.value),
-        )
-        target_rows = list(cursor.fetchall())
-        cursor.execute(
-            """
-            SELECT SamplingEraId, PanelVersion, EffectiveAtUtc,
-                   TimestampKind, IsActive, IsSynthetic
-            FROM ctl.MddMacSamplingEra WITH (UPDLOCK, HOLDLOCK)
-            WHERE EraCode = %s
-            """,
-            (ERA_CODE,),
-        )
-        era_rows = list(cursor.fetchall())
-        cursor.execute(
-            """
-            SELECT CurrentMarkerId, SamplingEraId, EraCode, PanelVersion,
-                   EffectiveAtUtc
-            FROM ctl.MddMacCurrentProductionEra WITH (UPDLOCK, HOLDLOCK)
-            WHERE CurrentMarkerId = 1
-            """
-        )
-        current_era_rows = list(cursor.fetchall())
-        cursor.execute(
-            """
-            SELECT CutoverKey, Tiered50ActivationStatus,
-                   Tiered50ActivationAtUtc
-            FROM ctl.MddMacProductionCutover WITH (UPDLOCK, HOLDLOCK)
-            WHERE PanelVersion = %s AND Tiered50ActivationAtUtc IS NOT NULL
-            ORDER BY CutoverId
-            """,
-            (manifest.panel_version,),
-        )
-        cutover_rows = list(cursor.fetchall())
-        activation_rows = [
-            row for row in cutover_rows
-            if str(_named_value(row, "Tiered50ActivationStatus", 1) or "") == "ACTIVATED"
-        ]
-        outage_rows = [
-            row for row in cutover_rows
-            if str(_named_value(row, "Tiered50ActivationStatus", 1) or "") == "OUTAGE"
-        ]
-        lifecycle = validate_existing_tiered50_activation(
-            target_rows=target_rows,
-            era_rows=era_rows,
-            current_era_rows=current_era_rows,
-            activation_rows=activation_rows,
-            outage_rows=outage_rows,
-        )
-        cursor.execute(
-            """
-            SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
-            FROM ctl.MddMacCollectorRun WITH (UPDLOCK, HOLDLOCK)
-            WHERE Status IN ('RUNNING', 'CLAIMED')
-              AND CollectionContext IN (%s, %s)
-            GROUP BY CollectionContext
-            """,
-            ("MAC_LEGACY7_PRODUCTION", MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT),
-        )
-        competing_writers = validate_no_competing_production_writers(list(cursor.fetchall()))
-        cursor.execute(
-            f"""
-            SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode,
-                   SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc,
-                   LaunchAgentLabel
-            FROM {RESUME_EVENT_TABLE} WITH (UPDLOCK, HOLDLOCK)
-            WHERE PanelVersion = %s
-            ORDER BY ResumeEventId DESC
-            """,
-            (manifest.panel_version,),
-        )
-        resume_rows = list(cursor.fetchall())
-        latest_resume = resume_rows[0] if resume_rows else None
-        existing_resume = next(
-            (
-                row
-                for row in resume_rows
-                if str(_named_value(row, "ResumeKey", 1) or "") == key
-            ),
-            None,
-        )
-        cursor.execute("COMMIT TRANSACTION;")
-        connection.commit()
-    except BaseException:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
+        try:
+            cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+            cursor.execute(
+                f"""
+                SELECT SamplingTargetId, IsEnabled, ActivationStatus,
+                       PanelVersion, SamplingEra, ActivatedAtUtc
+                FROM {TARGET_TABLE} WITH (UPDLOCK, HOLDLOCK)
+                WHERE PanelVersion = %s AND SamplingEra = %s
+                ORDER BY SamplingTargetId
+                """,
+                (manifest.panel_version, SamplingEra.TIERED50.value),
+            )
+            target_rows = list(cursor.fetchall())
+            cursor.execute(
+                """
+                SELECT SamplingEraId, PanelVersion, EffectiveAtUtc,
+                       TimestampKind, IsActive, IsSynthetic
+                FROM ctl.MddMacSamplingEra WITH (UPDLOCK, HOLDLOCK)
+                WHERE EraCode = %s
+                """,
+                (ERA_CODE,),
+            )
+            era_rows = list(cursor.fetchall())
+            cursor.execute(
+                """
+                SELECT CurrentMarkerId, SamplingEraId, EraCode, PanelVersion,
+                       EffectiveAtUtc
+                FROM ctl.MddMacCurrentProductionEra WITH (UPDLOCK, HOLDLOCK)
+                WHERE CurrentMarkerId = 1
+                """
+            )
+            current_era_rows = list(cursor.fetchall())
+            cursor.execute(
+                """
+                SELECT CutoverKey, Tiered50ActivationStatus,
+                       Tiered50ActivationAtUtc
+                FROM ctl.MddMacProductionCutover WITH (UPDLOCK, HOLDLOCK)
+                WHERE PanelVersion = %s AND Tiered50ActivationAtUtc IS NOT NULL
+                ORDER BY CutoverId
+                """,
+                (manifest.panel_version,),
+            )
+            cutover_rows = list(cursor.fetchall())
+            activation_rows = [
+                row for row in cutover_rows
+                if str(_named_value(row, "Tiered50ActivationStatus", 1) or "") == "ACTIVATED"
+            ]
+            outage_rows = [
+                row for row in cutover_rows
+                if str(_named_value(row, "Tiered50ActivationStatus", 1) or "") == "OUTAGE"
+            ]
+            lifecycle = validate_existing_tiered50_activation(
+                target_rows=target_rows,
+                era_rows=era_rows,
+                current_era_rows=current_era_rows,
+                activation_rows=activation_rows,
+                outage_rows=outage_rows,
+            )
+            cursor.execute(
+                """
+                SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
+                FROM ctl.MddMacCollectorRun WITH (UPDLOCK, HOLDLOCK)
+                WHERE Status IN ('RUNNING', 'CLAIMED')
+                  AND CollectionContext IN (%s, %s)
+                GROUP BY CollectionContext
+                """,
+                ("MAC_LEGACY7_PRODUCTION", MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT),
+            )
+            competing_writers = validate_no_competing_production_writers(list(cursor.fetchall()))
+            cursor.execute(
+                f"""
+                SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode,
+                       SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc,
+                       LaunchAgentLabel
+                FROM {RESUME_EVENT_TABLE} WITH (UPDLOCK, HOLDLOCK)
+                WHERE PanelVersion = %s
+                ORDER BY ResumeEventId DESC
+                """,
+                (manifest.panel_version,),
+            )
+            resume_rows = list(cursor.fetchall())
+            latest_resume = resume_rows[0] if resume_rows else None
+            existing_resume = next(
+                (
+                    row
+                    for row in resume_rows
+                    if str(_named_value(row, "ResumeKey", 1) or "") == key
+                ),
+                None,
+            )
+            if existing_resume is None:
+                cursor.execute(
+                    f"""
+                    SELECT TOP (1) ResumeEventId, ResumeKey, PanelVersion, EraCode,
+                           SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc,
+                           LaunchAgentLabel
+                    FROM {RESUME_EVENT_TABLE} WITH (UPDLOCK, HOLDLOCK)
+                    WHERE ResumeKey = %s
+                    """,
+                    (key,),
+                )
+                existing_resume = cursor.fetchone()
+            cursor.execute("COMMIT TRANSACTION;")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
-    evidence: dict[str, Any] = {
-        "operation": "RESUME",
-        "resume_key": key,
-        "requested_at_utc": now.isoformat().replace("+00:00", "Z"),
-        "lifecycle": lifecycle,
-        "competing_writers": competing_writers,
-        "limited_runtime": {
-            "settings": limited_runtime.get("settings"),
-            "login": limited_runtime.get("login"),
-            "quota": quota,
-        },
-        "launch_agent_readiness": launch_agent,
-        "operational_evidence": operational_evidence,
-        "historical_requests_replayed": 0,
-        "legacy7_mutated": False,
-        "target_rows_mutated": 0,
-        "sampling_eras_created": 0,
-    }
-
-    active_resume = latest_resume if latest_resume is not None else existing_resume
-    if active_resume is not None and launch_agent.get("loaded_before_resume"):
-        existing_same = (
-            str(_named_value(active_resume, "PanelVersion", 2) or "") == manifest.panel_version
-            and int(_named_value(active_resume, "SamplingEraId", 4) or 0) == int(lifecycle["sampling_era_id"])
-            and _utc_datetime(_named_value(active_resume, "OriginalActivationAtUtc", 5))
-            == lifecycle["effective_at_utc"]
-        )
-        if not existing_same:
-            raise RuntimeError("existing Tiered50 resume event conflicts with immutable activation state")
-        return {
-            "status": "IDEMPOTENT_ALREADY_ACTIVE",
+        evidence: dict[str, Any] = {
             "operation": "RESUME",
-            "resume_key": str(_named_value(active_resume, "ResumeKey", 1) or key),
-            "requested_resume_key": key,
+            "resume_key": key,
+            "requested_at_utc": now.isoformat().replace("+00:00", "Z"),
+            "resume_coordination": {
+                "resource": RESUME_APP_LOCK_RESOURCE,
+                "lock_owner": "SESSION",
+                "ordinary_row_locks_released_before_launchd": True,
+            },
+            "lifecycle": lifecycle,
+            "competing_writers": competing_writers,
+            "limited_runtime": {
+                "settings": limited_runtime.get("settings"),
+                "login": limited_runtime.get("login"),
+                "sql_instance_identity": limited_runtime.get("sql_instance_identity"),
+                "quota": quota,
+            },
+            "launch_agent_readiness": launch_agent,
+            "operational_evidence": operational_evidence,
+            "historical_requests_replayed": 0,
+            "legacy7_mutated": False,
+            "target_rows_mutated": 0,
+            "sampling_eras_created": 0,
+        }
+
+        def same_lifecycle(row: Any) -> bool:
+            return (
+                str(_named_value(row, "PanelVersion", 2) or "") == manifest.panel_version
+                and str(_named_value(row, "EraCode", 3) or "") == ERA_CODE
+                and int(_named_value(row, "SamplingEraId", 4) or 0) == int(lifecycle["sampling_era_id"])
+                and _utc_datetime(_named_value(row, "OriginalActivationAtUtc", 5))
+                == lifecycle["effective_at_utc"]
+                and str(_named_value(row, "LaunchAgentLabel", 7) or "") == TIERED50_LABEL
+            )
+
+        if latest_resume is not None and launch_agent.get("loaded_before_resume"):
+            if not same_lifecycle(latest_resume):
+                raise RuntimeError("existing Tiered50 resume event conflicts with immutable activation state")
+            return {
+                "status": "IDEMPOTENT_ALREADY_ACTIVE",
+                "operation": "RESUME",
+                "resume_key": str(_named_value(latest_resume, "ResumeKey", 1) or key),
+                "requested_resume_key": key,
+                "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
+                "sampling_era_id": lifecycle["sampling_era_id"],
+                "launch_agent": launch_agent,
+                "historical_state_preserved": True,
+                "mdd_requests_issued": 0,
+                "writes_performed": 0,
+            }
+        if existing_resume is not None and launch_agent.get("loaded_before_resume") is not True:
+            if not same_lifecycle(existing_resume):
+                raise RuntimeError("resume key already exists for a conflicting Tiered50 lifecycle")
+            return {
+                "status": "IDEMPOTENT_ALREADY_RECORDED",
+                "operation": "RESUME",
+                "resume_key": str(_named_value(existing_resume, "ResumeKey", 1) or key),
+                "requested_resume_key": key,
+                "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
+                "sampling_era_id": lifecycle["sampling_era_id"],
+                "launch_agent": {**launch_agent, "status": "STOPPED"},
+                "historical_state_preserved": True,
+                "mdd_requests_issued": 0,
+                "writes_performed": 0,
+                "resume_transition": "RECORDED_BUT_NOT_ACTIVE",
+            }
+
+        installed: dict[str, Any] = {
+            "label": TIERED50_LABEL,
+            "installed_plist_path": str(TIERED50_INSTALLED_PATH),
+            "runtime_bundle_path": launch_agent.get("runtime_bundle_path"),
+        }
+        try:
+            if not launch_agent.get("loaded_before_resume"):
+                # Re-render only the existing Tiered50 artifact with the
+                # current source fingerprint.  This does not materialize
+                # targets or touch SQL history.
+                installed = install_launch_agent(
+                    activate=True,
+                    runtime_config_path=str(limited_runtime["config_path"]),
+                    mode=TIERED50_MODE,
+                )
+                bootstrap_launch_agent(activate=True, mode=TIERED50_MODE)
+                if not _launch_agent_loaded():
+                    raise RuntimeError("Tiered50 LaunchAgent did not remain loaded after bootstrap")
+            else:
+                installed["status"] = "ALREADY_LOADED_AFTER_INCOMPLETE_PRIOR_TRANSITION"
+        except BaseException as exc:
+            rollback = _disable_tiered50_after_resume_failure(
+                runtime_config_path=str(limited_runtime["config_path"])
+            )
+            raise _resume_failure(
+                "Tiered50 resume LaunchAgent startup failed",
+                original_failure=exc,
+                rollback=rollback,
+            ) from exc
+
+        try:
+            recorded = _record_resume_event(
+                settings=settings,
+                resume_key=key,
+                lifecycle=lifecycle,
+                evidence=evidence,
+                connection=connection,
+            )
+        except BaseException as exc:
+            rollback = _disable_tiered50_after_resume_failure(
+                runtime_config_path=str(limited_runtime["config_path"])
+            )
+            raise _resume_failure(
+                "Tiered50 resume event could not be recorded",
+                original_failure=exc,
+                rollback=rollback,
+            ) from exc
+
+        resume_at = recorded.get("resume_at_utc")
+        return {
+            "status": "PASS" if recorded["status"] == "RECORDED" else recorded["status"],
+            "operation": "RESUME",
+            "resume_key": key,
+            "resume_event": recorded,
             "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
             "sampling_era_id": lifecycle["sampling_era_id"],
-            "launch_agent": launch_agent,
+            "target_rows_mutated": 0,
+            "sampling_eras_created": 0,
             "historical_state_preserved": True,
+            "historical_requests_replayed": 0,
+            "legacy7_status": "RETIRED_NOT_MUTATED",
+            "launch_agent": {
+                "status": "STARTED",
+                "label": installed.get("label"),
+                "installed_plist_path": installed.get("installed_plist_path"),
+                "runtime_bundle_path": installed.get("runtime_bundle_path"),
+            },
+            "resume_at_utc": resume_at,
             "mdd_requests_issued": 0,
-            "writes_performed": 0,
+            "writes_performed": 1 if recorded["status"] == "RECORDED" else 0,
         }
-    if existing_resume is not None:
-        raise RuntimeError(
-            "a previous resume event exists but Tiered50 is stopped; provide a new explicit --resume-key"
-        )
-
-    try:
-        # Re-render only the existing Tiered50 artifact with the current source
-        # fingerprint.  This does not materialize targets or touch SQL history.
-        installed = install_launch_agent(
-            activate=True,
-            runtime_config_path=str(limited_runtime["config_path"]),
-            mode=TIERED50_MODE,
-        )
-        bootstrap_launch_agent(activate=True, mode=TIERED50_MODE)
-        if not _launch_agent_loaded():
-            raise RuntimeError("Tiered50 LaunchAgent did not remain loaded after bootstrap")
-    except BaseException as exc:
-        _disable_tiered50_after_resume_failure(runtime_config_path=str(limited_runtime["config_path"]))
-        raise RuntimeError("Tiered50 resume LaunchAgent startup failed; Tiered50 was left stopped") from exc
-
-    try:
-        recorded = _record_resume_event(
-            settings=settings,
-            resume_key=key,
-            lifecycle=lifecycle,
-            evidence=evidence,
-        )
-    except BaseException as exc:
-        _disable_tiered50_after_resume_failure(runtime_config_path=str(limited_runtime["config_path"]))
-        raise RuntimeError("Tiered50 resume event could not be recorded; Tiered50 was left stopped") from exc
-
-    resume_at = recorded.get("resume_at_utc")
-    return {
-        "status": "PASS" if recorded["status"] == "RECORDED" else recorded["status"],
-        "operation": "RESUME",
-        "resume_key": key,
-        "resume_event": recorded,
-        "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
-        "sampling_era_id": lifecycle["sampling_era_id"],
-        "target_rows_mutated": 0,
-        "sampling_eras_created": 0,
-        "historical_state_preserved": True,
-        "historical_requests_replayed": 0,
-        "legacy7_status": "RETIRED_NOT_MUTATED",
-        "launch_agent": {
-            "status": "STARTED",
-            "label": installed.get("label"),
-            "installed_plist_path": installed.get("installed_plist_path"),
-            "runtime_bundle_path": installed.get("runtime_bundle_path"),
-        },
-        "resume_at_utc": resume_at,
-        "mdd_requests_issued": 0,
-        "writes_performed": 1 if recorded["status"] == "RECORDED" else 0,
-    }
+    finally:
+        if lock_acquired:
+            try:
+                _release_resume_operation_lock(connection)
+            except BaseException:
+                # Closing the SQL session still releases the session-owned
+                # application lock.  A release diagnostic must not hide the
+                # original resume outcome.
+                pass
+        connection.close()
 
 
 def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -> dict[str, object]:
@@ -978,7 +1406,10 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
     settings = _administrator_connection_settings()
     limited_runtime = _validate_limited_runtime(now=now)
     launch_agent = _validate_launch_agent_template(runtime_config_path=str(limited_runtime["config_path"]))
-    operational_evidence = _validate_operational_evidence(now=now)
+    operational_evidence = _validate_operational_evidence(
+        now=now,
+        expected_runtime_sql_identity=limited_runtime.get("sql_instance_identity"),
+    )
     connection = connect_mssql(settings)
     evidence: dict[str, object] = {
         "legacy7_status": "ALREADY_RETIRED_NOT_MUTATED",
@@ -1427,7 +1858,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "BLOCKED", "error_type": type(exc).__name__}, sort_keys=True))
+        result: dict[str, Any] = {
+            "status": "BLOCKED",
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+        }
+        rollback = getattr(exc, "rollback", None)
+        if isinstance(rollback, dict):
+            result["rollback"] = rollback
+            result["original_failure"] = {
+                "error_type": getattr(exc, "original_failure_type", None),
+                "reason": getattr(exc, "original_failure_reason", None),
+            }
+        print(json.dumps(result, sort_keys=True, default=str))
         return 2
 
 

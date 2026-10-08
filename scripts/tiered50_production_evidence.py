@@ -17,7 +17,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -28,12 +28,18 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     connect_mssql,
 )
 from cologne_transit_collector.domain import APPROVED_SUPER_CYCLE_COUNTS  # noqa: E402
-from cologne_transit_collector.runtime_configuration import EXPECTED_SQL_DATABASE  # noqa: E402
+from cologne_transit_collector.runtime_configuration import (  # noqa: E402
+    EXPECTED_SQL_DATABASE,
+    MacOSKeychainSecretProvider,
+)
 from cologne_transit_collector.admin_evidence import (  # noqa: E402
     EVIDENCE_ARTIFACT_VERSION,
+    AdminEvidenceError,
     REQUIRED_CHECK_IDS,
+    normalize_sql_instance_identity,
     payload_sha256,
     sign_payload,
+    validate_admin_evidence_artifact,
 )
 
 
@@ -41,6 +47,7 @@ LEGACY_LABEL = "com.cologne-transit-intelligence.mdd-collector"
 TIERED_LABEL = "com.cologne-transit-intelligence.mdd-tiered50-collector"
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
 MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS = "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS"
+ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
 
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
@@ -61,13 +68,24 @@ def _role_environment(role: str) -> tuple[dict[str, str], str]:
     if role == "admin":
         values: dict[str, str] = {}
         required: list[str] = []
-        for suffix in ("HOST", "DATABASE", "USER", "PASSWORD"):
+        for suffix in ("HOST", "DATABASE", "USER"):
             name = f"MSSQL_ADMIN_{suffix}"
             value = os.environ.get(name)
             if value is None or not value.strip():
                 required.append(name)
                 continue
             values[f"MSSQL_{suffix}"] = value
+        password = os.environ.get("MSSQL_ADMIN_PASSWORD")
+        keychain_used = False
+        if password is None or not password.strip():
+            account = os.environ.get("MSSQL_ADMIN_KEYCHAIN_ACCOUNT") or values.get("MSSQL_USER", "")
+            service = os.environ.get("MSSQL_ADMIN_KEYCHAIN_SERVICE") or ADMIN_KEYCHAIN_SERVICE
+            password = MacOSKeychainSecretProvider().get(service=service, account=account)
+            keychain_used = password is not None and bool(password.strip())
+        if password is None or not password.strip():
+            required.append("MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM")
+        else:
+            values["MSSQL_PASSWORD"] = password
         for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
             name = f"MSSQL_ADMIN_{suffix}"
             value = os.environ.get(name)
@@ -76,7 +94,7 @@ def _role_environment(role: str) -> tuple[dict[str, str], str]:
         if required:
             values["__ADMIN_MISSING_FIELDS__"] = ",".join(required)
             return values, "MSSQL_ADMIN_*_REQUIRED"
-        return values, "MSSQL_ADMIN_*_EXPLICIT"
+        return values, "MSSQL_ADMIN_*_KEYCHAIN" if keychain_used else "MSSQL_ADMIN_*_EXPLICIT"
 
     values = dict(os.environ)
     prefix = role.upper()
@@ -158,6 +176,7 @@ def _evaluate_admin_permissions(permission_values: dict[str, Any]) -> dict[str, 
 
     checks = {
         "database_view_definition": granted("has_view_definition"),
+        "database_view_state": granted("has_view_database_state"),
         "server_dmv_state": server_dmv_granted,
         "backup_history_backupset_select": granted("has_msdb_backupset_select"),
         "backup_history_backupmediafamily_select": granted("has_msdb_backupmediafamily_select"),
@@ -353,7 +372,7 @@ def _safe_runtime_read(label: str, callback: Any) -> dict[str, Any]:
             "read": label,
             "error_code": _sql_error_code(exc),
             "error_type": type(exc).__name__,
-            "reason": str(exc)[:500],
+            "reason": _sanitize_sql_reason(exc),
         }
 
 
@@ -436,8 +455,16 @@ def _load_external_admin_evidence(path: str | Path, *, now_utc: datetime) -> dic
     }
 
 
-def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
-    """Run VERIFYONLY on a path read from msdb, with no path in output.
+def _backup_path_list(paths: str | Sequence[str]) -> list[str]:
+    if isinstance(paths, str):
+        values = [paths]
+    else:
+        values = [str(path) for path in paths]
+    return [path for path in values if path.strip()]
+
+
+def _safe_backup_verify(connection: Any, paths: str | Sequence[str]) -> dict[str, Any]:
+    """Run VERIFYONLY across the complete native backup media set.
 
     Error 3013 is deliberately reported as undetermined.  It can accompany a
     permission, service-account file-access, driver, unavailable-file, or
@@ -445,14 +472,28 @@ def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
     server-side diagnostics resolve them.
     """
 
-    statement = "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM"
+    media = _backup_path_list(paths)
+    statement = "RESTORE VERIFYONLY FROM " + ", ".join(
+        "DISK = N'<backup path redacted>'" for _ in media
+    ) + " WITH CHECKSUM"
+    if not media:
+        return {
+            "status": "NOT_PROVEN",
+            "statement_id": "backup.restore_verifyonly_with_checksum",
+            "statement": statement,
+            "reason": "the latest full backup has no usable media paths",
+            "cause_classification": "UNDETERMINED",
+            "checksum_verified": False,
+        }
     try:
         autocommit = getattr(connection, "autocommit", None)
         if callable(autocommit):
             autocommit(True)
         cursor = connection.cursor()
-        escaped = str(path).replace("'", "''")
-        cursor.execute(f"RESTORE VERIFYONLY FROM DISK = N'{escaped}' WITH CHECKSUM")
+        clauses = ", ".join(
+            f"DISK = N'{path.replace(chr(39), chr(39) + chr(39))}'" for path in media
+        )
+        cursor.execute(f"RESTORE VERIFYONLY FROM {clauses} WITH CHECKSUM")
         try:
             cursor.fetchall()
         except Exception:
@@ -462,6 +503,7 @@ def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
             "statement_id": "backup.restore_verifyonly_with_checksum",
             "statement": statement,
             "checksum_verified": True,
+            "media_count": len(media),
             "cause_classification": "VERIFIED",
         }
     except Exception as exc:
@@ -475,6 +517,7 @@ def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
             "diagnostic_messages": [_sanitize_sql_reason(exc)],
             "cause_classification": "UNDETERMINED",
             "checksum_verified": False,
+            "media_count": len(media),
         }
 
 
@@ -613,6 +656,12 @@ def collect(
         sql_evidence["runtime_login"] = _safe_runtime_read(
             "runtime_login_status", runtime_persistence.runtime_login_status
         )
+        runtime_login = sql_evidence.get("runtime_login")
+        sql_evidence["runtime_sql_instance_identity"] = (
+            normalize_sql_instance_identity(runtime_login)
+            if isinstance(runtime_login, Mapping) and runtime_login.get("status", "PASS") == "PASS"
+            else {"status": "NOT_PROVEN", "reason": "runtime SQL instance identity was not available"}
+        )
         sql_evidence["runtime_schema"] = _safe_runtime_read(
             "validate_runtime_schema", runtime_persistence.validate_runtime_schema
         )
@@ -635,6 +684,10 @@ def collect(
                 "evidence_role": "DEDICATED_RUNTIME_LOGIN",
                 "reason": "runtime connection configuration was unavailable",
             }
+        sql_evidence["runtime_sql_instance_identity"] = {
+            "status": "NOT_PROVEN",
+            "reason": "runtime connection configuration was unavailable",
+        }
 
     admin_configuration_error: BaseException | None = None
     admin_settings: MssqlConnectionSettings | None = None
@@ -689,7 +742,17 @@ def collect(
     evidence["sql"] = sql_evidence
     try:
         cursor = _SafeAdminCursor(connection, evidence["sql"]["privileged_query_failures"])
-        cursor.execute("SELECT @@SERVERNAME AS ServerName, DB_NAME() AS DatabaseName, SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc")
+        cursor.execute(
+            """
+            SELECT CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)) AS ServerName,
+                   DB_NAME() AS DatabaseName,
+                   SUSER_SNAME() AS LoginName,
+                   SYSUTCDATETIME() AS CapturedAtUtc,
+                   CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(128)) AS MachineName,
+                   CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128)) AS InstanceName,
+                   CAST(@@SERVERNAME AS NVARCHAR(128)) AS ConfiguredServerName
+            """
+        )
         identity = cursor.fetchone()
         identity_failure = cursor.last_failure
         effective_login = str(_row_value(identity, "LoginName", 2) or "")
@@ -704,7 +767,13 @@ def collect(
             "database_name": str(_row_value(identity, "DatabaseName", 1) or ""),
             "login_name": effective_login,
             "captured_at_utc": _row_value(identity, "CapturedAtUtc", 3),
+            "machine_name": str(_row_value(identity, "MachineName", 4) or ""),
+            "instance_name": str(_row_value(identity, "InstanceName", 5) or ""),
+            "configured_server_name": str(_row_value(identity, "ConfiguredServerName", 6) or ""),
         }
+        evidence["sql"]["identity"]["sql_instance_identity"] = normalize_sql_instance_identity(
+            evidence["sql"]["identity"]
+        )
         cursor.execute(
             """
             SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS product_major_version,
@@ -784,12 +853,21 @@ def collect(
         }
         same_as_runtime = bool(effective_login and runtime_login and effective_login.casefold() == runtime_login.casefold())
         evidence["sql"]["admin_identity_gate"] = {
-            "status": "NOT_PROVEN" if identity_failure is not None or not effective_login else (
+            "status": "NOT_PROVEN"
+            if identity_failure is not None
+            or not effective_login
+            or not evidence["sql"]["identity"].get("server_name")
+            or evidence["sql"]["identity"].get("database_name") != EXPECTED_SQL_DATABASE
+            else (
                 "FAILED" if same_as_runtime else "PASS"
             ),
             "effective_login": effective_login,
             "runtime_login_match": same_as_runtime,
-            "reason": "administrative identity matches the dedicated runtime login" if same_as_runtime else None,
+            "reason": (
+                "administrative identity matches the dedicated runtime login"
+                if same_as_runtime
+                else None
+            ),
         }
         cursor.execute(
             """
@@ -854,44 +932,79 @@ def collect(
         evidence["sql"]["log_space_evidence"] = log_space_evidence
         cursor.execute(
             """
-            SELECT TOP (1) bs.backup_finish_date, bs.is_copy_only,
+            SELECT TOP (1) bs.backup_set_id, bs.media_set_id,
+                   bs.backup_finish_date, bs.is_copy_only,
                    bs.has_backup_checksums, bs.compressed_backup_size,
-                   bmf.physical_device_name
+                   bs.database_name
             FROM msdb.dbo.backupset AS bs
-            INNER JOIN msdb.dbo.backupmediafamily AS bmf
-                ON bmf.media_set_id = bs.media_set_id
             WHERE bs.database_name = DB_NAME() AND bs.type = 'D'
             ORDER BY bs.backup_finish_date DESC
             """
         )
         backup_history_evidence = _query_evidence(cursor, statement_id="backup.latest_full_backup_history")
         backup = cursor.fetchone()
-        backup_path = str(_row_value(backup, "physical_device_name", 4) or "") if backup else ""
+        backup_media_set_id = _row_value(backup, "media_set_id", 1) if backup else None
+        backup_paths: list[str] = []
+        backup_media_evidence: dict[str, Any] = {
+            "status": "NOT_PROVEN",
+            "statement_id": "backup.latest_full_backup_media_set",
+        }
+        if backup_history_evidence.get("status") == "PASS" and backup_media_set_id is not None:
+            cursor.execute(
+                """
+                SELECT family_sequence_number, physical_device_name
+                FROM msdb.dbo.backupmediafamily
+                WHERE media_set_id = %s
+                ORDER BY family_sequence_number
+                """,
+                (backup_media_set_id,),
+            )
+            backup_media_evidence = _query_evidence(
+                cursor,
+                statement_id="backup.latest_full_backup_media_set",
+            )
+            backup_media_rows = cursor.fetchall()
+            backup_paths = [
+                str(_row_value(row, "physical_device_name", 1) or "")
+                for row in backup_media_rows
+                if str(_row_value(row, "physical_device_name", 1) or "").strip()
+            ]
         evidence["sql"]["latest_full_backup"] = (
             {
-                "backup_finish_date": _row_value(backup, "backup_finish_date", 0),
-                "copy_only": bool(_row_value(backup, "is_copy_only", 1)),
-                "has_backup_checksums": bool(_row_value(backup, "has_backup_checksums", 2)),
-                "compressed_backup_size": int(_row_value(backup, "compressed_backup_size", 3) or 0),
-                "device_name_present": bool(backup_path),
+                "backup_set_id": int(_row_value(backup, "backup_set_id", 0) or 0),
+                "media_set_id": int(_row_value(backup, "media_set_id", 1) or 0),
+                "backup_finish_date": _row_value(backup, "backup_finish_date", 2),
+                "copy_only": bool(_row_value(backup, "is_copy_only", 3)),
+                "has_backup_checksums": bool(_row_value(backup, "has_backup_checksums", 4)),
+                "compressed_backup_size": int(_row_value(backup, "compressed_backup_size", 5) or 0),
+                "media_count": len(backup_paths),
+                "complete_media_set_proven": backup_media_evidence.get("status") == "PASS"
+                and bool(backup_paths),
             }
-            if backup_history_evidence.get("status") == "PASS" and backup
+            if backup_history_evidence.get("status") == "PASS" and backup and backup_media_evidence.get("status") == "PASS"
             else None
         )
         evidence["sql"]["latest_full_backup_evidence"] = backup_history_evidence
-        if backup_path:
+        evidence["sql"]["latest_full_backup_media_evidence"] = backup_media_evidence
+        if backup_paths:
             try:
                 if admin_settings is None:
                     raise RuntimeError("admin SQL settings are unavailable")
                 verify_connection = connect_mssql(admin_settings)
                 try:
-                    evidence["sql"]["backup_server_side_access"] = _safe_backup_access_diagnostics(
-                        verify_connection, backup_path
-                    )
-                    evidence["sql"]["backup_headeronly"] = _safe_backup_header(
-                        verify_connection, backup_path
-                    )
-                    evidence["sql"]["backup_verifyonly"] = _safe_backup_verify(verify_connection, backup_path)
+                    access_checks = [_safe_backup_access_diagnostics(verify_connection, path) for path in backup_paths]
+                    header_checks = [_safe_backup_header(verify_connection, path) for path in backup_paths]
+                    evidence["sql"]["backup_server_side_access"] = {
+                        "status": "PASS" if all(item.get("status") == "PASS" for item in access_checks) else "NOT_PROVEN",
+                        "media_count": len(backup_paths),
+                        "media": access_checks,
+                    }
+                    evidence["sql"]["backup_headeronly"] = {
+                        "status": "PASS" if all(item.get("status") == "PASS" for item in header_checks) else "NOT_PROVEN",
+                        "media_count": len(backup_paths),
+                        "media": header_checks,
+                    }
+                    evidence["sql"]["backup_verifyonly"] = _safe_backup_verify(verify_connection, backup_paths)
                 finally:
                     verify_connection.close()
             except Exception as exc:
@@ -908,18 +1021,18 @@ def collect(
             evidence["sql"]["backup_server_side_access"] = {
                 "status": "NOT_PROVEN",
                 "statement_id": "backup.server_side_file_access",
-                "reason": "no full backup path was returned by msdb history",
+                "reason": "the complete full-backup media set was not returned by msdb history",
             }
             evidence["sql"]["backup_headeronly"] = {
                 "status": "NOT_PROVEN",
                 "statement_id": "backup.restore_headeronly",
-                "reason": "no full backup path was returned by msdb history",
+                "reason": "the complete full-backup media set was not returned by msdb history",
             }
             evidence["sql"]["backup_verifyonly"] = {
                 "status": "NOT_PROVEN",
                 "statement_id": "backup.restore_verifyonly_with_checksum",
                 "statement": "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM",
-                "reason": "no full backup path was returned by msdb history",
+                "reason": "the complete full-backup media set was not returned by msdb history",
                 "cause_classification": "UNDETERMINED",
             }
 
@@ -945,6 +1058,86 @@ def collect(
             "maximum_id": int(_row_value(targets, "maximum_id", 4) or 0) if targets else None,
         }
         evidence["sql"]["tiered50_materialization_evidence"] = materialization_evidence
+        cursor.execute(
+            """
+            SELECT CutoverKey, PanelVersion, FinalLegacy7RunId,
+                   Tiered50ActivationAtUtc, Tiered50ActivationStatus,
+                   RecordedAtUtc
+            FROM ctl.MddMacProductionCutover
+            WHERE PanelVersion = 'TIERED50_PANEL_V1'
+            ORDER BY CutoverId
+            """
+        )
+        cutover_history_evidence = _query_evidence(cursor, statement_id="collector.production_cutover_history")
+        cutover_history = [
+            {
+                "cutover_key": str(_row_value(row, "CutoverKey", 0) or ""),
+                "panel_version": str(_row_value(row, "PanelVersion", 1) or ""),
+                "final_legacy7_run_id": str(_row_value(row, "FinalLegacy7RunId", 2) or "") or None,
+                "tiered50_activation_at_utc": _row_value(row, "Tiered50ActivationAtUtc", 3),
+                "tiered50_activation_status": str(_row_value(row, "Tiered50ActivationStatus", 4) or ""),
+                "recorded_at_utc": _row_value(row, "RecordedAtUtc", 5),
+            }
+            for row in cursor.fetchall()
+        ]
+        evidence["sql"]["production_cutover_history"] = cutover_history
+        evidence["sql"]["production_cutover_history_evidence"] = cutover_history_evidence
+        cursor.execute(
+            """
+            SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
+            FROM ctl.MddMacCollectorRun
+            WHERE Status IN ('RUNNING', 'CLAIMED')
+              AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+            GROUP BY CollectionContext
+            """
+        )
+        competing_writer_evidence = _query_evidence(cursor, statement_id="collector.competing_production_writers")
+        competing_writers = [
+            {
+                "collection_context": str(_row_value(row, "CollectionContext", 0) or ""),
+                "running_count": int(_row_value(row, "RunningCount", 1) or 0),
+            }
+            for row in cursor.fetchall()
+        ]
+        evidence["sql"]["competing_production_writers"] = competing_writers
+        evidence["sql"]["competing_production_writers_evidence"] = competing_writer_evidence
+        cursor.execute(
+            """
+            SELECT TOP (2) MonthKey, ProviderQuotaCeiling,
+                   NormalOperationalMaximum, RetryProtectionBoundary,
+                   ConfirmedProviderAttempts, ConservativeUnknownAttempts,
+                   ExplicitSharedConsumerReservedAttempts, AccountingStatus,
+                   IncludesAllSharedConsumers, ProviderPeriodStartUtc,
+                   ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc,
+                   SourceEvidenceHash, ReconciliationKey
+            FROM ctl.MddMacSharedQuotaAccounting
+            WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME()
+              AND ProviderPeriodEndUtc > SYSUTCDATETIME()
+            ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC
+            """
+        )
+        quota_ledger_evidence = _query_evidence(cursor, statement_id="quota.current_shared_ledger")
+        quota_rows = list(cursor.fetchall())
+        evidence["sql"]["current_quota_ledger"] = [
+            {
+                "month_key": str(_row_value(row, "MonthKey", 0) or ""),
+                "provider_quota_ceiling": _row_value(row, "ProviderQuotaCeiling", 1),
+                "normal_operational_maximum": _row_value(row, "NormalOperationalMaximum", 2),
+                "retry_protection_boundary": _row_value(row, "RetryProtectionBoundary", 3),
+                "confirmed_provider_attempts": _row_value(row, "ConfirmedProviderAttempts", 4),
+                "conservative_unknown_attempts": _row_value(row, "ConservativeUnknownAttempts", 5),
+                "reserved_shared_usage": _row_value(row, "ExplicitSharedConsumerReservedAttempts", 6),
+                "accounting_status": str(_row_value(row, "AccountingStatus", 7) or ""),
+                "includes_all_shared_consumers": bool(_row_value(row, "IncludesAllSharedConsumers", 8)),
+                "provider_period_start_utc": _row_value(row, "ProviderPeriodStartUtc", 9),
+                "provider_period_end_utc": _row_value(row, "ProviderPeriodEndUtc", 10),
+                "local_usage_included_through_utc": _row_value(row, "LocalUsageIncludedThroughUtc", 11),
+                "source_evidence_hash": str(_row_value(row, "SourceEvidenceHash", 12) or ""),
+                "reconciliation_key": str(_row_value(row, "ReconciliationKey", 13) or ""),
+            }
+            for row in quota_rows
+        ]
+        evidence["sql"]["current_quota_ledger_evidence"] = quota_ledger_evidence
         cursor.execute(
             """
             SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count,
@@ -1483,11 +1676,15 @@ def collect(
     permissions = evidence["sql"].get("admin_permissions") or {}
     required_query_statuses = (
         evidence["sql"].get("runtime_health", {}).get("status"),
+        evidence["sql"].get("database_files_evidence", {}).get("status"),
         evidence["sql"].get("volume_capacity_evidence", {}).get("status"),
         evidence["sql"].get("log_space_evidence", {}).get("status"),
         evidence["sql"].get("latest_full_backup_evidence", {}).get("status"),
         evidence["sql"].get("recent_http_attempts_evidence", {}).get("status"),
         evidence["sql"].get("tiered50_audit_history_evidence", {}).get("status"),
+        evidence["sql"].get("production_cutover_history_evidence", {}).get("status"),
+        evidence["sql"].get("competing_production_writers_evidence", {}).get("status"),
+        evidence["sql"].get("current_quota_ledger_evidence", {}).get("status"),
     )
     admin_authorized = (
         evidence["sql"].get("identity", {}).get("status") == "PASS"
@@ -1501,11 +1698,15 @@ def collect(
         "status": "PASS" if admin_authorized else "NOT_PROVEN",
         "required_query_statuses": {
             "runtime_health": required_query_statuses[0],
-            "volume_capacity": required_query_statuses[1],
-            "log_space": required_query_statuses[2],
-            "latest_full_backup_history": required_query_statuses[3],
-            "operational_history": required_query_statuses[4],
-            "tiered50_audit_history": required_query_statuses[5],
+            "database_files": required_query_statuses[1],
+            "volume_capacity": required_query_statuses[2],
+            "log_space": required_query_statuses[3],
+            "latest_full_backup_history": required_query_statuses[4],
+            "operational_history": required_query_statuses[5],
+            "tiered50_audit_history": required_query_statuses[6],
+            "production_cutover_history": required_query_statuses[7],
+            "competing_production_writers": required_query_statuses[8],
+            "current_quota_ledger": required_query_statuses[9],
         },
         "reason": None
         if admin_authorized
@@ -1523,12 +1724,15 @@ def collect(
     identity_login = str(identity.get("login_name") or "") if isinstance(identity, dict) else ""
     identity_server = str(identity.get("server_name") or "") if isinstance(identity, dict) else ""
     identity_captured_at = identity.get("captured_at_utc") if isinstance(identity, dict) else None
+    identity_instance = identity.get("sql_instance_identity") if isinstance(identity, dict) else None
     provenance_ok = bool(
         evidence["sql"].get("admin_authorization", {}).get("status") == "PASS"
         and identity.get("status") == "PASS"
         and identity_database == EXPECTED_SQL_DATABASE
         and identity_login
         and identity_server
+        and isinstance(identity_instance, Mapping)
+        and identity_instance.get("server_name")
         and identity_captured_at
     )
     existing_quota_integrity = evidence["sql"].get("quota_integrity")
@@ -1563,6 +1767,7 @@ def collect(
         ),
         "server_name": identity_server,
         "database_name": identity_database,
+        "sql_instance_identity": dict(identity_instance) if isinstance(identity_instance, Mapping) else None,
         "effective_login": identity_login,
         "captured_at_utc": identity_captured_at or evidence["generated_at_utc"],
         "required_check_ids": sorted(REQUIRED_CHECK_IDS),

@@ -53,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
             "mdd_requests_issued": 0,
             "writes_performed": 0,
         }
+        rollback = getattr(exc, "rollback", None)
+        if isinstance(rollback, dict):
+            result["rollback"] = rollback
+            result["original_failure"] = {
+                "error_type": getattr(exc, "original_failure_type", None),
+                "reason": getattr(exc, "original_failure_reason", None),
+            }
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
     return 0 if result.get("status") in {"PASS", "IDEMPOTENT_ALREADY_ACTIVE", "IDEMPOTENT_ALREADY_RECORDED"} else 2
 

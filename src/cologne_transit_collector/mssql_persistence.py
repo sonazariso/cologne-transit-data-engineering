@@ -1429,7 +1429,11 @@ class MssqlPersistence:
                        IS_SRVROLEMEMBER(N'securityadmin') AS is_securityadmin,
                        IS_ROLEMEMBER(N'db_owner') AS is_db_owner,
                        IS_ROLEMEMBER(N'db_datareader') AS is_db_datareader,
-                       IS_ROLEMEMBER(N'db_datawriter') AS is_db_datawriter
+                       IS_ROLEMEMBER(N'db_datawriter') AS is_db_datawriter,
+                       CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)) AS server_name,
+                       CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(128)) AS machine_name,
+                       CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128)) AS instance_name,
+                       CAST(@@SERVERNAME AS NVARCHAR(128)) AS configured_server_name
                 """
             )
             row = cursor.fetchone()
@@ -1442,6 +1446,10 @@ class MssqlPersistence:
             "is_db_owner": bool(_row_named(row, "is_db_owner", index=5)),
             "is_db_datareader": bool(_row_named(row, "is_db_datareader", index=6)),
             "is_db_datawriter": bool(_row_named(row, "is_db_datawriter", index=7)),
+            "server_name": str(_row_named(row, "server_name", index=8) or ""),
+            "machine_name": str(_row_named(row, "machine_name", index=9) or ""),
+            "instance_name": str(_row_named(row, "instance_name", index=10) or ""),
+            "configured_server_name": str(_row_named(row, "configured_server_name", index=11) or ""),
         }
 
     def runtime_privilege_boundary(self) -> Mapping[str, Any]:

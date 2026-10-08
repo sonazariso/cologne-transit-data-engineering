@@ -70,7 +70,10 @@ October bootstrap hard stop is unchanged, and automatic future-month
 authorization remains fail-closed until provider evidence or a separately
 approved conservative policy is registered through the existing SQL workflow.
 Production activation also requires an explicitly configured separate
-`MSSQL_ADMIN_HOST/DATABASE/USER/PASSWORD` identity whose effective login and
-version-appropriate DMV, backup, and operational-history permissions are proven. The
-current capture has no such identity, so capacity, backup, and historical
+`MSSQL_ADMIN_HOST/DATABASE/USER` identity with its password retrieved from the
+operator's macOS Keychain (or a one-process authorized override). Its effective
+login, actual SQL instance identity, and version-appropriate DMV, backup, and
+operational-history permissions must be proven. The Windows Authentication
+artifact is read-only evidence and cannot perform the Mac-side lifecycle write.
+The current capture has no such identity, so capacity, backup, and historical
 query failures remain `NOT_PROVEN` and Tiered50 remains stopped.

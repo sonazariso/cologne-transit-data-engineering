@@ -337,6 +337,43 @@ class AdminEvidenceEnvelopeTests(unittest.TestCase):
             self.assertTrue(result["signature_verified"])
             self.assertEqual(evidence["artifact_integrity"]["payload_sha256"], payload_sha256(evidence))
 
+    def test_structured_sql_identity_matches_runtime_and_rejects_same_database_elsewhere(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            private = directory_path / "private.pem"
+            public = directory_path / "public.pem"
+            os.system(f"/usr/bin/openssl genrsa -out {private} 2048 >/dev/null 2>&1")
+            os.system(f"/usr/bin/openssl rsa -in {private} -pubout -out {public} >/dev/null 2>&1")
+            evidence = self._evidence()
+            identity = {
+                "server_name": r"sql01\COLLECTOR",
+                "machine_name": "sql01",
+                "instance_name": "COLLECTOR",
+                "database_name": "CologneTransitIntelligence",
+            }
+            evidence["capture_provenance"]["server_name"] = identity["server_name"]  # type: ignore[index]
+            evidence["capture_provenance"]["sql_instance_identity"] = identity  # type: ignore[index]
+            evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
+            result = validate_admin_evidence_artifact(
+                evidence,
+                now_utc=AT,
+                expected_database="CologneTransitIntelligence",
+                public_key_path=public,
+                expected_sql_identity=identity,
+            )
+            self.assertEqual(result["sql_instance_identity"]["server_name"], r"sql01\COLLECTOR")
+            different_instance = dict(identity)
+            different_instance["server_name"] = r"sql02\COLLECTOR"
+            different_instance["machine_name"] = "sql02"
+            with self.assertRaisesRegex(AdminEvidenceError, "different SQL instance"):
+                validate_admin_evidence_artifact(
+                    evidence,
+                    now_utc=AT,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                    expected_sql_identity=different_instance,
+                )
+
     def test_editing_signed_payload_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)

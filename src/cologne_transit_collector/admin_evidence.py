@@ -14,6 +14,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,12 +38,59 @@ REQUIRED_CHECK_IDS = frozenset(
         "backup.latest_full_backup_history",
         "backup.restore_verifyonly_with_checksum",
         "collector_runtime_history_or_materialization",
+        "collector.production_cutover_history",
+        "collector.competing_production_writers",
+        "quota.current_shared_ledger",
     }
 )
 
 
 class AdminEvidenceError(ValueError):
     """The administrative evidence envelope is not trustworthy or fresh."""
+
+
+def normalize_sql_instance_identity(identity: Mapping[str, Any] | None) -> dict[str, str]:
+    """Return the non-secret identity fields used for runtime binding.
+
+    ``@@SERVERNAME`` can reflect a SQL Server registration name and a client
+    may connect through an alias.  The server name returned by
+    ``SERVERPROPERTY('ServerName')`` is the authoritative instance identity
+    used here; optional machine and instance fields strengthen the comparison
+    when SQL Server provides them.  Connection aliases are deliberately not
+    compared as if they were instance identities.
+    """
+
+    if not isinstance(identity, Mapping):
+        return {}
+    normalized: dict[str, str] = {}
+    for field in ("server_name", "machine_name", "instance_name", "database_name"):
+        value = identity.get(field)
+        if value is None:
+            continue
+        text = re.sub(r"\s+", " ", str(value)).strip().casefold()
+        if text:
+            normalized[field] = text
+    return normalized
+
+
+def sql_instance_identities_match(
+    observed: Mapping[str, Any] | None,
+    expected: Mapping[str, Any] | None,
+) -> bool:
+    """Compare actual SQL instance identities without accepting aliases blindly."""
+
+    observed_normalized = normalize_sql_instance_identity(observed)
+    expected_normalized = normalize_sql_instance_identity(expected)
+    if not observed_normalized.get("server_name") or not expected_normalized.get("server_name"):
+        return False
+    if observed_normalized["server_name"] != expected_normalized["server_name"]:
+        return False
+    for field in ("machine_name", "instance_name", "database_name"):
+        expected_value = expected_normalized.get(field)
+        observed_value = observed_normalized.get(field)
+        if expected_value and observed_value and expected_value != observed_value:
+            return False
+    return True
 
 
 def _json_safe(value: Any) -> Any:
@@ -187,6 +235,7 @@ def validate_admin_evidence_artifact(
     now_utc: datetime,
     expected_database: str,
     public_key_path: str | Path | None,
+    expected_sql_identity: Mapping[str, Any] | None = None,
     max_age: timedelta = ADMIN_EVIDENCE_MAX_AGE,
 ) -> dict[str, Any]:
     """Validate freshness, provenance, signature, and required checks."""
@@ -210,6 +259,28 @@ def validate_admin_evidence_artifact(
         raise AdminEvidenceError("administrative evidence is not bound to a SQL instance")
     if not str(provenance.get("effective_login") or "").strip():
         raise AdminEvidenceError("administrative evidence does not identify the effective administrator")
+    observed_sql_identity = provenance.get("sql_instance_identity")
+    if isinstance(observed_sql_identity, Mapping):
+        normalized_identity = normalize_sql_instance_identity(observed_sql_identity)
+        provenance_server = normalize_sql_instance_identity(
+            {"server_name": provenance.get("server_name")}
+        ).get("server_name")
+        provenance_database = normalize_sql_instance_identity(
+            {"database_name": provenance.get("database_name")}
+        ).get("database_name")
+        if (
+            not normalized_identity.get("server_name")
+            or provenance_server != normalized_identity["server_name"]
+            or provenance_database != normalized_identity.get("database_name")
+        ):
+            raise AdminEvidenceError("administrative evidence has inconsistent SQL instance provenance")
+    if expected_sql_identity is not None:
+        if not isinstance(observed_sql_identity, Mapping):
+            raise AdminEvidenceError(
+                "administrative evidence does not contain the authoritative SQL instance identity"
+            )
+        if not sql_instance_identities_match(observed_sql_identity, expected_sql_identity):
+            raise AdminEvidenceError("administrative evidence is bound to a different SQL instance")
     if provenance.get("execution_path") not in {"SEPARATE_SQL_LOGIN", "WINDOWS_INTEGRATED_AUTH"}:
         raise AdminEvidenceError("administrative evidence has no authorized execution path")
     try:
@@ -253,6 +324,7 @@ def validate_admin_evidence_artifact(
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
         "server_name": str(provenance["server_name"]),
         "database_name": str(provenance["database_name"]),
+        "sql_instance_identity": dict(observed_sql_identity) if isinstance(observed_sql_identity, Mapping) else None,
         "effective_login": str(provenance["effective_login"]),
         "execution_path": str(provenance["execution_path"]),
         "signature_verified": True,
@@ -269,6 +341,8 @@ __all__ = [
     "canonical_payload",
     "payload_sha256",
     "sign_payload",
+    "normalize_sql_instance_identity",
+    "sql_instance_identities_match",
     "validate_admin_evidence_artifact",
     "verify_signature",
 ]

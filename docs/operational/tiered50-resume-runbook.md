@@ -15,8 +15,24 @@ server-side `RESTORE VERIFYONLY ... WITH CHECKSUM`, current quota state, and
 collector history. The private signing key and any SQL password remain outside
 the repository and outside all evidence files.
 
-For an explicit SQL administrator connection, configure only the
-`MSSQL_ADMIN_*` variables in the operator environment and run:
+The production resume write still requires a separate administrator SQL
+connection on the Mac. Windows Authentication evidence is read-only evidence;
+it is not authorization for the Mac process to append a resume event. The
+preferred Mac credential path is a Keychain item:
+
+```text
+MSSQL_ADMIN_HOST=<authoritative SQL host or alias>
+MSSQL_ADMIN_DATABASE=CologneTransitIntelligence
+MSSQL_ADMIN_USER=<separately authorized administrator>
+MSSQL_ADMIN_KEYCHAIN_SERVICE=com.cologne-transit-intelligence.mssql-admin-password
+MSSQL_ADMIN_KEYCHAIN_ACCOUNT=<optional; defaults to MSSQL_ADMIN_USER>
+```
+
+The operator may use a one-process `MSSQL_ADMIN_PASSWORD` override when
+necessary, but must not place it in source, tracked environment files, logs,
+evidence, or review archives. The resume gate rejects the restricted
+`CologneTransitCollector` login for lifecycle writes. With the secure
+Keychain item available, run:
 
 ```text
 python3 scripts/tiered50_production_evidence.py \
@@ -26,7 +42,10 @@ python3 scripts/tiered50_production_evidence.py \
 
 The administrative variables never inherit `MSSQL_*` runtime credentials. The
 runtime account must remain `CologneTransitCollector` and the administrator
-must be a different, separately authorized identity.
+must be a different, separately authorized identity. The signed artifact must
+contain the actual `SERVERPROPERTY('ServerName')` identity and the resume gate
+compares it with the identity returned by the installed runtime connection;
+matching database names or aliases alone are insufficient.
 
 The controlled Windows Authentication alternative is
 `scripts/capture_windows_sql_admin_evidence.ps1`. It writes an unsigned,
@@ -46,7 +65,12 @@ python3 scripts/tiered50_production_evidence.py \
 ```
 
 The public-key verification happens before the merge; the final signature
-binds the SQL and Mac evidence together.
+binds the SQL and Mac evidence together. This Windows workflow does not and
+must not perform the SQL lifecycle write. If no separate Mac administrator
+Keychain item or one-process authorized credential is available, stop here and
+leave Tiered50 stopped with `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`.
+The final artifact must also contain a fresh Windows VM disk-capacity check;
+the SQL and Mac captures do not infer that capacity from the host filesystem.
 
 ## Read-only and rollback validation
 
@@ -74,17 +98,26 @@ python3 scripts/resume_tiered50_production.py \
   --resume-key TIERED50_PANEL_V1:RESUME:2026-10-08T16:00Z
 ```
 
-The command takes SQL locks while checking the immutable target set, original
-activation boundary, one real sampling era, current-era pointer, activation
+The command acquires the exclusive SQL application lock
+`CologneTransitIntelligence:TIERED50:RESUME` before readiness validation. It
+holds that session-owned lock across immutable-state checks, the LaunchAgent
+transition, and completion recording, while releasing ordinary row locks before
+slow launchd work. The command takes SQL locks while checking the immutable target set,
+original activation boundary, one real sampling era, current-era pointer, activation
 record, historical outage, competing workers, current quota headroom, signed
 administrative evidence, and the latest installed bundle. It enables the
 existing versioned artifact only after every gate passes, verifies the service
 is loaded, and then appends one `ctl.MddMacProductionResumeEvent` row with the
-actual SQL UTC timestamp. A partial enablement is disabled and unloaded again.
+actual SQL UTC timestamp. A partial enablement is disabled and unloaded again;
+the installed plist and actual launchd state must both verify stopped. An
+unreadable or still-active rollback is reported as a critical operational
+blocker with the original activation failure and separate rollback failures.
 
-Repeating the same key after a successful resume is idempotent. Reusing a key
-while the service is stopped fails closed; use a new explicit key only after
-the reason for the stop has been reviewed. A historical `OUTAGE` remains
+Repeating the same key is idempotent and never creates a second resume event.
+If its event is already recorded while the service is stopped, the command
+reports `IDEMPOTENT_ALREADY_RECORDED` and does not silently reactivate it. A
+new explicit key may be used only after the reason for the stop has been
+reviewed. A historical `OUTAGE` remains
 immutable evidence and does not by itself keep a current, successfully resumed
 service in `BLOCKED` status.
 
