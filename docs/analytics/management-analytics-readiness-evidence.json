@@ -1,0 +1,2023 @@
+{
+  "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V1",
+  "report_status": "BLOCKED_BY_READ_ONLY_PERMISSION_SCOPE",
+  "sanitization": {
+    "credentials_included": false,
+    "passwords_included": false,
+    "api_keys_included": false,
+    "keychain_values_included": false,
+    "raw_source_payloads_included": false,
+    "server_endpoint_included": false,
+    "fixture_results_substituted": false
+  },
+  "live_sql_evidence": {
+    "connection_status": "PASS",
+    "database_name": "CologneTransitIntelligence",
+    "capture_timestamp_utc": "2026-10-08T07:57:49.5155896Z",
+    "database_status": "ONLINE",
+    "database_user_access": "MULTI_USER",
+    "database_user": "CologneTransitCollector",
+    "original_login": "CologneTransitCollector",
+    "read_only_queries_only": true,
+    "query_timeout_seconds": 30,
+    "login_timeout_seconds": 8,
+    "server_endpoint_omitted": true
+  },
+  "live_login_scope": {
+    "is_sysadmin": false,
+    "is_serveradmin": false,
+    "is_securityadmin": false,
+    "is_db_owner": false,
+    "is_db_datareader": false,
+    "is_db_datawriter": false,
+    "can_view_definition": false,
+    "can_select_database": false,
+    "database_reader_status": "NOT_A_MEMBER",
+    "source_read_access_status": "BLOCKED"
+  },
+  "physical_schema_inventory": {
+    "metadata_visibility_limited": true,
+    "visible_non_system_object_count": 49,
+    "visible_non_system_objects": [
+      {
+        "schema_name": "ctl",
+        "object_name": "CK_ctl_MddMacQuotaPermit_Amount",
+        "type_desc": "CHECK_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.817",
+        "modify_utc": "2026-10-07T11:47:20.817"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "CK_ctl_MddRealtimeSamplingSlot_Positive",
+        "type_desc": "CHECK_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.880",
+        "modify_utc": "2026-09-07T10:52:59.880"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "CK_ctl_MddRealtimeSamplingTarget_NumberOfResults",
+        "type_desc": "CHECK_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.847",
+        "modify_utc": "2026-09-07T10:52:59.847"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacCollectorRun_CreatedAtUtc",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.787",
+        "modify_utc": "2026-10-07T11:47:20.787"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacCollectorRun_Status",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.787",
+        "modify_utc": "2026-10-07T11:47:20.787"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacDispatcherClaim_Status",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.790",
+        "modify_utc": "2026-10-07T11:47:20.790"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacQuotaPermit_LiveClientInvocation",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.817",
+        "modify_utc": "2026-10-07T11:47:20.817"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacTargetAudit_HttpAttempts",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.807",
+        "modify_utc": "2026-10-07T11:47:20.807"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacTargetAudit_Status",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.807",
+        "modify_utc": "2026-10-07T11:47:20.807"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddMacTargetClaim_Status",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.800",
+        "modify_utc": "2026-10-07T11:47:20.800"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_CreatedAtUtc",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.847",
+        "modify_utc": "2026-09-07T10:52:59.847"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_IsEnabled",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.847",
+        "modify_utc": "2026-09-07T10:52:59.847"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_NumberOfResults",
+        "type_desc": "DEFAULT_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.847",
+        "modify_utc": "2026-09-07T10:52:59.847"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacDispatcherClaim_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.790",
+        "modify_utc": "2026-10-07T11:47:20.790"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacDispatcherClaimEvent_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.793",
+        "modify_utc": "2026-10-07T11:47:20.793"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacHttpAttempt_Audit",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.810",
+        "modify_utc": "2026-10-07T11:47:20.810"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacHttpAttempt_QuotaPermit",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.817",
+        "modify_utc": "2026-10-07T11:47:20.817"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacQuotaAudit_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.823",
+        "modify_utc": "2026-10-07T11:47:20.823"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacTargetAudit_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.807",
+        "modify_utc": "2026-10-07T11:47:20.807"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacTargetClaim_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.800",
+        "modify_utc": "2026-10-07T11:47:20.800"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddMacTargetClaimEvent_Run",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.800",
+        "modify_utc": "2026-10-07T11:47:20.800"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "FK_ctl_MddRealtimeSamplingSlot_Target",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.880",
+        "modify_utc": "2026-09-07T10:52:59.880"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacCollectorRun",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.787",
+        "modify_utc": "2026-10-07T11:47:20.830"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacDispatcherClaim",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.790",
+        "modify_utc": "2026-10-07T11:47:20.790"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacDispatcherClaimEvent",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.793",
+        "modify_utc": "2026-10-07T11:47:20.797"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacHttpAttempt",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.810",
+        "modify_utc": "2026-10-07T11:47:20.817"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacQuotaAudit",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.820",
+        "modify_utc": "2026-10-07T11:47:20.820"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacQuotaPermit",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.813",
+        "modify_utc": "2026-10-07T11:47:20.903"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacTargetAudit",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.803",
+        "modify_utc": "2026-10-07T20:44:51.080"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacTargetClaim",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.797",
+        "modify_utc": "2026-10-07T11:47:20.797"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddMacTargetClaimEvent",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-10-07T11:47:20.800",
+        "modify_utc": "2026-10-07T11:47:20.803"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddRealtimeSamplingSlot",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-09-07T10:52:59.873",
+        "modify_utc": "2026-09-07T10:52:59.873"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "MddRealtimeSamplingTarget",
+        "type_desc": "USER_TABLE",
+        "create_utc": "2026-09-07T10:52:59.833",
+        "modify_utc": "2026-09-07T10:52:59.880"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacCollectorRun",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.787",
+        "modify_utc": "2026-10-07T11:47:20.787"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacDispatcherClaim",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.790",
+        "modify_utc": "2026-10-07T11:47:20.790"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacDispatcherClaimEvent",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.793",
+        "modify_utc": "2026-10-07T11:47:20.793"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacHttpAttempt",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.810",
+        "modify_utc": "2026-10-07T11:47:20.810"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacQuotaAudit",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.820",
+        "modify_utc": "2026-10-07T11:47:20.820"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacQuotaPermit",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.817",
+        "modify_utc": "2026-10-07T11:47:20.817"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacTargetAudit",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.807",
+        "modify_utc": "2026-10-07T11:47:20.807"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacTargetClaim",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.797",
+        "modify_utc": "2026-10-07T11:47:20.797"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddMacTargetClaimEvent",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.800",
+        "modify_utc": "2026-10-07T11:47:20.800"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddRealtimeSamplingSlot",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.877",
+        "modify_utc": "2026-09-07T10:52:59.877"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "PK_ctl_MddRealtimeSamplingTarget",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT",
+        "create_utc": "2026-09-07T10:52:59.843",
+        "modify_utc": "2026-09-07T10:52:59.843"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "UQ_ctl_MddMacCollectorRun_RunId",
+        "type_desc": "UNIQUE_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.787",
+        "modify_utc": "2026-10-07T11:47:20.787"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "UQ_ctl_MddMacHttpAttempt_Audit_Attempt",
+        "type_desc": "UNIQUE_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.810",
+        "modify_utc": "2026-10-07T11:47:20.810"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "UQ_ctl_MddMacTargetAudit_Run_Target_Bucket",
+        "type_desc": "UNIQUE_CONSTRAINT",
+        "create_utc": "2026-10-07T11:47:20.807",
+        "modify_utc": "2026-10-07T11:47:20.807"
+      },
+      {
+        "schema_name": "ctl",
+        "object_name": "uspGetMddRealtimeSamplingTarget",
+        "type_desc": "SQL_STORED_PROCEDURE",
+        "create_utc": "2026-09-07T10:52:59.887",
+        "modify_utc": "2026-09-07T11:02:08.200"
+      },
+      {
+        "schema_name": "stg",
+        "object_name": "uspPersistMddMacSnapshot",
+        "type_desc": "SQL_STORED_PROCEDURE",
+        "create_utc": "2026-10-07T11:47:20.880",
+        "modify_utc": "2026-10-07T21:46:10.330"
+      }
+    ],
+    "requested_object_probe_count": 40,
+    "object_probes": [
+      {
+        "name": "ctl.MddRealtimeSamplingTarget",
+        "category": "monitoring_panel",
+        "purpose": "approved Legacy7 target identity and panel metadata",
+        "can_select": true,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "COLUMN_NAMES_OBSERVED",
+        "live_columns": [
+          "SamplingTargetId",
+          "StopPointRef",
+          "TargetName",
+          "NumberOfResults",
+          "IsEnabled",
+          "Notes",
+          "CreatedAtUtc"
+        ],
+        "readability_status": "READABLE",
+        "live_column_definitions": [
+          {
+            "ORDINAL_POSITION": 1,
+            "COLUMN_NAME": "SamplingTargetId",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 2,
+            "COLUMN_NAME": "StopPointRef",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 100,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 3,
+            "COLUMN_NAME": "TargetName",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 200,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 4,
+            "COLUMN_NAME": "NumberOfResults",
+            "DATA_TYPE": "tinyint",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 3,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 5,
+            "COLUMN_NAME": "IsEnabled",
+            "DATA_TYPE": "bit",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 6,
+            "COLUMN_NAME": "Notes",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 1000,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 7,
+            "COLUMN_NAME": "CreatedAtUtc",
+            "DATA_TYPE": "datetime2",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          }
+        ]
+      },
+      {
+        "name": "ctl.MddRealtimeSamplingSlot",
+        "category": "monitoring_panel",
+        "purpose": "Legacy7 UTC bucket-to-slot mapping",
+        "can_select": true,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "COLUMN_NAMES_OBSERVED",
+        "live_columns": [
+          "SamplingSlot",
+          "SamplingTargetId"
+        ],
+        "readability_status": "READABLE",
+        "live_column_definitions": [
+          {
+            "ORDINAL_POSITION": 1,
+            "COLUMN_NAME": "SamplingSlot",
+            "DATA_TYPE": "smallint",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 5,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 2,
+            "COLUMN_NAME": "SamplingTargetId",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          }
+        ]
+      },
+      {
+        "name": "ctl.MddMacTargetAudit",
+        "category": "monitoring_panel",
+        "purpose": "target-audit lineage and transport/parser outcome metadata",
+        "can_select": true,
+        "can_view_definition": true,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "COLUMN_NAMES_OBSERVED",
+        "live_columns": [
+          "AuditId",
+          "RunId",
+          "PanelVersion",
+          "TargetIdentity",
+          "StationName",
+          "Tier",
+          "PhaseIndex",
+          "NumberOfResults",
+          "LogicalDueBucket",
+          "SamplingEra",
+          "SamplingTargetId",
+          "ContinuityClassification",
+          "CollectionContext",
+          "StartedAtUtc",
+          "CompletedAtUtc",
+          "Status",
+          "HttpAttempts",
+          "HttpStatus",
+          "StopEventResultCount",
+          "ParserOutcome",
+          "PersistenceOutcome",
+          "ErrorCategory",
+          "OutcomeJson",
+          "DurationMs",
+          "SkipReason",
+          "RetryDecision",
+          "RetryOutcome",
+          "SamplingSlot",
+          "SelectionPolicyVersion"
+        ],
+        "readability_status": "READABLE",
+        "live_column_definitions": [
+          {
+            "ORDINAL_POSITION": 1,
+            "COLUMN_NAME": "AuditId",
+            "DATA_TYPE": "bigint",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 19,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 2,
+            "COLUMN_NAME": "RunId",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 100,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 3,
+            "COLUMN_NAME": "PanelVersion",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 100,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 4,
+            "COLUMN_NAME": "TargetIdentity",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 200,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 5,
+            "COLUMN_NAME": "StationName",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": 400,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 6,
+            "COLUMN_NAME": "Tier",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 10,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 7,
+            "COLUMN_NAME": "PhaseIndex",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 8,
+            "COLUMN_NAME": "NumberOfResults",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 9,
+            "COLUMN_NAME": "LogicalDueBucket",
+            "DATA_TYPE": "bigint",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 19,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 10,
+            "COLUMN_NAME": "SamplingEra",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 40,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 11,
+            "COLUMN_NAME": "SamplingTargetId",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 12,
+            "COLUMN_NAME": "ContinuityClassification",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 13,
+            "COLUMN_NAME": "CollectionContext",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 14,
+            "COLUMN_NAME": "StartedAtUtc",
+            "DATA_TYPE": "datetime2",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 15,
+            "COLUMN_NAME": "CompletedAtUtc",
+            "DATA_TYPE": "datetime2",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 16,
+            "COLUMN_NAME": "Status",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 40,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 17,
+            "COLUMN_NAME": "HttpAttempts",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "NO"
+          },
+          {
+            "ORDINAL_POSITION": 18,
+            "COLUMN_NAME": "HttpStatus",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 19,
+            "COLUMN_NAME": "StopEventResultCount",
+            "DATA_TYPE": "bigint",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 19,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 20,
+            "COLUMN_NAME": "ParserOutcome",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 21,
+            "COLUMN_NAME": "PersistenceOutcome",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 22,
+            "COLUMN_NAME": "ErrorCategory",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 23,
+            "COLUMN_NAME": "OutcomeJson",
+            "DATA_TYPE": "nvarchar",
+            "CHARACTER_MAXIMUM_LENGTH": -1,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 24,
+            "COLUMN_NAME": "DurationMs",
+            "DATA_TYPE": "decimal",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 18,
+            "NUMERIC_SCALE": 6,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 25,
+            "COLUMN_NAME": "SkipReason",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 120,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 26,
+            "COLUMN_NAME": "RetryDecision",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 120,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 27,
+            "COLUMN_NAME": "RetryOutcome",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 120,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 28,
+            "COLUMN_NAME": "SamplingSlot",
+            "DATA_TYPE": "int",
+            "CHARACTER_MAXIMUM_LENGTH": null,
+            "NUMERIC_PRECISION": 10,
+            "NUMERIC_SCALE": 0,
+            "IS_NULLABLE": "YES"
+          },
+          {
+            "ORDINAL_POSITION": 29,
+            "COLUMN_NAME": "SelectionPolicyVersion",
+            "DATA_TYPE": "varchar",
+            "CHARACTER_MAXIMUM_LENGTH": 80,
+            "NUMERIC_PRECISION": null,
+            "NUMERIC_SCALE": null,
+            "IS_NULLABLE": "YES"
+          }
+        ]
+      },
+      {
+        "name": "ctl.MddMacSamplingEra",
+        "category": "sampling_era",
+        "purpose": "append-only sampling-era evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.MddMacMethodologyEvidence",
+        "category": "sampling_era",
+        "purpose": "append-only cadence/oversampling methodology evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacSourceSnapshot",
+        "category": "mac_source",
+        "purpose": "one parsed response observation and source lineage",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacCallObservation",
+        "category": "mac_source",
+        "purpose": "source call, journey, line, direction, stop, and call-scope evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacTimingObservation",
+        "category": "timing",
+        "purpose": "timetabled, estimated, source-recorded, arrival/departure, and event-identity evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacSituationEvidence",
+        "category": "provider_cause",
+        "purpose": "provider-reported Situation identity, validity, and affected-entity evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacServiceSectionEvidence",
+        "category": "provider_cause",
+        "purpose": "provider-reported service-section and line/direction evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacAttributeEvidence",
+        "category": "provider_cause",
+        "purpose": "provider-reported Attribute and cause-code evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacResponseError",
+        "category": "data_quality",
+        "purpose": "persisted provider response error evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddMacParserGap",
+        "category": "data_quality",
+        "purpose": "unmapped-but-retained source fields and parser-gap classifications",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.MddImportBatch",
+        "category": "source_lineage",
+        "purpose": "historical import batch and source-population lineage",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.MddImportSourceRow",
+        "category": "source_lineage",
+        "purpose": "historical imported source-row lineage",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.MddCollectorRun",
+        "category": "windows_history",
+        "purpose": "historical Windows collector-run identity and sampling era",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddRealtimeStopObservation",
+        "category": "windows_realtime",
+        "purpose": "historical Windows stop observations",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddRealtimeSituationObservation",
+        "category": "windows_realtime",
+        "purpose": "historical Windows Situation observations",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.MddRealtimeStopSituationLink",
+        "category": "windows_realtime",
+        "purpose": "historical Windows stop-to-Situation links",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.GtfsLoadBatch",
+        "category": "gtfs",
+        "purpose": "GTFS feed load and freshness lineage",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.GtfsStagingState",
+        "category": "gtfs",
+        "purpose": "current GTFS staging state",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "ctl.GtfsValidationResult",
+        "category": "gtfs",
+        "purpose": "GTFS validation outcomes",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.GtfsStops",
+        "category": "gtfs",
+        "purpose": "GTFS stop and parent-station identities",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.GtfsRoutes",
+        "category": "gtfs",
+        "purpose": "GTFS route and line identities",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.GtfsTrips",
+        "category": "gtfs",
+        "purpose": "GTFS trip identities and service relationships",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "stg.GtfsStopTimes",
+        "category": "gtfs",
+        "purpose": "GTFS scheduled stop order and timetable evidence",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.DimStop",
+        "category": "warehouse",
+        "purpose": "warehouse stop and parent-station dimension",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.DimRoute",
+        "category": "warehouse",
+        "purpose": "warehouse route dimension",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.DimService",
+        "category": "warehouse",
+        "purpose": "warehouse service dimension",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.BridgeServiceDate",
+        "category": "warehouse",
+        "purpose": "active service-date coverage",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.FactScheduledTrip",
+        "category": "warehouse",
+        "purpose": "scheduled trip-pattern grain",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.FactScheduledStopEvent",
+        "category": "warehouse",
+        "purpose": "scheduled stop-event grain and stop order",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "dw.FactRealtimeStopPerformance",
+        "category": "warehouse",
+        "purpose": "existing realtime performance projection, if present",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "OBJECT_NOT_FOUND_OR_NOT_VISIBLE"
+      },
+      {
+        "name": "dw.FactOperationalStopOutcome",
+        "category": "warehouse",
+        "purpose": "existing operational outcome projection",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwNetworkBaselineKpi",
+        "category": "analytics",
+        "purpose": "existing network baseline analytical view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwRealtimeDelayHotspot",
+        "category": "analytics",
+        "purpose": "existing realtime delay-hotspot analytical view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwRealtimeReliabilityByDimension",
+        "category": "analytics",
+        "purpose": "existing realtime reliability-by-dimension analytical view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwRealtimeSituationLinkedOutcome",
+        "category": "analytics",
+        "purpose": "existing linked Situation/outcome analytical view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwMddMacRecordedAtTimeHistory",
+        "category": "analytics",
+        "purpose": "source-recorded-time history view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      },
+      {
+        "name": "analytics.vwMddMacSourceFieldCoverage",
+        "category": "analytics",
+        "purpose": "source-field coverage view",
+        "can_select": false,
+        "can_view_definition": false,
+        "can_execute": false,
+        "read_only_probe": true,
+        "live_definition_status": "NOT_OBSERVED",
+        "live_columns": [],
+        "readability_status": "SELECT_PERMISSION_DENIED"
+      }
+    ],
+    "definition_rule": "Only live column definitions observed through this login are included; repository contracts are not substituted for live metadata."
+  },
+  "current_monitoring_panel": {
+    "target_query_status": "PASS",
+    "target_count": 7,
+    "sampling_target_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sampling_target_ids_1_through_7_preserved": true,
+    "targets": [
+      {
+        "SamplingTargetId": 1,
+        "StopPointRef": "de:05315:11110",
+        "TargetName": "Köln Heumarkt",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 2,
+        "StopPointRef": "de:05315:11201",
+        "TargetName": "Köln Hbf",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 3,
+        "StopPointRef": "de:05315:12711",
+        "TargetName": "Köln Rodenkirchen Bf",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 4,
+        "StopPointRef": "de:05315:14201",
+        "TargetName": "Köln Bf Ehrenfeld",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 5,
+        "StopPointRef": "de:05315:16601",
+        "TargetName": "Köln Worringen S-Bahn",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 6,
+        "StopPointRef": "de:05315:17311",
+        "TargetName": "Köln Porz Markt",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      },
+      {
+        "SamplingTargetId": 7,
+        "StopPointRef": "de:05315:19201",
+        "TargetName": "Köln Bf Mülheim",
+        "NumberOfResults": 5,
+        "IsEnabled": true
+      }
+    ],
+    "slot_query_status": "PASS",
+    "slots": [
+      {
+        "SamplingSlot": 1,
+        "SamplingTargetId": 2
+      },
+      {
+        "SamplingSlot": 2,
+        "SamplingTargetId": 7
+      },
+      {
+        "SamplingSlot": 3,
+        "SamplingTargetId": 1
+      },
+      {
+        "SamplingSlot": 4,
+        "SamplingTargetId": 4
+      },
+      {
+        "SamplingSlot": 5,
+        "SamplingTargetId": 6
+      },
+      {
+        "SamplingSlot": 6,
+        "SamplingTargetId": 2
+      },
+      {
+        "SamplingSlot": 7,
+        "SamplingTargetId": 7
+      },
+      {
+        "SamplingSlot": 8,
+        "SamplingTargetId": 1
+      },
+      {
+        "SamplingSlot": 9,
+        "SamplingTargetId": 5
+      },
+      {
+        "SamplingSlot": 10,
+        "SamplingTargetId": 3
+      }
+    ],
+    "is_legacy7_limited_monitoring_panel": true,
+    "koln_neumarkt_is_legacy7_production_target": false,
+    "koln_neumarkt_hotspot_claim": "NOT_PERMITTED_WITHOUT_SEPARATE_QUALIFIED_EVIDENCE"
+  },
+  "live_target_audit_population": {
+    "summary_query_status": "PASS",
+    "by_sampling_era_context_status": [
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "SKIPPED",
+        "audit_rows": 2,
+        "run_ids": 2,
+        "logical_buckets": 2,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T11:29:41.637Z",
+        "last_started_utc": "2026-10-01T16:59:32.660Z",
+        "first_completed_utc": "2026-10-01T11:29:41.637Z",
+        "last_completed_utc": "2026-10-01T16:59:32.661Z",
+        "http_status_rows": 0,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      },
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "SUCCEEDED",
+        "audit_rows": 70,
+        "run_ids": 70,
+        "logical_buckets": 70,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T11:30:36.332Z",
+        "last_started_utc": "2026-10-01T22:55:00.707Z",
+        "first_completed_utc": "2026-10-01T11:30:58.539Z",
+        "last_completed_utc": "2026-10-01T22:55:18.150Z",
+        "http_status_rows": 70,
+        "http_200_rows": 70,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 70,
+        "persistence_outcome_rows": 70
+      },
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "FAILED",
+        "audit_rows": 3,
+        "run_ids": 3,
+        "logical_buckets": 3,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T21:10:00.524Z",
+        "last_started_utc": "2026-10-01T21:20:00.540Z",
+        "first_completed_utc": "2026-10-01T21:10:01.554Z",
+        "last_completed_utc": "2026-10-01T21:20:10.732Z",
+        "http_status_rows": 3,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_PYTHON_MSSQL_PREPARED",
+        "Status": "SUCCEEDED",
+        "audit_rows": 42,
+        "run_ids": 6,
+        "logical_buckets": 6,
+        "target_identities": 7,
+        "first_started_utc": "2026-10-07T16:25:01.867Z",
+        "last_started_utc": "2026-10-07T17:04:08.702Z",
+        "first_completed_utc": "2026-10-07T16:25:08.888Z",
+        "last_completed_utc": "2026-10-07T17:04:15.246Z",
+        "http_status_rows": 42,
+        "http_200_rows": 42,
+        "result_count_rows": 42,
+        "parser_outcome_rows": 42,
+        "persistence_outcome_rows": 42
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_LEGACY7_PRODUCTION",
+        "Status": "SUCCEEDED",
+        "audit_rows": 33,
+        "run_ids": 33,
+        "logical_buckets": 33,
+        "target_identities": 7,
+        "first_started_utc": "2026-10-07T19:40:17.282Z",
+        "last_started_utc": "2026-10-08T07:49:24.604Z",
+        "first_completed_utc": "2026-10-07T19:40:22.055Z",
+        "last_completed_utc": "2026-10-08T07:49:32.784Z",
+        "http_status_rows": 33,
+        "http_200_rows": 33,
+        "result_count_rows": 33,
+        "parser_outcome_rows": 33,
+        "persistence_outcome_rows": 33
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_LEGACY7_PRODUCTION",
+        "Status": "SKIPPED",
+        "audit_rows": 1,
+        "run_ids": 1,
+        "logical_buckets": 1,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-08T07:54:35.769Z",
+        "last_started_utc": "2026-10-08T07:54:35.769Z",
+        "first_completed_utc": "2026-10-08T07:54:35.996Z",
+        "last_completed_utc": "2026-10-08T07:54:35.996Z",
+        "http_status_rows": 0,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      }
+    ],
+    "bucket_shape_query_status": "PASS",
+    "bucket_shape_by_context": [
+      {
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "bucket_groups": 75,
+        "singleton_bucket_groups": 75,
+        "non_singleton_bucket_groups": 0
+      },
+      {
+        "CollectionContext": "MAC_LEGACY7_PRODUCTION",
+        "bucket_groups": 34,
+        "singleton_bucket_groups": 34,
+        "non_singleton_bucket_groups": 0
+      },
+      {
+        "CollectionContext": "MAC_PYTHON_MSSQL_PREPARED",
+        "bucket_groups": 6,
+        "singleton_bucket_groups": 0,
+        "non_singleton_bucket_groups": 6
+      }
+    ],
+    "mac_legacy7_production_boundary_status": "PASS",
+    "mac_legacy7_production_boundary": {
+      "audit_rows": 34,
+      "run_ids": 34,
+      "logical_buckets": 34,
+      "target_identities": 7,
+      "first_started_utc": "2026-10-07T19:40:17.282Z",
+      "last_started_utc": "2026-10-08T07:54:35.769Z",
+      "first_completed_utc": "2026-10-07T19:40:22.055Z",
+      "last_completed_utc": "2026-10-08T07:54:35.996Z"
+    },
+    "interpretation": "Target-audit rows prove monitoring/audit lineage only. They do not prove timing coverage, actual delay, journey continuity, or provider cause."
+  },
+  "source_coverage": {
+    "status": "BLOCKED",
+    "source_objects_readable": [],
+    "source_objects_not_readable": [
+      "stg.MddMacSourceSnapshot",
+      "stg.MddMacCallObservation",
+      "stg.MddMacTimingObservation"
+    ],
+    "observation_counts": null,
+    "freshness_window": null,
+    "reason": "Source child tables could not be read with the configured collector login; NULL is used instead of a fabricated count or freshness boundary."
+  },
+  "timing_evidence": {
+    "status": "BLOCKED_BY_SOURCE_ACCESS",
+    "measurements": [
+      {
+        "measure": "scheduled_arrival_availability",
+        "required_fields": "TimetabledTimeSourceText plus validated GTFS scheduled arrival",
+        "interpretation": "scheduled/timetabled arrival field availability only",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "estimated_arrival_availability",
+        "required_fields": "EstimatedTimeSourceText",
+        "interpretation": "provider estimate availability; never actual physical delay",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "estimate_revision_frequency",
+        "required_fields": "SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText",
+        "interpretation": "revisions per uniquely identified source event; repeated raw rows are not the denominator",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "first_and_latest_observed_estimate",
+        "required_fields": "SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText",
+        "interpretation": "first/latest non-NULL estimate over an explicit UTC window",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "last_non_null_recorded_at_time",
+        "required_fields": "RecordedAtTimeSourceText and ObservedAtUtc",
+        "interpretation": "retain last known source value without replacing later source-NULL observations",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "recorded_at_time_occurrence",
+        "required_fields": "RecordedAtTimeSourceText and RecordedAtTimeSourcePath",
+        "interpretation": "source-provided value only; capture/prediction timestamps are not substitutes",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "arrival_departure_context",
+        "required_fields": "TimingContext",
+        "interpretation": "ARRIVAL and DEPARTURE remain separate timing populations",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "call_scope_context",
+        "required_fields": "CallScope",
+        "interpretation": "THIS, PREVIOUS, and ONWARD remain separate source call contexts",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "missing_timing_and_parser_gaps",
+        "required_fields": "MddMacTimingObservation and MddMacParserGap",
+        "interpretation": "missing evidence and parser gaps are classified, not silently converted to zero",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      }
+    ],
+    "semantics_preserved": [
+      "RecordedAtTime is never inferred from prediction or capture timestamps.",
+      "Last-known non-NULL RecordedAtTime must remain available without replacing later source-NULL observations.",
+      "Estimated delay is not actual physical delay.",
+      "ARRIVAL and DEPARTURE remain separate.",
+      "THIS, PREVIOUS, and ONWARD call contexts remain separate."
+    ]
+  },
+  "hotspot_feasibility": {
+    "status": "BLOCKED_BY_SOURCE_ACCESS",
+    "legacy7_panel_status": "PARTIAL",
+    "legacy7_panel_population": {
+      "target_count": 7,
+      "current_mac_production_audits": 34,
+      "current_mac_production_target_identities": 7
+    },
+    "candidate_results": null,
+    "reason": "No station/line delay distribution or repeated high-delay location ranking was run because timing and schedule evidence were not readable.",
+    "raw_observation_count_warning": "Raw audit counts are not hotspot rankings."
+  },
+  "propagation_feasibility": {
+    "status": "BLOCKED_BY_SOURCE_ACCESS",
+    "conclusion": "INSUFFICIENT_EVIDENCE",
+    "observed_estimated_delay_change": null,
+    "candidate_downstream_propagation": null,
+    "provider_reported_disruption_association": null,
+    "proven_causal_attribution": null,
+    "required_continuity_evidence": [
+      "stable source journey identity",
+      "service date / operating day",
+      "stop identity and stop sequence",
+      "direction and line consistency",
+      "scheduled stop order",
+      "repeated observation timestamps",
+      "THIS/PREVIOUS/ONWARD context",
+      "temporal consistency",
+      "ambiguous journey-match classification"
+    ],
+    "reason": "The current login cannot inspect the source call/timing rows needed to establish consecutive-stop continuity."
+  },
+  "provider_reported_causes": {
+    "status": "BLOCKED_BY_SOURCE_ACCESS",
+    "source_situation_evidence_records": null,
+    "explicit_disruption_or_cause_codes": null,
+    "situation_identity_version_continuity": null,
+    "affected_lines_and_journeys": null,
+    "linked_vs_unlinked_situations": null,
+    "missing_or_ambiguous_cause_classifications": null,
+    "historical_description_changes": null,
+    "reason": "Situation, Attribute, service-section, and historical Windows evidence objects are not readable by this login.",
+    "non_causal_rule": "A Situation association is not proof that the situation caused a specific delay; free text alone is not a cause classifier."
+  },
+  "era_reconciliation": {
+    "status": "PARTIAL",
+    "live_visible_contexts": [
+      "LIVE_RESEARCH_SINGLE_1",
+      "MAC_LEGACY7_PRODUCTION",
+      "MAC_PYTHON_MSSQL_PREPARED"
+    ],
+    "live_visible_sampling_eras": [
+      "Legacy7",
+      "Tiered50"
+    ],
+    "populations": [
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "SKIPPED",
+        "audit_rows": 2,
+        "run_ids": 2,
+        "logical_buckets": 2,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T11:29:41.637Z",
+        "last_started_utc": "2026-10-01T16:59:32.660Z",
+        "first_completed_utc": "2026-10-01T11:29:41.637Z",
+        "last_completed_utc": "2026-10-01T16:59:32.661Z",
+        "http_status_rows": 0,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      },
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "SUCCEEDED",
+        "audit_rows": 70,
+        "run_ids": 70,
+        "logical_buckets": 70,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T11:30:36.332Z",
+        "last_started_utc": "2026-10-01T22:55:00.707Z",
+        "first_completed_utc": "2026-10-01T11:30:58.539Z",
+        "last_completed_utc": "2026-10-01T22:55:18.150Z",
+        "http_status_rows": 70,
+        "http_200_rows": 70,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 70,
+        "persistence_outcome_rows": 70
+      },
+      {
+        "SamplingEra": "Tiered50",
+        "CollectionContext": "LIVE_RESEARCH_SINGLE_1",
+        "Status": "FAILED",
+        "audit_rows": 3,
+        "run_ids": 3,
+        "logical_buckets": 3,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-01T21:10:00.524Z",
+        "last_started_utc": "2026-10-01T21:20:00.540Z",
+        "first_completed_utc": "2026-10-01T21:10:01.554Z",
+        "last_completed_utc": "2026-10-01T21:20:10.732Z",
+        "http_status_rows": 3,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_PYTHON_MSSQL_PREPARED",
+        "Status": "SUCCEEDED",
+        "audit_rows": 42,
+        "run_ids": 6,
+        "logical_buckets": 6,
+        "target_identities": 7,
+        "first_started_utc": "2026-10-07T16:25:01.867Z",
+        "last_started_utc": "2026-10-07T17:04:08.702Z",
+        "first_completed_utc": "2026-10-07T16:25:08.888Z",
+        "last_completed_utc": "2026-10-07T17:04:15.246Z",
+        "http_status_rows": 42,
+        "http_200_rows": 42,
+        "result_count_rows": 42,
+        "parser_outcome_rows": 42,
+        "persistence_outcome_rows": 42
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_LEGACY7_PRODUCTION",
+        "Status": "SUCCEEDED",
+        "audit_rows": 33,
+        "run_ids": 33,
+        "logical_buckets": 33,
+        "target_identities": 7,
+        "first_started_utc": "2026-10-07T19:40:17.282Z",
+        "last_started_utc": "2026-10-08T07:49:24.604Z",
+        "first_completed_utc": "2026-10-07T19:40:22.055Z",
+        "last_completed_utc": "2026-10-08T07:49:32.784Z",
+        "http_status_rows": 33,
+        "http_200_rows": 33,
+        "result_count_rows": 33,
+        "parser_outcome_rows": 33,
+        "persistence_outcome_rows": 33
+      },
+      {
+        "SamplingEra": "Legacy7",
+        "CollectionContext": "MAC_LEGACY7_PRODUCTION",
+        "Status": "SKIPPED",
+        "audit_rows": 1,
+        "run_ids": 1,
+        "logical_buckets": 1,
+        "target_identities": 1,
+        "first_started_utc": "2026-10-08T07:54:35.769Z",
+        "last_started_utc": "2026-10-08T07:54:35.769Z",
+        "first_completed_utc": "2026-10-08T07:54:35.996Z",
+        "last_completed_utc": "2026-10-08T07:54:35.996Z",
+        "http_status_rows": 0,
+        "http_200_rows": 0,
+        "result_count_rows": 0,
+        "parser_outcome_rows": 0,
+        "persistence_outcome_rows": 0
+      }
+    ],
+    "historical_windows_legacy7_production": {
+      "status": "BLOCKED_BY_ACCESS",
+      "required_object": "ctl.MddCollectorRun",
+      "note": "The Windows-era population is not counted from current live SQL under this login."
+    },
+    "imported_live_research_single_1": {
+      "status": "VISIBLE_AS_TARGET_AUDIT_CONTEXT_ONLY",
+      "note": "The context label is visible in target audits; source-row and import-batch evidence remain unreadable."
+    },
+    "mac_oversampling_validation_interval": {
+      "status": "VISIBLE_AS_TARGET_AUDIT_CONTEXT_ONLY",
+      "note": "MAC_PYTHON_MSSQL_PREPARED target-audit rows are visible, but the exact methodology record and source snapshots are not readable."
+    },
+    "corrected_mac_legacy7_production": {
+      "status": "VISIBLE_AS_TARGET_AUDIT_CONTEXT_ONLY",
+      "note": "MAC_LEGACY7_PRODUCTION target-audit lineage is visible; source timing evidence is not."
+    },
+    "oversampling_rate_rule": "Exclude the oversampling interval from cadence-equivalent rate comparisons while preserving its valid source evidence.",
+    "tiered50_activation": "No Tiered50 activation or database write was performed; current active-era status is not re-read because ctl.MddMacSamplingEra is not readable."
+  },
+  "power_bi_readiness": {
+    "permanent_analytical_facts_created": false,
+    "power_bi_modified": false,
+    "model_status": "DO_NOT_IMPLEMENT_OR_POPULATE_UNTIL_SOURCE_ACCESS_AND_EVIDENCE_GAPS_ARE_RESOLVED",
+    "kpi_matrix": [
+      {
+        "kpi": "monitoring_panel_coverage",
+        "business_definition": "Observed target-audit coverage by collection context and sampling era; not network coverage.",
+        "reporting_grain": "collection_context + sampling_era + monitored target + UTC observation window",
+        "required_sql_sources": [
+          "ctl.MddRealtimeSamplingTarget",
+          "ctl.MddRealtimeSamplingSlot",
+          "ctl.MddMacTargetAudit",
+          "GTFS network universe (not readable)"
+        ],
+        "calculation_logic": "Distinct monitored target identities and completed target audits, segmented by era/context; never rank on raw observation count alone.",
+        "denominator": "Approved monitoring panel denominator is available; network denominator requires GTFS/warehouse coverage.",
+        "missing_evidence": "GTFS/warehouse network universe and complete source observation coverage.",
+        "confidence_limitation": "Legacy7 is a limited monitoring panel and cannot support network-wide claims.",
+        "readiness_status": "PARTIAL",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "scheduled_arrival_availability",
+        "business_definition": "Share of eligible source timing occurrences with a validated scheduled/timetabled arrival.",
+        "reporting_grain": "unique source event identity + service date + stop call + arrival context",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "dw.FactScheduledStopEvent",
+          "dw.BridgeServiceDate"
+        ],
+        "calculation_logic": "COUNT of non-NULL timetabled arrivals divided by eligible timing occurrences after explicit identity and service-date rules.",
+        "denominator": "Eligible timing occurrences with a valid event/stop/service-date basis; not available in this readback.",
+        "missing_evidence": "Live SELECT access to source timing and schedule objects.",
+        "confidence_limitation": "No live measurement; unavailable is not zero.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": false
+      },
+      {
+        "kpi": "estimated_arrival_availability",
+        "business_definition": "Share of eligible timing occurrences with a provider EstimatedTime.",
+        "reporting_grain": "unique source event identity + service date + stop call + timing context",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "stg.MddMacCallObservation"
+        ],
+        "calculation_logic": "COUNT of non-NULL EstimatedTime divided by eligible timing occurrences; label as estimate availability only.",
+        "denominator": "Eligible timing occurrences after identity and context filters; not available in this readback.",
+        "missing_evidence": "Live SELECT access to MddMac timing/call observations.",
+        "confidence_limitation": "Estimated arrival is not confirmed actual arrival and must not be relabeled as actual delay.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": false
+      },
+      {
+        "kpi": "station_estimated_delay_distribution",
+        "business_definition": "Distribution of explicitly labelled estimated arrival difference from timetable by monitored station.",
+        "reporting_grain": "station/stop position + unique source event + service date + arrival context",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "stg.MddMacCallObservation",
+          "dw.DimStop",
+          "dw.FactScheduledStopEvent"
+        ],
+        "calculation_logic": "EstimatedTime minus TimetabledTime only when both comparable values exist; summarize median/quantiles/count with denominator.",
+        "denominator": "Comparable non-NULL estimate/timetable pairs; not available in this readback.",
+        "missing_evidence": "Timing rows, validated stop identity, schedule match, temporal coverage, and sample-quality fields.",
+        "confidence_limitation": "Limited Legacy7 panel; no causal or actual-physical-delay interpretation.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "line_service_estimated_reliability",
+        "business_definition": "Explicitly labelled estimated-arrival performance by validated line/service identity.",
+        "reporting_grain": "line/service + service date + time window + unique source event",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "stg.MddMacCallObservation",
+          "dw.DimRoute",
+          "dw.DimService",
+          "dw.FactScheduledStopEvent"
+        ],
+        "calculation_logic": "Aggregate comparable estimate/timetable pairs only after validated line/service and schedule matching.",
+        "denominator": "Comparable matched event-stop pairs by line/service; not available in this readback.",
+        "missing_evidence": "Live timing, static identity, schedule, and network sampling coverage.",
+        "confidence_limitation": "Tiered50 or another representative coverage decision is required before network reliability claims.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "time_of_day_estimated_delay_pattern",
+        "business_definition": "Estimated-delay distribution by explicit UTC/local reporting time bucket, with coverage denominator.",
+        "reporting_grain": "time bucket + monitored station/line + unique source event",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "stg.MddMacSourceSnapshot",
+          "validated date/time dimensions"
+        ],
+        "calculation_logic": "Derive time bucket from an explicitly selected observation/event timestamp; preserve UTC window and sampling era.",
+        "denominator": "Comparable timing pairs observed in each time bucket; not available in this readback.",
+        "missing_evidence": "Timing observations, observation timestamps, and coverage denominator.",
+        "confidence_limitation": "Cadence and panel selection can confound apparent time-of-day patterns.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "repeated_high_delay_location_candidate",
+        "business_definition": "Location repeatedly appearing in the upper tail of estimated delay across independent events and comparable windows.",
+        "reporting_grain": "location + service date/window + independent source event",
+        "required_sql_sources": [
+          "stg.MddMacTimingObservation",
+          "stg.MddMacCallObservation",
+          "dw.DimStop"
+        ],
+        "calculation_logic": "Use event-level tail membership and repeated-window coverage; never rank by raw observation count.",
+        "denominator": "Independent eligible source events and observed windows per location; not available in this readback.",
+        "missing_evidence": "Timing, identity, window completeness, and source coverage quality.",
+        "confidence_limitation": "Candidate investigation signal only; not proof of a location causing delay.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "consecutive_stop_estimated_delay_increase",
+        "business_definition": "Observed change in estimated delay between consecutive stops for the same defensibly matched journey.",
+        "reporting_grain": "service date + journey identity + consecutive stop pair + observation interval",
+        "required_sql_sources": [
+          "stg.MddMacCallObservation",
+          "stg.MddMacTimingObservation",
+          "dw.FactScheduledStopEvent"
+        ],
+        "calculation_logic": "Join only validated same-journey, direction/line-consistent, stop-sequence-ordered records; compare estimates, not actual delay.",
+        "denominator": "Matched consecutive-stop pairs with comparable timing evidence; not available in this readback.",
+        "missing_evidence": "Journey identity, stop sequence, temporal consistency, and timing rows.",
+        "confidence_limitation": "Observed estimate change is not causal propagation or proof of dwell delay.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": false
+      },
+      {
+        "kpi": "dwell_related_hypothesis",
+        "business_definition": "Candidate association between estimated delay change and dwell/stop-service indicators where source fields support it.",
+        "reporting_grain": "journey + stop call + consecutive stop pair + service date",
+        "required_sql_sources": [
+          "stg.MddMacCallObservation",
+          "stg.MddMacTimingObservation",
+          "dw.FactScheduledStopEvent"
+        ],
+        "calculation_logic": "Compare timing changes with explicitly persisted stop flags/bay/context; report as hypothesis only.",
+        "denominator": "Matched pairs with both timing and relevant stop-service evidence; not available in this readback.",
+        "missing_evidence": "Call flags, stop sequence, timing, and validated journey continuity.",
+        "confidence_limitation": "No causal attribution from dwell-related association.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": false
+      },
+      {
+        "kpi": "candidate_downstream_propagation",
+        "business_definition": "Candidate association where an estimated-delay increase persists to a later stop on the same matched journey.",
+        "reporting_grain": "service date + journey identity + ordered stop sequence + source observation interval",
+        "calculation_logic": "Separate observed estimate change, candidate propagation, provider-reported disruption association, and proven causation.",
+        "denominator": "Matched journeys with at least two ordered, comparable stop calls; not available in this readback.",
+        "missing_evidence": "Live source call/timing rows and reliable journey continuity.",
+        "confidence_limitation": "Current readback cannot establish continuity; conclusion is INSUFFICIENT_EVIDENCE.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": true
+      },
+      {
+        "kpi": "provider_reported_disruption_evidence",
+        "business_definition": "Persisted provider Situation/Attribute evidence, its identity/version continuity, and affected-line/journey linkage.",
+        "reporting_grain": "situation identity/version + observation + affected entity + association scope",
+        "required_sql_sources": [
+          "stg.MddMacSituationEvidence",
+          "stg.MddMacAttributeEvidence",
+          "stg.MddMacServiceSectionEvidence",
+          "stg.MddRealtimeSituationObservation"
+        ],
+        "calculation_logic": "Count source evidence and explicit codes separately from estimated-delay observations; do not infer cause from free text alone.",
+        "denominator": "Persisted source Situation evidence occurrences and linked/unlinked eligible observations; not available in this readback.",
+        "missing_evidence": "Situation, Attribute, service-section, and historical Windows evidence rows.",
+        "confidence_limitation": "Situation association is not proof that a specific situation caused a specific delay.",
+        "readiness_status": "BLOCKED",
+        "tiered50_required": false
+      },
+      {
+        "kpi": "data_quality_and_evidence_confidence",
+        "business_definition": "Coverage, identity quality, parser-gap, missing-field, and sample-era evidence attached to every manager-facing metric.",
+        "reporting_grain": "metric population + source event/observation + sampling era + quality classification",
+        "required_sql_sources": [
+          "stg.MddMacParserGap",
+          "stg.MddMacTimingObservation",
+          "stg.MddMacCallObservation",
+          "ctl.MddMacTargetAudit"
+        ],
+        "calculation_logic": "Expose denominators, missingness, ambiguity, sampling era, and matching quality next to every result.",
+        "denominator": "Current target-audit denominators are partially available; source-event quality denominators are not.",
+        "missing_evidence": "Source timing/call/parser-gap rows and static/network coverage.",
+        "confidence_limitation": "Only monitoring-panel audit lineage is directly observed in this readback.",
+        "readiness_status": "PARTIAL",
+        "tiered50_required": false
+      }
+    ]
+  },
+  "highest_priority_data_gaps": [
+    "Grant a dedicated read-only analytics/review principal access to the required source, historical, GTFS, warehouse, and analytics objects, or run the diagnostic under an approved read-only analyst credential.",
+    "Re-run physical metadata discovery and bounded evidence queries with the approved analyst scope; do not rely on repository DDL as a live schema substitute.",
+    "Measure timing availability, source-event identity ambiguity, call/timing context, parser gaps, Situation/Attribute coverage, and freshness from live rows.",
+    "Validate journey continuity and scheduled stop order before considering any downstream propagation candidate.",
+    "Agree the reporting population and sampling-era denominator before any manager-facing KPI implementation; keep Legacy7 separate from Tiered50 and imported research."
+  ],
+  "required_decisions_before_implementation": [
+    "Which approved read-only principal may inspect the authoritative SQL evidence without changing production runtime permissions?",
+    "Which explicit UTC analysis windows and service-date rules govern each KPI?",
+    "What minimum identity/matching quality is required before a consecutive-stop association is shown as a candidate?",
+    "Which KPIs, if any, may be exposed for the limited Legacy7 panel before representative Tiered50 coverage exists?",
+    "Which source-reported Situation fields are reportable as evidence, and which are explicitly not treated as causal attribution?"
+  ],
+  "validation_notes": {
+    "all_live_queries_read_only": true,
+    "database_isolation_changed": false,
+    "production_indexes_changed": false,
+    "mdd_requests_issued": false,
+    "gtfs_downloads_issued": false,
+    "collector_or_scheduler_changed": false,
+    "tiered50_activated": false,
+    "power_bi_changed": false,
+    "historical_data_deleted_or_rewritten": false,
+    "thresholds_invented": false
+  }
+}
