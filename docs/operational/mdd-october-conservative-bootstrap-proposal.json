@@ -1,0 +1,70 @@
+{
+  "artifact_version": "MDD_CONSERVATIVE_OCTOBER_BOOTSTRAP_PROPOSAL_V1",
+  "status": "OPERATOR_APPROVAL_REQUIRED",
+  "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+  "purpose": "Bounded interim authorization when the provider screenshot supplies a cumulative lower bound but does not supply a measurement cutoff or reset timezone.",
+  "scope": {
+    "provider": "MDD NRW",
+    "dashboard": "Monitoring",
+    "usage_category": "Nutzungszweck: Auskunfts- und Informationssysteme",
+    "selected_month_label": "Oktober",
+    "selected_year": 2026,
+    "provider_period_timezone": null,
+    "provider_period_start_utc": null,
+    "provider_period_end_utc": null
+  },
+  "evidence": {
+    "screenshot_relative_path": "docs/operational/mdd-october-monitoring-dashboard.png",
+    "screenshot_sha256": "9b25d4d28cf57f77feccb3b1da30e7e2c8629cec2319ff5a46877e3fac23088f",
+    "screenshot_cumulative_requests": 554,
+    "screenshot_monthly_limit": 250000,
+    "operator_attestation_status": "OPERATOR_CONFIRMED_NOT_INDEPENDENTLY_VERIFIED",
+    "operator_attestation_date": "2026-10-08",
+    "provider_measurement_cutoff": "NOT_ESTABLISHED",
+    "dashboard_freshness": "NOT_ESTABLISHED",
+    "reset_timezone": "NOT_ESTABLISHED"
+  },
+  "accounting_policy": {
+    "credential_scope": "Use the operator-confirmed exclusive-credential model; this is not independent provider verification.",
+    "screenshot_role": "Conservative lower-bound evidence only; it is never the continuously updated request counter.",
+    "initial_seed": "554 plus every October SQL permit amount observed through the actual bootstrap approval time, including confirmed, conservative-uncertain, and pending permits.",
+    "double_counting_rule": "Adding the complete local ledger is deliberately allowed to overcount requests that may already be represented by 554; no local permit may be omitted.",
+    "continuous_rule": "After the stored local ledger cutoff, authorization adds only genuinely new permit rows with ReservedAtUtc strictly after that cutoff and no later than the authorization time.",
+    "external_usage": "No separate external reservation is assumed beyond the exclusive-credential attestation; any contrary evidence stops authorization immediately.",
+    "limits": {
+      "provider_absolute_ceiling": 250000,
+      "normal_operational_maximum": 210000,
+      "retry_protection_boundary": 207500
+    }
+  },
+  "validity_policy": {
+    "valid_from_utc": "OPERATOR_SUPPLIED_ACTUAL_APPROVAL_TIMESTAMP",
+    "latest_stop_utc": "2026-10-30T23:00:00Z",
+    "latest_stop_is_provider_metadata": false,
+    "latest_stop_reason": "Policy stop safely before the earliest possible civil-time November transition under the unknown reset timezone; it is not a claim about MDD's actual billing boundary.",
+    "no_extension_without": [
+      "verified provider billing-period timezone and UTC boundaries",
+      "verified provider measurement freshness/cutoff",
+      "new explicit operator approval"
+    ]
+  },
+  "mandatory_stop_conditions": [
+    "SQL connectivity or durable permit finalization is unavailable",
+    "the bootstrap validity interval expires",
+    "the next authorization would reach or exceed the applicable approved boundary",
+    "the SQL ledger, permit totals, or reconciliation counters are inconsistent",
+    "unexpected provider-wide usage or another consumer is discovered",
+    "a pending permit cannot be conservatively recovered",
+    "the month-transition stop boundary is reached"
+  ],
+  "approval": {
+    "required": true,
+    "approved": false,
+    "operator_must_accept": [
+      "intentional conservative overcounting of any local permits already represented by the screenshot",
+      "the maximum validity window and hard stop boundary",
+      "fail-closed behavior for SQL, permit, counter, and external-usage anomalies"
+    ]
+  },
+  "activation_effect": "This proposal does not authorize SQL registration, LaunchAgent activation, MDD requests, or any change to the retired Legacy7 state."
+}

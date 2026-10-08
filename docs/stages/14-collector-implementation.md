@@ -395,7 +395,7 @@ not active.
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 253 tests per run and
+repository suite passed in five consecutive runs with 257 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule

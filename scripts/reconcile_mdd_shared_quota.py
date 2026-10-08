@@ -63,6 +63,10 @@ def _summary(reconciliation: Mapping[str, Any], *, local_usage: Mapping[str, Any
         "local_usage": reconciliation["local_usage"],
         "local_sql_evidence": _local_evidence_summary(local_usage),
         "local_usage_boundary_rule": reconciliation["local_usage_boundary_rule"],
+        "baseline_component_total": reconciliation["baseline_component_total"],
+        "post_provider_cutoff_local_usage_registered": reconciliation[
+            "post_provider_cutoff_local_usage_registered"
+        ],
         "baseline_as_of_utc": reconciliation["baseline_as_of_utc"],
         "local_usage_included_through_utc": reconciliation["local_usage_included_through_utc"],
         "provider_measurement_cutoff_utc": reconciliation["provider_measurement_cutoff_utc"],

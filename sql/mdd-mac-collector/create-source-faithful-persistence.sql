@@ -368,6 +368,9 @@ BEGIN
         ProviderQuotaCeiling INT NOT NULL,
         NormalOperationalMaximum INT NOT NULL,
         RetryProtectionBoundary INT NOT NULL,
+        /* COMPLETE rows include all accounted local permits through
+           LocalUsageIncludedThroughUtc. Runtime authorization adds only
+           permits strictly after that stored cutoff. */
         ConfirmedProviderAttempts BIGINT NOT NULL,
         ConservativeUnknownAttempts BIGINT NOT NULL,
         ExplicitSharedConsumerReservedAttempts BIGINT NOT NULL,
@@ -569,6 +572,23 @@ IF NOT EXISTS
                     AND LocalUsageIncludedThroughUtc >= ProviderMeasurementCutoffUtc
                     AND StaleAfterUtc <= ProviderPeriodEndUtc
                 )
+            );
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacSharedQuotaAccounting')
+      AND name = N'CK_ctl_MddMacSharedQuotaAccounting_CompleteTotal'
+)
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting
+        ADD CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_CompleteTotal
+            CHECK
+            (
+                AccountingStatus <> 'COMPLETE'
+                OR ConfirmedProviderAttempts
+                   + ConservativeUnknownAttempts
+                   + ExplicitSharedConsumerReservedAttempts <= 250000
             );
 GO
 

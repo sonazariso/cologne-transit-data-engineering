@@ -94,12 +94,86 @@ class QuotaBaselineTests(unittest.TestCase):
             local_usage=_local_usage(),
             now_utc=NOW,
         )
-        self.assertEqual(result["confirmed_provider_attempts"], 93)
-        self.assertEqual(result["conservative_unknown_attempts"], 18)
-        self.assertEqual(result["explicit_shared_consumer_reserved_attempts"], 6)
+        self.assertEqual(result["confirmed_provider_attempts"], 97)
+        self.assertEqual(result["conservative_unknown_attempts"], 19)
+        self.assertEqual(result["explicit_shared_consumer_reserved_attempts"], 8)
+        self.assertEqual(result["baseline_component_total"], 124)
         self.assertEqual(result["current_conservative_accounted_total"], 124)
         self.assertEqual(result["provider_period_timezone"], "Europe/Berlin")
         self.assertEqual(len(result["source_evidence_hash"]), 64)
+
+    def test_provider_cutoff_before_local_cutoff_is_persisted_as_one_baseline(self) -> None:
+        local_usage = {
+            "confirmed_through_cutoff": 0,
+            "unknown_through_cutoff": 0,
+            "pending_through_cutoff": 0,
+            "confirmed_after_cutoff": 7,
+            "unknown_after_cutoff": 0,
+            "pending_after_cutoff": 0,
+        }
+        result = reconcile_provider_evidence(
+            _evidence(
+                explicit_shared_consumer_reserved_attempts=0,
+                conservative_unknown_attempts=0,
+            ),
+            local_usage=local_usage,
+            now_utc=NOW,
+        )
+        self.assertEqual(result["current_conservative_accounted_total"], 107)
+        self.assertEqual(
+            result["baseline_component_total"],
+            result["confirmed_provider_attempts"]
+            + result["conservative_unknown_attempts"]
+            + result["explicit_shared_consumer_reserved_attempts"],
+        )
+        self.assertEqual(result["confirmed_provider_attempts"], 97)
+        self.assertEqual(result["conservative_unknown_attempts"], 10)
+        self.assertEqual(result["explicit_shared_consumer_reserved_attempts"], 0)
+
+    def test_provider_includes_local_usage_only_through_provider_cutoff(self) -> None:
+        document = _evidence(
+            local_usage_included_through_utc="2026-10-08T09:00:00Z",
+            explicit_shared_consumer_reserved_attempts=0,
+            conservative_unknown_attempts=0,
+        )
+        provider = dict(document["provider"])  # type: ignore[arg-type]
+        provider["includes_local_usage"] = True
+        document["provider"] = provider
+        local_usage = {
+            "confirmed_through_cutoff": 3,
+            "unknown_through_cutoff": 2,
+            "pending_through_cutoff": 0,
+            "confirmed_after_cutoff": 4,
+            "unknown_after_cutoff": 1,
+            "pending_after_cutoff": 2,
+        }
+        result = reconcile_provider_evidence(document, local_usage=local_usage, now_utc=NOW)
+        self.assertEqual(result["baseline_component_total"], 107)
+        self.assertEqual(result["current_conservative_accounted_total"], 107)
+        self.assertEqual(result["confirmed_provider_attempts"], 94)
+        self.assertEqual(result["conservative_unknown_attempts"], 11)
+        self.assertEqual(result["explicit_shared_consumer_reserved_attempts"], 2)
+
+    def test_equal_provider_and_local_cutoff_does_not_create_post_cutoff_usage(self) -> None:
+        local_usage = {
+            "confirmed_through_cutoff": 3,
+            "unknown_through_cutoff": 2,
+            "pending_through_cutoff": 0,
+            "confirmed_after_cutoff": 0,
+            "unknown_after_cutoff": 0,
+            "pending_after_cutoff": 0,
+        }
+        result = reconcile_provider_evidence(
+            _evidence(
+                local_usage_included_through_utc="2026-10-08T08:00:00Z",
+                explicit_shared_consumer_reserved_attempts=0,
+                conservative_unknown_attempts=0,
+            ),
+            local_usage=local_usage,
+            now_utc=NOW,
+        )
+        self.assertEqual(result["baseline_component_total"], 105)
+        self.assertEqual(result["current_conservative_accounted_total"], 105)
 
     def test_provider_included_local_pending_permit_is_a_double_counting_blocker(self) -> None:
         document = _evidence()

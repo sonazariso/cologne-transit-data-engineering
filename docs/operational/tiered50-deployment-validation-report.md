@@ -16,16 +16,30 @@ Mac power/uptime evidence, and an observable VMware guest. Legacy7 was then
 unloaded and disabled. No Windows collector or competing Legacy7 writer is
 active, and no Tiered50 MDD request has been issued.
 
+The latest live preflight also confirms that the dedicated
+`CologneTransitCollector` login can use the production runtime surface and
+that the exact 50-target materialization is present. Full additive-schema
+validation and migration preservation checks remain administrator-only. A
+read-only migration check under the dedicated login reported missing
+administrator-visible objects; an explicit `--apply` attempt stopped at its
+pre-migration historical preservation read because that login lacks `SELECT`
+on `stg.MddRealtimeStopSituationLink`. No migration write was performed.
+The migration must be rechecked and, if needed, applied through the separate
+administrator connection before production activation.
+
 Activation remains blocked because the supplied official Monitoring screenshot
 does not establish a registrable provider-wide October shared-credential
 baseline. The dashboard visibly reports `554` cumulative requests against a
 `250000` monthly limit for `Nutzungszweck: Auskunfts- und
-Informationssysteme`, which is a nominal display headroom of `249446`. It does
-not establish the exact measurement cutoff or refresh time, credential and
-consumer scope, reset timezone/bounds, accounting model, post-cutoff usage,
+Informationssysteme`, which is a nominal display headroom of `249446`. The
+operator has attested exclusive use of the account/application credential;
+that is recorded as an attestation, not independent provider verification.
+The screenshot still does not establish the exact measurement cutoff or
+refresh time, counter semantics, reset timezone/bounds, post-cutoff usage,
 outstanding permits, or external reservations. The durable SQL quota contract
 therefore denies both INITIAL and RETRY permits rather than treating those
-unknowns as zero. The cutover is recorded as an auditable outage; Tiered50
+unknowns as zero. A separate conservative October bootstrap proposal awaits
+explicit approval. The cutover is recorded as an auditable outage; Tiered50
 remains inactive and Legacy7 is not a fallback.
 
 Offline validation passed for the 50-target manifest, exact phase sequence
@@ -38,13 +52,15 @@ activation is blocked.
 
 ## October quota-baseline reconciliation
 
-The screenshot is recorded as observed-facts-only evidence in
+The screenshot is recorded as observed facts plus a dated operator attestation in
 [`mdd-october-monitoring-dashboard-evidence.json`](mdd-october-monitoring-dashboard-evidence.json).
 Its visible `554` and `250000` values are retained; the nominal display
-headroom is not used as operational headroom. The original image file is not
-available in this checkout, so no image SHA-256 is claimed. No provider scope,
-measurement cutoff, reset period/timezone, external-consumer reservation, or
-operational headroom has been fabricated. The existing SQL HTTP attempts,
+headroom is not used as operational headroom. The original image is retained
+at `mdd-october-monitoring-dashboard.png` with SHA-256
+`9b25d4d28cf57f77feccb3b1da30e7e2c8629cec2319ff5a46877e3fac23088f`. No
+provider measurement cutoff, freshness, reset period/timezone,
+external-consumer reservation, or operational headroom has been fabricated.
+The existing SQL HTTP attempts,
 quota permits, collector activity, and prior reconciliation history are read
 as separate evidence by
 [`scripts/reconcile_mdd_shared_quota.py`](../../scripts/reconcile_mdd_shared_quota.py),
@@ -67,8 +83,11 @@ The recorded SQL identity is `sa` and is administrative evidence only; it is
 not proof that the deployed runtime can use `CologneTransitCollector`. The
 actual limited-login, schema, privilege, quota, and LaunchAgent checks are
 activation gates and were not claimed as passed here. Until the provider
-report and those gates are verified, the baseline remains unregistered, both
-permit classes fail closed, and Tiered50 remains inactive.
+report or an explicitly approved bounded bootstrap and those gates are
+verified, the baseline remains unregistered, both permit classes fail closed,
+and Tiered50 remains inactive. The bounded proposal is recorded in
+[`mdd-october-conservative-bootstrap-proposal.json`](mdd-october-conservative-bootstrap-proposal.json);
+it is not an approval or an activation instruction.
 
 Power BI and analytics permissions were not modified. No manual Heumarkt
 request was issued. Full sanitized machine-readable evidence is in

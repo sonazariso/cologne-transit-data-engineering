@@ -35,10 +35,14 @@ consecutive expected Legacy7 buckets, current SQL capacity and backup
 readiness, the separate versioned Tiered50 bundle, and no competing Legacy7
 writer. The supplied Monitoring screenshot visibly reports 554 cumulative
 requests against a 250000 monthly limit for the selected October 2026
-category, but it does not prove provider scope, freshness, reset
-bounds/timezone, accounting model, or post-cutoff/external usage. Activation
-therefore remains correctly blocked; both INITIAL and RETRY permits fail
-closed. No Tiered50 MDD request or live cycle has been issued. See the
+category. The operator has separately attested that this account/application
+has exclusive credential use; that attestation is not independent provider
+verification. The screenshot still does not establish provider measurement
+freshness, reset bounds/timezone, counter semantics, or post-cutoff usage.
+Activation therefore remains correctly blocked; both INITIAL and RETRY
+permits fail closed. A separate conservative October bootstrap proposal is
+recorded for explicit approval, but no Tiered50 MDD request or live cycle has
+been issued. See the
 [dashboard evidence](docs/operational/mdd-october-monitoring-dashboard-evidence.json),
 [sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
 [fresh operational evidence](docs/operational/tiered50-production-evidence.json),

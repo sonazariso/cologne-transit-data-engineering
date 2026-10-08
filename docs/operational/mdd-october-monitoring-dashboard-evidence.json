@@ -1,14 +1,24 @@
 {
-  "artifact_version": "MDD_MONITORING_DASHBOARD_EVIDENCE_V1",
-  "status": "OBSERVED_FACTS_ONLY_SCOPE_AND_FRESHNESS_UNVERIFIED",
+  "artifact_version": "MDD_MONITORING_DASHBOARD_EVIDENCE_V2",
+  "status": "OBSERVED_FACTS_OPERATOR_ATTESTATION_PROVIDER_FRESHNESS_UNVERIFIED",
   "source": {
     "provider": "MDD NRW",
     "dashboard": "Monitoring",
     "usage_category": "Nutzungszweck: Auskunfts- und Informationssysteme",
-    "provenance": "User-supplied screenshot in the S112 task context",
-    "original_image_file_available_in_workspace": false,
-    "original_image_sha256": null,
-    "original_image_excluded_from_review_zip": true
+    "provenance": "User-supplied original attachment in the S113 task context",
+    "original_image_filename": "mdd.png",
+    "original_image_relative_path": "docs/operational/mdd-october-monitoring-dashboard.png",
+    "original_image_file_available_in_workspace": true,
+    "original_image_sha256": "9b25d4d28cf57f77feccb3b1da30e7e2c8629cec2319ff5a46877e3fac23088f",
+    "original_image_excluded_from_review_zip": false
+  },
+  "operator_attestation": {
+    "attested_on": "2026-10-08",
+    "attestation_timezone": "Europe/Berlin",
+    "status": "OPERATOR_CONFIRMED_NOT_INDEPENDENTLY_VERIFIED",
+    "statement": "There is only one MDD API Key associated with this account/application; it is the same key used by Cologne Transit Intelligence; no other application or key consumes this MDD account quota.",
+    "scope": "credential_exclusivity_for_this_account_and_application",
+    "independent_provider_verification": false
   },
   "observed": {
     "selected_month_label": "Oktober",
@@ -20,24 +30,26 @@
   "not_established": [
     "exact provider measurement timestamp or usage cutoff",
     "dashboard latest refresh or update timestamp",
-    "whether the displayed usage aggregates one credential, multiple credentials, or application-wide activity",
-    "whether all Tiered50 credential consumers are included",
+    "provider counter scope and aggregation semantics beyond the operator's exclusive-credential attestation",
+    "whether all future Tiered50 usage is reflected without dashboard delay",
     "provider billing or reset timezone and exact UTC period boundaries",
-    "exclusive credential, central authorization, or refreshed provider accounting model",
+    "independent verification of the operator-confirmed exclusive credential model",
     "post-cutoff consumption",
     "outstanding permits, unknown attempts, external reservations, or unexplained discrepancy"
   ],
   "local_reconciliation": {
-    "status": "BLOCKED_BY_UNVERIFIED_PROVIDER_METADATA",
+    "status": "BLOCKED_BY_UNVERIFIED_PROVIDER_CUTOFF_AND_FRESHNESS",
     "provider_total_added_to_local_sql_counts": false,
     "local_sql_counts_partitioned_at_provider_cutoff": false,
     "local_sql_counts_classified_as_post_cutoff": false,
-    "reason": "Without a verified provider cutoff and scope, local SQL attempts cannot be classified as included in, after, or external to the displayed 554."
+    "operator_exclusive_credential_attestation_used": true,
+    "reason": "The exclusive credential is operator-confirmed, but without a verified provider cutoff, freshness, and reset boundary the displayed 554 cannot be reconciled to SQL permits without risking double counting or undercounting."
   },
   "registration": {
     "eligible": false,
     "accounting_status": "NOT_REGISTERED",
-    "reason": "Displayed values do not establish the required scope, freshness, reset-period, and accounting metadata.",
+    "reason": "The screenshot and operator attestation do not establish exact provider measurement freshness, reset-period bounds/timezone, or counter semantics required by the COMPLETE provider-baseline contract.",
+    "operator_exclusive_credential_attestation_accepted": true,
     "sql_writes_performed": 0,
     "mdd_requests_issued": 0
   }

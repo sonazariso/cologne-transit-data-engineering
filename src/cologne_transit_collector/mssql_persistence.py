@@ -2730,7 +2730,14 @@ class MssqlPersistence:
         return row
 
     @staticmethod
-    def _quota_usage_totals(cursor: Any, *, month: str, local_cutoff: datetime) -> Mapping[str, int]:
+    def _quota_usage_totals(
+        cursor: Any,
+        *,
+        month: str,
+        local_cutoff: datetime,
+        observed_through: datetime | None = None,
+    ) -> Mapping[str, int]:
+        observed = _utc(observed_through or datetime.now(timezone.utc))
         cursor.execute(
             """
             SELECT
@@ -2741,6 +2748,7 @@ class MssqlPersistence:
             FROM ctl.MddMacQuotaPermit WITH (READCOMMITTEDLOCK)
             WHERE MonthKey = %s
               AND ReservedAtUtc > %s
+              AND ReservedAtUtc <= %s
             """,
             (
                 HTTP_PROVIDER_ATTEMPT_CONFIRMED,
@@ -2748,6 +2756,7 @@ class MssqlPersistence:
                 PENDING_AUTHORIZATION,
                 month,
                 local_cutoff,
+                observed,
             ),
         )
         row = cursor.fetchone()
@@ -2798,7 +2807,12 @@ class MssqlPersistence:
                     }
                 baseline_as_of = _optional_utc(mapped_baseline["BaselineAsOfUtc"])
                 local_cutoff = _optional_utc(mapped_baseline["LocalUsageIncludedThroughUtc"])
-                local = self._quota_usage_totals(cursor, month=month, local_cutoff=local_cutoff)
+                local = self._quota_usage_totals(
+                    cursor,
+                    month=month,
+                    local_cutoff=local_cutoff,
+                    observed_through=at,
+                )
         except Exception:
             # A schema/permission/connectivity failure is itself unavailable
             # provider-wide state; it must not become an implicit zero.
@@ -2810,9 +2824,14 @@ class MssqlPersistence:
                 "known_total": None,
             }
 
-        confirmed = int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0) + local["confirmed"]
-        conservative = int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0) + local["conservative"]
-        reserved = int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0) + local["pending"]
+        baseline_confirmed = int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0)
+        baseline_conservative = int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0)
+        baseline_reserved = int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0)
+        baseline_total = baseline_confirmed + baseline_conservative + baseline_reserved
+        confirmed = baseline_confirmed + local["confirmed"]
+        conservative = baseline_conservative + local["conservative"]
+        reserved = baseline_reserved + local["pending"]
+        post_cutoff_total = local["confirmed"] + local["conservative"] + local["pending"]
         return {
             "confirmed_provider_attempts": confirmed,
             "reserved_shared_usage": reserved,
@@ -2832,7 +2851,14 @@ class MssqlPersistence:
             "source_evidence_hash": str(mapped_baseline["SourceEvidenceHash"] or ""),
             "reconciliation_key": str(mapped_baseline["ReconciliationKey"] or ""),
             "provider_period_timezone": str(mapped_baseline["ProviderPeriodTimezone"] or ""),
-            "known_total": confirmed + conservative + reserved,
+            "baseline_component_total": baseline_total,
+            "post_cutoff_local_usage": {
+                "confirmed": local["confirmed"],
+                "conservative": local["conservative"],
+                "pending": local["pending"],
+                "total": post_cutoff_total,
+            },
+            "known_total": baseline_total + post_cutoff_total,
         }
 
     @staticmethod
@@ -3147,6 +3173,27 @@ class MssqlPersistence:
 
         expected_local = dict(reconciliation.get("local_usage") or {})
         supplied_local = dict(local_usage.get("permit_counts") or local_usage)
+        persisted_baseline_total = sum(
+            int(reconciliation.get(name, 0) or 0)
+            for name in (
+                "confirmed_provider_attempts",
+                "conservative_unknown_attempts",
+                "explicit_shared_consumer_reserved_attempts",
+            )
+        )
+        declared_baseline_total = int(
+            reconciliation.get(
+                "baseline_component_total",
+                reconciliation.get("current_conservative_accounted_total", -1),
+            )
+            or 0
+        )
+        if persisted_baseline_total != declared_baseline_total:
+            raise MssqlSafetyError(
+                "validated quota reconciliation does not equal its persisted baseline components"
+            )
+        if persisted_baseline_total > ABSOLUTE_PROVIDER_CEILING:
+            raise MssqlSafetyError("validated quota reconciliation exceeds the absolute provider ceiling")
         for name in (
             "confirmed_through_cutoff",
             "unknown_through_cutoff",
@@ -3226,6 +3273,11 @@ class MssqlPersistence:
                     new_cutoff = _optional_utc(reconciliation.get("provider_measurement_cutoff_utc"))
                     if old_cutoff is not None and new_cutoff is not None and new_cutoff < old_cutoff:
                         raise MssqlSafetyError("new provider baseline is older than the current baseline")
+                    old_local_cutoff = _optional_utc(current.get("LocalUsageIncludedThroughUtc"))
+                    if old_local_cutoff is not None and cutoff < old_local_cutoff:
+                        raise MssqlSafetyError(
+                            "new local SQL accounting cutoff is older than the current baseline"
+                        )
                     old_as_of = _optional_utc(current.get("BaselineAsOfUtc"))
                     new_as_of = _optional_utc(reconciliation.get("baseline_as_of_utc"))
                     if old_as_of is not None and new_as_of is not None and new_as_of < old_as_of:
@@ -3549,7 +3601,12 @@ class MssqlPersistence:
                     }
                 local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
                 assert local_cutoff is not None
-                local = self._quota_usage_totals(cursor, month=month, local_cutoff=local_cutoff)
+                local = self._quota_usage_totals(
+                    cursor,
+                    month=month,
+                    local_cutoff=local_cutoff,
+                    observed_through=at,
+                )
                 baseline_total = (
                     int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0)
                     + int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0)

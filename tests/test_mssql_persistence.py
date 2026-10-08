@@ -43,6 +43,44 @@ class FailingConnection:
         self.closed = True
 
 
+class QuotaReadCursor:
+    """Small DB-API fixture for the production quota read path."""
+
+    def __init__(self, baseline: dict[str, object], post_cutoff: dict[str, object]) -> None:
+        self.baseline = baseline
+        self.post_cutoff = post_cutoff
+        self.result: list[dict[str, object]] = []
+        self.post_cutoff_parameters: tuple[object, ...] | None = None
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+        if "FROM ctl.MddMacSharedQuotaAccounting" in sql:
+            self.result = [self.baseline]
+            return
+        if "FROM ctl.MddMacQuotaPermit" in sql and "LiveClientInvocation" in sql:
+            self.post_cutoff_parameters = params
+            self.result = [self.post_cutoff]
+            return
+        raise AssertionError(f"unexpected quota SQL: {sql}")
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return list(self.result)
+
+    def fetchone(self) -> dict[str, object] | None:
+        return self.result[0] if self.result else None
+
+
+class QuotaReadConnection:
+    def __init__(self, cursor: QuotaReadCursor) -> None:
+        self.cursor_value = cursor
+        self.closed = False
+
+    def cursor(self) -> QuotaReadCursor:
+        return self.cursor_value
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class MssqlPersistenceTests(unittest.TestCase):
     @staticmethod
     def _snapshot(name: str) -> dict:
@@ -145,6 +183,53 @@ class MssqlPersistenceTests(unittest.TestCase):
         self.assertEqual(connection.rollback_count, 1)
         self.assertTrue(connection.closed)
         self.assertEqual(connection.commit_count, 0)
+
+    def test_quota_read_path_uses_persisted_baseline_then_only_new_permits(self) -> None:
+        baseline = {
+            "MonthKey": "2026-10",
+            "ProviderQuotaCeiling": 250000,
+            "NormalOperationalMaximum": 210000,
+            "RetryProtectionBoundary": 207500,
+            # 100 provider attempts + 7 local permits between provider and
+            # local observation cutoffs. The 7 must already be durable here.
+            "ConfirmedProviderAttempts": 97,
+            "ConservativeUnknownAttempts": 10,
+            "ExplicitSharedConsumerReservedAttempts": 0,
+            "AccountingStatus": "COMPLETE",
+            "IncludesAllSharedConsumers": True,
+            "BaselineAsOfUtc": datetime(2026, 10, 1, 11, 0, tzinfo=timezone.utc),
+            "LocalUsageIncludedThroughUtc": datetime(2026, 10, 1, 10, 5, tzinfo=timezone.utc),
+            "SourceDescription": "synthetic provider baseline",
+            "AccountingModel": "EXCLUSIVE_CREDENTIAL",
+            "ProviderMeasurementCutoffUtc": datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc),
+            "StaleAfterUtc": datetime(2026, 10, 1, 16, 0, tzinfo=timezone.utc),
+            "SourceEvidenceHash": "a" * 64,
+            "ReconciliationKey": "synthetic-2026-10-01",
+            "ProviderPeriodTimezone": "UTC",
+            "ProviderPeriodStartUtc": datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc),
+            "ProviderPeriodEndUtc": datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc),
+        }
+        cursor = QuotaReadCursor(
+            baseline,
+            {"confirmed": 2, "conservative": 1, "pending": 0, "invocations": 3},
+        )
+        connection = QuotaReadConnection(cursor)
+        adapter = MssqlPersistence(
+            MssqlConnectionSettings(host="127.0.0.1", user="u", password="p"),
+            connection_factory=lambda: connection,
+        )
+
+        usage = adapter.current_month_usage(at_utc=AT)
+
+        self.assertIsNotNone(usage)
+        assert usage is not None
+        self.assertTrue(usage["state_available"])
+        self.assertEqual(usage["baseline_component_total"], 107)
+        self.assertEqual(usage["post_cutoff_local_usage"]["total"], 3)
+        self.assertEqual(usage["known_total"], 110)
+        self.assertEqual(usage["confirmed_provider_attempts"], 99)
+        self.assertEqual(usage["conservative_live_attempts"], 11)
+        self.assertEqual(cursor.post_cutoff_parameters[-1], AT)
 
     def test_temporary_raw_evidence_is_bounded_owner_only_and_secret_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mssql-raw-") as directory:

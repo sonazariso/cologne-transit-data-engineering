@@ -159,10 +159,13 @@ def reconcile_provider_evidence(
 ) -> dict[str, Any]:
     """Validate evidence and return a sanitized, SQL-ready reconciliation.
 
-    ``local_usage`` is read from the authoritative database by the administrative tool.  Local
-    permits through ``local_usage_included_through_utc`` are deliberately not
-    added to a provider total that declares it already includes local usage.
-    This is the key double-counting boundary.
+    ``local_usage`` is read from the authoritative database by the administrative tool.
+    The three persisted baseline components represent the complete reconciled
+    amount through ``local_usage_included_through_utc``.  A later authorization
+    therefore has one unambiguous boundary: it adds only permit rows strictly
+    after that stored local cutoff.  When the provider cutoff is older than the
+    local cutoff, local permits in that interval are part of the persisted
+    baseline rather than being left in a transient reconciliation total.
     """
 
     if not isinstance(document, Mapping):
@@ -322,26 +325,38 @@ def reconcile_provider_evidence(
     )
 
     if provider_includes_local:
-        baseline_confirmed = provider_confirmed
-        baseline_unknown = provider_unknown + external_unknown + unexplained_discrepancies
-        baseline_reserved = external_reserved
-        local_included_note = "provider_total_includes_local_usage_through_cutoff"
-    else:
-        baseline_confirmed = provider_confirmed + local_through_confirmed
+        # The provider total covers local usage only through the provider
+        # cutoff.  The local SQL observation may extend beyond that cutoff;
+        # those permits must be moved into the durable baseline components.
+        baseline_confirmed = provider_confirmed + local_after_confirmed
         baseline_unknown = (
-            provider_unknown + local_through_unknown + external_unknown + unexplained_discrepancies
+            provider_unknown + local_after_unknown + external_unknown + unexplained_discrepancies
         )
-        baseline_reserved = external_reserved + local_through_pending
-        local_included_note = "provider_total_excludes_local_usage_and_local_cutoff_counts_are_added"
+        baseline_reserved = external_reserved + local_after_pending
+        local_included_note = (
+            "provider_total_includes_local_usage_through_provider_cutoff;"
+            " post_provider_cutoff_local_usage_added_through_local_cutoff"
+        )
+    else:
+        # The provider total excludes local usage, so every local permit
+        # through the stored local cutoff belongs in the persisted baseline.
+        baseline_confirmed = provider_confirmed + local_through_confirmed + local_after_confirmed
+        baseline_unknown = (
+            provider_unknown
+            + local_through_unknown
+            + local_after_unknown
+            + external_unknown
+            + unexplained_discrepancies
+        )
+        baseline_reserved = external_reserved + local_through_pending + local_after_pending
+        local_included_note = "provider_total_excludes_local_usage; all_local_sql_counts_added_through_local_cutoff"
 
-    current_total = (
-        baseline_confirmed
-        + baseline_unknown
-        + baseline_reserved
-        + local_after_confirmed
-        + local_after_unknown
-        + local_after_pending
-    )
+    # This is intentionally the same sum that is persisted to
+    # ctl.MddMacSharedQuotaAccounting.  Keeping the invariant explicit makes a
+    # reconciliation with a later SQL cutoff durable instead of relying on the
+    # display-only total returned by this function.
+    baseline_component_total = baseline_confirmed + baseline_unknown + baseline_reserved
+    current_total = baseline_component_total
     if current_total > ABSOLUTE_PROVIDER_CEILING:
         raise QuotaBaselineError("conservative accounted usage exceeds the absolute provider ceiling")
 
@@ -389,6 +404,8 @@ def reconcile_provider_evidence(
         "provider_attempt_classification": provider_classification,
         "provider_includes_local_usage": provider_includes_local,
         "operating_model_evidence": model_evidence,
+        "external_shared_consumer_reserved_attempts": external_reserved,
+        "external_unknown_attempts": external_unknown,
         "local_usage": {
             "confirmed_through_cutoff": local_through_confirmed,
             "unknown_through_cutoff": local_through_unknown,
@@ -398,6 +415,12 @@ def reconcile_provider_evidence(
             "pending_after_cutoff": local_after_pending,
         },
         "local_usage_boundary_rule": local_included_note,
+        "baseline_component_total": baseline_component_total,
+        "post_provider_cutoff_local_usage_registered": {
+            "confirmed": local_after_confirmed,
+            "unknown": local_after_unknown,
+            "pending": local_after_pending,
+        },
         "current_conservative_accounted_total": current_total,
         "remaining_headroom": {
             "normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM - current_total,
