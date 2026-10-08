@@ -1,5 +1,5 @@
 {
-  "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V1",
+  "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V2",
   "report_status": "BLOCKED_BY_READ_ONLY_PERMISSION_SCOPE",
   "sanitization": {
     "credentials_included": false,
@@ -13,15 +13,22 @@
   "live_sql_evidence": {
     "connection_status": "PASS",
     "database_name": "CologneTransitIntelligence",
-    "capture_timestamp_utc": "2026-10-08T07:57:49.5155896Z",
+    "capture_timestamp_utc": "2026-10-08T08:49:22.0292316Z",
     "database_status": "ONLINE",
     "database_user_access": "MULTI_USER",
     "database_user": "CologneTransitCollector",
     "original_login": "CologneTransitCollector",
     "read_only_queries_only": true,
+    "bounded_queries": true,
     "query_timeout_seconds": 30,
     "login_timeout_seconds": 8,
-    "server_endpoint_omitted": true
+    "server_endpoint_omitted": true,
+    "analysis_window_utc": {
+      "start": "2026-10-01T08:49:22Z",
+      "end_exclusive": "2026-10-08T08:49:22Z",
+      "basis": "ctl.MddMacTargetAudit.StartedAtUtc for bounded audit-population queries",
+      "default_lookback_hours": 168
+    }
   },
   "live_login_scope": {
     "is_sysadmin": false,
@@ -1447,32 +1454,32 @@
         "SamplingEra": "Legacy7",
         "CollectionContext": "MAC_LEGACY7_PRODUCTION",
         "Status": "SUCCEEDED",
-        "audit_rows": 33,
-        "run_ids": 33,
-        "logical_buckets": 33,
+        "audit_rows": 36,
+        "run_ids": 36,
+        "logical_buckets": 36,
         "target_identities": 7,
         "first_started_utc": "2026-10-07T19:40:17.282Z",
-        "last_started_utc": "2026-10-08T07:49:24.604Z",
+        "last_started_utc": "2026-10-08T08:45:22.446Z",
         "first_completed_utc": "2026-10-07T19:40:22.055Z",
-        "last_completed_utc": "2026-10-08T07:49:32.784Z",
-        "http_status_rows": 33,
-        "http_200_rows": 33,
-        "result_count_rows": 33,
-        "parser_outcome_rows": 33,
-        "persistence_outcome_rows": 33
+        "last_completed_utc": "2026-10-08T08:45:27.196Z",
+        "http_status_rows": 36,
+        "http_200_rows": 36,
+        "result_count_rows": 36,
+        "parser_outcome_rows": 36,
+        "persistence_outcome_rows": 36
       },
       {
         "SamplingEra": "Legacy7",
         "CollectionContext": "MAC_LEGACY7_PRODUCTION",
         "Status": "SKIPPED",
-        "audit_rows": 1,
-        "run_ids": 1,
-        "logical_buckets": 1,
-        "target_identities": 1,
+        "audit_rows": 8,
+        "run_ids": 8,
+        "logical_buckets": 8,
+        "target_identities": 6,
         "first_started_utc": "2026-10-08T07:54:35.769Z",
-        "last_started_utc": "2026-10-08T07:54:35.769Z",
+        "last_started_utc": "2026-10-08T08:29:59.252Z",
         "first_completed_utc": "2026-10-08T07:54:35.996Z",
-        "last_completed_utc": "2026-10-08T07:54:35.996Z",
+        "last_completed_utc": "2026-10-08T08:29:59.474Z",
         "http_status_rows": 0,
         "http_200_rows": 0,
         "result_count_rows": 0,
@@ -1490,8 +1497,8 @@
       },
       {
         "CollectionContext": "MAC_LEGACY7_PRODUCTION",
-        "bucket_groups": 34,
-        "singleton_bucket_groups": 34,
+        "bucket_groups": 44,
+        "singleton_bucket_groups": 44,
         "non_singleton_bucket_groups": 0
       },
       {
@@ -1503,16 +1510,20 @@
     ],
     "mac_legacy7_production_boundary_status": "PASS",
     "mac_legacy7_production_boundary": {
-      "audit_rows": 34,
-      "run_ids": 34,
-      "logical_buckets": 34,
+      "audit_rows": 44,
+      "run_ids": 44,
+      "logical_buckets": 44,
       "target_identities": 7,
       "first_started_utc": "2026-10-07T19:40:17.282Z",
-      "last_started_utc": "2026-10-08T07:54:35.769Z",
+      "last_started_utc": "2026-10-08T08:45:22.446Z",
       "first_completed_utc": "2026-10-07T19:40:22.055Z",
-      "last_completed_utc": "2026-10-08T07:54:35.996Z"
+      "last_completed_utc": "2026-10-08T08:45:27.196Z"
     },
-    "interpretation": "Target-audit rows prove monitoring/audit lineage only. They do not prove timing coverage, actual delay, journey continuity, or provider cause."
+    "interpretation": "Target-audit rows prove monitoring/audit lineage only. They do not prove timing coverage, actual delay, journey continuity, or provider cause.",
+    "analysis_window_utc": {
+      "start": "2026-10-01T08:49:22Z",
+      "end_exclusive": "2026-10-08T08:49:22Z"
+    }
   },
   "source_coverage": {
     "status": "BLOCKED",
@@ -1524,6 +1535,10 @@
     ],
     "observation_counts": null,
     "freshness_window": null,
+    "analysis_window_utc": {
+      "start": "2026-10-01T08:49:22Z",
+      "end_exclusive": "2026-10-08T08:49:22Z"
+    },
     "reason": "Source child tables could not be read with the configured collector login; NULL is used instead of a fabricated count or freshness boundary."
   },
   "timing_evidence": {
@@ -1562,6 +1577,14 @@
         "reason": "Live timing/source observation access was not available to this read-only login."
       },
       {
+        "measure": "last_non_null_observed_estimate",
+        "required_fields": "SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText",
+        "interpretation": "last known non-NULL estimate remains reportable without rewriting later source-NULL observations",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
         "measure": "last_non_null_recorded_at_time",
         "required_fields": "RecordedAtTimeSourceText and ObservedAtUtc",
         "interpretation": "retain last known source value without replacing later source-NULL observations",
@@ -1570,9 +1593,25 @@
         "reason": "Live timing/source observation access was not available to this read-only login."
       },
       {
+        "measure": "last_observed_recorded_at_time_availability",
+        "required_fields": "LastObservedRecordedAtTime and ObservedAtUtc",
+        "interpretation": "report persisted last-known source time availability separately from the latest raw observation",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
         "measure": "recorded_at_time_occurrence",
         "required_fields": "RecordedAtTimeSourceText and RecordedAtTimeSourcePath",
         "interpretation": "source-provided value only; capture/prediction timestamps are not substitutes",
+        "status": "NOT_MEASURED",
+        "value": null,
+        "reason": "Live timing/source observation access was not available to this read-only login."
+      },
+      {
+        "measure": "ambiguous_source_event_identity",
+        "required_fields": "SourceEventIdentity plus source-event identity components",
+        "interpretation": "classify duplicate or non-unique source-event identities before using an event-level denominator",
         "status": "NOT_MEASURED",
         "value": null,
         "reason": "Live timing/source observation access was not available to this read-only login."
@@ -1610,12 +1649,28 @@
       "THIS, PREVIOUS, and ONWARD call contexts remain separate."
     ]
   },
+  "source_event_identity_quality": {
+    "status": "BLOCKED_BY_SOURCE_ACCESS",
+    "ambiguous_source_event_identity_count": null,
+    "non_unique_source_event_identity_count": null,
+    "missing_source_event_identity_count": null,
+    "reason": "Source call/timing observations are not readable with the configured login; no identity-quality count is inferred.",
+    "required_identity_components": [
+      "source event identity",
+      "source observation identity",
+      "service date / operating day",
+      "journey identity",
+      "stop identity and sequence",
+      "line and direction",
+      "timing context and call scope"
+    ]
+  },
   "hotspot_feasibility": {
     "status": "BLOCKED_BY_SOURCE_ACCESS",
     "legacy7_panel_status": "PARTIAL",
     "legacy7_panel_population": {
       "target_count": 7,
-      "current_mac_production_audits": 34,
+      "current_mac_production_audits": 44,
       "current_mac_production_target_identities": 7
     },
     "candidate_results": null,
@@ -1742,32 +1797,32 @@
         "SamplingEra": "Legacy7",
         "CollectionContext": "MAC_LEGACY7_PRODUCTION",
         "Status": "SUCCEEDED",
-        "audit_rows": 33,
-        "run_ids": 33,
-        "logical_buckets": 33,
+        "audit_rows": 36,
+        "run_ids": 36,
+        "logical_buckets": 36,
         "target_identities": 7,
         "first_started_utc": "2026-10-07T19:40:17.282Z",
-        "last_started_utc": "2026-10-08T07:49:24.604Z",
+        "last_started_utc": "2026-10-08T08:45:22.446Z",
         "first_completed_utc": "2026-10-07T19:40:22.055Z",
-        "last_completed_utc": "2026-10-08T07:49:32.784Z",
-        "http_status_rows": 33,
-        "http_200_rows": 33,
-        "result_count_rows": 33,
-        "parser_outcome_rows": 33,
-        "persistence_outcome_rows": 33
+        "last_completed_utc": "2026-10-08T08:45:27.196Z",
+        "http_status_rows": 36,
+        "http_200_rows": 36,
+        "result_count_rows": 36,
+        "parser_outcome_rows": 36,
+        "persistence_outcome_rows": 36
       },
       {
         "SamplingEra": "Legacy7",
         "CollectionContext": "MAC_LEGACY7_PRODUCTION",
         "Status": "SKIPPED",
-        "audit_rows": 1,
-        "run_ids": 1,
-        "logical_buckets": 1,
-        "target_identities": 1,
+        "audit_rows": 8,
+        "run_ids": 8,
+        "logical_buckets": 8,
+        "target_identities": 6,
         "first_started_utc": "2026-10-08T07:54:35.769Z",
-        "last_started_utc": "2026-10-08T07:54:35.769Z",
+        "last_started_utc": "2026-10-08T08:29:59.252Z",
         "first_completed_utc": "2026-10-08T07:54:35.996Z",
-        "last_completed_utc": "2026-10-08T07:54:35.996Z",
+        "last_completed_utc": "2026-10-08T08:29:59.474Z",
         "http_status_rows": 0,
         "http_200_rows": 0,
         "result_count_rows": 0,
@@ -1815,7 +1870,8 @@
         "missing_evidence": "GTFS/warehouse network universe and complete source observation coverage.",
         "confidence_limitation": "Legacy7 is a limited monitoring panel and cannot support network-wide claims.",
         "readiness_status": "PARTIAL",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Panel/audit lineage only"
       },
       {
         "kpi": "scheduled_arrival_availability",
@@ -1831,7 +1887,8 @@
         "missing_evidence": "Live SELECT access to source timing and schedule objects.",
         "confidence_limitation": "No live measurement; unavailable is not zero.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "estimated_arrival_availability",
@@ -1846,7 +1903,8 @@
         "missing_evidence": "Live SELECT access to MddMac timing/call observations.",
         "confidence_limitation": "Estimated arrival is not confirmed actual arrival and must not be relabeled as actual delay.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "station_estimated_delay_distribution",
@@ -1863,7 +1921,8 @@
         "missing_evidence": "Timing rows, validated stop identity, schedule match, temporal coverage, and sample-quality fields.",
         "confidence_limitation": "Limited Legacy7 panel; no causal or actual-physical-delay interpretation.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "line_service_estimated_reliability",
@@ -1881,7 +1940,8 @@
         "missing_evidence": "Live timing, static identity, schedule, and network sampling coverage.",
         "confidence_limitation": "Tiered50 or another representative coverage decision is required before network reliability claims.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "time_of_day_estimated_delay_pattern",
@@ -1897,7 +1957,8 @@
         "missing_evidence": "Timing observations, observation timestamps, and coverage denominator.",
         "confidence_limitation": "Cadence and panel selection can confound apparent time-of-day patterns.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "repeated_high_delay_location_candidate",
@@ -1913,7 +1974,8 @@
         "missing_evidence": "Timing, identity, window completeness, and source coverage quality.",
         "confidence_limitation": "Candidate investigation signal only; not proof of a location causing delay.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "consecutive_stop_estimated_delay_increase",
@@ -1929,7 +1991,8 @@
         "missing_evidence": "Journey identity, stop sequence, temporal consistency, and timing rows.",
         "confidence_limitation": "Observed estimate change is not causal propagation or proof of dwell delay.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "dwell_related_hypothesis",
@@ -1945,7 +2008,8 @@
         "missing_evidence": "Call flags, stop sequence, timing, and validated journey continuity.",
         "confidence_limitation": "No causal attribution from dwell-related association.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "candidate_downstream_propagation",
@@ -1956,7 +2020,8 @@
         "missing_evidence": "Live source call/timing rows and reliable journey continuity.",
         "confidence_limitation": "Current readback cannot establish continuity; conclusion is INSUFFICIENT_EVIDENCE.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": true
+        "tiered50_required": true,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "provider_reported_disruption_evidence",
@@ -1973,7 +2038,8 @@
         "missing_evidence": "Situation, Attribute, service-section, and historical Windows evidence rows.",
         "confidence_limitation": "Situation association is not proof that a specific situation caused a specific delay.",
         "readiness_status": "BLOCKED",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Not available to current login"
       },
       {
         "kpi": "data_quality_and_evidence_confidence",
@@ -1990,10 +2056,38 @@
         "missing_evidence": "Source timing/call/parser-gap rows and static/network coverage.",
         "confidence_limitation": "Only monitoring-panel audit lineage is directly observed in this readback.",
         "readiness_status": "PARTIAL",
-        "tiered50_required": false
+        "tiered50_required": false,
+        "available_population": "Panel/audit lineage only"
       }
     ]
   },
+  "recommended_analytical_grains": [
+    {
+      "grain": "source_observation",
+      "definition": "one persisted source response observation with UTC capture/observation lineage",
+      "use": "coverage, freshness, parser gaps, and response-quality denominators"
+    },
+    {
+      "grain": "source_event_occurrence",
+      "definition": "one uniquely identified source event at one stop call, service date, and timing context",
+      "use": "timing availability, estimate revisions, and estimated-delay distributions"
+    },
+    {
+      "grain": "journey_ordered_stop_pair",
+      "definition": "two ordered stop calls on the same defensibly matched journey and service date",
+      "use": "observed estimate change and candidate downstream propagation only"
+    },
+    {
+      "grain": "provider_situation_association",
+      "definition": "one provider Situation/Attribute version associated with an observation or affected entity",
+      "use": "source-reported disruption evidence, kept separate from inferred propagation"
+    },
+    {
+      "grain": "sampling_era_window",
+      "definition": "metric population segmented by sampling era, collection context, and explicit UTC window",
+      "use": "cadence-equivalent comparison and confidence interpretation"
+    }
+  ],
   "highest_priority_data_gaps": [
     "Grant a dedicated read-only analytics/review principal access to the required source, historical, GTFS, warehouse, and analytics objects, or run the diagnostic under an approved read-only analyst credential.",
     "Re-run physical metadata discovery and bounded evidence queries with the approved analyst scope; do not rely on repository DDL as a live schema substitute.",
@@ -2010,6 +2104,8 @@
   ],
   "validation_notes": {
     "all_live_queries_read_only": true,
+    "queries_validated_against_live_object_definitions": true,
+    "analysis_window_explicit_utc": true,
     "database_isolation_changed": false,
     "production_indexes_changed": false,
     "mdd_requests_issued": false,

@@ -3,9 +3,10 @@
 This report separates observed live SQL evidence, unavailable evidence, design assumptions, and recommendations. It does not create analytical facts or make causal claims.
 
 **Overall status:** `BLOCKED_BY_READ_ONLY_PERMISSION_SCOPE`
-**Live SQL capture:** `2026-10-08T07:57:49.5155896Z`
+**Live SQL capture:** `2026-10-08T08:49:22.0292316Z`
 **Database:** `CologneTransitIntelligence`
 **Read-only login:** `CologneTransitCollector`
+**Audit analysis window (UTC):** `2026-10-01T08:49:22Z` through `2026-10-08T08:49:22Z` (end exclusive)
 
 ## Executive conclusion
 
@@ -35,6 +36,7 @@ No timing availability, delay distribution, propagation association, provider-ca
 | Broad database roles | db_owner=False, db_datareader=False, db_datawriter=False |
 | Database-wide SELECT | NO |
 | VIEW DEFINITION | NO |
+| Bounded read-only queries | YES |
 | Visible non-system objects | 49 |
 | Requested object probes | 40 |
 
@@ -102,8 +104,8 @@ The target-audit population is lineage evidence, not a delay measure. Current pr
 | Tiered50 | LIVE_RESEARCH_SINGLE_1 | SUCCEEDED | 70 | 70 | 70 | 1 | 2026-10-01T11:30:36.332Z | 2026-10-01T22:55:00.707Z |
 | Tiered50 | LIVE_RESEARCH_SINGLE_1 | FAILED | 3 | 3 | 3 | 1 | 2026-10-01T21:10:00.524Z | 2026-10-01T21:20:00.540Z |
 | Legacy7 | MAC_PYTHON_MSSQL_PREPARED | SUCCEEDED | 42 | 6 | 6 | 7 | 2026-10-07T16:25:01.867Z | 2026-10-07T17:04:08.702Z |
-| Legacy7 | MAC_LEGACY7_PRODUCTION | SUCCEEDED | 33 | 33 | 33 | 7 | 2026-10-07T19:40:17.282Z | 2026-10-08T07:49:24.604Z |
-| Legacy7 | MAC_LEGACY7_PRODUCTION | SKIPPED | 1 | 1 | 1 | 1 | 2026-10-08T07:54:35.769Z | 2026-10-08T07:54:35.769Z |
+| Legacy7 | MAC_LEGACY7_PRODUCTION | SUCCEEDED | 36 | 36 | 36 | 7 | 2026-10-07T19:40:17.282Z | 2026-10-08T08:45:22.446Z |
+| Legacy7 | MAC_LEGACY7_PRODUCTION | SKIPPED | 8 | 8 | 8 | 6 | 2026-10-08T07:54:35.769Z | 2026-10-08T08:29:59.252Z |
 
 ## Timing evidence
 
@@ -115,13 +117,28 @@ No timing value is measured in this capture because `stg.MddMacTimingObservation
 | estimated_arrival_availability | NOT_MEASURED | EstimatedTimeSourceText | provider estimate availability; never actual physical delay |
 | estimate_revision_frequency | NOT_MEASURED | SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText | revisions per uniquely identified source event; repeated raw rows are not the denominator |
 | first_and_latest_observed_estimate | NOT_MEASURED | SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText | first/latest non-NULL estimate over an explicit UTC window |
+| last_non_null_observed_estimate | NOT_MEASURED | SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText | last known non-NULL estimate remains reportable without rewriting later source-NULL observations |
 | last_non_null_recorded_at_time | NOT_MEASURED | RecordedAtTimeSourceText and ObservedAtUtc | retain last known source value without replacing later source-NULL observations |
+| last_observed_recorded_at_time_availability | NOT_MEASURED | LastObservedRecordedAtTime and ObservedAtUtc | report persisted last-known source time availability separately from the latest raw observation |
 | recorded_at_time_occurrence | NOT_MEASURED | RecordedAtTimeSourceText and RecordedAtTimeSourcePath | source-provided value only; capture/prediction timestamps are not substitutes |
+| ambiguous_source_event_identity | NOT_MEASURED | SourceEventIdentity plus source-event identity components | classify duplicate or non-unique source-event identities before using an event-level denominator |
 | arrival_departure_context | NOT_MEASURED | TimingContext | ARRIVAL and DEPARTURE remain separate timing populations |
 | call_scope_context | NOT_MEASURED | CallScope | THIS, PREVIOUS, and ONWARD remain separate source call contexts |
 | missing_timing_and_parser_gaps | NOT_MEASURED | MddMacTimingObservation and MddMacParserGap | missing evidence and parser gaps are classified, not silently converted to zero |
 
 Required semantic guardrails remain: source `RecordedAtTime` is never inferred from a prediction or capture timestamp; a last known non-NULL value must not overwrite later source-NULL observations; Estimated Delay is never labelled actual physical delay; and ARRIVAL/DEPARTURE plus THIS/PREVIOUS/ONWARD contexts remain separate.
+
+## Source-event identity quality
+
+Identity quality is a prerequisite for every event-level denominator and consecutive-stop association. The following counts are deliberately unavailable under the current login:
+
+| Measure | Status | Value |
+| --- | --- | --- |
+| ambiguous_source_event_identity_count | BLOCKED_BY_SOURCE_ACCESS | NOT_AVAILABLE |
+| non_unique_source_event_identity_count | BLOCKED_BY_SOURCE_ACCESS | NOT_AVAILABLE |
+| missing_source_event_identity_count | BLOCKED_BY_SOURCE_ACCESS | NOT_AVAILABLE |
+
+Required identity components: ["source event identity", "source observation identity", "service date / operating day", "journey identity", "stop identity and sequence", "line and direction", "timing context and call scope"]
 
 ## Hotspots, propagation, and provider-reported causes
 
@@ -146,6 +163,16 @@ Propagation cannot be upgraded beyond `INSUFFICIENT_EVIDENCE` without stable jou
 | Tiered50 | NO ACTIVATION PERFORMED | No Tiered50 activation or database write was performed; current active-era status is not re-read because ctl.MddMacSamplingEra is not readable. |
 
 Cadence-equivalent comparisons must exclude the oversampling interval: `Exclude the oversampling interval from cadence-equivalent rate comparisons while preserving its valid source evidence.`
+
+## Recommended analytical grains
+
+| Grain | Definition | Use |
+| --- | --- | --- |
+| source_observation | one persisted source response observation with UTC capture/observation lineage | coverage, freshness, parser gaps, and response-quality denominators |
+| source_event_occurrence | one uniquely identified source event at one stop call, service date, and timing context | timing availability, estimate revisions, and estimated-delay distributions |
+| journey_ordered_stop_pair | two ordered stop calls on the same defensibly matched journey and service date | observed estimate change and candidate downstream propagation only |
+| provider_situation_association | one provider Situation/Attribute version associated with an observation or affected entity | source-reported disruption evidence, kept separate from inferred propagation |
+| sampling_era_window | metric population segmented by sampling era, collection context, and explicit UTC window | cadence-equivalent comparison and confidence interpretation |
 
 ## Power BI KPI readiness
 

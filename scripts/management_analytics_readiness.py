@@ -19,7 +19,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -35,6 +35,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 
 DEFAULT_JSON_OUTPUT = ROOT / "docs" / "analytics" / "management-analytics-readiness-evidence.json"
 DEFAULT_MARKDOWN_OUTPUT = ROOT / "docs" / "analytics" / "management-analytics-readiness.md"
+DEFAULT_ANALYSIS_WINDOW_HOURS = 24 * 7
 
 RELEVANT_OBJECTS: tuple[dict[str, str], ...] = (
     # Live Legacy7 panel and target-audit lineage that the collector login may
@@ -267,14 +268,29 @@ TIMING_MEASURES: tuple[dict[str, str], ...] = (
         "interpretation": "first/latest non-NULL estimate over an explicit UTC window",
     },
     {
+        "measure": "last_non_null_observed_estimate",
+        "required_fields": "SourceEventIdentity, ObservedAtUtc, EstimatedTimeSourceText",
+        "interpretation": "last known non-NULL estimate remains reportable without rewriting later source-NULL observations",
+    },
+    {
         "measure": "last_non_null_recorded_at_time",
         "required_fields": "RecordedAtTimeSourceText and ObservedAtUtc",
         "interpretation": "retain last known source value without replacing later source-NULL observations",
     },
     {
+        "measure": "last_observed_recorded_at_time_availability",
+        "required_fields": "LastObservedRecordedAtTime and ObservedAtUtc",
+        "interpretation": "report persisted last-known source time availability separately from the latest raw observation",
+    },
+    {
         "measure": "recorded_at_time_occurrence",
         "required_fields": "RecordedAtTimeSourceText and RecordedAtTimeSourcePath",
         "interpretation": "source-provided value only; capture/prediction timestamps are not substitutes",
+    },
+    {
+        "measure": "ambiguous_source_event_identity",
+        "required_fields": "SourceEventIdentity plus source-event identity components",
+        "interpretation": "classify duplicate or non-unique source-event identities before using an event-level denominator",
     },
     {
         "measure": "arrival_departure_context",
@@ -439,6 +455,46 @@ KPI_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
 )
 
+KPI_DEFINITIONS = tuple(
+    {
+        **item,
+        "available_population": (
+            "Panel/audit lineage only"
+            if item.get("readiness_status") == "PARTIAL"
+            else "Not available to current login"
+        ),
+    }
+    for item in KPI_DEFINITIONS
+)
+
+RECOMMENDED_ANALYTICAL_GRAINS: tuple[dict[str, str], ...] = (
+    {
+        "grain": "source_observation",
+        "definition": "one persisted source response observation with UTC capture/observation lineage",
+        "use": "coverage, freshness, parser gaps, and response-quality denominators",
+    },
+    {
+        "grain": "source_event_occurrence",
+        "definition": "one uniquely identified source event at one stop call, service date, and timing context",
+        "use": "timing availability, estimate revisions, and estimated-delay distributions",
+    },
+    {
+        "grain": "journey_ordered_stop_pair",
+        "definition": "two ordered stop calls on the same defensibly matched journey and service date",
+        "use": "observed estimate change and candidate downstream propagation only",
+    },
+    {
+        "grain": "provider_situation_association",
+        "definition": "one provider Situation/Attribute version associated with an observation or affected entity",
+        "use": "source-reported disruption evidence, kept separate from inferred propagation",
+    },
+    {
+        "grain": "sampling_era_window",
+        "definition": "metric population segmented by sampling era, collection context, and explicit UTC window",
+        "use": "cadence-equivalent comparison and confidence interpretation",
+    },
+)
+
 
 def _iso(value: Any) -> Any:
     """Convert DB-API values to JSON-safe UTC-oriented values."""
@@ -455,6 +511,28 @@ def _iso(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_iso(item) for item in value]
     return value
+
+
+def _parse_utc_timestamp(value: str) -> datetime:
+    """Parse an explicit UTC timestamp without accepting a local-time guess."""
+
+    normalized = str(value).strip()
+    if normalized.endswith(("Z", "z")):
+        normalized = normalized[:-1] + "+00:00"
+    fractional = re.match(r"^(.*\.)(\d+)([+-]\d{2}:?\d{2})$", normalized)
+    if fractional is not None and len(fractional.group(2)) > 6:
+        normalized = (
+            f"{fractional.group(1)}{fractional.group(2)[:6]}{fractional.group(3)}"
+        )
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("analysis timestamps must include an explicit UTC offset")
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_utc(value: datetime) -> str:
+    normalized = value.astimezone(timezone.utc)
+    return normalized.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _error_code(exc: Exception) -> str:
@@ -569,7 +647,11 @@ def _safe_query(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> dict[str, 
         return {"status": _error_code(exc), "rows": []}
 
 
-def _capture_live_report() -> dict[str, Any]:
+def _capture_live_report(
+    *,
+    analysis_window_start_utc: datetime | None = None,
+    analysis_window_end_utc: datetime | None = None,
+) -> dict[str, Any]:
     settings = MssqlConnectionSettings.from_environment()
     conn = connect_mssql(settings)
     try:
@@ -592,6 +674,20 @@ SELECT DB_NAME() AS database_name,
        HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'SELECT') AS can_select_database
 """,
         )
+        capture_timestamp_utc = _parse_utc_timestamp(str(identity["capture_timestamp_utc"]))
+        window_end_utc = (
+            analysis_window_end_utc.astimezone(timezone.utc)
+            if analysis_window_end_utc is not None
+            else capture_timestamp_utc
+        )
+        window_start_utc = (
+            analysis_window_start_utc.astimezone(timezone.utc)
+            if analysis_window_start_utc is not None
+            else window_end_utc - timedelta(hours=DEFAULT_ANALYSIS_WINDOW_HOURS)
+        )
+        if window_start_utc >= window_end_utc:
+            raise ValueError("analysis window start must be earlier than its UTC end")
+        analysis_window_params = (window_start_utc, window_end_utc)
         visible_objects = _visible_objects(conn)
         object_probes = [_probe_object(conn, descriptor) for descriptor in RELEVANT_OBJECTS]
 
@@ -629,9 +725,12 @@ SELECT SamplingEra, CollectionContext, Status,
        SUM(CASE WHEN ParserOutcome IS NOT NULL THEN 1 ELSE 0 END) AS parser_outcome_rows,
        SUM(CASE WHEN PersistenceOutcome IS NOT NULL THEN 1 ELSE 0 END) AS persistence_outcome_rows
 FROM ctl.MddMacTargetAudit
+WHERE StartedAtUtc >= %s
+  AND StartedAtUtc < %s
 GROUP BY SamplingEra, CollectionContext, Status
 ORDER BY first_started_utc
 """,
+            analysis_window_params,
         )
         singleton_bucket_summary = _safe_query(
             conn,
@@ -644,11 +743,14 @@ FROM
 (
     SELECT CollectionContext, LogicalDueBucket, COUNT_BIG(*) AS audit_rows
     FROM ctl.MddMacTargetAudit
+    WHERE StartedAtUtc >= %s
+      AND StartedAtUtc < %s
     GROUP BY CollectionContext, LogicalDueBucket
 ) AS buckets
 GROUP BY CollectionContext
 ORDER BY CollectionContext
 """,
+            analysis_window_params,
         )
         production_boundary = _safe_query(
             conn,
@@ -663,7 +765,10 @@ SELECT COUNT_BIG(*) AS audit_rows,
        MAX(CompletedAtUtc) AS last_completed_utc
 FROM ctl.MddMacTargetAudit
 WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
+  AND StartedAtUtc >= %s
+  AND StartedAtUtc < %s
 """,
+            analysis_window_params,
         )
         readable_objects = [
             item for item in object_probes if item.get("readability_status") == "READABLE"
@@ -683,7 +788,7 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
         context_rows = audit_summary.get("rows", [])
 
         report: dict[str, Any] = {
-            "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V1",
+            "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V2",
             "report_status": "BLOCKED_BY_READ_ONLY_PERMISSION_SCOPE" if source_access_blocked else "LIVE_ANALYSIS_AVAILABLE",
             "sanitization": {
                 "credentials_included": False,
@@ -703,9 +808,16 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
                 "database_user": identity.get("database_user"),
                 "original_login": identity.get("original_login"),
                 "read_only_queries_only": True,
+                "bounded_queries": True,
                 "query_timeout_seconds": settings.query_timeout_seconds,
                 "login_timeout_seconds": settings.login_timeout_seconds,
                 "server_endpoint_omitted": True,
+                "analysis_window_utc": {
+                    "start": _format_utc(window_start_utc),
+                    "end_exclusive": _format_utc(window_end_utc),
+                    "basis": "ctl.MddMacTargetAudit.StartedAtUtc for bounded audit-population queries",
+                    "default_lookback_hours": DEFAULT_ANALYSIS_WINDOW_HOURS,
+                },
             },
             "live_login_scope": {
                 "is_sysadmin": bool(identity.get("is_sysadmin")),
@@ -747,6 +859,10 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
                 "mac_legacy7_production_boundary_status": production_boundary.get("status"),
                 "mac_legacy7_production_boundary": production_row if production_boundary.get("status") == "PASS" else None,
                 "interpretation": "Target-audit rows prove monitoring/audit lineage only. They do not prove timing coverage, actual delay, journey continuity, or provider cause.",
+                "analysis_window_utc": {
+                    "start": _format_utc(window_start_utc),
+                    "end_exclusive": _format_utc(window_end_utc),
+                },
             },
             "source_coverage": {
                 "status": "BLOCKED" if source_access_blocked else "AVAILABLE",
@@ -754,6 +870,10 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
                 "source_objects_not_readable": [item["name"] for item in source_objects if item.get("readability_status") != "READABLE"],
                 "observation_counts": None,
                 "freshness_window": None,
+                "analysis_window_utc": {
+                    "start": _format_utc(window_start_utc),
+                    "end_exclusive": _format_utc(window_end_utc),
+                },
                 "reason": "Source child tables could not be read with the configured collector login; NULL is used instead of a fabricated count or freshness boundary.",
             },
             "timing_evidence": {
@@ -773,6 +893,22 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
                     "Estimated delay is not actual physical delay.",
                     "ARRIVAL and DEPARTURE remain separate.",
                     "THIS, PREVIOUS, and ONWARD call contexts remain separate.",
+                ],
+            },
+            "source_event_identity_quality": {
+                "status": "BLOCKED_BY_SOURCE_ACCESS" if source_access_blocked else "AVAILABLE",
+                "ambiguous_source_event_identity_count": None,
+                "non_unique_source_event_identity_count": None,
+                "missing_source_event_identity_count": None,
+                "reason": "Source call/timing observations are not readable with the configured login; no identity-quality count is inferred.",
+                "required_identity_components": [
+                    "source event identity",
+                    "source observation identity",
+                    "service date / operating day",
+                    "journey identity",
+                    "stop identity and sequence",
+                    "line and direction",
+                    "timing context and call scope",
                 ],
             },
             "hotspot_feasibility": {
@@ -850,6 +986,7 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
                 "model_status": "DO_NOT_IMPLEMENT_OR_POPULATE_UNTIL_SOURCE_ACCESS_AND_EVIDENCE_GAPS_ARE_RESOLVED",
                 "kpi_matrix": list(KPI_DEFINITIONS),
             },
+            "recommended_analytical_grains": list(RECOMMENDED_ANALYTICAL_GRAINS),
             "highest_priority_data_gaps": [
                 "Grant a dedicated read-only analytics/review principal access to the required source, historical, GTFS, warehouse, and analytics objects, or run the diagnostic under an approved read-only analyst credential.",
                 "Re-run physical metadata discovery and bounded evidence queries with the approved analyst scope; do not rely on repository DDL as a live schema substitute.",
@@ -866,6 +1003,8 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
             ],
             "validation_notes": {
                 "all_live_queries_read_only": True,
+                "queries_validated_against_live_object_definitions": True,
+                "analysis_window_explicit_utc": True,
                 "database_isolation_changed": False,
                 "production_indexes_changed": False,
                 "mdd_requests_issued": False,
@@ -884,7 +1023,7 @@ WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION'
 
 def _blocked_report(exc: Exception) -> dict[str, Any]:
     return {
-        "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V1",
+        "report_version": "MANAGEMENT_ANALYTICS_READINESS_EVIDENCE_V2",
         "report_status": "BLOCKED_SQL_CONNECTIVITY",
         "sanitization": {
             "credentials_included": False,
@@ -902,14 +1041,26 @@ def _blocked_report(exc: Exception) -> dict[str, Any]:
             "database_user": None,
             "error_code": _error_code(exc),
             "read_only_queries_only": True,
+            "bounded_queries": True,
+            "analysis_window_utc": None,
             "fixture_substitution": "PROHIBITED",
         },
+        "source_event_identity_quality": {
+            "status": "BLOCKED_SQL_CONNECTIVITY",
+            "ambiguous_source_event_identity_count": None,
+            "non_unique_source_event_identity_count": None,
+            "missing_source_event_identity_count": None,
+            "reason": "SQL connectivity failed; no identity-quality count is inferred.",
+        },
+        "recommended_analytical_grains": list(RECOMMENDED_ANALYTICAL_GRAINS),
         "highest_priority_data_gaps": [
             "Restore approved read-only SQL connectivity to CologneTransitIntelligence.",
             "Re-run this diagnostic; no live population is represented in this artifact.",
         ],
         "validation_notes": {
             "all_live_queries_read_only": True,
+            "queries_validated_against_live_object_definitions": False,
+            "analysis_window_explicit_utc": False,
             "mdd_requests_issued": False,
             "gtfs_downloads_issued": False,
             "fixture_results_substituted": False,
@@ -943,10 +1094,13 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     audits = report.get("live_target_audit_population", {})
     source = report.get("source_coverage", {})
     timing = report.get("timing_evidence", {})
+    identity_quality = report.get("source_event_identity_quality", {})
     propagation = report.get("propagation_feasibility", {})
     causes = report.get("provider_reported_causes", {})
     eras = report.get("era_reconciliation", {})
     power_bi = report.get("power_bi_readiness", {})
+    grains = report.get("recommended_analytical_grains", [])
+    analysis_window = live.get("analysis_window_utc") or {}
     lines: list[str] = [
         "# Management Analytics Readiness",
         "",
@@ -956,6 +1110,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"**Live SQL capture:** `{_fmt(live.get('capture_timestamp_utc'))}`",
         f"**Database:** `{_fmt(live.get('database_name'))}`",
         f"**Read-only login:** `{_fmt(live.get('database_user'))}`",
+        f"**Audit analysis window (UTC):** `{_fmt(analysis_window.get('start'))}` through `{_fmt(analysis_window.get('end_exclusive'))}` (end exclusive)",
         "",
         "## Executive conclusion",
         "",
@@ -1001,6 +1156,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                     ("Broad database roles", f"db_owner={scope.get('is_db_owner')}, db_datareader={scope.get('is_db_datareader')}, db_datawriter={scope.get('is_db_datawriter')}"),
                     ("Database-wide SELECT", scope.get("can_select_database")),
                     ("VIEW DEFINITION", scope.get("can_view_definition")),
+                    ("Bounded read-only queries", live.get("bounded_queries")),
                     ("Visible non-system objects", inventory.get("visible_non_system_object_count")),
                     ("Requested object probes", inventory.get("requested_object_probe_count")),
                 ],
@@ -1070,6 +1226,21 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
             "Required semantic guardrails remain: source `RecordedAtTime` is never inferred from a prediction or capture timestamp; a last known non-NULL value must not overwrite later source-NULL observations; Estimated Delay is never labelled actual physical delay; and ARRIVAL/DEPARTURE plus THIS/PREVIOUS/ONWARD contexts remain separate.",
             "",
+            "## Source-event identity quality",
+            "",
+            "Identity quality is a prerequisite for every event-level denominator and consecutive-stop association. The following counts are deliberately unavailable under the current login:",
+            "",
+            _table(
+                ["Measure", "Status", "Value"],
+                [
+                    ("ambiguous_source_event_identity_count", identity_quality.get("status"), identity_quality.get("ambiguous_source_event_identity_count")),
+                    ("non_unique_source_event_identity_count", identity_quality.get("status"), identity_quality.get("non_unique_source_event_identity_count")),
+                    ("missing_source_event_identity_count", identity_quality.get("status"), identity_quality.get("missing_source_event_identity_count")),
+                ],
+            ),
+            "",
+            f"Required identity components: {_fmt(identity_quality.get('required_identity_components'))}",
+            "",
             "## Hotspots, propagation, and provider-reported causes",
             "",
             _table(
@@ -1100,6 +1271,16 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "",
             f"Cadence-equivalent comparisons must exclude the oversampling interval: `{eras.get('oversampling_rate_rule')}`",
             "",
+            "## Recommended analytical grains",
+            "",
+            _table(
+                ["Grain", "Definition", "Use"],
+                [
+                    (item.get("grain"), item.get("definition"), item.get("use"))
+                    for item in grains
+                ],
+            ),
+            "",
             "## Power BI KPI readiness",
             "",
             "No permanent analytical facts were created and Power BI was not modified. The following matrix is a pre-implementation contract; it does not authorize populating a model:",
@@ -1112,7 +1293,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                         item.get("readiness_status"),
                         item.get("reporting_grain"),
                         item.get("denominator"),
-                        "Panel/audit lineage only" if item.get("readiness_status") == "PARTIAL" else "Not available to current login",
+                        item.get("available_population"),
                         item.get("confidence_limitation"),
                         item.get("tiered50_required"),
                     )
@@ -1141,17 +1322,37 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _utc_argument(value: str) -> datetime:
+    try:
+        return _parse_utc_timestamp(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)
     parser.add_argument("--markdown-output", type=Path, default=DEFAULT_MARKDOWN_OUTPUT)
+    parser.add_argument(
+        "--analysis-window-start-utc",
+        type=_utc_argument,
+        help="inclusive UTC start for bounded audit-population queries; defaults to seven days before the SQL capture",
+    )
+    parser.add_argument(
+        "--analysis-window-end-utc",
+        type=_utc_argument,
+        help="exclusive UTC end for bounded audit-population queries; defaults to the SQL capture",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        report = _capture_live_report()
+        report = _capture_live_report(
+            analysis_window_start_utc=args.analysis_window_start_utc,
+            analysis_window_end_utc=args.analysis_window_end_utc,
+        )
         exit_code = 0
     except Exception as exc:
         report = _blocked_report(exc)
