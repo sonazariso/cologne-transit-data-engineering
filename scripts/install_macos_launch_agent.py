@@ -27,12 +27,19 @@ sys.path.insert(0, str(ROOT / "src"))
 from cologne_transit_collector.domain import (  # noqa: E402
     MAC_SQL_CUTOVER_APPROVED_ENV,
     MAC_SQL_ENABLED_ENV,
+    MAC_SQL_MODE_ENV,
     MAC_SQL_REQUIRED_TARGET_SCOPE,
     MAC_SQL_REQUIRED_VALIDATION_POLICY,
     MAC_SQL_REQUIRED_RUNTIME_STATE,
     MAC_SQL_RUNTIME_STATE_ENV,
     MAC_SQL_TARGET_SCOPE_ENV,
     MAC_SQL_VALIDATION_POLICY_ENV,
+    MAC_TIERED50_CUTOVER_APPROVED_ENV,
+    MAC_TIERED50_ENABLED_ENV,
+    MAC_TIERED50_REQUIRED_TARGET_SCOPE,
+    MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
+    MAC_TIERED50_TARGET_SCOPE_ENV,
+    MAC_TIERED50_VALIDATION_POLICY_ENV,
 )
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     DEFAULT_RUNTIME_CONFIG_PATH,
@@ -44,6 +51,11 @@ from cologne_transit_collector.runtime_configuration import (  # noqa: E402
 LABEL = "com.cologne-transit-intelligence.mdd-collector"
 TEMPLATE_PATH = ROOT / "deployment" / "launchd" / f"{LABEL}.plist"
 INSTALLED_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+TIERED50_MODE = "tiered50"
+LEGACY7_MODE = "legacy7"
+TIERED50_LABEL = "com.cologne-transit-intelligence.mdd-tiered50-collector"
+TIERED50_TEMPLATE_PATH = ROOT / "deployment" / "launchd" / f"{TIERED50_LABEL}.plist"
+TIERED50_INSTALLED_PATH = Path.home() / "Library" / "LaunchAgents" / f"{TIERED50_LABEL}.plist"
 LOG_DIRECTORY = Path.home() / "Library" / "Logs" / "CologneTransitIntelligence"
 RUNTIME_BUNDLE_DIRECTORY = (
     Path.home() / "Library" / "Application Support" / "CologneTransitIntelligence" / "runtime-bundle"
@@ -51,6 +63,13 @@ RUNTIME_BUNDLE_DIRECTORY = (
 RUNTIME_BUNDLE_ENTRY = RUNTIME_BUNDLE_DIRECTORY / "macos_launchd_entry.py"
 INSTALLATION_MANIFEST = (
     Path.home() / "Library" / "Application Support" / "CologneTransitIntelligence" / "launchd-installation.json"
+)
+TIERED50_INSTALLATION_MANIFEST = (
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "CologneTransitIntelligence"
+    / "tiered50-launchd-installation.json"
 )
 SECRET_MARKERS = frozenset(
     {
@@ -77,10 +96,19 @@ def _plist_has_secret(plist: Mapping[str, Any]) -> bool:
     return any(marker in serialized for marker in SECRET_MARKERS)
 
 
-def _load_template() -> dict[str, Any]:
-    with TEMPLATE_PATH.open("rb") as handle:
+def _mode_paths(mode: str) -> tuple[str, Path, Path, Path]:
+    if mode == LEGACY7_MODE:
+        return LABEL, TEMPLATE_PATH, INSTALLED_PATH, INSTALLATION_MANIFEST
+    if mode == TIERED50_MODE:
+        return TIERED50_LABEL, TIERED50_TEMPLATE_PATH, TIERED50_INSTALLED_PATH, TIERED50_INSTALLATION_MANIFEST
+    raise ValueError(f"unsupported LaunchAgent mode: {mode}")
+
+
+def _load_template(mode: str = LEGACY7_MODE) -> dict[str, Any]:
+    label, template_path, _installed_path, _installation_manifest = _mode_paths(mode)
+    with template_path.open("rb") as handle:
         template = plistlib.load(handle)
-    if template.get("Label") != LABEL:
+    if template.get("Label") != label:
         raise ValueError("tracked LaunchAgent label is unexpected")
     if template.get("ProgramArguments", [None])[0] != REQUIRED_PYTHON_INTERPRETER:
         raise ValueError("tracked LaunchAgent interpreter is not the approved absolute path")
@@ -89,23 +117,45 @@ def _load_template() -> dict[str, Any]:
     return template
 
 
-def build_installed_plist(*, activate: bool, runtime_config_path: str | Path = DEFAULT_RUNTIME_CONFIG_PATH) -> dict[str, Any]:
+def build_installed_plist(
+    *,
+    activate: bool,
+    runtime_config_path: str | Path = DEFAULT_RUNTIME_CONFIG_PATH,
+    mode: str = LEGACY7_MODE,
+) -> dict[str, Any]:
     """Render a machine-local plist without changing the tracked template."""
 
-    plist = _load_template()
+    label, _template_path, _installed_path, _installation_manifest = _mode_paths(mode)
+    plist = _load_template(mode)
     environment = dict(plist.get("EnvironmentVariables", {}))
-    environment.update(
-        {
-            "PYTHONPATH": str(RUNTIME_BUNDLE_DIRECTORY / "src"),
-            RUNTIME_CONFIG_PATH_ENV: str(Path(runtime_config_path).expanduser().resolve()),
-            "COLLECTOR_RUNTIME_ROOT": str(RUNTIME_BUNDLE_DIRECTORY),
-            MAC_SQL_ENABLED_ENV: "1" if activate else "0",
-            MAC_SQL_RUNTIME_STATE_ENV: MAC_SQL_REQUIRED_RUNTIME_STATE if activate else "UNCONFIRMED",
-            MAC_SQL_CUTOVER_APPROVED_ENV: "1" if activate else "0",
-            MAC_SQL_TARGET_SCOPE_ENV: MAC_SQL_REQUIRED_TARGET_SCOPE if activate else "UNAPPROVED",
-            MAC_SQL_VALIDATION_POLICY_ENV: MAC_SQL_REQUIRED_VALIDATION_POLICY,
-        }
-    )
+    environment.update({
+        "PYTHONPATH": str(RUNTIME_BUNDLE_DIRECTORY / "src"),
+        RUNTIME_CONFIG_PATH_ENV: str(Path(runtime_config_path).expanduser().resolve()),
+        "COLLECTOR_RUNTIME_ROOT": str(RUNTIME_BUNDLE_DIRECTORY),
+    })
+    if mode == LEGACY7_MODE:
+        environment.update(
+            {
+                MAC_SQL_ENABLED_ENV: "1" if activate else "0",
+                MAC_SQL_RUNTIME_STATE_ENV: MAC_SQL_REQUIRED_RUNTIME_STATE if activate else "UNCONFIRMED",
+                MAC_SQL_CUTOVER_APPROVED_ENV: "1" if activate else "0",
+                MAC_SQL_TARGET_SCOPE_ENV: MAC_SQL_REQUIRED_TARGET_SCOPE if activate else "UNAPPROVED",
+                MAC_SQL_VALIDATION_POLICY_ENV: MAC_SQL_REQUIRED_VALIDATION_POLICY,
+            }
+        )
+    else:
+        environment.update(
+            {
+                MAC_SQL_MODE_ENV: "TIERED50",
+                MAC_TIERED50_ENABLED_ENV: "1" if activate else "0",
+                MAC_SQL_RUNTIME_STATE_ENV: MAC_SQL_REQUIRED_RUNTIME_STATE if activate else "UNCONFIRMED",
+                MAC_TIERED50_CUTOVER_APPROVED_ENV: "1" if activate else "0",
+                MAC_TIERED50_TARGET_SCOPE_ENV: (
+                    MAC_TIERED50_REQUIRED_TARGET_SCOPE if activate else "UNAPPROVED"
+                ),
+                MAC_TIERED50_VALIDATION_POLICY_ENV: MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
+            }
+        )
     for name in SECRET_MARKERS:
         environment.pop(name, None)
     plist["EnvironmentVariables"] = environment
@@ -114,24 +164,35 @@ def build_installed_plist(*, activate: bool, runtime_config_path: str | Path = D
     # installed artifact therefore calls an absolute user-local runtime
     # wrapper that inserts its bundled ``src`` before importing the runner.
     plist["ProgramArguments"] = [REQUIRED_PYTHON_INTERPRETER, str(RUNTIME_BUNDLE_ENTRY)]
+    if mode == TIERED50_MODE:
+        plist["ProgramArguments"].extend(["--mode", TIERED50_MODE])
     plist["WorkingDirectory"] = str(RUNTIME_BUNDLE_DIRECTORY)
     plist["Disabled"] = not activate
-    plist["StandardOutPath"] = str(LOG_DIRECTORY / "mdd-collector.log")
-    plist["StandardErrorPath"] = str(LOG_DIRECTORY / "mdd-collector.err.log")
+    log_stem = "mdd-collector" if mode == LEGACY7_MODE else "mdd-tiered50-collector"
+    plist["StandardOutPath"] = str(LOG_DIRECTORY / f"{log_stem}.log")
+    plist["StandardErrorPath"] = str(LOG_DIRECTORY / f"{log_stem}.err.log")
+    if plist.get("Label") != label:
+        raise ValueError("rendered LaunchAgent label changed unexpectedly")
     if _plist_has_secret(plist):
         raise ValueError("installed LaunchAgent contains a prohibited secret marker")
     return plist
 
 
-def install(*, activate: bool, runtime_config_path: str | Path = DEFAULT_RUNTIME_CONFIG_PATH) -> dict[str, Any]:
+def install(
+    *,
+    activate: bool,
+    runtime_config_path: str | Path = DEFAULT_RUNTIME_CONFIG_PATH,
+    mode: str = LEGACY7_MODE,
+) -> dict[str, Any]:
     """Write the user-local plist and its separate non-secret manifest."""
 
-    INSTALLED_PATH.parent.mkdir(parents=True, exist_ok=True)
-    INSTALLED_PATH.parent.chmod(0o700)
+    label, _template_path, installed_path, installation_manifest = _mode_paths(mode)
+    installed_path.parent.mkdir(parents=True, exist_ok=True)
+    installed_path.parent.chmod(0o700)
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     LOG_DIRECTORY.chmod(0o700)
-    INSTALLATION_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    INSTALLATION_MANIFEST.parent.chmod(0o700)
+    installation_manifest.parent.mkdir(parents=True, exist_ok=True)
+    installation_manifest.parent.chmod(0o700)
 
     RUNTIME_BUNDLE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     RUNTIME_BUNDLE_DIRECTORY.chmod(0o700)
@@ -161,30 +222,35 @@ def install(*, activate: bool, runtime_config_path: str | Path = DEFAULT_RUNTIME
     )
     RUNTIME_BUNDLE_ENTRY.chmod(0o700)
 
-    rendered = build_installed_plist(activate=activate, runtime_config_path=runtime_config_path)
-    with INSTALLED_PATH.open("wb") as handle:
+    rendered = build_installed_plist(
+        activate=activate,
+        runtime_config_path=runtime_config_path,
+        mode=mode,
+    )
+    with installed_path.open("wb") as handle:
         plistlib.dump(rendered, handle, fmt=plistlib.FMT_XML, sort_keys=False)
-    INSTALLED_PATH.chmod(0o600)
+    installed_path.chmod(0o600)
 
     manifest = {
-        "label": LABEL,
-        "installed_plist_path": str(INSTALLED_PATH),
-        "installed_plist_sha256": _sha256(INSTALLED_PATH),
-        "tracked_template_path": str(TEMPLATE_PATH),
-        "tracked_template_sha256": _sha256(TEMPLATE_PATH),
+        "label": label,
+        "mode": mode,
+        "installed_plist_path": str(installed_path),
+        "installed_plist_sha256": _sha256(installed_path),
+        "tracked_template_path": str(_template_path),
+        "tracked_template_sha256": _sha256(_template_path),
         "runtime_config_path": str(Path(runtime_config_path).expanduser().resolve()),
         "runtime_bundle_path": str(RUNTIME_BUNDLE_DIRECTORY),
         "activated": activate,
         "recorded_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    with INSTALLATION_MANIFEST.open("w", encoding="utf-8") as handle:
+    with installation_manifest.open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
-    INSTALLATION_MANIFEST.chmod(0o600)
+    installation_manifest.chmod(0o600)
     return manifest
 
 
-def bootstrap(*, activate: bool = True) -> None:
+def bootstrap(*, activate: bool = True, mode: str = LEGACY7_MODE) -> None:
     """Load the installed LaunchAgent without manually invoking its program.
 
     ``launchctl`` persists a per-label disabled override after a previous
@@ -192,18 +258,19 @@ def bootstrap(*, activate: bool = True) -> None:
     override, so synchronize the exact label state before bootstrapping it.
     """
 
+    label, _template_path, installed_path, _installation_manifest = _mode_paths(mode)
     domain = f"gui/{os.getuid()}"
     # bootout is scoped to this exact user-local label and is idempotent when
     # the job is not currently loaded.
     subprocess.run(
-        ["/bin/launchctl", "bootout", f"{domain}/{LABEL}"],
+        ["/bin/launchctl", "bootout", f"{domain}/{label}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
     state_command = "enable" if activate else "disable"
     state = subprocess.run(
-        ["/bin/launchctl", state_command, f"{domain}/{LABEL}"],
+        ["/bin/launchctl", state_command, f"{domain}/{label}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -211,7 +278,7 @@ def bootstrap(*, activate: bool = True) -> None:
     if state.returncode != 0:
         raise RuntimeError(f"launchd {state_command} failed")
     completed = subprocess.run(
-        ["/bin/launchctl", "bootstrap", domain, str(INSTALLED_PATH)],
+        ["/bin/launchctl", "bootstrap", domain, str(installed_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -225,6 +292,7 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--install-disabled", action="store_true", help="render the safe local artifact")
     mode.add_argument("--activate", action="store_true", help="render the approved production gate values")
+    parser.add_argument("--mode", choices=(LEGACY7_MODE, TIERED50_MODE), default=LEGACY7_MODE)
     parser.add_argument("--runtime-config", type=Path, default=DEFAULT_RUNTIME_CONFIG_PATH)
     parser.add_argument("--bootstrap", action="store_true", help="load the exact installed artifact into launchd")
     return parser
@@ -234,9 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     activate = bool(args.activate)
     try:
-        manifest = install(activate=activate, runtime_config_path=args.runtime_config)
+        manifest = install(activate=activate, runtime_config_path=args.runtime_config, mode=args.mode)
         if args.bootstrap:
-            bootstrap(activate=activate)
+            bootstrap(activate=activate, mode=args.mode)
             manifest["launchd_bootstrapped"] = True
         print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
         return 0

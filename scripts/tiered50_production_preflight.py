@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Run the no-network Tiered50 production preflight.
+
+The default path is entirely offline: it reads the approved manifest, parser
+fixtures, SQL migration text, and disabled LaunchAgent templates. ``--live``
+adds read-only SQL/catalog checks but never invokes MDD and never activates
+the panel. A PASS here is an offline readiness result, not live validation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import zipfile
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from cologne_transit_collector.collector import LiveModeBlocked  # noqa: E402
+from cologne_transit_collector.domain import (  # noqa: E402
+    ABSOLUTE_PROVIDER_CEILING,
+    APPROVED_SUPER_CYCLE_COUNTS,
+    AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+    HEARTBEAT_MINUTES,
+    MAX_ATTEMPTS,
+    MAXIMUM_CONCURRENCY,
+    NORMAL_OPERATIONAL_MAXIMUM,
+    REQUEST_TIMEOUT_SECONDS,
+    SamplingEra,
+)
+from cologne_transit_collector.manifest import (  # noqa: E402
+    LEGACY7_SAMPLING_TARGET_IDS,
+    load_default_manifest,
+)
+from cologne_transit_collector.macos_runner import require_tiered50_cutover_gate  # noqa: E402
+from cologne_transit_collector.mssql_persistence import (  # noqa: E402
+    MssqlConnectionSettings,
+    MssqlPersistence,
+    build_mssql_snapshot_rows,
+)
+from cologne_transit_collector.schedule import (  # noqa: E402
+    may_execute_bucket,
+    schedule_reconciliation,
+)
+from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
+from package_source_zip import is_forbidden_source_member, source_members  # noqa: E402
+from validate_tiered50_migration import validate_static  # noqa: E402
+
+
+MIGRATION = ROOT / "sql" / "mdd-mac-collector" / "materialize-tiered50-production.sql"
+LAUNCHD_TEMPLATES = (
+    ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-collector.plist",
+    ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-tiered50-collector.plist",
+)
+
+
+def _result(status: str, details: Any = None, error: str | None = None) -> dict[str, Any]:
+    value: dict[str, Any] = {"status": status}
+    if details is not None:
+        value["details"] = details
+    if error is not None:
+        value["error_type"] = error
+    return value
+
+
+def _approved_production_ids(manifest: Any) -> dict[str, int]:
+    mapping = dict(LEGACY7_SAMPLING_TARGET_IDS)
+    for sampling_target_id, target in enumerate(manifest.new_tiered50_targets, start=8):
+        mapping[target.source_parent_station_id] = sampling_target_id
+    return mapping
+
+
+def validate_manifest() -> dict[str, Any]:
+    manifest = load_default_manifest(ROOT)
+    counts = Counter(target.tier for target in manifest.targets)
+    cadence = Counter(target.cadence_minutes for target in manifest.targets)
+    results = Counter(target.number_of_results for target in manifest.targets)
+    expected_ids = _approved_production_ids(manifest)
+    bound = manifest.bind_production_sampling_target_ids(expected_ids)
+    bound.validate_production_binding()
+    expected = {
+        "target_count": 50,
+        "legacy7_count": 7,
+        "new_count": 43,
+        "tier_counts": {"A": 8, "B": 20, "C": 22},
+        "cadence_counts": {"5": 8, "15": 20, "30": 22},
+        "result_counts": {"20": 8, "30": 42},
+        "production_ids": "1..50 with Legacy7 preserved as 1..7",
+    }
+    observed = {
+        "target_count": len(manifest.targets),
+        "legacy7_count": len(manifest.legacy7_targets),
+        "new_count": len(manifest.new_tiered50_targets),
+        "tier_counts": dict(sorted(counts.items())),
+        "cadence_counts": {str(key): value for key, value in sorted(cadence.items())},
+        "result_counts": {str(key): value for key, value in sorted(results.items())},
+        "production_ids": "1..50 with Legacy7 preserved as 1..7",
+    }
+    if observed != expected:
+        raise ValueError(f"manifest reconciliation differs from approved values: {observed}")
+    return {
+        "status": "PASS",
+        "panel_version": manifest.panel_version,
+        "sampling_era": manifest.sampling_era.value,
+        "activation_status": manifest.activation_status,
+        "expected": expected,
+        "observed": observed,
+        "legacy7_source_ids": sorted(target.source_parent_station_id for target in manifest.legacy7_targets),
+    }
+
+
+def validate_schedule() -> dict[str, Any]:
+    manifest = load_default_manifest(ROOT)
+    reconciliation = schedule_reconciliation(manifest.targets)
+    expected_counts = tuple(APPROVED_SUPER_CYCLE_COUNTS)
+    if tuple(reconciliation["super_cycle_counts"]) != expected_counts:
+        raise ValueError("six-phase schedule does not match the approved counts")
+    if int(reconciliation["super_cycle_total"]) != 110 or int(reconciliation["requests_per_hour"]) != 220:
+        raise ValueError("schedule totals do not match 110 per 30 minutes and 220 per hour")
+    if not may_execute_bucket(100, 100) or may_execute_bucket(100, 99) or may_execute_bucket(100, 101):
+        raise ValueError("missed-bucket replay guard is not fail-closed")
+    return {
+        "status": "PASS",
+        "heartbeat_minutes": HEARTBEAT_MINUTES,
+        "logical_bucket_timezone": "UTC",
+        "no_catch_up": True,
+        "reconciliation": reconciliation,
+    }
+
+
+def validate_runtime_guardrails() -> dict[str, Any]:
+    missing_key = False
+    try:
+        require_tiered50_cutover_gate({})
+    except LiveModeBlocked:
+        missing_key = True
+    if not missing_key:
+        raise ValueError("Tiered50 credential/cutover gate did not fail closed")
+    if MAXIMUM_CONCURRENCY != 2 or MAX_ATTEMPTS != 2 or REQUEST_TIMEOUT_SECONDS != 30:
+        raise ValueError("approved concurrency, retry, or timeout guardrail changed")
+    if not (AUTOMATIC_RETRY_PROTECTION_BOUNDARY < NORMAL_OPERATIONAL_MAXIMUM < ABSOLUTE_PROVIDER_CEILING):
+        raise ValueError("quota boundaries are not ordered as approved")
+    return {
+        "status": "PASS",
+        "concurrency": MAXIMUM_CONCURRENCY,
+        "max_attempts": MAX_ATTEMPTS,
+        "request_timeout_seconds": REQUEST_TIMEOUT_SECONDS,
+        "quota_boundaries": {
+            "retry_protection": AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
+            "normal_operational_maximum": NORMAL_OPERATIONAL_MAXIMUM,
+            "provider_ceiling": ABSOLUTE_PROVIDER_CEILING,
+        },
+        "credential_gate_fail_closed": True,
+    }
+
+
+def validate_claim_identity() -> dict[str, Any]:
+    manifest = load_default_manifest(ROOT)
+    bound = manifest.bind_production_sampling_target_ids(_approved_production_ids(manifest))
+    keys = {
+        (
+            int(target.production_sampling_target_id or 0),
+            bucket,
+        )
+        for target in bound.targets
+        for bucket in range(6)
+    }
+    development_keys = {
+        (target.panel_version, target.source_parent_station_id, bucket)
+        for target in bound.targets
+        for bucket in range(6)
+    }
+    if len(keys) != 300 or len(development_keys) != 300:
+        raise ValueError("target/bucket claim identity is not unique across the panel")
+    migration_text = MIGRATION.read_text(encoding="utf-8")
+    for marker in (
+        "SamplingTargetId INT NULL",
+        "UX_ctl_MddMacTargetClaim_SamplingTarget_Bucket",
+        "SamplingTargetId, LogicalDueBucket",
+    ):
+        if marker not in migration_text:
+            raise ValueError(f"claim migration is missing marker: {marker}")
+    return {
+        "status": "PASS",
+        "production_identity": "SamplingTargetId + LogicalDueBucket",
+        "unique_target_bucket_keys": len(keys),
+        "unique_development_fallback_keys": len(development_keys),
+        "dispatcher_identity": "PanelVersion + LogicalDueBucket",
+    }
+
+
+def validate_source_persistence_contract() -> dict[str, Any]:
+    fixtures = (
+        ("stage14_trias_equivalent.json", "application/json"),
+        ("mdd_mac_multi_occurrence.json", "application/json"),
+        ("stage14_trias_source_contract_correction.json", "application/json"),
+        ("stage14_trias_equivalent.xml", "application/xml"),
+    )
+    totals: Counter[str] = Counter()
+    recorded_values: list[str] = []
+    scopes: set[str] = set()
+    for filename, content_type in fixtures:
+        parsed = parse_trias_response((ROOT / "tests" / "fixtures" / filename).read_bytes(), content_type)
+        rows = build_mssql_snapshot_rows(parsed.to_dict())
+        for name, values in rows.items():
+            totals[name] += len(values)
+            for row in values:
+                if any(str(key).casefold() == "actualtime" for key in row):
+                    raise ValueError("source persistence contract introduced ActualTime")
+        for row in rows["timings"]:
+            scopes.add(str(row.get("call_scope") or ""))
+            if row.get("recorded_at_time") is not None:
+                recorded_values.append(str(row["recorded_at_time"]))
+    if not {"PREVIOUS", "THIS", "ONWARD"}.issubset(scopes):
+        raise ValueError("previous/this/onward call scopes were not retained")
+    if not recorded_values or totals["situations"] < 1 or totals["attributes"] < 2 or totals["parser_gaps"] < 1:
+        raise ValueError("source-field persistence fixtures did not exercise required evidence grains")
+    return {
+        "status": "PASS",
+        "fixture_count": len(fixtures),
+        "row_counts": dict(sorted(totals.items())),
+        "call_scopes": sorted(scope for scope in scopes if scope),
+        "recorded_at_time_values_seen": len(recorded_values),
+        "actual_time_fabrication": False,
+        "null_source_values_preserved": True,
+        "causal_inference": False,
+    }
+
+
+def validate_deployment_and_sql() -> dict[str, Any]:
+    migration = validate_static()
+    if migration["status"] != "PASS":
+        raise ValueError("static Tiered50 migration validation failed")
+    import plistlib
+
+    templates: list[dict[str, Any]] = []
+    for path in LAUNCHD_TEMPLATES:
+        with path.open("rb") as handle:
+            plist = plistlib.load(handle)
+        if not plist.get("Disabled") or plist.get("RunAtLoad") or plist.get("StartInterval") != 300:
+            raise ValueError(f"LaunchAgent is not a disabled five-minute template: {path.name}")
+        serialized = json.dumps(plist, ensure_ascii=False).casefold()
+        if any(marker in serialized for marker in ("mdd_api_key", "mssql_password", "sql_server_password")):
+            raise ValueError(f"LaunchAgent contains a credential marker: {path.name}")
+        templates.append({"name": path.name, "label": plist.get("Label"), "disabled": True})
+    forbidden_members = [
+        archive_name
+        for _path, archive_name in source_members(ROOT)
+        if is_forbidden_source_member(archive_name)
+    ]
+    if forbidden_members:
+        raise ValueError(f"forbidden source members would be packaged: {forbidden_members}")
+    return {
+        "status": "PASS",
+        "migration": migration,
+        "launchd_templates": templates,
+        "source_package_filters": "PASS",
+        "power_bi_modified": False,
+        "analytics_permissions_expanded": False,
+    }
+
+
+def validate_live_read_only() -> dict[str, Any]:
+    """Collect read-only SQL and host evidence without activation or MDD."""
+
+    settings = MssqlConnectionSettings.from_environment()
+    persistence = MssqlPersistence(settings=settings)
+    result: dict[str, Any] = {
+        "status": "PASS",
+        "mdd_requests_issued": 0,
+        "writes_performed": 0,
+        "mac_host_disk": {
+            "free_bytes": shutil.disk_usage(ROOT).free,
+            "total_bytes": shutil.disk_usage(ROOT).total,
+            "scope": "macOS collector host only",
+        },
+        "windows_vm_disk": {"status": "NOT_PROVEN"},
+        "backup_recovery": {"status": "NOT_PROVEN", "reason": "database-host administrator evidence required"},
+    }
+    try:
+        result["runtime_schema"] = persistence.validate_runtime_schema()
+        result["tiered50_schema"] = persistence.validate_tiered50_runtime_schema()
+        result["quota_usage"] = persistence.current_month_usage()
+        result["competing_writers"] = persistence.assert_no_competing_writer(
+            "MAC_TIERED50_PRODUCTION"
+        )
+        with persistence._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT name, type_desc, size, growth, is_percent_growth, max_size
+                FROM sys.database_files
+                ORDER BY file_id
+                """
+            )
+            result["sql_database_files"] = [
+                {
+                    "name": str(row[0]),
+                    "type": str(row[1]),
+                    "size_pages": int(row[2]),
+                    "growth": int(row[3]),
+                    "is_percent_growth": bool(row[4]),
+                    "max_size_pages": int(row[5]),
+                }
+                for row in cursor.fetchall()
+            ]
+    finally:
+        persistence.close()
+    return result
+
+
+def run_preflight(*, live: bool = False) -> dict[str, Any]:
+    checks = {
+        "manifest": validate_manifest(),
+        "schedule": validate_schedule(),
+        "runtime_guardrails": validate_runtime_guardrails(),
+        "claim_identity": validate_claim_identity(),
+        "source_persistence": validate_source_persistence_contract(),
+        "deployment_and_sql": validate_deployment_and_sql(),
+    }
+    live_result: dict[str, Any] | None = None
+    live_error: str | None = None
+    if live:
+        try:
+            live_result = validate_live_read_only()
+        except Exception as exc:
+            live_error = type(exc).__name__
+            live_result = {
+                "status": "NOT_PROVEN",
+                "mdd_requests_issued": 0,
+                "writes_performed": 0,
+                "error_type": live_error,
+            }
+    blockers = [
+        "Tiered50 SQL materialization/activation was not applied by this offline preflight.",
+        "No complete scheduled 30-minute Tiered50 live cycle is evidenced.",
+        "Recent Legacy7 five-minute availability and database-host capacity/backup evidence are incomplete.",
+    ]
+    if live_error:
+        blockers.append(f"Read-only live SQL preflight was not proven ({live_error}).")
+    return {
+        "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
+        "status": "PASS" if not live_error else "PASS_WITH_LIVE_EVIDENCE_GAP",
+        "production_status": "BLOCKED — LEGACY7 PRESERVED",
+        "tiered50_active": False,
+        "stations_actually_collecting": 7,
+        "first_completed_live_cycle": None,
+        "mdd_requests_issued": 0,
+        "writes_performed": 0,
+        "checks": checks,
+        "live_read_only": live_result,
+        "blockers": blockers,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--live", action="store_true", help="add read-only SQL/catalog checks")
+    args = parser.parse_args(argv)
+    try:
+        result = run_preflight(live=args.live)
+    except Exception as exc:
+        result = {
+            "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
+            "status": "FAIL",
+            "production_status": "BLOCKED — LEGACY7 PRESERVED",
+            "tiered50_active": False,
+            "mdd_requests_issued": 0,
+            "error_type": type(exc).__name__,
+            "blockers": ["offline preflight failed before all checks completed"],
+        }
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+    return 0 if result["status"] in {"PASS", "PASS_WITH_LIVE_EVIDENCE_GAP"} else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

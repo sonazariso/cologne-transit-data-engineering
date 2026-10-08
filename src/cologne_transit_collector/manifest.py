@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -13,6 +13,7 @@ from .domain import (
     LIVE_RESEARCH_LEGACY_ID,
     LIVE_RESEARCH_STATION_NAME,
     LIVE_RESEARCH_TARGET_ID,
+    TIERED50_SELECTION_POLICY_VERSION,
     TIER_CADENCE_MINUTES,
     TIER_COUNTS,
     TIER_NUMBER_OF_RESULTS,
@@ -248,6 +249,93 @@ class RuntimeManifest:
         if len(expected) != 50 or expected != actual:
             raise ManifestValidationError(
                 "runtime manifest phases do not exactly match persisted Stage 13 evidence"
+            )
+
+    def bind_production_sampling_target_ids(
+        self,
+        sampling_target_ids: Mapping[str, int],
+    ) -> "RuntimeManifest":
+        """Bind live SQL identities without changing approved membership/phases.
+
+        The repository manifest intentionally contains no future production IDs.
+        A live adapter may bind IDs read back from SQL, but the station set and
+        all policy fields still come exclusively from this approved manifest.
+        """
+
+        expected = {target.source_parent_station_id for target in self.targets}
+        observed = {str(key) for key in sampling_target_ids}
+        if observed != expected:
+            missing = sorted(expected - observed)
+            extra = sorted(observed - expected)
+            raise ManifestValidationError(
+                f"production target identity binding differs from the approved manifest; "
+                f"missing={missing}, extra={extra}"
+            )
+        bound: list[Target] = []
+        for target in self.targets:
+            try:
+                identity = int(sampling_target_ids[target.source_parent_station_id])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ManifestValidationError(
+                    "production SamplingTargetId values must be positive integers"
+                ) from exc
+            if identity <= 0:
+                raise ManifestValidationError("production SamplingTargetId values must be positive")
+            bound.append(
+                replace(
+                    target,
+                    production_sampling_target_id=str(identity),
+                    selection_policy_version=TIERED50_SELECTION_POLICY_VERSION,
+                )
+            )
+        result = replace(self, targets=tuple(bound))
+        result.validate_production_binding()
+        return result
+
+    def validate_production_binding(self) -> None:
+        """Validate SQL-bound IDs while preserving the inactive source manifest."""
+
+        # Validate the source manifest contract after removing runtime-only IDs.
+        source_targets = tuple(
+            replace(target, production_sampling_target_id=None)
+            for target in self.targets
+        )
+        replace(
+            self,
+            activation_status="DEFERRED_NOT_ACTIVE",
+            cutover_timestamp_utc=None,
+            targets=source_targets,
+        ).validate()
+
+        ids: list[int] = []
+        for target in self.targets:
+            try:
+                identity = int(target.production_sampling_target_id or 0)
+            except (TypeError, ValueError) as exc:
+                raise ManifestValidationError(
+                    "bound production SamplingTargetId is not an integer"
+                ) from exc
+            if identity <= 0:
+                raise ManifestValidationError("bound production SamplingTargetId must be positive")
+            ids.append(identity)
+        if len(set(ids)) != 50 or set(ids) != set(range(1, 51)):
+            raise ManifestValidationError(
+                "bound production SamplingTargetIds must be exactly 1 through 50"
+            )
+        legacy_ids = {
+            target.source_parent_station_id: int(target.production_sampling_target_id or 0)
+            for target in self.legacy7_targets
+        }
+        if legacy_ids != LEGACY7_SAMPLING_TARGET_IDS:
+            raise ManifestValidationError(
+                "bound production IDs do not preserve Legacy7 identities 1 through 7"
+            )
+        if any(
+            int(target.production_sampling_target_id or 0) <= 7
+            for target in self.new_tiered50_targets
+        ):
+            raise ManifestValidationError(
+                "new Tiered50 targets must use production identities 8 through 50"
             )
 
 

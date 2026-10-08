@@ -28,6 +28,18 @@ The existing PostgreSQL contracts and SQLite collector/research
 implementation remain historical/legacy artifacts for deferred cleanup.
 Tiered50 remains inactive.
 
+The current Tiered50 deployment validation is **BLOCKED — LEGACY7 PRESERVED**:
+the explicit separately guarded runner, additive 43-row SQL materialization,
+disabled LaunchAgent, and offline preflight are source-controlled, but live
+materialization and activation were not performed. Offline checks reconcile
+the approved 50-target panel, exact six-phase schedule, source-field contract,
+claims, retry/quota boundaries, and fail-closed credentials. The available
+Legacy7 evidence does not prove the required stable 30-minute availability
+interval or database capacity/backup/quota gates, so there is no completed
+Tiered50 live cycle and no Tiered50 station is collecting. See the [sanitized
+validation evidence](docs/operational/tiered50-deployment-validation-evidence.json)
+and [operator report](docs/operational/tiered50-deployment-validation-report.md).
+
 - Stage 0 — Project Definition: **APPROVED**
 - Stage 1 — Source Inventory & Permission: **APPROVED**
 - Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **COMPLETE**. Fresh 2026-10-07 evidence confirms `CologneTransitIntelligence` is ONLINE; the native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH CHECKSUM`; and full read-only `DBCC CHECKDB` reports no corruption errors. The verified 606,586,880-byte backup and matching SHA-256 Mac safety copy are retained on the user-provided `CologneTransitData` share. The low-space `C:` volume was not used as the backup destination. The stabilization capture preceded the later operator-confirmed Windows-task retirement documented in the current cutover record.

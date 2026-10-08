@@ -392,18 +392,22 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      dependency and creates no local shadow database. Deployment scheduling and
      host selection remain outside the package.
 118. The versioned Stage 14 manifest is the authoritative offline runtime
-     configuration. The prepared direct runner separately reads the unchanged
+     configuration. The Legacy7 direct runner separately reads the unchanged
      seven existing SQL sampling targets, requires IDs 1–7 and their exact
      StopPointRef mapping, and refuses the deferred Tiered50 target list. The
+     separately guarded Tiered50 runner may use only the additive SQL-bound
+     target table after every materialization and activation gate passes. The
      offline manifest still contains exactly 50 targets, fixed Stage 13 phase
      indexes, and no fabricated future `SamplingTargetId` values. Manifest
      phase changes fail closed against Stage 13 evidence.
 119. The production claim identity remains `(SamplingTargetId,
-     LogicalDueBucket)`. A disposable local backend may use the explicitly
-     labeled development identity `(panel_version, source_parent_station_id,
-     logical_due_bucket)` only because the 43 new production IDs do not yet
-     exist. The adapter boundary must prevent that local key from becoming a
-     production schema decision.
+     LogicalDueBucket)`. The additive Tiered50 materialization allocates
+     stable IDs 8–50 while preserving Legacy7 IDs 1–7; activation is the only
+     point at which those new rows may become enabled. A disposable local
+     backend may use the explicitly labeled development identity
+     `(panel_version, source_parent_station_id, logical_due_bucket)` before
+     SQL binding. The adapter boundary must prevent that local key from
+     replacing the production identity.
 120. The one-heartbeat command derives the current five-minute logical bucket
      from UTC wall-clock time, executes only that bucket, and never replays
      missed buckets or fabricates missed snapshots. It must not become a

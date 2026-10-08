@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cologne-transit-intelligence.mdd-tiered50-collector</string>
+
+    <!-- Prepared only. Keep this independent job disabled until every gate passes. -->
+    <key>Disabled</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>/Users/admin/Documents/cologne-transit-intelligence</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Pinned interpreter validated with pymssql==2.3.2 on this Mac. -->
+        <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+        <string>-m</string>
+        <string>cologne_transit_collector.macos_runner</string>
+        <string>--mode</string>
+        <string>tiered50</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/admin/Documents/cologne-transit-intelligence/src</string>
+        <key>COLLECTOR_MAC_SQL_MODE</key>
+        <string>TIERED50</string>
+        <key>COLLECTOR_MAC_TIERED50_ENABLED</key>
+        <string>0</string>
+        <key>COLLECTOR_WINDOWS_RUNTIME_STATE</key>
+        <string>UNCONFIRMED</string>
+        <key>COLLECTOR_TIERED50_CUTOVER_APPROVED</key>
+        <string>0</string>
+        <key>COLLECTOR_TIERED50_TARGET_SCOPE</key>
+        <string>UNAPPROVED</string>
+        <key>COLLECTOR_TIERED50_VALIDATION_POLICY</key>
+        <string>OFFLINE_RECONCILIATION_ONLY</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/admin/Library/Logs/CologneTransitIntelligence/mdd-tiered50-collector.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/admin/Library/Logs/CologneTransitIntelligence/mdd-tiered50-collector.err.log</string>
+</dict>
+</plist>

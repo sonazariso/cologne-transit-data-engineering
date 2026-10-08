@@ -1,0 +1,119 @@
+{
+  "artifact_version": "TIERED50_DEPLOYMENT_VALIDATION_EVIDENCE_V1",
+  "evidence_capture_timestamp_utc": "2026-10-08T09:13:46.222561Z",
+  "production_status": "BLOCKED — LEGACY7 PRESERVED",
+  "tiered50_active": false,
+  "stations_actually_collecting": {
+    "tiered50": 0,
+    "legacy7": 7,
+    "basis": "latest sanitized Legacy7 closeout evidence; no Tiered50 live cycle"
+  },
+  "authoritative_database": "CologneTransitIntelligence",
+  "execution_host": "macOS",
+  "windows_collectors": "RETIRED_AND_NOT_REENABLED",
+  "manifest": {
+    "panel_version": "TIERED50_PANEL_V1",
+    "sampling_era": "Tiered50",
+    "target_count": 50,
+    "legacy7_continuity_anchors": 7,
+    "new_targets": 43,
+    "tier_counts": {"A": 8, "B": 20, "C": 22},
+    "cadence_minutes": {"A": 5, "B": 15, "C": 30},
+    "number_of_results": {"A": 20, "B": 30, "C": 30},
+    "activation_status": "DEFERRED_NOT_ACTIVE"
+  },
+  "offline_validation": {
+    "status": "PASS",
+    "repository_test_count": 243,
+    "repository_test_consecutive_passes": 5,
+    "resource_warning_policy": "ERROR",
+    "compilation": "PASS",
+    "json_validation": "PASS",
+    "git_diff_check": "PASS",
+    "mdd_requests_issued": 0,
+    "writes_performed": 0,
+    "six_phase_counts": [19, 18, 18, 18, 19, 18],
+    "nominal_requests_per_30_minutes": 110,
+    "nominal_requests_per_hour": 220,
+    "concurrency": 2,
+    "max_attempts": 2,
+    "request_timeout_seconds": 30,
+    "no_catch_up": true,
+    "claim_identity": "SamplingTargetId + LogicalDueBucket",
+    "credential_gate_fail_closed": true,
+    "source_field_persistence_contract": "PASS",
+    "actual_time_fabrication": false,
+    "parser_gap_preservation": true,
+    "transactional_sql_persistence_contract": "PASS_STATIC_REVIEW"
+  },
+  "sql_materialization": {
+    "migration_file": "sql/mdd-mac-collector/materialize-tiered50-production.sql",
+    "static_validation": "PASS",
+    "prepared_new_rows": 43,
+    "assigned_new_ids": "8..50",
+    "legacy_ids_1_through_7_preserved": true,
+    "applied_to_live_database": false,
+    "active_tiered50_rows": 0
+  },
+  "runtime_and_deployment": {
+    "explicit_tiered50_runner_path": "IMPLEMENTED_BUT_GATED",
+    "separate_collection_context": "MAC_TIERED50_PRODUCTION",
+    "separate_launch_agent_template": "deployment/launchd/com.cologne-transit-intelligence.mdd-tiered50-collector.plist",
+    "tiered50_launch_agent_disabled": true,
+    "legacy7_launch_agent_preserved": true,
+    "competing_writer_check": "IMPLEMENTED_READ_ONLY_GUARD"
+  },
+  "legacy7_availability": {
+    "source": "docs/operational/legacy7-production-transition-closeout-evidence.json",
+    "observed_buckets": [5971342, 5971343, 5971344],
+    "missing_buckets_within_observed_window": [],
+    "confirmed_failures": [],
+    "stable_interval_minutes_observed": 15,
+    "stable_interval_minutes_required": 30,
+    "stable_interval_status": "NOT_PROVEN",
+    "mac_host_continuity": "NOT_PROVEN",
+    "vmware_fusion_continuity": "NOT_PROVEN",
+    "windows_vm_continuity": "NOT_PROVEN",
+    "sql_server_continuity": "PARTIAL — three persisted successful heartbeats only",
+    "missing_bucket_cause": "NOT_INFERRED"
+  },
+  "capacity_and_quota": {
+    "status": "NOT_PROVEN",
+    "provider_ceiling": 250000,
+    "normal_operational_maximum": 210000,
+    "retry_protection_boundary": 207500,
+    "rows_log_free_space": "NOT_PROVEN",
+    "file_growth_capacity": "NOT_PROVEN",
+    "windows_vm_disk": "NOT_PROVEN",
+    "backup_and_recovery": "NOT_PROVEN",
+    "shared_credential_usage_reconciliation": "NOT_PROVEN"
+  },
+  "live_validation": {
+    "status": "NOT_RUN",
+    "first_completed_30_minute_cycle": null,
+    "nominal_requests_reconciled": null,
+    "http_attempts_reconciled": null,
+    "sql_snapshots_persisted": null,
+    "duplicate_target_buckets": null,
+    "reason": "Tiered50 activation and network collection were not authorized without proven availability/capacity gates"
+  },
+  "analytics": {
+    "power_bi_modified": false,
+    "collector_analytics_select_grants_added": false,
+    "historical_readiness_diagnostic_preserved": true
+  },
+  "sanitization": {
+    "credentials_included": false,
+    "api_keys_included": false,
+    "passwords_included": false,
+    "keychain_values_included": false,
+    "raw_mdd_payloads_included": false,
+    "manual_heumarkt_requests_issued": false
+  },
+  "blockers": [
+    "No proven recent stable Legacy7 availability interval of at least 30 minutes.",
+    "Tiered50 SQL materialization and activation were not applied.",
+    "No complete scheduled Tiered50 30-minute live cycle exists.",
+    "Database capacity, backup/recovery, VM disk, and shared-credential quota reconciliation are not proven in this evidence capture."
+  ]
+}

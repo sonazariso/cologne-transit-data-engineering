@@ -15,6 +15,12 @@ Stage 14 status is recorded in the entries below.
   three corrected scheduled heartbeat validations, and the
   `MAC_LEGACY7_PRODUCTION` era. Tiered50 remains deferred and Power BI is
   unchanged.
+- Tiered50 deployment preparation: added a separately guarded macOS runtime,
+  stable additive SQL materialization for new identities 8–50, a disabled
+  Tiered50 LaunchAgent template, read-only migration/preflight checks, and
+  sanitized availability evidence. Offline invariants pass, but the live
+  materialization, activation, capacity/quota proof, and complete 30-minute
+  Tiered50 cycle remain unproven; status is **BLOCKED — LEGACY7 PRESERVED**.
 
 ### Added
 - S98 operational completion work: added a fresh ROWS/LOG/volume capacity

@@ -23,10 +23,18 @@ from .domain import (
     MAC_SQL_COLLECTION_CONTEXT,
     MAC_SQL_CUTOVER_APPROVED_ENV,
     MAC_SQL_ENABLED_ENV,
+    MAC_SQL_MODE_ENV,
     MAC_SQL_REQUIRED_RUNTIME_STATE,
     MAC_SQL_REQUIRED_TARGET_SCOPE,
     MAC_SQL_RUNTIME_STATE_ENV,
     MAC_SQL_TARGET_SCOPE_ENV,
+    MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    MAC_TIERED50_CUTOVER_APPROVED_ENV,
+    MAC_TIERED50_ENABLED_ENV,
+    MAC_TIERED50_REQUIRED_TARGET_SCOPE,
+    MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
+    MAC_TIERED50_TARGET_SCOPE_ENV,
+    MAC_TIERED50_VALIDATION_POLICY_ENV,
     SamplingEra,
     MAX_ATTEMPTS,
     MAXIMUM_CONCURRENCY,
@@ -302,8 +310,10 @@ class Collector:
         allow_live: bool = False,
         pilot_target: str | None = None,
     ) -> CollectorRunResult:
-        if mode not in {"dry-run", "simulate", "live", "live-research", "mac-sql"}:
-            raise ValueError("run_once mode must be dry-run, simulate, live, live-research, or mac-sql")
+        if mode not in {"dry-run", "simulate", "live", "live-research", "mac-sql", "mac-tiered50"}:
+            raise ValueError(
+                "run_once mode must be dry-run, simulate, live, live-research, mac-sql, or mac-tiered50"
+            )
         if mode == "live":
             raise LiveModeBlocked(
                 "live mode is blocked in Stage 14 implementation: production persistence and cutover are deferred"
@@ -337,7 +347,39 @@ class Collector:
                 raise LiveModeBlocked("mac-sql requires the direct persistence collection context")
             if not self.manifest.targets or any(target.sampling_era is not SamplingEra.LEGACY7 for target in self.manifest.targets):
                 raise LiveModeBlocked("mac-sql refuses Tiered50 or mixed target manifests")
-        if mode not in {"live-research", "mac-sql"} and getattr(self.mdd_client, "offline_safe", True) is False:
+        if mode == "mac-tiered50":
+            if not allow_live:
+                raise LiveModeBlocked("mac-tiered50 requires explicit cutover approval and allow_live=True")
+            if os.environ.get(MAC_SQL_MODE_ENV) != "TIERED50":
+                raise LiveModeBlocked("mac-tiered50 requires the explicit TIERED50 runtime mode")
+            if os.environ.get(MAC_TIERED50_ENABLED_ENV) != "1":
+                raise LiveModeBlocked("mac-tiered50 is disabled; no network request performed")
+            if os.environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+                raise LiveModeBlocked(
+                    "current Windows collector runtime is not confirmed retired; no network request performed"
+                )
+            if os.environ.get(MAC_TIERED50_CUTOVER_APPROVED_ENV) != "1":
+                raise LiveModeBlocked("explicit Tiered50 cutover approval is missing; no network request performed")
+            if os.environ.get(MAC_TIERED50_TARGET_SCOPE_ENV) != MAC_TIERED50_REQUIRED_TARGET_SCOPE:
+                raise LiveModeBlocked("explicit approved Tiered50 target scope is missing; no network request performed")
+            if os.environ.get(MAC_TIERED50_VALIDATION_POLICY_ENV) != MAC_TIERED50_REQUIRED_VALIDATION_POLICY:
+                raise LiveModeBlocked(
+                    "Tiered50 requires completed offline validation before live collection; no network request performed"
+                )
+            if _mdd_credential_status(self.mdd_client) != "VALID":
+                raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
+            if not getattr(self.persistence, "is_production_ready", False):
+                raise LiveModeBlocked("mac-tiered50 requires a production-ready direct persistence adapter")
+            if getattr(self.persistence, "collection_context", None) != MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT:
+                raise LiveModeBlocked("mac-tiered50 requires the dedicated Tiered50 persistence context")
+            if not self.manifest.targets or any(
+                target.sampling_era is not SamplingEra.TIERED50
+                or target.production_sampling_target_id is None
+                for target in self.manifest.targets
+            ):
+                raise LiveModeBlocked("mac-tiered50 requires all 50 SQL-bound Tiered50 targets")
+            self.manifest.validate_production_binding()
+        if mode not in {"live-research", "mac-sql", "mac-tiered50"} and getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
         now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -347,6 +389,8 @@ class Collector:
             if mode == "live-research"
             else MAC_SQL_COLLECTION_CONTEXT
             if mode == "mac-sql"
+            else MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+            if mode == "mac-tiered50"
             else "OFFLINE_DEVELOPMENT"
         )
         identifier = run_id or str(uuid.uuid4())
@@ -357,6 +401,10 @@ class Collector:
             safety_margin_seconds=self.safety_margin_seconds,
             monotonic_fn=lambda: self.monotonic_fn() - started_monotonic,
         )
+        if mode == "mac-tiered50":
+            writer_guard = getattr(self.persistence, "assert_no_competing_writer", None)
+            if callable(writer_guard):
+                writer_guard(collection_context=collection_context)
         self.persistence.start_collector_run(
             run_id=identifier,
             panel_version=self.manifest.panel_version,

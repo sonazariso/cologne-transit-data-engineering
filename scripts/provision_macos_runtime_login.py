@@ -60,15 +60,18 @@ class RuntimePermission:
 
 
 # Code-backed permission contract for the SQL issued by one ordinary Mac
-# Legacy7 heartbeat, including its startup selector/schema checks and the
-# atomic quota finalization fallback.  Administrator/import/diagnostic reads
-# are intentionally not in this matrix and must use an administrator login.
+# Legacy7 heartbeat and the separately guarded Tiered50 heartbeat, including
+# their startup/schema checks and the atomic quota finalization fallback.
+# Administrator/import/diagnostic reads are intentionally not in this matrix
+# and must use an administrator login.
 RUNTIME_PERMISSION_MATRIX = (
     RuntimePermission("read approved target definitions", "ctl.MddRealtimeSamplingTarget", "SELECT"),
     RuntimePermission("read approved ten-slot mapping", "ctl.MddRealtimeSamplingSlot", "SELECT"),
+    RuntimePermission("read active Tiered50 materialization", "ctl.MddMacTiered50ProductionTarget", "SELECT"),
     RuntimePermission("execute Legacy7 selector", "ctl.uspGetMddRealtimeSamplingTarget", "EXECUTE"),
     RuntimePermission("inspect Legacy7 selector definition", "ctl.uspGetMddRealtimeSamplingTarget", "VIEW DEFINITION"),
     RuntimePermission("inspect required audit lineage columns", "ctl.MddMacTargetAudit", "VIEW DEFINITION"),
+    RuntimePermission("read competing production writer status", "ctl.MddMacCollectorRun", "SELECT"),
     RuntimePermission("create collector run", "ctl.MddMacCollectorRun", "INSERT"),
     RuntimePermission("complete collector run", "ctl.MddMacCollectorRun", "UPDATE"),
     RuntimePermission("claim/read dispatcher bucket", "ctl.MddMacDispatcherClaim", "SELECT"),

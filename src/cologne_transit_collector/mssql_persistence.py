@@ -25,6 +25,8 @@ from .domain import (
     HttpResponse,
     LEGACY7_SELECTION_POLICY_VERSION,
     MAC_SQL_COLLECTION_CONTEXT,
+    MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    TIERED50_SELECTION_POLICY_VERSION,
     SamplingEra,
     Target,
     TransportFailure,
@@ -35,7 +37,7 @@ from .legacy7_schedule import (
     legacy7_selection_for_bucket,
     validate_legacy7_slot_mapping,
 )
-from .manifest import LEGACY7_SAMPLING_TARGET_IDS
+from .manifest import LEGACY7_SAMPLING_TARGET_IDS, RuntimeManifest
 from .quota import (
     CONSERVATIVE_LIVE_ATTEMPT,
     HTTP_PROVIDER_ATTEMPT_CONFIRMED,
@@ -139,6 +141,9 @@ RUNTIME_SCHEMA_ROUTINES = (
     "ctl.uspGetMddRealtimeSamplingTarget",
     "stg.uspPersistMddMacSnapshot",
 )
+
+TIERED50_TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
+TIERED50_RUNTIME_SCHEMA_TABLES = RUNTIME_SCHEMA_TABLES + (TIERED50_TARGET_TABLE,)
 
 
 @dataclass(frozen=True)
@@ -967,6 +972,117 @@ class MssqlPersistence:
             "missing": [],
         }
 
+    def validate_tiered50_runtime_schema(self) -> Mapping[str, Any]:
+        """Validate the additional object surface used only by Tiered50.
+
+        Legacy7 startup deliberately does not require this table.  That keeps
+        an additive, prepared migration from taking the established writer
+        offline while Tiered50 is still deferred.
+        """
+
+        required_objects = tuple(RUNTIME_SCHEMA_TABLES) + (TIERED50_TARGET_TABLE,)
+        names = ", ".join(
+            "N'" + name.split(".", 1)[1].replace("'", "''") + "'"
+            for name in required_objects
+            if name.startswith("ctl.")
+        )
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT s.name + N'.' + o.name AS object_name, o.type AS object_type
+                FROM sys.objects AS o
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE s.name = N'ctl' AND o.name IN ("""
+                + names
+                + ")"
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT s.name + N'.' + o.name AS object_name, c.name AS column_name
+                FROM sys.columns AS c
+                INNER JOIN sys.objects AS o ON o.object_id = c.object_id
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE s.name = N'ctl'
+                  AND o.name IN (N'MddMacTiered50ProductionTarget',
+                                 N'MddMacTargetClaim',
+                                 N'MddMacTargetClaimEvent')
+                """
+            )
+            column_rows = cursor.fetchall()
+        observed_objects = {
+            str(_row_value(row, "object_name", 0)): str(_row_named(row, "object_type", index=1) or "")
+            for row in rows
+        }
+        missing = [name for name in required_objects if name not in observed_objects]
+        if missing:
+            raise MssqlSchemaError(
+                "Tiered50 production runtime objects are missing or not visible: "
+                + ", ".join(missing)
+            )
+        wrong_types = [
+            name
+            for name in required_objects
+            if observed_objects.get(name) not in {"U", "U "}
+        ]
+        if wrong_types:
+            raise MssqlSchemaError(
+                "Tiered50 production runtime objects have unexpected SQL types: "
+                + ", ".join(wrong_types)
+            )
+        required_columns = {
+            "SamplingTargetId",
+            "SourceParentStationId",
+            "ParentStopPointRef",
+            "PanelVersion",
+            "SamplingEra",
+            "Tier",
+            "PhaseIndex",
+            "PhaseCount",
+            "CadenceMinutes",
+            "NumberOfResults",
+            "ContinuityClassification",
+            "IsEnabled",
+            "ActivationStatus",
+        }
+        observed_columns = {
+            (
+                str(_row_named(row, "object_name", index=0)),
+                str(_row_named(row, "column_name", index=1)),
+            )
+            for row in column_rows
+        }
+        required_column_pairs = {
+            (TIERED50_TARGET_TABLE, column) for column in required_columns
+        } | {
+            ("ctl.MddMacTargetClaim", "SamplingTargetId"),
+            ("ctl.MddMacTargetClaimEvent", "SamplingTargetId"),
+        }
+        missing_columns = sorted(
+            f"{object_name}.{column}"
+            for object_name, column in required_column_pairs
+            if (object_name, column) not in observed_columns
+        )
+        if missing_columns:
+            raise MssqlSchemaError(
+                "Tiered50 production target columns are missing or not visible: "
+                + ", ".join(missing_columns)
+            )
+        return {
+            "status": "PASS",
+            "validation_scope": "TIERED50_PRODUCTION_RUNTIME",
+            "expected_table_count": len(required_objects),
+            "expected_routine_count": len(RUNTIME_SCHEMA_ROUTINES),
+            "tiered50_target_table": TIERED50_TARGET_TABLE,
+            "required_target_columns": sorted(required_columns),
+            "required_claim_identity_columns": [
+                "ctl.MddMacTargetClaim.SamplingTargetId",
+                "ctl.MddMacTargetClaimEvent.SamplingTargetId",
+            ],
+            "missing": [],
+        }
+
     def validate_schema(self) -> Mapping[str, Any]:
         """Backward-compatible alias for full/admin validation.
 
@@ -1127,6 +1243,121 @@ class MssqlPersistence:
             for target_id, stop_ref, name, number_of_results, _enabled in sorted(normalized)
         )
 
+    def load_tiered50_production_targets(
+        self,
+        manifest: RuntimeManifest,
+    ) -> tuple[Target, ...]:
+        """Load active SQL-bound Tiered50 rows and bind them to the manifest.
+
+        The seven historical target rows are read from their original table;
+        only the 43 new rows come from the additive Tiered50 table.  No SQL
+        identity, membership, phase, or panel value is inferred from row order.
+        """
+
+        manifest.validate()
+        existing = self.load_existing_sampling_targets()
+        existing_by_id = {
+            int(target.legacy_sampling_target_id or 0): target for target in existing
+        }
+        if set(existing_by_id) != set(range(1, 8)):
+            raise MssqlSafetyError("Legacy7 SamplingTargetIds 1 through 7 are not preserved")
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                f"""
+                SELECT SamplingTargetId, SourceParentStationId, ParentStopPointRef,
+                       TargetName, PanelVersion, SamplingEra, Tier, PhaseIndex,
+                       PhaseCount, CadenceMinutes, NumberOfResults,
+                       ContinuityClassification, IsEnabled, ActivationStatus
+                FROM {TIERED50_TARGET_TABLE}
+                WHERE PanelVersion = %s
+                  AND SamplingEra = %s
+                  AND IsEnabled = 1
+                  AND ActivationStatus = 'ACTIVE'
+                ORDER BY SamplingTargetId
+                """,
+                (manifest.panel_version, SamplingEra.TIERED50.value),
+            )
+            rows = list(cursor.fetchall())
+
+        if len(rows) != 43:
+            raise MssqlSafetyError(
+                "active Tiered50 materialization must contain exactly 43 new targets"
+            )
+        expected_new_ids = set(range(8, 51))
+        observed_ids: set[int] = set()
+        observed_sources: set[str] = set()
+        manifest_by_source = {
+            target.source_parent_station_id: target for target in manifest.targets
+        }
+        production_ids: dict[str, int] = {}
+        for row in rows:
+            try:
+                sampling_id = int(_row_named(row, "SamplingTargetId", index=0))
+                source_parent = str(
+                    _row_named(row, "SourceParentStationId", index=1) or ""
+                )
+                parent_ref = str(
+                    _row_named(row, "ParentStopPointRef", index=2) or ""
+                )
+            except (TypeError, ValueError) as exc:
+                raise MssqlSafetyError("Tiered50 target materialization contains invalid identity") from exc
+            if sampling_id in observed_ids or sampling_id not in expected_new_ids:
+                raise MssqlSafetyError("Tiered50 production IDs must be unique and exactly 8 through 50")
+            if source_parent in observed_sources or source_parent not in manifest_by_source:
+                raise MssqlSafetyError("Tiered50 materialization contains an unknown or duplicate parent station")
+            approved = manifest_by_source[source_parent]
+            if approved.is_legacy7_member:
+                raise MssqlSafetyError("Tiered50 materialization must contain only the 43 new stations")
+            expected_values = {
+                "ParentStopPointRef": approved.source_parent_station_id,
+                "TargetName": approved.station_name,
+                "PanelVersion": approved.panel_version,
+                "SamplingEra": SamplingEra.TIERED50.value,
+                "Tier": approved.tier,
+                "PhaseIndex": approved.phase_index,
+                "PhaseCount": approved.phase_count,
+                "CadenceMinutes": approved.cadence_minutes,
+                "NumberOfResults": approved.number_of_results,
+                "ContinuityClassification": approved.continuity_classification,
+            }
+            observed_values = {
+                "ParentStopPointRef": parent_ref,
+                "TargetName": str(_row_named(row, "TargetName", index=3) or ""),
+                "PanelVersion": str(_row_named(row, "PanelVersion", index=4) or ""),
+                "SamplingEra": str(_row_named(row, "SamplingEra", index=5) or ""),
+                "Tier": str(_row_named(row, "Tier", index=6) or ""),
+                "PhaseIndex": int(_row_named(row, "PhaseIndex", index=7)),
+                "PhaseCount": int(_row_named(row, "PhaseCount", index=8)),
+                "CadenceMinutes": int(_row_named(row, "CadenceMinutes", index=9)),
+                "NumberOfResults": int(_row_named(row, "NumberOfResults", index=10)),
+                "ContinuityClassification": str(
+                    _row_named(row, "ContinuityClassification", index=11) or ""
+                ),
+            }
+            if observed_values != expected_values:
+                raise MssqlSafetyError(
+                    "Tiered50 SQL target fields differ from the approved manifest for "
+                    + source_parent
+                )
+            observed_ids.add(sampling_id)
+            observed_sources.add(source_parent)
+            production_ids[source_parent] = sampling_id
+        if observed_ids != expected_new_ids:
+            raise MssqlSafetyError("Tiered50 production IDs are not exactly 8 through 50")
+
+        for target in manifest.legacy7_targets:
+            legacy_id = int(target.legacy_sampling_target_id or 0)
+            if legacy_id not in existing_by_id:
+                raise MssqlSafetyError("Legacy7 target identity disappeared during Tiered50 binding")
+            production_ids[target.source_parent_station_id] = legacy_id
+        bound = manifest.bind_production_sampling_target_ids(production_ids)
+        return tuple(
+            replace(target, sampling_era=SamplingEra.TIERED50)
+            for target in bound.targets
+        )
+
     def legacy7_selector_definition(self) -> Mapping[str, Any]:
         """Capture the existing selector definition and parameter metadata read-only."""
 
@@ -1271,6 +1502,45 @@ class MssqlPersistence:
             selected_sampling_slot=sampling_slot,
             selection_policy_version=LEGACY7_SELECTION_POLICY_VERSION,
         )
+
+    def assert_no_competing_writer(self, *, collection_context: str) -> Mapping[str, Any]:
+        """Fail closed when the other production Mac writer is still running."""
+
+        context = str(collection_context)
+        if context not in {
+            MAC_SQL_COLLECTION_CONTEXT,
+            MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+        }:
+            raise MssqlSafetyError("unknown production collection context")
+        other = (
+            MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+            if context == MAC_SQL_COLLECTION_CONTEXT
+            else MAC_SQL_COLLECTION_CONTEXT
+        )
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
+                FROM ctl.MddMacCollectorRun WITH (READCOMMITTED)
+                WHERE Status IN ('RUNNING', 'CLAIMED')
+                  AND CollectionContext = %s
+                GROUP BY CollectionContext
+                """,
+                (other,),
+            )
+            row = cursor.fetchone()
+        running = int(_row_named(row, "RunningCount", index=1) or 0) if row else 0
+        if running:
+            raise MssqlSafetyError(
+                f"competing production writer is active: {other} ({running})"
+            )
+        return {
+            "status": "PASS",
+            "collection_context": context,
+            "competing_context": other,
+            "competing_running_count": running,
+        }
 
     def reconcile_live_legacy7_selector(
         self,
@@ -1427,42 +1697,121 @@ class MssqlPersistence:
         claimed = _utc(claimed_at)
         stale_after = claimed + timedelta(seconds=300)
         token = str(uuid.uuid4())
-        key = (target.panel_version, target.source_parent_station_id, int(logical_due_bucket))
+        tiered50 = target.sampling_era is SamplingEra.TIERED50
+        sampling_target_id = _target_sampling_id(target) if tiered50 else None
+        if tiered50 and sampling_target_id is None:
+            raise MssqlSafetyError("Tiered50 target claims require a stable SamplingTargetId")
+        key = (
+            target.panel_version,
+            sampling_target_id if tiered50 else target.source_parent_station_id,
+            int(logical_due_bucket),
+        )
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
-                cursor.execute(
-                    """
-                    SELECT Status
-                    FROM ctl.MddMacTargetClaim WITH (UPDLOCK, HOLDLOCK)
-                    WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
-                    """,
-                    key,
-                )
+                if tiered50:
+                    cursor.execute(
+                        """
+                        SELECT Status
+                        FROM ctl.MddMacTargetClaim WITH (UPDLOCK, HOLDLOCK)
+                        WHERE PanelVersion = %s AND SamplingTargetId = %s AND LogicalDueBucket = %s
+                        """,
+                        (target.panel_version, sampling_target_id, int(logical_due_bucket)),
+                    )
+                else:
+                    # Keep the already-active Legacy7 writer compatible with
+                    # its existing claim table.  The additive migration adds
+                    # SamplingTargetId for the separately guarded Tiered50
+                    # path; Legacy7 remains keyed by its historical identity.
+                    cursor.execute(
+                        """
+                        SELECT Status
+                        FROM ctl.MddMacTargetClaim WITH (UPDLOCK, HOLDLOCK)
+                        WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
+                        """,
+                        (target.panel_version, target.source_parent_station_id, int(logical_due_bucket)),
+                    )
                 existing = cursor.fetchone()
                 won = existing is None
                 existing_status = _row_value(existing, "Status", 0) if existing else None
                 if won:
+                    if tiered50:
+                        cursor.execute(
+                            """
+                            INSERT INTO ctl.MddMacTargetClaim
+                                (PanelVersion, SamplingTargetId, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
+                                 ClaimedAtUtc, StaleAfterUtc, Status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
+                            """,
+                            (
+                                target.panel_version,
+                                sampling_target_id,
+                                target.source_parent_station_id,
+                                int(logical_due_bucket),
+                                run_id,
+                                token,
+                                claimed,
+                                stale_after,
+                            ),
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            INSERT INTO ctl.MddMacTargetClaim
+                                (PanelVersion, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
+                                 ClaimedAtUtc, StaleAfterUtc, Status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
+                            """,
+                            (
+                                target.panel_version,
+                                target.source_parent_station_id,
+                                int(logical_due_bucket),
+                                run_id,
+                                token,
+                                claimed,
+                                stale_after,
+                            ),
+                        )
+                if tiered50:
                     cursor.execute(
                         """
-                        INSERT INTO ctl.MddMacTargetClaim
-                            (PanelVersion, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
-                             ClaimedAtUtc, StaleAfterUtc, Status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
+                        INSERT INTO ctl.MddMacTargetClaimEvent
+                            (PanelVersion, SamplingTargetId, TargetIdentity, LogicalDueBucket, RunId,
+                             EventAtUtc, Outcome, ExistingStatus)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                        SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
                         """,
-                        (*key, run_id, token, claimed, stale_after),
+                        (
+                            target.panel_version,
+                            sampling_target_id,
+                            target.source_parent_station_id,
+                            int(logical_due_bucket),
+                            run_id,
+                            claimed,
+                            "CLAIMED" if won else "DUPLICATE_CLAIM",
+                            existing_status,
+                        ),
                     )
-                cursor.execute(
-                    """
-                    INSERT INTO ctl.MddMacTargetClaimEvent
-                        (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
-                         EventAtUtc, Outcome, ExistingStatus)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s);
-                    SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
-                    """,
-                    (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_CLAIM", existing_status),
-                )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO ctl.MddMacTargetClaimEvent
+                            (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
+                             EventAtUtc, Outcome, ExistingStatus)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                        SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
+                        """,
+                        (
+                            target.panel_version,
+                            target.source_parent_station_id,
+                            int(logical_due_bucket),
+                            run_id,
+                            claimed,
+                            "CLAIMED" if won else "DUPLICATE_CLAIM",
+                            existing_status,
+                        ),
+                    )
                 event_id = int(_row_value(cursor.fetchone(), "TargetClaimEventId", 0))
                 cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
@@ -1480,18 +1829,41 @@ class MssqlPersistence:
         run_id: str,
         event_at: datetime,
     ) -> int:
+        tiered50 = target.sampling_era is SamplingEra.TIERED50
+        sampling_target_id = _target_sampling_id(target) if tiered50 else None
+        if tiered50 and sampling_target_id is None:
+            raise MssqlSafetyError("Tiered50 duplicate claims require a stable SamplingTargetId")
         with self._connection() as connection:
             cursor = self._cursor(connection)
-            cursor.execute(
-                """
-                INSERT INTO ctl.MddMacTargetClaimEvent
-                    (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
-                     EventAtUtc, Outcome, ExistingStatus)
-                    VALUES (%s, %s, %s, %s, %s, 'DUPLICATE_DISPATCHER_CLAIM', NULL);
-                SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
-                """,
-                (panel_version, target.source_parent_station_id, int(logical_due_bucket), run_id, _utc(event_at)),
-            )
+            if tiered50:
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacTargetClaimEvent
+                        (PanelVersion, SamplingTargetId, TargetIdentity, LogicalDueBucket, RunId,
+                         EventAtUtc, Outcome, ExistingStatus)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'DUPLICATE_DISPATCHER_CLAIM', NULL);
+                    SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
+                    """,
+                    (
+                        panel_version,
+                        sampling_target_id,
+                        target.source_parent_station_id,
+                        int(logical_due_bucket),
+                        run_id,
+                        _utc(event_at),
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacTargetClaimEvent
+                        (PanelVersion, TargetIdentity, LogicalDueBucket, RunId,
+                         EventAtUtc, Outcome, ExistingStatus)
+                        VALUES (%s, %s, %s, %s, %s, 'DUPLICATE_DISPATCHER_CLAIM', NULL);
+                    SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS TargetClaimEventId;
+                    """,
+                    (panel_version, target.source_parent_station_id, int(logical_due_bucket), run_id, _utc(event_at)),
+                )
             event_id = int(_row_value(cursor.fetchone(), "TargetClaimEventId", 0))
             connection.commit()
         return event_id
@@ -1514,6 +1886,15 @@ class MssqlPersistence:
         ):
             raise MssqlSafetyError(
                 "MAC_LEGACY7_PRODUCTION audits require target ID, SamplingSlot, and selection-policy lineage"
+            )
+        if context == MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT and (
+            target.sampling_era is not SamplingEra.TIERED50
+            or _target_sampling_id(target) is None
+            or target.production_sampling_target_id is None
+            or target.selection_policy_version != TIERED50_SELECTION_POLICY_VERSION
+        ):
+            raise MssqlSafetyError(
+                "MAC_TIERED50_PRODUCTION audits require production ID and phase-policy lineage"
             )
         with self._connection() as connection:
             cursor = self._cursor(connection)
@@ -1548,14 +1929,34 @@ class MssqlPersistence:
                     ),
                 )
                 audit_id = int(_row_value(cursor.fetchone(), "AuditId", 0))
-                cursor.execute(
-                    """
-                    UPDATE ctl.MddMacTargetClaim
-                    SET Status = 'RUNNING', StartedAtUtc = %s
-                    WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
-                    """,
-                    (_utc(started_at), target.panel_version, target.source_parent_station_id, int(logical_due_bucket)),
-                )
+                if context == MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT:
+                    cursor.execute(
+                        """
+                        UPDATE ctl.MddMacTargetClaim
+                        SET Status = 'RUNNING', StartedAtUtc = %s
+                        WHERE PanelVersion = %s AND SamplingTargetId = %s AND LogicalDueBucket = %s
+                        """,
+                        (
+                            _utc(started_at),
+                            target.panel_version,
+                            _target_sampling_id(target),
+                            int(logical_due_bucket),
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE ctl.MddMacTargetClaim
+                        SET Status = 'RUNNING', StartedAtUtc = %s
+                        WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
+                        """,
+                        (
+                            _utc(started_at),
+                            target.panel_version,
+                            target.source_parent_station_id,
+                            int(logical_due_bucket),
+                        ),
+                    )
                 cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
             except BaseException:
@@ -2405,6 +2806,8 @@ __all__ = [
     "MssqlSchemaError",
     "RUNTIME_SCHEMA_ROUTINES",
     "RUNTIME_SCHEMA_TABLES",
+    "TIERED50_RUNTIME_SCHEMA_TABLES",
+    "TIERED50_TARGET_TABLE",
     "WINDOWS_RUNTIME_UNCONFIRMED",
     "build_mssql_snapshot_rows",
     "connect_mssql",

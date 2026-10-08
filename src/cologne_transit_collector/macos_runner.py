@@ -1,9 +1,9 @@
-"""Fail-closed future runner for one direct Microsoft-database heartbeat.
+"""Fail-closed Mac production runner for one SQL-backed heartbeat.
 
-This module is intentionally not enabled by the repository's scheduler
-artifact.  It can only proceed after the operator has separately confirmed
-that the prior collector is retired, approved the cutover, selected the
-existing seven-target scope, and supplied the inherited MDD credential.
+Legacy7 and Tiered50 are intentionally separate runtime modes. The tracked
+LaunchAgent templates disable both modes by default; a production invocation
+must pass the mode-specific human-controlled gates before credentials are
+resolved or an MDD client can be used.
 """
 
 from __future__ import annotations
@@ -23,12 +23,20 @@ from .domain import (
     MAC_SQL_COLLECTION_CONTEXT,
     MAC_SQL_CUTOVER_APPROVED_ENV,
     MAC_SQL_ENABLED_ENV,
+    MAC_SQL_MODE_ENV,
     MAC_SQL_REQUIRED_RUNTIME_STATE,
     MAC_SQL_REQUIRED_TARGET_SCOPE,
     MAC_SQL_REQUIRED_VALIDATION_POLICY,
     MAC_SQL_RUNTIME_STATE_ENV,
     MAC_SQL_TARGET_SCOPE_ENV,
     MAC_SQL_VALIDATION_POLICY_ENV,
+    MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    MAC_TIERED50_CUTOVER_APPROVED_ENV,
+    MAC_TIERED50_ENABLED_ENV,
+    MAC_TIERED50_REQUIRED_TARGET_SCOPE,
+    MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
+    MAC_TIERED50_TARGET_SCOPE_ENV,
+    MAC_TIERED50_VALIDATION_POLICY_ENV,
     SamplingEra,
 )
 from .manifest import load_default_manifest
@@ -46,7 +54,12 @@ from .runtime_configuration import (
     merge_non_secret_runtime_values,
     resolve_required_secrets,
 )
+from .schedule import schedule_reconciliation
 from .transport import LiveMddClient, validate_api_key_format
+
+
+LEGACY7_MODE = "legacy7"
+TIERED50_MODE = "tiered50"
 
 
 def _parse_utc(value: str | None) -> datetime | None:
@@ -60,17 +73,23 @@ def _parse_utc(value: str | None) -> datetime | None:
 
 
 def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
-    """Reject every run until the human-controlled cutover gates are set."""
+    """Reject Legacy7 network collection until its existing gates pass."""
 
     values = os.environ if environ is None else environ
+    if values.get(MAC_SQL_MODE_ENV) not in {None, "LEGACY7"}:
+        raise LiveModeBlocked("Legacy7 runner mode does not match the configured runtime mode")
     if values.get(MAC_SQL_ENABLED_ENV) != "1":
         raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
     if values.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
-        raise LiveModeBlocked("current Windows collector runtime is not confirmed retired; no network request performed")
+        raise LiveModeBlocked(
+            "current Windows collector runtime is not confirmed retired; no network request performed"
+        )
     if values.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
         raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
     if values.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
-        raise LiveModeBlocked("explicit existing-seven-target scope approval is missing; no network request performed")
+        raise LiveModeBlocked(
+            "explicit existing-seven-target scope approval is missing; no network request performed"
+        )
     if values.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
         raise LiveModeBlocked(
             "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
@@ -79,39 +98,121 @@ def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
         raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
 
 
-def _require_nonsecret_cutover_gate(environ: dict[str, str]) -> None:
-    """Check gates before touching Keychain secrets."""
+def require_tiered50_cutover_gate(environ: dict[str, str] | None = None) -> None:
+    """Reject Tiered50 collection unless its independent gates pass."""
 
-    if environ.get(MAC_SQL_ENABLED_ENV) != "1":
-        raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
-    if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
-        raise LiveModeBlocked("current Windows collector runtime is not confirmed retired; no network request performed")
-    if environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
-        raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
-    if environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
-        raise LiveModeBlocked("explicit existing-seven-target scope approval is missing; no network request performed")
-    if environ.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+    values = os.environ if environ is None else environ
+    if values.get(MAC_SQL_MODE_ENV) != "TIERED50":
+        raise LiveModeBlocked("Tiered50 runner requires COLLECTOR_MAC_SQL_MODE=TIERED50")
+    if values.get(MAC_TIERED50_ENABLED_ENV) != "1":
+        raise LiveModeBlocked("Tiered50 collection is disabled; no network request performed")
+    if values.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
         raise LiveModeBlocked(
-            "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+            "current Windows collector runtime is not confirmed retired; no network request performed"
         )
+    if values.get(MAC_TIERED50_CUTOVER_APPROVED_ENV) != "1":
+        raise LiveModeBlocked("explicit Tiered50 cutover approval is missing; no network request performed")
+    if values.get(MAC_TIERED50_TARGET_SCOPE_ENV) != MAC_TIERED50_REQUIRED_TARGET_SCOPE:
+        raise LiveModeBlocked("explicit approved Tiered50 target scope is missing; no network request performed")
+    if values.get(MAC_TIERED50_VALIDATION_POLICY_ENV) != MAC_TIERED50_REQUIRED_VALIDATION_POLICY:
+        raise LiveModeBlocked(
+            "Tiered50 requires completed offline validation before live collection; no network request performed"
+        )
+    if validate_api_key_format(values.get("MDD_API_KEY")) != "VALID":
+        raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
+
+
+def _require_nonsecret_cutover_gate(environ: dict[str, str], *, mode: str) -> None:
+    """Check mode-specific non-secret gates before touching Keychain secrets."""
+
+    if mode == LEGACY7_MODE:
+        if environ.get(MAC_SQL_ENABLED_ENV) != "1":
+            raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
+        if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+            raise LiveModeBlocked(
+                "current Windows collector runtime is not confirmed retired; no network request performed"
+            )
+        if environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
+            raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
+        if environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
+            raise LiveModeBlocked(
+                "explicit existing-seven-target scope approval is missing; no network request performed"
+            )
+        if environ.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+            raise LiveModeBlocked(
+                "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+            )
+        return
+    if mode == TIERED50_MODE:
+        if environ.get(MAC_SQL_MODE_ENV) != "TIERED50":
+            raise LiveModeBlocked("Tiered50 runner requires COLLECTOR_MAC_SQL_MODE=TIERED50")
+        if environ.get(MAC_TIERED50_ENABLED_ENV) != "1":
+            raise LiveModeBlocked("Tiered50 collection is disabled; no network request performed")
+        if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+            raise LiveModeBlocked(
+                "current Windows collector runtime is not confirmed retired; no network request performed"
+            )
+        if environ.get(MAC_TIERED50_CUTOVER_APPROVED_ENV) != "1":
+            raise LiveModeBlocked("explicit Tiered50 cutover approval is missing; no network request performed")
+        if environ.get(MAC_TIERED50_TARGET_SCOPE_ENV) != MAC_TIERED50_REQUIRED_TARGET_SCOPE:
+            raise LiveModeBlocked("explicit approved Tiered50 target scope is missing; no network request performed")
+        if environ.get(MAC_TIERED50_VALIDATION_POLICY_ENV) != MAC_TIERED50_REQUIRED_VALIDATION_POLICY:
+            raise LiveModeBlocked(
+                "Tiered50 requires completed offline validation before live collection; no network request performed"
+            )
+        return
+    raise ValueError(f"unsupported Mac runtime mode: {mode}")
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one explicitly approved direct-database MDD heartbeat.")
+    parser.add_argument(
+        "--mode",
+        choices=(LEGACY7_MODE, TIERED50_MODE),
+        default=LEGACY7_MODE,
+        help="independent production scope to execute",
+    )
     parser.add_argument("--at", dest="at_utc", help="UTC ISO-8601 time for deterministic validation")
     return parser
+
+
+def _validate_runtime_login(login_status: dict[str, object], *, mode: str) -> None:
+    if str(login_status.get("login_name", "")).casefold() in {"", "sa"}:
+        raise MssqlSafetyError(f"Mac {mode} runtime requires the dedicated non-sa SQL login")
+    if any(
+        bool(login_status.get(name))
+        for name in (
+            "is_sysadmin",
+            "is_serveradmin",
+            "is_securityadmin",
+            "is_db_owner",
+            "is_db_datareader",
+            "is_db_datawriter",
+        )
+    ):
+        raise MssqlSafetyError(f"Mac {mode} runtime login has a prohibited broad privilege")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
     root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
+    runtime_mode = args.mode
+    collector_mode = "mac-sql" if runtime_mode == LEGACY7_MODE else "mac-tiered50"
+    collection_context = (
+        MAC_SQL_COLLECTION_CONTEXT
+        if runtime_mode == LEGACY7_MODE
+        else MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+    )
     try:
         base_configuration = merge_non_secret_runtime_values()
-        _require_nonsecret_cutover_gate(dict(base_configuration.values))
+        _require_nonsecret_cutover_gate(dict(base_configuration.values), mode=runtime_mode)
         configuration = resolve_required_secrets(base_configuration)
         runtime_values = dict(configuration.values)
-        require_cutover_gate(runtime_values)
+        if runtime_mode == LEGACY7_MODE:
+            require_cutover_gate(runtime_values)
+        else:
+            require_tiered50_cutover_gate(runtime_values)
         mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
         if mssql_settings.database != EXPECTED_SQL_DATABASE:
             raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
@@ -120,38 +221,56 @@ def main(argv: list[str] | None = None) -> int:
         persistence = MssqlPersistence(
             settings=mssql_settings,
             raw_evidence_directory=runtime_values.get("MSSQL_RAW_EVIDENCE_DIR"),
-            collection_context=MAC_SQL_COLLECTION_CONTEXT,
+            collection_context=collection_context,
         )
         login_status = persistence.runtime_login_status()
-        if str(login_status.get("login_name", "")).casefold() in {"", "sa"}:
-            raise MssqlSafetyError("Mac Legacy7 runtime requires the dedicated non-sa SQL login")
-        if any(
-            bool(login_status.get(name))
-            for name in (
-                "is_sysadmin",
-                "is_serveradmin",
-                "is_securityadmin",
-                "is_db_owner",
-                "is_db_datareader",
-                "is_db_datawriter",
+        _validate_runtime_login(login_status, mode=runtime_mode)
+
+        if runtime_mode == LEGACY7_MODE:
+            schema = persistence.validate_runtime_schema()
+            approved_targets = persistence.load_existing_sampling_targets()
+            selected_target = persistence.select_existing_legacy7_target(
+                at_utc=at_utc,
+                targets=approved_targets,
             )
-        ):
-            raise MssqlSafetyError("Mac Legacy7 runtime login has a prohibited broad privilege")
-        schema = persistence.validate_runtime_schema()
-        approved_targets = persistence.load_existing_sampling_targets()
-        selected_target = persistence.select_existing_legacy7_target(
-            at_utc=at_utc,
-            targets=approved_targets,
-        )
-        targets = (selected_target,)
-        manifest = replace(
-            base_manifest,
-            panel_version="MDD_MAC_LEGACY7_EXISTING_V1",
-            status="PREPARED_EXISTING_LEGACY7",
-            sampling_era=SamplingEra.LEGACY7,
-            activation_status="EXPLICIT_CUTOVER_APPROVED",
-            targets=targets,
-        )
+            targets = (selected_target,)
+            manifest = replace(
+                base_manifest,
+                panel_version="MDD_MAC_LEGACY7_EXISTING_V1",
+                status="PREPARED_EXISTING_LEGACY7",
+                sampling_era=SamplingEra.LEGACY7,
+                activation_status="EXPLICIT_CUTOVER_APPROVED",
+                targets=targets,
+            )
+            selection_policy_version = selected_target.selection_policy_version
+            selection_details = {
+                "sampling_slot": selected_target.selected_sampling_slot,
+                "sampling_target_id": selected_target.legacy_sampling_target_id,
+                "stop_point_ref": selected_target.source_parent_station_id,
+                "station_name": selected_target.station_name,
+                "number_of_results": selected_target.number_of_results,
+            }
+            schema_details = schema
+        else:
+            schema = persistence.validate_runtime_schema()
+            tiered_schema = persistence.validate_tiered50_runtime_schema()
+            targets = persistence.load_tiered50_production_targets(base_manifest)
+            manifest = replace(
+                base_manifest,
+                status="ACTIVE_TIERED50_PRODUCTION",
+                activation_status="EXPLICIT_CUTOVER_APPROVED",
+                targets=targets,
+            )
+            manifest.validate_production_binding()
+            selection_policy_version = "TIERED50_UTC_PHASE_V1"
+            selection_details = {
+                "production_sampling_target_ids": sorted(
+                    int(target.production_sampling_target_id or 0) for target in targets
+                ),
+                "schedule_reconciliation": schedule_reconciliation(targets),
+            }
+            schema_details = {"base": schema, "tiered50": tiered_schema}
+
         settings = CollectorSettings.for_repository(root, environ=runtime_values)
         collector = Collector(
             manifest=manifest,
@@ -172,34 +291,24 @@ def main(argv: list[str] | None = None) -> int:
                 previous_handlers[signal_number] = signal.getsignal(signal_number)
                 signal.signal(signal_number, lambda _signum, _frame: collector.request_shutdown())
         try:
-            result = collector.run_once(mode="mac-sql", allow_live=True, at_utc=at_utc)
+            result = collector.run_once(mode=collector_mode, allow_live=True, at_utc=at_utc)
         finally:
             for signal_number, handler in previous_handlers.items():
                 signal.signal(signal_number, handler)
-        print(
-            json.dumps(
-                {
-                    "status": result.status,
-                    "mode": "mac-sql",
-                    "collection_context": MAC_SQL_COLLECTION_CONTEXT,
-                    "target_count": len(targets),
-                    "approved_target_scope_count": len(approved_targets),
-                    "selection_policy_version": selected_target.selection_policy_version,
-                    "sampling_slot": selected_target.selected_sampling_slot,
-                    "sampling_target_id": selected_target.legacy_sampling_target_id,
-                    "stop_point_ref": selected_target.source_parent_station_id,
-                    "station_name": selected_target.station_name,
-                    "number_of_results": selected_target.number_of_results,
-                    "logical_due_bucket": int(at_utc.timestamp() // 300),
-                    "sql_login_status": login_status,
-                    "schema": schema,
-                    "result": result.to_dict(),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
-            )
-        )
+        payload = {
+            "status": result.status,
+            "mode": collector_mode,
+            "runtime_scope": runtime_mode,
+            "collection_context": collection_context,
+            "target_count": len(targets),
+            "selection_policy_version": selection_policy_version,
+            "logical_due_bucket": int(at_utc.timestamp() // 300),
+            "sql_login_status": login_status,
+            "schema": schema_details,
+            "selection": selection_details,
+            "result": result.to_dict(),
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
         return 0 if result.status in {"COMPLETE", "DUPLICATE_NO_WORK"} else 1
     except SecretRequired as exc:
         print(str(exc), file=sys.stderr)
@@ -207,7 +316,12 @@ def main(argv: list[str] | None = None) -> int:
     except (LiveModeBlocked, MssqlDependencyError, MssqlSafetyError, MssqlSchemaError) as exc:
         print(
             json.dumps(
-                {"status": "BLOCKED", "reason": str(exc), "simulated_transport_calls": 0, "live_network_calls": 0},
+                {
+                    "status": "BLOCKED",
+                    "reason": str(exc),
+                    "simulated_transport_calls": 0,
+                    "live_network_calls": 0,
+                },
                 sort_keys=True,
             ),
             file=sys.stderr,
@@ -218,8 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except Exception as exc:
         # Do not echo DB-API/provider exception text; it may contain endpoint
-        # or credential-adjacent diagnostics.  The audit tables receive the
-        # detailed sanitized outcome once a run has been opened.
+        # or credential-adjacent diagnostics. Audit tables receive sanitized
+        # detail once a run has been opened.
         print(json.dumps({"status": "ERROR", "error_type": type(exc).__name__}, sort_keys=True), file=sys.stderr)
         return 1
 

@@ -21,6 +21,31 @@ from typing import Iterable
 
 MACOS_METADATA_NAMES = frozenset({".DS_Store"})
 MACOS_METADATA_DIRECTORY = "__MACOSX"
+RUNTIME_STATE_NAMES = frozenset(
+    {
+        ".env",
+        "credentials.json",
+        "secrets.json",
+        "keychain.json",
+        "launchd-installation.json",
+        "tiered50-launchd-installation.json",
+    }
+)
+RUNTIME_STATE_SUFFIXES = frozenset(
+    {
+        ".db",
+        ".sqlite",
+        ".sqlite3",
+        ".sqlite-shm",
+        ".sqlite-wal",
+        ".log",
+        ".err.log",
+        ".zip",
+        ".pem",
+        ".p12",
+        ".key",
+    }
+)
 
 
 def is_macos_metadata(relative_path: str | Path) -> bool:
@@ -31,6 +56,28 @@ def is_macos_metadata(relative_path: str | Path) -> bool:
         return True
     name = path.name
     return name in MACOS_METADATA_NAMES or name.startswith("._")
+
+
+def is_forbidden_source_member(relative_path: str | Path) -> bool:
+    """Return whether a path is local runtime state rather than source."""
+
+    path = PurePosixPath(str(relative_path).replace(os.sep, "/"))
+    name = path.name.casefold()
+    if is_macos_metadata(path):
+        return True
+    if name in RUNTIME_STATE_NAMES:
+        return True
+    if name.startswith(".env.") and name != ".env.example":
+        return True
+    if any(marker in name for marker in ("credential", "secret", "keychain")):
+        return True
+    if any(name.endswith(suffix) for suffix in RUNTIME_STATE_SUFFIXES):
+        return True
+    # The approved manifest is source configuration. Other runtime JSON
+    # artifacts are machine-local state and must not enter source evidence.
+    if name.endswith(".json") and "runtime" in name and path.as_posix() != "config/tiered50_runtime_manifest.json":
+        return True
+    return False
 
 
 def git_visible_paths(repository_root: str | Path) -> tuple[Path, ...]:
@@ -53,7 +100,7 @@ def git_visible_paths(repository_root: str | Path) -> tuple[Path, ...]:
             candidate.relative_to(root)
         except ValueError:
             continue
-        if candidate.is_file() and not is_macos_metadata(candidate.relative_to(root)):
+        if candidate.is_file() and not is_forbidden_source_member(candidate.relative_to(root)):
             paths.append(candidate)
     return tuple(sorted(set(paths), key=lambda path: path.relative_to(root).as_posix()))
 
@@ -68,7 +115,7 @@ def source_members(repository_root: str | Path, *, output_path: str | Path | Non
             continue
         relative = path.relative_to(root)
         archive_name = relative.as_posix()
-        if not is_macos_metadata(relative):
+        if not is_forbidden_source_member(relative):
             yield path, archive_name
 
 
@@ -77,9 +124,7 @@ def verify_source_zip(output_path: str | Path) -> tuple[str, ...]:
 
     output = Path(output_path).expanduser().resolve()
     with zipfile.ZipFile(output, "r") as archive:
-        return tuple(
-            name for name in archive.namelist() if is_macos_metadata(name)
-        )
+        return tuple(name for name in archive.namelist() if is_forbidden_source_member(name))
 
 
 def create_source_zip(repository_root: str | Path, output_path: str | Path) -> Path:

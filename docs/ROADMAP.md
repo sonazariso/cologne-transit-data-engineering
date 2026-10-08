@@ -406,6 +406,13 @@ by design; the generated user-local LaunchAgent is active. Tiered50 activation
 and Stage 15B live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**;
 Stage 15A readiness is in progress below.
 
+The current Tiered50 deployment validation is **BLOCKED — LEGACY7 PRESERVED**.
+The separately guarded runtime, additive 43-row materialization SQL, stable
+production claim identity, disabled Tiered50 LaunchAgent, and offline preflight
+are implemented. Live materialization, activation, capacity/quota proof, and a
+complete scheduled 30-minute Tiered50 cycle remain outstanding; the Legacy7
+runtime is preserved without an overlapping writer.
+
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,
 `EstimatedTime`, `RecordedAtTime`, and collection observation time. S80

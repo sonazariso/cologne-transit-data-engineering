@@ -9,6 +9,33 @@ Legacy7 `launchd` job is active on its ordinary five-minute schedule after the
 dedicated-login, preflight, retirement, selector, and heartbeat gates passed.
 The tracked template remains disabled by design; Tiered50 remains inactive.
 
+## Current Tiered50 deployment validation
+
+The approved `TIERED50_PANEL_V1` manifest is preserved unchanged. The
+repository now contains an explicit, separately guarded `tiered50` runner
+mode, the `MAC_TIERED50_PRODUCTION` collection context, additive SQL
+materialization for stable identities 8–50, and a distinct disabled
+LaunchAgent template. The Tiered50 path reuses the source-faithful collector,
+claims, quota, retry, parser, and transactional SQL persistence core only
+after its own gates pass; it does not turn the Legacy7 target count into 50.
+
+The current status is **BLOCKED — LEGACY7 PRESERVED**. Offline validation
+passes for the exact 50-target manifest, six-phase schedule, source-field
+persistence contract, stable target/bucket claims, retry/quota boundaries,
+and fail-closed credential handling. The additive migration is statically
+reconciled to 43 new rows and has not been applied to the live database; the
+Tiered50 LaunchAgent remains disabled. No MDD request, manual Heumarkt
+request, sampling-era activation, or Tiered50 SQL write was issued by this
+validation.
+
+The available Legacy7 closeout evidence contains three consecutive persisted
+UTC buckets spanning 15 minutes. It does not prove the required recent
+30-minute stable interval, continuous Mac/VM/SQL availability, database
+capacity or backup readiness, or shared-credential quota reconciliation.
+Missing-bucket causes are not inferred. The machine-readable result is
+[`docs/operational/tiered50-deployment-validation-evidence.json`](operational/tiered50-deployment-validation-evidence.json), with the operator
+summary in [`docs/operational/tiered50-deployment-validation-report.md`](operational/tiered50-deployment-validation-report.md).
+
 ## Cadence-correction addendum — 2026-10-07
 
 The existing cutover evidence reports that the following three Mac runs each
@@ -46,10 +73,10 @@ It is generated from the code-backed heartbeat permission matrix in
 
 | Permission | Object |
 | --- | --- |
-| `SELECT` | `ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot` |
+| `SELECT` | `ctl.MddRealtimeSamplingTarget`, `ctl.MddRealtimeSamplingSlot`, `ctl.MddMacTiered50ProductionTarget` |
 | `EXECUTE, VIEW DEFINITION` | `ctl.uspGetMddRealtimeSamplingTarget` |
 | `VIEW DEFINITION` | `ctl.MddMacTargetAudit` (lineage-column validation only) |
-| `INSERT, UPDATE` | `ctl.MddMacCollectorRun` |
+| `SELECT, INSERT, UPDATE` | `ctl.MddMacCollectorRun` |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit` |
 | `INSERT` | `ctl.MddMacDispatcherClaimEvent`, `ctl.MddMacTargetClaimEvent`, `ctl.MddMacHttpAttempt`, `ctl.MddMacQuotaAudit` |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacQuotaPermit` |
