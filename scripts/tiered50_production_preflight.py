@@ -50,6 +50,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 from cologne_transit_collector.schedule import (  # noqa: E402
     may_execute_bucket,
     schedule_reconciliation,
+    validate_launchd_wall_clock_schedule,
 )
 from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
 from package_source_zip import is_forbidden_source_member, source_members  # noqa: E402
@@ -273,12 +274,21 @@ def validate_deployment_and_sql() -> dict[str, Any]:
     for path in LAUNCHD_TEMPLATES:
         with path.open("rb") as handle:
             plist = plistlib.load(handle)
-        if not plist.get("Disabled") or plist.get("RunAtLoad") or plist.get("StartInterval") != 300:
-            raise ValueError(f"LaunchAgent is not a disabled five-minute template: {path.name}")
+        if not plist.get("Disabled") or plist.get("RunAtLoad"):
+            raise ValueError(f"LaunchAgent is not a disabled scheduled template: {path.name}")
+        if path.name.endswith("mdd-tiered50-collector.plist"):
+            schedule = validate_launchd_wall_clock_schedule(plist)
+        else:
+            if plist.get("StartInterval") != 300:
+                raise ValueError(f"retired Legacy7 template lost its historical five-minute interval: {path.name}")
+            schedule = {
+                "schedule_type": "RETIRED_LEGACY7_RELATIVE_INTERVAL",
+                "start_interval_seconds": 300,
+            }
         serialized = json.dumps(plist, ensure_ascii=False).casefold()
         if any(marker in serialized for marker in ("mdd_api_key", "mssql_password", "sql_server_password")):
             raise ValueError(f"LaunchAgent contains a credential marker: {path.name}")
-        templates.append({"name": path.name, "label": plist.get("Label"), "disabled": True})
+        templates.append({"name": path.name, "label": plist.get("Label"), "disabled": True, "schedule": schedule})
     forbidden_members = [
         archive_name
         for _path, archive_name in source_members(ROOT)
@@ -466,6 +476,11 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
     if not isinstance(((operational_evidence or {}).get("sql") or {}).get("first_tiered50_scheduled_cycle"), dict):
         blockers.append(
             "A complete successful Tiered50 30-minute validation cycle and its database-host capacity/backup evidence remain required."
+        )
+    six_cycle = ((operational_evidence or {}).get("sql") or {}).get("tiered50_six_bucket_cycle")
+    if not isinstance(six_cycle, dict) or six_cycle.get("status") != "PASS":
+        blockers.append(
+            "A complete successful Tiered50 six-bucket cycle with the approved 19/18/18/18/19/18 distribution is not yet proven."
         )
     if live_error:
         blockers.append(f"Read-only live SQL preflight was not proven ({live_error}).")

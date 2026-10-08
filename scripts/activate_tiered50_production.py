@@ -49,6 +49,7 @@ from install_macos_launch_agent import (  # noqa: E402
     build_installed_plist,
     install as install_launch_agent,
 )
+from cologne_transit_collector.schedule import validate_launchd_wall_clock_schedule  # noqa: E402
 
 
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
@@ -152,8 +153,7 @@ def _validate_launch_agent_template(*, runtime_config_path: str) -> dict[str, An
     )
     if rendered.get("Disabled") or rendered.get("RunAtLoad"):
         raise RuntimeError("Tiered50 LaunchAgent activation template is not a scheduled production bundle")
-    if rendered.get("StartInterval") != 300:
-        raise RuntimeError("Tiered50 LaunchAgent interval is not the approved five-minute schedule")
+    schedule = validate_launchd_wall_clock_schedule(rendered)
     environment = dict(rendered.get("EnvironmentVariables", {}))
     if environment.get("COLLECTOR_MAC_TIERED50_ENABLED") != "1":
         raise RuntimeError("Tiered50 LaunchAgent enable gate is not set in the approved render")
@@ -161,7 +161,7 @@ def _validate_launch_agent_template(*, runtime_config_path: str) -> dict[str, An
         raise RuntimeError("Tiered50 LaunchAgent render contains a prohibited secret marker")
     return {
         "label": rendered.get("Label"),
-        "start_interval_seconds": rendered.get("StartInterval"),
+        "schedule": schedule,
         "runtime_config_path": runtime_config_path,
         "secret_free": True,
         "activation_gate": "VALIDATED",
@@ -199,8 +199,17 @@ def _validate_operational_evidence(*, now: datetime) -> dict[str, Any]:
         or bool(plist.get("contains_secret_marker"))
     ):
         raise RuntimeError("installed Tiered50 LaunchAgent evidence is missing or unsafe")
-    if plist.get("start_interval_seconds") != 300:
-        raise RuntimeError("installed Tiered50 LaunchAgent interval is not five minutes")
+    try:
+        installed_schedule = {
+            "StartCalendarInterval": [
+                {"Minute": int(minute)}
+                for minute in plist.get("start_calendar_interval_minutes", [])
+            ],
+            "RunAtLoad": plist.get("run_at_load"),
+        }
+        validate_launchd_wall_clock_schedule(installed_schedule)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("installed Tiered50 LaunchAgent is not the approved wall-clock schedule") from exc
     heartbeat = sql.get("six_consecutive_expected_heartbeats")
     if not isinstance(heartbeat, dict) or not heartbeat.get("all_accounted") or not heartbeat.get("all_succeeded"):
         raise RuntimeError("six consecutive prior scheduled heartbeat records are not proven")
@@ -214,7 +223,7 @@ def _validate_operational_evidence(*, now: datetime) -> dict[str, Any]:
         "sql_volume_capacity": "PASS",
         "running_windows_vm": "PASS",
         "installed_tiered50_launchagent": "PRESENT_SECRET_FREE",
-        "prior_scheduled_heartbeat_evidence": "SIX_CONSECUTIVE_SUCCESSFUL_LEGACY7_BUCKETS",
+        "prior_scheduled_heartbeat_evidence": "SIX_CONSECUTIVE_SUCCESSFUL_HISTORICAL_BUCKETS_READ_ONLY",
         "mac_host_capacity": "PASS",
     }
 

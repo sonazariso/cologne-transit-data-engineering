@@ -13,6 +13,7 @@ import json
 import os
 import signal
 import sys
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,6 +195,9 @@ def _validate_runtime_login(login_status: dict[str, object], *, mode: str) -> No
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    process_started_at = datetime.now(timezone.utc)
+    process_started_monotonic = time.monotonic()
+    injected_at = _parse_utc(args.at_utc)
     configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
     root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
     runtime_mode = args.mode
@@ -204,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             raise LiveModeBlocked(f"unsupported production runtime mode: {runtime_mode}")
         collector_mode = "mac-tiered50"
         collection_context = MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+        base_configuration_started = time.monotonic()
         base_configuration = merge_non_secret_runtime_values()
         _require_nonsecret_cutover_gate(dict(base_configuration.values), mode=runtime_mode)
         configuration = resolve_required_secrets(base_configuration)
@@ -212,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
         if mssql_settings.database != EXPECTED_SQL_DATABASE:
             raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
-        at_utc = _parse_utc(args.at_utc) or datetime.now(timezone.utc)
+        at_utc = injected_at or process_started_at
         base_manifest = load_default_manifest(root)
         persistence = MssqlPersistence(
             settings=mssql_settings,
@@ -240,7 +245,23 @@ def main(argv: list[str] | None = None) -> int:
             "schedule_reconciliation": schedule_reconciliation(targets),
         }
         schema_details = {"base": schema, "tiered50": tiered_schema}
+        quota_recovery_started = time.monotonic()
         quota_recovery = persistence.recover_stale_quota_permits(at_utc=at_utc)
+        runtime_timing = {
+            "scheduler_trigger_at_utc": process_started_at.isoformat().replace("+00:00", "Z"),
+            "scheduler_trigger_time_source": (
+                "INJECTED_VALIDATION_TIME" if injected_at is not None else "PROCESS_STARTUP_OBSERVED"
+            ),
+            "preflight_and_sql_initialization_duration_ms": max(
+                0.0, (quota_recovery_started - base_configuration_started) * 1000.0
+            ),
+            "quota_recovery_duration_ms": max(
+                0.0, (time.monotonic() - quota_recovery_started) * 1000.0
+            ),
+            "process_startup_observed_duration_ms": max(
+                0.0, (time.monotonic() - process_started_monotonic) * 1000.0
+            ),
+        }
 
         settings = CollectorSettings.for_repository(root, environ=runtime_values)
         collector = Collector(
@@ -262,7 +283,12 @@ def main(argv: list[str] | None = None) -> int:
                 previous_handlers[signal_number] = signal.getsignal(signal_number)
                 signal.signal(signal_number, lambda _signum, _frame: collector.request_shutdown())
         try:
-            result = collector.run_once(mode=collector_mode, allow_live=True, at_utc=at_utc)
+            result = collector.run_once(
+                mode=collector_mode,
+                allow_live=True,
+                at_utc=at_utc,
+                runtime_timing=runtime_timing,
+            )
         finally:
             for signal_number, handler in previous_handlers.items():
                 signal.signal(signal_number, handler)

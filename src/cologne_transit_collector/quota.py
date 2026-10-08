@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
 from .domain import (
@@ -118,6 +118,8 @@ class QuotaDecision:
     boundary: int
     reason: str
     permit_id: Optional[str] = None
+    authorization_at_utc: Optional[str] = None
+    valid_until_utc: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,7 +130,21 @@ class QuotaDecision:
             "boundary": self.boundary,
             "reason": self.reason,
             "permit_id": self.permit_id,
+            "authorization_at_utc": self.authorization_at_utc,
+            "valid_until_utc": self.valid_until_utc,
         }
+
+
+def _iso_timestamp(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -499,6 +515,8 @@ class QuotaGuard:
                 boundary=int(result.get("boundary", effective_boundary)),
                 reason=str(result.get("reason", "atomic quota decision")),
                 permit_id=(str(result["permit_id"]) if result.get("permit_id") is not None else None),
+                authorization_at_utc=_iso_timestamp(result.get("authorization_at_utc") or at_utc),
+                valid_until_utc=_iso_timestamp(result.get("valid_until_utc")),
             )
 
         snapshot = self._snapshot(at_utc)
@@ -562,13 +580,16 @@ class QuotaGuard:
     ) -> QuotaDecision:
         """Atomically authorize one scheduled initial attempt."""
 
-        return self._atomic_or_snapshot(
+        decision = self._atomic_or_snapshot(
             decision_kind="INITIAL",
             boundary=self.normal_maximum,
             at_utc=at_utc,
             proposed_attempts=proposed_attempts,
             authorization_key=authorization_key,
         )
+        if decision.authorization_at_utc is None and at_utc is not None:
+            return replace(decision, authorization_at_utc=_iso_timestamp(at_utc))
+        return decision
 
     def allow_retry(
         self,
@@ -579,13 +600,16 @@ class QuotaGuard:
     ) -> QuotaDecision:
         """Atomically authorize one automatic retry, failing closed without state."""
 
-        return self._atomic_or_snapshot(
+        decision = self._atomic_or_snapshot(
             decision_kind="RETRY",
             boundary=self.retry_boundary,
             at_utc=at_utc,
             proposed_attempts=proposed_attempts,
             authorization_key=authorization_key,
         )
+        if decision.authorization_at_utc is None and at_utc is not None:
+            return replace(decision, authorization_at_utc=_iso_timestamp(at_utc))
+        return decision
 
     def release(self, decision: QuotaDecision | None) -> None:
         self.finalize_no_network(decision)

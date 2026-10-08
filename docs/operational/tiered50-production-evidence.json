@@ -1,5 +1,7 @@
 {
   "artifact_version": "TIERED50_PRODUCTION_EVIDENCE_V1",
+  "capture_role": "HISTORICAL_PRE_WALL_CLOCK_SCHEDULE_FIX",
+  "current_review_note": "The SQL and host observations below were captured before the wall-clock scheduler correction. They remain immutable historical evidence; current source/deployment validation is reported separately and does not claim active collection.",
   "generated_at_utc": "2026-10-08T12:41:46.425576Z",
   "host": {
     "legacy7_launchd": {

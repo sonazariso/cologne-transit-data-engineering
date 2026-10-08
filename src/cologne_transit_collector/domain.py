@@ -23,6 +23,11 @@ RETRY_SKIPPED_HEARTBEAT_BUDGET = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
 RETRY_SKIPPED_QUOTA = "RETRY_SKIPPED_QUOTA"
 SKIPPED_QUOTA = "SKIPPED_QUOTA"
 INTERRUPTED_SHUTDOWN = "INTERRUPTED_SHUTDOWN"
+LATE_DISPATCH = "LATE_DISPATCH"
+INSUFFICIENT_BUDGET = "INSUFFICIENT_BUDGET"
+AUTHORIZATION_EXPIRED_BEFORE_NETWORK = "AUTHORIZATION_EXPIRED_BEFORE_NETWORK"
+IN_FLIGHT_OPERATION_OVERRUN = "IN_FLIGHT_OPERATION_OVERRUN"
+COMPLETED_WITH_COVERAGE_GAP = "COMPLETED_WITH_COVERAGE_GAP"
 
 TIER_CADENCE_MINUTES: Mapping[str, int] = {"A": 5, "B": 15, "C": 30}
 TIER_NUMBER_OF_RESULTS: Mapping[str, int] = {"A": 20, "B": 30, "C": 30}
@@ -224,6 +229,8 @@ class TargetOutcome:
     simulated_transport_calls: int = 0
     live_network_calls: int = 0
     live_client_invocations: int = 0
+    timing: Mapping[str, Any] = field(default_factory=dict)
+    deadline_outcome: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -247,6 +254,8 @@ class TargetOutcome:
             "simulated_transport_calls": self.simulated_transport_calls,
             "live_network_calls": self.live_network_calls,
             "live_client_invocations": self.live_client_invocations,
+            "timing": dict(self.timing),
+            "deadline_outcome": self.deadline_outcome,
         }
 
 
@@ -275,6 +284,51 @@ class CollectorRunResult:
     dispatcher_claim_status: str = "CLAIMED"
     collection_context: str = "OFFLINE_DEVELOPMENT"
     maintenance: Mapping[str, Any] = field(default_factory=dict)
+    timing: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def coverage(self) -> dict[str, Any]:
+        counts = {
+            "succeeded": sum(item.status == "SUCCEEDED" for item in self.outcomes),
+            "failed": sum(item.status == "FAILED" for item in self.outcomes),
+            "skipped": sum(item.status == "SKIPPED" for item in self.outcomes),
+            "duplicate_claims": sum(
+                item.status in {"DUPLICATE_CLAIM", "DUPLICATE_DISPATCHER_CLAIM"}
+                for item in self.outcomes
+            ),
+        }
+        accounted = sum(counts.values())
+        missing = max(0, int(self.due_count) - accounted)
+        executed_coverage = (
+            int(self.due_count) > 0
+            and counts["succeeded"] == int(self.due_count)
+            and counts["failed"] == 0
+            and counts["skipped"] == 0
+            and counts["duplicate_claims"] == 0
+            and missing == 0
+            and all(item.deadline_outcome is None for item in self.outcomes)
+        )
+        if self.status == "DUPLICATE_NO_WORK":
+            verdict = "NOT_EXECUTED_DUPLICATE_DISPATCHER_CLAIM"
+        else:
+            verdict = "PASS" if executed_coverage else "FAILED"
+        return {
+            "due": int(self.due_count),
+            **counts,
+            "unaccounted": missing,
+            "coverage_verdict": verdict,
+            "coverage_sla_met": executed_coverage,
+        }
+
+    @property
+    def dispatcher_lifecycle_status(self) -> str:
+        if self.status == "DUPLICATE_NO_WORK":
+            return "DUPLICATE_DISPATCHER_CLAIM"
+        if self.status == "INTERRUPTED":
+            return "INTERRUPTED"
+        if self.status in {"FAILED"}:
+            return "FAILED"
+        return "COMPLETED"
 
     @property
     def http_attempt_count(self) -> int:
@@ -300,6 +354,8 @@ class CollectorRunResult:
             "logical_due_bucket_identity": self.bucket.identity,
             "due_count": self.due_count,
             "status": self.status,
+            "dispatcher_lifecycle_status": self.dispatcher_lifecycle_status,
+            "coverage": self.coverage,
             "max_observed_concurrency": self.max_observed_concurrency,
             "http_attempt_count": self.http_attempt_count,
             "simulated_transport_calls": self.simulated_transport_calls,
@@ -310,5 +366,6 @@ class CollectorRunResult:
             "dispatcher_claim_status": self.dispatcher_claim_status,
             "collection_context": self.collection_context,
             "maintenance": dict(self.maintenance),
+            "timing": dict(self.timing),
             "outcomes": [outcome.to_dict() for outcome in self.outcomes],
         }

@@ -918,10 +918,14 @@ class MssqlPersistence:
         connection_factory: Callable[[], Any] | None = None,
         raw_evidence_directory: str | Path | None = None,
         collection_context: str = MAC_COLLECTION_CONTEXT,
+        authorization_clock_fn: Callable[[], datetime] | None = None,
+        allow_injected_authorization_time: bool = False,
     ) -> None:
         self.settings = settings or MssqlConnectionSettings.from_environment()
         self._connection_factory = connection_factory or (lambda: connect_mssql(self.settings))
         self.collection_context = collection_context
+        self._authorization_clock_fn = authorization_clock_fn
+        self._allow_injected_authorization_time = bool(allow_injected_authorization_time)
         configured_raw = raw_evidence_directory or os.environ.get("MSSQL_RAW_EVIDENCE_DIR")
         self._raw = _TemporaryRawEvidence(configured_raw)
 
@@ -942,6 +946,33 @@ class MssqlPersistence:
     @staticmethod
     def _cursor(connection: Any) -> Any:
         return connection.cursor()
+
+    def _authoritative_authorization_time(self, fallback: datetime) -> datetime:
+        """Read the SQL Server clock for live permit authorization.
+
+        An injected clock is available to deterministic tests. Production
+        callers cannot make a stale ``at_utc`` value bypass bootstrap expiry:
+        the default path asks SQL Server for its current UTC time.
+        """
+
+        if self._allow_injected_authorization_time:
+            return _utc(fallback)
+        if self._authorization_clock_fn is not None:
+            return _utc(self._authorization_clock_fn())
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            try:
+                cursor.execute("SELECT SYSUTCDATETIME() AS AuthoritativeUtc")
+                row = cursor.fetchone()
+                value = _row_named(row, "AuthoritativeUtc", index=0)
+                if value is not None:
+                    return _utc(_optional_utc(value) or fallback)
+            except Exception:
+                # A later reservation query still validates its explicit
+                # period bounds. Falling back to the local clock is safer than
+                # accepting an arbitrary caller-supplied historical timestamp.
+                pass
+        return _utc(datetime.now(timezone.utc))
 
     def validate_full_schema(self) -> Mapping[str, Any]:
         """Validate the complete additive schema under an admin context.
@@ -2538,6 +2569,10 @@ class MssqlPersistence:
                         ParserOutcome = %s,
                         PersistenceOutcome = %s,
                         ErrorCategory = %s,
+                        DurationMs = %s,
+                        SkipReason = %s,
+                        RetryDecision = %s,
+                        RetryOutcome = %s,
                         OutcomeJson = %s
                     WHERE AuditId = %s
                     """,
@@ -2550,6 +2585,10 @@ class MssqlPersistence:
                         outcome.get("parser_outcome"),
                         outcome.get("persistence_outcome"),
                         outcome.get("error_category"),
+                        float(outcome.get("duration_seconds", 0) or 0) * 1000.0,
+                        outcome.get("skip_reason"),
+                        outcome.get("retry_decision"),
+                        outcome.get("retry_outcome"),
                         encoded,
                         int(audit_id),
                     ),
@@ -4262,7 +4301,7 @@ class MssqlPersistence:
         amount = int(proposed_attempts)
         if amount <= 0:
             raise ValueError("proposed_attempts must be positive")
-        at = _utc(at_utc or datetime.now(timezone.utc))
+        requested_at = _utc(at_utc or datetime.now(timezone.utc))
         if decision_kind not in {"INITIAL", "RETRY"}:
             raise ValueError("decision_kind must be INITIAL or RETRY")
         effective_boundary = approved_quota_boundary(decision_kind, boundary)
@@ -4270,6 +4309,7 @@ class MssqlPersistence:
         if key is not None and len(key) > 240:
             raise ValueError("authorization_key must be at most 240 characters")
         permit_id = str(uuid.uuid4())
+        at = self._authoritative_authorization_time(requested_at)
         self.ensure_automatic_quota_rollover(at_utc=at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
@@ -4292,6 +4332,7 @@ class MssqlPersistence:
                         "boundary": effective_boundary,
                         "reason": "current provider billing period is ambiguous",
                         "permit_id": None,
+                        "authorization_at_utc": _iso(at),
                     }
                 baseline = candidates[0] if candidates else None
                 bootstrap = None
@@ -4322,6 +4363,7 @@ class MssqlPersistence:
                             "boundary": effective_boundary,
                             "reason": reason,
                             "permit_id": None,
+                            "authorization_at_utc": _iso(at),
                         }
                     bootstrap = bootstrap_candidates[0]
                     month = str(_row_named(bootstrap, "MonthKey", index=2) or "")
@@ -4357,7 +4399,7 @@ class MssqlPersistence:
                     cursor.execute(
                         """
                         SELECT PermitId, MonthKey, DecisionKind, ReservationScope, Amount,
-                               Status
+                               ReservedAtUtc, Status
                         FROM ctl.MddMacQuotaPermit WITH (UPDLOCK, HOLDLOCK)
                         WHERE AuthorizationKey = %s
                         """,
@@ -4372,7 +4414,7 @@ class MssqlPersistence:
                             and str(_row_named(existing, "ReservationScope", index=3) or "") == str(reservation_scope)
                             and int(_row_named(existing, "Amount", index=4) or 0) == amount
                         )
-                        existing_status = str(_row_named(existing, "Status", index=5) or "")
+                        existing_status = str(_row_named(existing, "Status", index=6) or "")
                         cursor.execute("COMMIT TRANSACTION;")
                         connection.commit()
                         if not same_contract:
@@ -4384,8 +4426,20 @@ class MssqlPersistence:
                                 "boundary": effective_boundary,
                                 "reason": "authorization key was already used with a different permit contract",
                                 "permit_id": None,
+                                "authorization_at_utc": _iso(at),
                             }
                         if existing_status == PENDING_AUTHORIZATION:
+                            if str(_row_named(existing, "MonthKey", index=1) or "") != month:
+                                return {
+                                    "allowed": False,
+                                    "decision": "DUPLICATE_AUTHORIZATION_EXPIRED",
+                                    "proposed_attempts": amount,
+                                    "known_total": None,
+                                    "boundary": effective_boundary,
+                                    "reason": "pending permit belongs to a prior provider accounting period",
+                                    "permit_id": None,
+                                    "authorization_at_utc": _iso(at),
+                                }
                             return {
                                 "allowed": True,
                                 "decision": "DUPLICATE_AUTHORIZATION_REUSED",
@@ -4394,6 +4448,7 @@ class MssqlPersistence:
                                 "boundary": effective_boundary,
                                 "reason": "existing pending permit reused idempotently",
                                 "permit_id": existing_permit,
+                                "authorization_at_utc": _iso(at),
                             }
                         return {
                             "allowed": False,
@@ -4403,7 +4458,9 @@ class MssqlPersistence:
                             "boundary": effective_boundary,
                             "reason": "authorization key already has a finalized permit",
                             "permit_id": None,
+                            "authorization_at_utc": _iso(at),
                         }
+                valid_until_utc: datetime | None = None
                 if bootstrap is not None:
                     bootstrap_mapping = _row_mapping(bootstrap, BOOTSTRAP_AUTHORIZATION_COLUMNS)
                     valid_bootstrap, bootstrap_reason = validate_stored_bootstrap_row(
@@ -4426,9 +4483,12 @@ class MssqlPersistence:
                             "boundary": effective_boundary,
                             "reason": bootstrap_reason,
                             "permit_id": None,
+                            "authorization_at_utc": _iso(at),
                         }
+                    valid_until_utc = _optional_utc(bootstrap_mapping["StopAtUtc"])
                     local_cutoff = _optional_utc(bootstrap_mapping["LocalUsageIncludedThroughUtc"])
                 else:
+                    valid_until_utc = _optional_utc(_row_named(baseline, "ProviderPeriodEndUtc", index=19))
                     local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
                 assert local_cutoff is not None
                 local = self._quota_usage_totals(
@@ -4469,6 +4529,7 @@ class MssqlPersistence:
                         "boundary": ABSOLUTE_PROVIDER_CEILING,
                         "reason": "provider quota ceiling would be exceeded",
                         "permit_id": None,
+                        "authorization_at_utc": _iso(at),
                     }
                 if projected > effective_boundary:
                     cursor.execute("COMMIT TRANSACTION;")
@@ -4485,6 +4546,7 @@ class MssqlPersistence:
                         "boundary": effective_boundary,
                         "reason": "quota boundary would be exceeded by this atomic reservation",
                         "permit_id": None,
+                        "authorization_at_utc": _iso(at),
                     }
                 cursor.execute(
                     """
@@ -4518,6 +4580,8 @@ class MssqlPersistence:
             "boundary": effective_boundary,
             "reason": "within atomic provider-wide quota headroom",
             "permit_id": permit_id,
+            "authorization_at_utc": _iso(at),
+            "valid_until_utc": _iso(valid_until_utc),
         }
 
     authorize_attempt = reserve_quota_attempt

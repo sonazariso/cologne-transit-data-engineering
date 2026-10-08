@@ -26,6 +26,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlPersistence,
     connect_mssql,
 )
+from cologne_transit_collector.domain import APPROVED_SUPER_CYCLE_COUNTS  # noqa: E402
 from cologne_transit_collector.runtime_configuration import EXPECTED_SQL_DATABASE  # noqa: E402
 
 
@@ -63,11 +64,25 @@ def _plist_state(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as handle:
             plist = plistlib.load(handle)
+        calendar = plist.get("StartCalendarInterval")
+        calendar_minutes = None
+        if isinstance(calendar, list):
+            calendar_minutes = [
+                int(item["Minute"])
+                for item in calendar
+                if isinstance(item, dict) and "Minute" in item
+            ]
         return {
             "exists": True,
             "disabled": bool(plist.get("Disabled")),
             "run_at_load": bool(plist.get("RunAtLoad")),
             "start_interval_seconds": plist.get("StartInterval"),
+            "start_calendar_interval_minutes": calendar_minutes,
+            "schedule_type": (
+                "START_CALENDAR_INTERVAL_LOCAL_WALL_CLOCK"
+                if calendar_minutes is not None
+                else "RELATIVE_INTERVAL"
+            ),
             "program_arguments": [str(value) for value in plist.get("ProgramArguments", [])],
             "contains_secret_marker": any(
                 marker in json.dumps(plist, ensure_ascii=False)
@@ -355,6 +370,38 @@ def collect() -> dict[str, Any]:
             }
             for row in tiered_rows
         ]
+        tiered_by_bucket = {
+            int(_row_value(row, "LogicalDueBucket", 0)): {
+                "audit_count": int(_row_value(row, "audit_count", 1) or 0),
+                "succeeded_count": int(_row_value(row, "succeeded_count", 2) or 0),
+                "skipped_count": int(_row_value(row, "skipped_count", 3) or 0),
+                "failed_count": int(_row_value(row, "failed_count", 4) or 0),
+            }
+            for row in tiered_rows
+        }
+        six_cycle = {"status": "NOT_PROVEN", "expected_distribution": list(APPROVED_SUPER_CYCLE_COUNTS)}
+        for candidate in sorted(tiered_by_bucket):
+            window = [tiered_by_bucket.get(candidate + offset) for offset in range(6)]
+            if any(item is None for item in window):
+                continue
+            valid = all(
+                item["audit_count"] == APPROVED_SUPER_CYCLE_COUNTS[(candidate + offset) % 6]
+                and item["succeeded_count"] == item["audit_count"]
+                and item["skipped_count"] == 0
+                and item["failed_count"] == 0
+                for offset, item in enumerate(window)
+            )
+            if valid:
+                six_cycle = {
+                    "status": "PASS",
+                    "start_bucket": candidate,
+                    "buckets": [candidate + offset for offset in range(6)],
+                    "distribution": [item["audit_count"] for item in window],
+                    "successful_target_audits": sum(item["succeeded_count"] for item in window),
+                    "expected_distribution": list(APPROVED_SUPER_CYCLE_COUNTS),
+                }
+                break
+        evidence["sql"]["tiered50_six_bucket_cycle"] = six_cycle
         cursor.execute(
             """
             SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc,
@@ -371,6 +418,13 @@ def collect() -> dict[str, Any]:
         }
         if first_tiered_run:
             first_bucket = int(_row_value(first_tiered_run, "LogicalDueBucket", 1) or 0)
+            summary: dict[str, Any] = {}
+            try:
+                decoded_summary = json.loads(str(_row_value(first_tiered_run, "SummaryJson", 5) or "{}"))
+                if isinstance(decoded_summary, dict):
+                    summary = decoded_summary
+            except (TypeError, ValueError, json.JSONDecodeError):
+                summary = {}
             cursor.execute(
                 """
                 SELECT COUNT_BIG(*) AS target_audits,
@@ -465,11 +519,17 @@ def collect() -> dict[str, Any]:
                 "confirmed_permits": int(_row_value(permit_summary, "confirmed_permits", 4) or 0),
                 "uncertain_permits": int(_row_value(permit_summary, "uncertain_permits", 5) or 0),
                 "persistence_outcomes": persistence_summary,
+                "coverage": summary.get("coverage"),
+                "timing": summary.get("timing"),
                 "validation_status": (
                     "PASS"
                     if int(_row_value(audit_summary, "failed", 3) or 0) == 0
                     and int(_row_value(audit_summary, "skipped", 2) or 0) == 0
                     and int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0) == 0
+                    and (
+                        not isinstance(summary.get("coverage"), dict)
+                        or bool(summary["coverage"].get("coverage_sla_met"))
+                    )
                     else "FAILED_CADENCE_OR_PERSISTENCE_GATE"
                 ),
             }

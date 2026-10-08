@@ -107,6 +107,7 @@ TERMINAL_RUN_STATUSES = frozenset(
     {
         "COMPLETE",
         "COMPLETED_WITH_FAILURES",
+        "COMPLETED_WITH_COVERAGE_GAP",
         "DUPLICATE_NO_WORK",
         "FAILED",
         "INTERRUPTED",

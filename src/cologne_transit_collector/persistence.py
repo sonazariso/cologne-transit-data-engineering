@@ -472,7 +472,8 @@ class SQLitePersistence:
                 skip_reason TEXT,
                 error_category TEXT,
                 retry_decision TEXT,
-                retry_outcome TEXT
+                retry_outcome TEXT,
+                outcome_json TEXT
             );
             CREATE TABLE IF NOT EXISTS http_attempts (
                 attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -741,6 +742,7 @@ class SQLitePersistence:
         self._ensure_column("shared_usage", "provider_quota_unknown_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("collector_runs", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._ensure_column("target_audits", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
+        self._ensure_column("target_audits", "outcome_json", "TEXT")
         self._ensure_column("parsed_snapshots", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._ensure_column("quota_audit", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
         self._ensure_column("recorded_at_time_evidence", "collection_context", "TEXT NOT NULL DEFAULT 'OFFLINE_DEVELOPMENT'")
@@ -2008,9 +2010,9 @@ class SQLitePersistence:
                 UPDATE target_audits SET completed_at_utc = ?, status = ?, http_status = ?,
                  http_attempts = ?, stop_event_result_count = ?, parser_outcome = ?,
                  persistence_outcome = ?, duration_ms = ?, skip_reason = ?, error_category = ?,
-                 retry_decision = ?, retry_outcome = ? WHERE audit_id = ?
+                 retry_decision = ?, retry_outcome = ?, outcome_json = ? WHERE audit_id = ?
                 """,
-                (_iso(completed_at), status, outcome.get("http_status"), int(outcome.get("http_attempts", 0)), outcome.get("stop_event_result_count"), outcome.get("parser_outcome"), outcome.get("persistence_outcome"), float(outcome.get("duration_seconds", 0) or 0) * 1000, outcome.get("skip_reason"), _safe_error_category(outcome.get("error_category")), outcome.get("retry_decision"), outcome.get("retry_outcome"), audit_id),
+                (_iso(completed_at), status, outcome.get("http_status"), int(outcome.get("http_attempts", 0)), outcome.get("stop_event_result_count"), outcome.get("parser_outcome"), outcome.get("persistence_outcome"), float(outcome.get("duration_seconds", 0) or 0) * 1000, outcome.get("skip_reason"), _safe_error_category(outcome.get("error_category")), outcome.get("retry_decision"), outcome.get("retry_outcome"), json.dumps(dict(outcome), sort_keys=True, default=str), audit_id),
             )
             self._connection.execute(
                 "UPDATE target_claims SET status = ?, completed_at_utc = ? WHERE panel_version = ? AND source_parent_station_id = ? AND logical_due_bucket = ?",

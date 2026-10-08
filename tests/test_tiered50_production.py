@@ -138,7 +138,11 @@ class Tiered50ProductionTests(unittest.TestCase):
             template = plistlib.load(handle)
         self.assertTrue(template["Disabled"])
         self.assertFalse(template["RunAtLoad"])
-        self.assertEqual(template["StartInterval"], 300)
+        self.assertNotIn("StartInterval", template)
+        self.assertEqual(
+            [item["Minute"] for item in template["StartCalendarInterval"]],
+            list(range(0, 60, 5)),
+        )
         self.assertEqual(template["EnvironmentVariables"]["COLLECTOR_MAC_SQL_MODE"], "TIERED50")
         self.assertEqual(template["EnvironmentVariables"]["COLLECTOR_MAC_TIERED50_ENABLED"], "0")
         self.assertNotIn("MDD_API_KEY", template["EnvironmentVariables"])

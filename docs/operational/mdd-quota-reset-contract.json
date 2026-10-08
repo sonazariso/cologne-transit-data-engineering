@@ -27,6 +27,14 @@
   "credential_exclusivity_confirmed": true,
   "provider_reset_boundary_verified": false,
   "automatic_rollover_implementation": "READY_BUT_FAIL_CLOSED_UNTIL_ADMIN_CONTRACT",
+  "conservative_calendar_month_policy_evaluation": {
+    "status": "BLOCKED",
+    "provider_monthly_reset_commitment_verified": false,
+    "operator_approval_present": false,
+    "latest_defensible_boundary_policy": "NOT_ACTIVATED",
+    "reason": "The reviewed public sources expose a monthly quota and request history but do not establish that this credential resets on a calendar month or identify a supported provider timezone. A UTC-midnight rule or a synthetic timezone would therefore assume an unsupported billing contract.",
+    "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its supported timezone envelope and delay."
+  },
   "runtime_behavior": {
     "october_bootstrap_hard_stop_utc": "2026-10-30T23:00:00Z",
     "future_period_creation": "SQL procedure is called only after a verified administrator reset contract, its provider-timezone calendar boundary, and the conservative post-boundary delay are all satisfied.",

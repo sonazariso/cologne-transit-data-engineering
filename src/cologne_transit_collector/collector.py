@@ -17,7 +17,12 @@ from .domain import (
     APPROVED_TRANSIENT_HTTP_STATUS_CODES,
     APPROVED_TRANSIENT_TRANSPORT_CATEGORIES,
     HEARTBEAT_SECONDS,
+    AUTHORIZATION_EXPIRED_BEFORE_NETWORK,
+    COMPLETED_WITH_COVERAGE_GAP,
+    INSUFFICIENT_BUDGET,
+    IN_FLIGHT_OPERATION_OVERRUN,
     INTERRUPTED_SHUTDOWN,
+    LATE_DISPATCH,
     LIVE_RESEARCH_COLLECTION_CONTEXT,
     LIVE_RESEARCH_TARGET_ID,
     MAC_SQL_CUTOVER_APPROVED_ENV,
@@ -68,6 +73,21 @@ LOGGER = logging.getLogger(__name__)
 CLIENT_EXECUTION_FAILURE = "CLIENT_EXECUTION_FAILURE"
 
 
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _mdd_credential_status(client: object) -> str:
     """Return credential status without requiring production secrets in env."""
 
@@ -103,8 +123,10 @@ class HeartbeatBudget:
     ) -> None:
         self._monotonic = monotonic_fn
         self._lock = threading.Lock()
+        self.bucket_end_utc = bucket_end_utc.astimezone(timezone.utc)
+        self.started_at_utc = started_at_utc.astimezone(timezone.utc)
         self._started_monotonic = monotonic_fn()
-        wall_remaining = max(0.0, (bucket_end_utc - started_at_utc).total_seconds())
+        wall_remaining = max(0.0, (self.bucket_end_utc - self.started_at_utc).total_seconds())
         self._budget_seconds = max(0.0, min(float(heartbeat_seconds), wall_remaining) - float(safety_margin_seconds))
         self._deadline_monotonic = self._started_monotonic + self._budget_seconds
 
@@ -115,6 +137,14 @@ class HeartbeatBudget:
     @property
     def remaining_seconds(self) -> float:
         return max(0.0, self._deadline_monotonic - self._monotonic())
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return max(0.0, self._monotonic() - self._started_monotonic)
+
+    @property
+    def deadline_reached(self) -> bool:
+        return self.remaining_seconds <= 0.0
 
     def can_start(self, *, operation_seconds: float = REQUEST_TIMEOUT_SECONDS, sleep_seconds: float = 0.0) -> bool:
         return self.remaining_seconds >= max(0.0, float(operation_seconds)) + max(0.0, float(sleep_seconds))
@@ -225,6 +255,7 @@ class Collector:
         safety_margin_seconds: float = 5.0,
         sleep_fn: Callable[[float], None] = time.sleep,
         monotonic_fn: Callable[[], float] = time.monotonic,
+        wall_clock_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         shutdown_event: threading.Event | None = None,
     ) -> None:
         if max_concurrency != MAXIMUM_CONCURRENCY:
@@ -243,6 +274,7 @@ class Collector:
         self.safety_margin_seconds = safety_margin_seconds
         self.sleep_fn = sleep_fn
         self.monotonic_fn = monotonic_fn
+        self.wall_clock_fn = wall_clock_fn
         self.shutdown_event = shutdown_event or threading.Event()
         self._active_lock = threading.Lock()
         self._worker_slots = threading.BoundedSemaphore(self.max_concurrency)
@@ -308,6 +340,7 @@ class Collector:
         run_id: str | None = None,
         allow_live: bool = False,
         pilot_target: str | None = None,
+        runtime_timing: Mapping[str, Any] | None = None,
     ) -> CollectorRunResult:
         if mode not in {"dry-run", "simulate", "live", "live-research", "mac-sql", "mac-tiered50"}:
             raise ValueError(
@@ -364,7 +397,10 @@ class Collector:
         if mode not in {"live-research", "mac-tiered50"} and getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
-        now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        observed_now = at_utc or self.wall_clock_fn()
+        if observed_now.tzinfo is None:
+            observed_now = observed_now.replace(tzinfo=timezone.utc)
+        now = observed_now.astimezone(timezone.utc)
         plan = self.live_research_plan(at_utc=now) if mode == "live-research" else self.plan(at_utc=now)
         collection_context = (
             LIVE_RESEARCH_COLLECTION_CONTEXT
@@ -375,12 +411,24 @@ class Collector:
         )
         identifier = run_id or str(uuid.uuid4())
         started_monotonic = self.monotonic_fn()
+        run_timing: dict[str, Any] = {
+            "run_started_at_utc": now.isoformat().replace("+00:00", "Z"),
+            "bucket_start_utc": plan.bucket.start_utc.isoformat().replace("+00:00", "Z"),
+            "bucket_end_utc": plan.bucket.end_utc.isoformat().replace("+00:00", "Z"),
+            "launch_jitter_ms": max(0.0, (now - plan.bucket.start_utc).total_seconds() * 1000.0),
+            "heartbeat_budget_seconds": None,
+            "safety_margin_seconds": float(self.safety_margin_seconds),
+            "injected_logical_time": at_utc is not None,
+        }
+        if runtime_timing:
+            run_timing.update({str(key): value for key, value in runtime_timing.items()})
         budget = HeartbeatBudget(
             bucket_end_utc=plan.bucket.end_utc,
             started_at_utc=now,
             safety_margin_seconds=self.safety_margin_seconds,
             monotonic_fn=lambda: self.monotonic_fn() - started_monotonic,
         )
+        run_timing["heartbeat_budget_seconds"] = budget.budget_seconds
         if mode == "mac-tiered50":
             writer_guard = getattr(self.persistence, "assert_no_competing_writer", None)
             if callable(writer_guard):
@@ -398,17 +446,22 @@ class Collector:
         # This is the outer atomic boundary. It must be won before target
         # claims or a ThreadPoolExecutor are created, so a duplicate
         # dispatcher invocation cannot race the winning dispatcher.
+        dispatcher_claim_started = self.monotonic_fn()
         dispatcher_claim = self.persistence.claim_dispatcher_bucket(
             run_id=identifier,
             panel_version=self.manifest.panel_version,
             logical_due_bucket=plan.bucket.index,
             claimed_at=now,
         )
+        run_timing["dispatcher_claim_duration_ms"] = max(
+            0.0, (self.monotonic_fn() - dispatcher_claim_started) * 1000.0
+        )
         if not dispatcher_claim.won:
             duplicate_event = getattr(self.persistence, "record_duplicate_target_claim_event", None)
             if callable(duplicate_event) and dispatcher_claim.existing_status in {
                 "COMPLETE",
                 "COMPLETED_WITH_FAILURES",
+                COMPLETED_WITH_COVERAGE_GAP,
                 "INTERRUPTED",
             }:
                 for target in plan.due_targets:
@@ -444,6 +497,7 @@ class Collector:
                 dispatcher_claim_won=False,
                 dispatcher_claim_status="DUPLICATE_DISPATCHER_CLAIM",
                 collection_context=collection_context,
+                timing=run_timing,
             )
             maintenance = self._finish_live_research_maintenance(
                 mode=mode,
@@ -466,12 +520,22 @@ class Collector:
                     target = pending.pop(0)
                     # The target claim is deliberately just in time: targets
                     # still waiting in ``pending`` are not marked claimed.
+                    claim_started = self.monotonic_fn()
+                    claim_time = (
+                        now
+                        if at_utc is not None and collection_context != MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+                        else self.wall_clock_fn()
+                    )
+                    if claim_time.tzinfo is None:
+                        claim_time = claim_time.replace(tzinfo=timezone.utc)
                     claim = self.persistence.claim_target(
                         run_id=identifier,
                         target=target,
                         logical_due_bucket=plan.bucket.index,
-                        claimed_at=datetime.now(timezone.utc),
+                        claimed_at=claim_time.astimezone(timezone.utc),
                     )
+                    claim_duration_ms = max(0.0, (self.monotonic_fn() - claim_started) * 1000.0)
+                    run_timing.setdefault("target_claim_durations_ms", []).append(claim_duration_ms)
                     if not claim.won:
                         outcomes.append(
                             TargetOutcome(
@@ -493,6 +557,8 @@ class Collector:
                         budget,
                         now,
                         collection_context,
+                        claim_duration_ms,
+                        claim_time.astimezone(timezone.utc),
                     )
                     futures[future] = target
                 if self.shutdown_event.is_set():
@@ -533,8 +599,28 @@ class Collector:
             status = "DUPLICATE_NO_WORK"
         elif any(item.status == "FAILED" for item in outcomes):
             status = "COMPLETED_WITH_FAILURES"
+        elif (
+            not all(item.status == "SUCCEEDED" for item in outcomes)
+            or len(outcomes) != plan.due_count
+            or any(item.deadline_outcome is not None for item in outcomes)
+        ):
+            status = COMPLETED_WITH_COVERAGE_GAP
         else:
             status = "COMPLETE"
+        run_timing["target_claim_count"] = len(run_timing.get("target_claim_durations_ms", []))
+        run_timing["target_claim_duration_max_ms"] = max(
+            run_timing.get("target_claim_durations_ms", [0.0]), default=0.0
+        )
+        run_timing["run_completed_at_utc"] = self._event_time(
+            logical_time=now,
+            collection_context=collection_context,
+        ).isoformat().replace("+00:00", "Z")
+        run_timing["run_duration_ms"] = max(0.0, (self.monotonic_fn() - started_monotonic) * 1000.0)
+        run_timing["targets_processed_after_deadline"] = sum(
+            1
+            for item in outcomes
+            if item.timing.get("processed_after_deadline")
+        )
         result = CollectorRunResult(
             run_id=identifier,
             mode=mode,
@@ -547,6 +633,7 @@ class Collector:
             dispatcher_claim_won=True,
             dispatcher_claim_status="CLAIMED",
             collection_context=collection_context,
+            timing=run_timing,
         )
         maintenance = self._finish_live_research_maintenance(
             mode=mode,
@@ -637,6 +724,21 @@ class Collector:
             else "FAILED",
         }
 
+    def _event_time(self, *, logical_time: datetime, collection_context: str) -> datetime:
+        """Use live wall time for SQL authorization/audit, injected time offline."""
+
+        if collection_context == MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT:
+            value = self.wall_clock_fn()
+        else:
+            value = logical_time
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _deadline_classification(budget: HeartbeatBudget, observed_at: datetime) -> str:
+        return LATE_DISPATCH if observed_at >= budget.bucket_end_utc else INSUFFICIENT_BUDGET
+
     def _interrupted_outcome(
         self,
         target: Target,
@@ -694,9 +796,19 @@ class Collector:
         budget: HeartbeatBudget,
         quota_at_utc: datetime,
         collection_context: str,
+        target_claim_duration_ms: float = 0.0,
+        target_claimed_at_utc: datetime | None = None,
     ) -> TargetOutcome:
         self._enter_worker()
-        started = datetime.now(timezone.utc)
+        started = self._event_time(logical_time=quota_at_utc, collection_context=collection_context)
+        target_timing: dict[str, Any] = {
+            "target_claim_duration_ms": float(target_claim_duration_ms),
+            "target_claimed_at_utc": (
+                target_claimed_at_utc.isoformat().replace("+00:00", "Z")
+                if target_claimed_at_utc is not None
+                else None
+            ),
+        }
         audit_id: Any = None
         attempts = 0
         last_status: int | None = None
@@ -711,6 +823,7 @@ class Collector:
         live_network_calls = 0
         live_client_invocations = 0
         try:
+            audit_started = self.monotonic_fn()
             audit_id = self.persistence.start_target_audit(
                 run_id=run_id,
                 target=target,
@@ -718,35 +831,49 @@ class Collector:
                 started_at=started,
                 collection_context=collection_context,
             )
+            target_timing["target_audit_start_duration_ms"] = max(
+                0.0, (self.monotonic_fn() - audit_started) * 1000.0
+            )
             while attempts < self.max_attempts:
                 retrying = attempts > 0
                 retry_after = pending_retry_after if retrying else 0.0
                 if not budget.can_start(operation_seconds=self.request_timeout_seconds):
                     reason = RETRY_SKIPPED_HEARTBEAT_BUDGET if retrying else SKIPPED_HEARTBEAT_BUDGET
-                    outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_attempts=attempts, skip_reason=reason, retry_outcome=reason)
-                    self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                    target_timing.update({
+                        "processed_after_deadline": budget.deadline_reached,
+                        "deadline_remaining_seconds": budget.remaining_seconds,
+                        "deadline_classification": self._deadline_classification(budget, started),
+                    })
+                    outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_attempts=attempts, skip_reason=reason, retry_outcome=reason, timing=target_timing, deadline_outcome=self._deadline_classification(budget, started))
+                    self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context))
                     return outcome
                 if retrying:
                     if retry_after and not budget.can_start(operation_seconds=self.request_timeout_seconds, sleep_seconds=retry_after):
                         retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
                         retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
-                        outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome)
-                        self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                        target_timing.update({"processed_after_deadline": budget.deadline_reached, "deadline_remaining_seconds": budget.remaining_seconds, "deadline_classification": self._deadline_classification(budget, started)})
+                        outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome, timing=target_timing, deadline_outcome=self._deadline_classification(budget, started))
+                        self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context))
                         return outcome
                     if retry_after:
                         self.sleep_fn(retry_after)
                         if not budget.can_start(operation_seconds=self.request_timeout_seconds):
                             retry_decision = "RETRY_SKIPPED_HEARTBEAT_BUDGET"
                             retry_outcome = RETRY_SKIPPED_HEARTBEAT_BUDGET
-                            outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome)
-                            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+                            target_timing.update({"processed_after_deadline": budget.deadline_reached, "deadline_remaining_seconds": budget.remaining_seconds, "deadline_classification": self._deadline_classification(budget, started)})
+                            outcome = TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "SKIPPED", http_status=last_status, http_attempts=attempts, error_category=error_category, retry_outcome=retry_outcome, skip_reason=retry_outcome, timing=target_timing, deadline_outcome=self._deadline_classification(budget, started))
+                            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context))
                             return outcome
 
-                # Quota month selection follows the logical heartbeat time so
-                # deterministic offline runs cannot cross a calendar-month
-                # boundary merely because the test executes later.
-                decision_at = quota_at_utc
+                # Offline simulations retain their injected logical timestamp;
+                # live SQL authorization uses the current wall clock at the
+                # reservation point, after any preceding SQL or retry delay.
+                decision_at = self._event_time(
+                    logical_time=quota_at_utc,
+                    collection_context=collection_context,
+                )
                 authorization_key = f"{run_id}:{audit_id}:{attempts + 1}"
+                quota_started = self.monotonic_fn()
                 quota_decision = (
                     self.quota_guard.allow_retry(
                         at_utc=decision_at,
@@ -758,6 +885,10 @@ class Collector:
                         authorization_key=authorization_key,
                     )
                 )
+                quota_duration_ms = max(0.0, (self.monotonic_fn() - quota_started) * 1000.0)
+                target_timing["quota_authorization_duration_ms"] = quota_duration_ms
+                target_timing["quota_authorization_at_utc"] = quota_decision.authorization_at_utc
+                target_timing["quota_authorization_valid_until_utc"] = quota_decision.valid_until_utc
                 self._record_quota(
                     run_id,
                     target,
@@ -787,6 +918,7 @@ class Collector:
                             retry_outcome=retry_outcome,
                             simulated_transport_calls=simulated_transport_calls,
                             live_network_calls=live_network_calls,
+                            timing=target_timing,
                         )
                     else:
                         outcome = TargetOutcome(
@@ -800,16 +932,108 @@ class Collector:
                             error_category="QUOTA_DENIED",
                             simulated_transport_calls=simulated_transport_calls,
                             live_network_calls=live_network_calls,
+                            timing=target_timing,
                         )
                     self.persistence.complete_target_audit(
                         audit_id=audit_id,
                         outcome=outcome.to_dict(),
-                        completed_at=datetime.now(timezone.utc),
+                        completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context),
+                    )
+                    return outcome
+
+                target_timing["budget_remaining_after_quota_seconds"] = budget.remaining_seconds
+                authorized_at = _parse_utc_timestamp(quota_decision.authorization_at_utc) or decision_at
+                target_timing["permit_granted_before_bucket_boundary"] = authorized_at < budget.bucket_end_utc
+                if not budget.can_start(operation_seconds=self.request_timeout_seconds):
+                    self.quota_guard.release(quota_decision)
+                    target_timing.update({
+                        "processed_after_deadline": True,
+                        "deadline_remaining_seconds": budget.remaining_seconds,
+                        "deadline_classification": self._deadline_classification(budget, decision_at),
+                    })
+                    outcome = TargetOutcome(
+                        target.source_parent_station_id,
+                        target.station_name,
+                        target.tier,
+                        target.phase_index,
+                        bucket_index,
+                        "SKIPPED",
+                        http_attempts=attempts,
+                        skip_reason=SKIPPED_HEARTBEAT_BUDGET,
+                        error_category=self._deadline_classification(budget, decision_at),
+                        timing=target_timing,
+                        deadline_outcome=self._deadline_classification(budget, decision_at),
+                    )
+                    self.persistence.complete_target_audit(
+                        audit_id=audit_id,
+                        outcome=outcome.to_dict(),
+                        completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context),
                     )
                     return outcome
 
                 attempts += 1
-                attempt_started = datetime.now(timezone.utc)
+                attempt_started = self._event_time(
+                    logical_time=quota_at_utc,
+                    collection_context=collection_context,
+                )
+                target_timing["network_attempt_started_at_utc"] = attempt_started.isoformat().replace("+00:00", "Z")
+                target_timing["network_attempt_started_after_bucket_boundary"] = attempt_started >= budget.bucket_end_utc
+                if quota_decision.valid_until_utc is not None:
+                    authorization_expiry = _parse_utc_timestamp(quota_decision.valid_until_utc)
+                    if authorization_expiry is not None and attempt_started >= authorization_expiry:
+                        attempts -= 1
+                        self.quota_guard.release(quota_decision)
+                        target_timing.update({
+                            "processed_after_deadline": attempt_started >= budget.bucket_end_utc,
+                            "authorization_expired_before_network_at_utc": attempt_started.isoformat().replace("+00:00", "Z"),
+                            "deadline_classification": "AUTHORIZATION_EXPIRED_BEFORE_NETWORK",
+                        })
+                        outcome = TargetOutcome(
+                            target.source_parent_station_id,
+                            target.station_name,
+                            target.tier,
+                            target.phase_index,
+                            bucket_index,
+                            "SKIPPED",
+                            http_attempts=attempts,
+                            skip_reason=SKIPPED_QUOTA,
+                            error_category="QUOTA_EXPIRED_BEFORE_NETWORK",
+                            timing=target_timing,
+                            deadline_outcome=AUTHORIZATION_EXPIRED_BEFORE_NETWORK,
+                        )
+                        self.persistence.complete_target_audit(
+                            audit_id=audit_id,
+                            outcome=outcome.to_dict(),
+                            completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context),
+                        )
+                        return outcome
+                if attempt_started >= budget.bucket_end_utc:
+                    attempts -= 1
+                    self.quota_guard.release(quota_decision)
+                    target_timing.update({
+                        "processed_after_deadline": True,
+                        "deadline_classification": self._deadline_classification(budget, attempt_started),
+                    })
+                    outcome = TargetOutcome(
+                        target.source_parent_station_id,
+                        target.station_name,
+                        target.tier,
+                        target.phase_index,
+                        bucket_index,
+                        "SKIPPED",
+                        http_attempts=attempts,
+                        skip_reason=SKIPPED_HEARTBEAT_BUDGET,
+                        error_category=LATE_DISPATCH,
+                        timing=target_timing,
+                        deadline_outcome=LATE_DISPATCH,
+                    )
+                    self.persistence.complete_target_audit(
+                        audit_id=audit_id,
+                        outcome=outcome.to_dict(),
+                        completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context),
+                    )
+                    return outcome
+                attempt_monotonic = self.monotonic_fn()
                 try:
                     response_or_failure = self.mdd_client.fetch(
                         target,
@@ -824,7 +1048,16 @@ class Collector:
                     # attempt was made, so the permit must be released as
                     # no-network and the target must not be retried.
                     response_or_failure = _client_execution_failure(exc)
-                attempt_completed = datetime.now(timezone.utc)
+                attempt_completed = self._event_time(
+                    logical_time=quota_at_utc,
+                    collection_context=collection_context,
+                )
+                target_timing["network_attempt_duration_ms"] = max(
+                    0.0, (self.monotonic_fn() - attempt_monotonic) * 1000.0
+                )
+                if attempt_completed >= budget.bucket_end_utc and attempt_started < budget.bucket_end_utc:
+                    target_timing["in_flight_operation_overrun"] = True
+                    target_timing["deadline_classification"] = "IN_FLIGHT_OPERATION_OVERRUN"
                 network_attempted, _http_response_received, transport_kind, live_client_invocation = _transport_metadata(response_or_failure)
                 if network_attempted:
                     live_network_calls += 1
@@ -890,7 +1123,11 @@ class Collector:
                         continue
                     break
                 try:
+                    parse_started = self.monotonic_fn()
                     parsed = parse_trias_response(response.body, self._content_type(response))
+                    target_timing["response_parsing_duration_ms"] = max(
+                        0.0, (self.monotonic_fn() - parse_started) * 1000.0
+                    )
                 except (TriasParserError, ValueError):
                     parser_outcome = "PARSER_FAILURE"
                     error_category = "PARSER_FAILURE"
@@ -911,13 +1148,17 @@ class Collector:
                     retry_outcome = "RETRY_SUCCEEDED"
                 result_count = parsed.result_count
                 try:
+                    persistence_started = self.monotonic_fn()
                     self.persistence.persist_snapshot(
                         audit_id=audit_id,
                         target=target,
                         logical_due_bucket=bucket_index,
                         parsed_snapshot=parsed.to_dict(),
-                        persisted_at=datetime.now(timezone.utc),
+                        persisted_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context),
                         collection_context=collection_context,
+                    )
+                    target_timing["snapshot_persistence_duration_ms"] = max(
+                        0.0, (self.monotonic_fn() - persistence_started) * 1000.0
                     )
                     persistence_outcome = "PERSISTED_PARSED_SNAPSHOT"
                     reasons: list[str] = []
@@ -944,6 +1185,15 @@ class Collector:
                 break
 
             status = "SUCCEEDED" if parser_outcome == "PARSED" and persistence_outcome == "PERSISTED_PARSED_SNAPSHOT" else ("SKIPPED" if retry_outcome in {RETRY_SKIPPED_HEARTBEAT_BUDGET, RETRY_SKIPPED_QUOTA} or attempts == 0 else "FAILED")
+            completed_at = self._event_time(logical_time=quota_at_utc, collection_context=collection_context)
+            target_timing["target_audit_finalization_duration_ms"] = 0.0
+            target_timing["target_completed_at_utc"] = completed_at.isoformat().replace("+00:00", "Z")
+            target_timing["target_duration_ms"] = max(0.0, (completed_at - started).total_seconds() * 1000.0)
+            deadline_outcome = (
+                IN_FLIGHT_OPERATION_OVERRUN
+                if target_timing.get("in_flight_operation_overrun")
+                else None
+            )
             outcome = TargetOutcome(
                 target.source_parent_station_id,
                 target.station_name,
@@ -956,7 +1206,7 @@ class Collector:
                 stop_event_result_count=result_count,
                 parser_outcome=parser_outcome,
                 persistence_outcome=persistence_outcome,
-                duration_seconds=(datetime.now(timezone.utc) - started).total_seconds(),
+                duration_seconds=(completed_at - started).total_seconds(),
                 error_category=error_category,
                 retry_decision=retry_decision,
                 retry_outcome=retry_outcome,
@@ -964,16 +1214,22 @@ class Collector:
                 simulated_transport_calls=simulated_transport_calls,
                 live_network_calls=live_network_calls,
                 live_client_invocations=live_client_invocations,
+                timing=target_timing,
+                deadline_outcome=deadline_outcome,
             )
-            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=datetime.now(timezone.utc))
+            finalize_started = self.monotonic_fn()
+            self.persistence.complete_target_audit(audit_id=audit_id, outcome=outcome.to_dict(), completed_at=completed_at)
+            target_timing["target_audit_finalization_duration_ms"] = max(
+                0.0, (self.monotonic_fn() - finalize_started) * 1000.0
+            )
             return outcome
         except BaseException:
             if audit_id is not None:
                 try:
-                    self.persistence.complete_target_audit(audit_id=audit_id, outcome={"status": "FAILED", "http_attempts": attempts, "error_category": "SANITIZED_ERROR", "persistence_outcome": "PERSISTENCE_FAILURE"}, completed_at=datetime.now(timezone.utc))
+                    self.persistence.complete_target_audit(audit_id=audit_id, outcome={"status": "FAILED", "http_attempts": attempts, "error_category": "SANITIZED_ERROR", "persistence_outcome": "PERSISTENCE_FAILURE", "timing": target_timing}, completed_at=self._event_time(logical_time=quota_at_utc, collection_context=collection_context))
                 except BaseException:
                     pass
-            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls, live_client_invocations=live_client_invocations)
+            return TargetOutcome(target.source_parent_station_id, target.station_name, target.tier, target.phase_index, bucket_index, "FAILED", http_attempts=attempts, error_category="SANITIZED_ERROR", simulated_transport_calls=simulated_transport_calls, live_network_calls=live_network_calls, live_client_invocations=live_client_invocations, timing=target_timing)
         finally:
             self._leave_worker()
 

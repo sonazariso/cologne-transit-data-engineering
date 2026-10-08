@@ -3,10 +3,39 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .domain import HEARTBEAT_SECONDS, LogicalBucket, Plan, Target
 from .legacy7_schedule import legacy7_sampling_slot_for_bucket
+
+
+# launchd calendar jobs are local-time jobs. The collector derives its
+# durable identity from UTC, so a DST fold can at most produce two different
+# UTC buckets; the dispatcher claim prevents duplicate work for either one.
+LAUNCHD_WALL_CLOCK_MINUTES: tuple[int, ...] = tuple(range(0, 60, HEARTBEAT_SECONDS // 60))
+
+
+def launchd_wall_clock_schedule() -> list[dict[str, int]]:
+    """Return the exact plist value for the five-minute wall-clock trigger."""
+
+    return [{"Minute": minute} for minute in LAUNCHD_WALL_CLOCK_MINUTES]
+
+
+def validate_launchd_wall_clock_schedule(plist: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the Tiered50 launchd schedule without invoking launchd."""
+
+    if "StartInterval" in plist:
+        raise ValueError("wall-clock Tiered50 schedule must not use StartInterval")
+    if bool(plist.get("RunAtLoad")):
+        raise ValueError("Tiered50 RunAtLoad must remain disabled")
+    if plist.get("StartCalendarInterval") != launchd_wall_clock_schedule():
+        raise ValueError("Tiered50 StartCalendarInterval must contain minutes 00 through 55 every five minutes")
+    return {
+        "schedule_type": "START_CALENDAR_INTERVAL_LOCAL_WALL_CLOCK",
+        "calendar_minutes": list(LAUNCHD_WALL_CLOCK_MINUTES),
+        "run_at_load": False,
+        "catch_up": False,
+    }
 
 
 def ensure_utc(value: datetime) -> datetime:

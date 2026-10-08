@@ -47,6 +47,7 @@ from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     REQUIRED_PYTHON_INTERPRETER,
     RUNTIME_CONFIG_PATH_ENV,
 )
+from cologne_transit_collector.schedule import validate_launchd_wall_clock_schedule  # noqa: E402
 
 
 LABEL = "com.cologne-transit-intelligence.mdd-collector"
@@ -154,6 +155,8 @@ def _load_template(mode: str = TIERED50_MODE) -> dict[str, Any]:
         raise ValueError("tracked LaunchAgent interpreter is not the approved absolute path")
     if _plist_has_secret(template):
         raise ValueError("tracked LaunchAgent template contains a prohibited secret marker")
+    if mode == TIERED50_MODE:
+        validate_launchd_wall_clock_schedule(template)
     return template
 
 
@@ -218,6 +221,8 @@ def build_installed_plist(
         raise ValueError("rendered LaunchAgent label changed unexpectedly")
     if _plist_has_secret(plist):
         raise ValueError("installed LaunchAgent contains a prohibited secret marker")
+    if mode == TIERED50_MODE:
+        validate_launchd_wall_clock_schedule(plist)
     return plist
 
 
@@ -303,6 +308,7 @@ def install(
         "tracked_template_sha256": _sha256(_template_path),
         "runtime_config_path": str(Path(runtime_config_path).expanduser().resolve()),
         "runtime_bundle_path": str(bundle_directory),
+        "schedule": validate_launchd_wall_clock_schedule(rendered),
         "activated": activate,
         "recorded_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
