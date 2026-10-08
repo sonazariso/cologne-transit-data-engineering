@@ -1,0 +1,18 @@
+{
+  "batch": {
+    "audit_rows": 19,
+    "duration_ms": 1.582485999999994,
+    "target_claim_rows": 0,
+    "transaction_shape": "ONE_BATCH_TRANSACTION_NO_TARGET_CLAIMS"
+  },
+  "former_sequential_shape": {
+    "audit_rows": 19,
+    "duration_ms": 7.032788999999983,
+    "transaction_shape": "ONE_START_AND_ONE_COMPLETE_TRANSACTION_PER_TARGET"
+  },
+  "interpretation": "DISPOSABLE_SQLITE_OVERHEAD_COMPARISON_NOT_PRODUCTION_LATENCY_EVIDENCE",
+  "network_requests_issued": 0,
+  "speedup_ratio": 4.4441397901782445,
+  "status": "PASS",
+  "target_count": 19
+}

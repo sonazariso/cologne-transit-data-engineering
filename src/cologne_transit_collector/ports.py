@@ -92,6 +92,17 @@ class PersistencePort(Protocol):
                            collection_context: str | None = None) -> Any:
         ...
 
+    def persist_skipped_target_audits(
+        self,
+        *,
+        run_id: str,
+        logical_due_bucket: int,
+        skipped_audits: Sequence[Mapping[str, Any]],
+        collection_context: str | None = None,
+    ) -> None:
+        """Persist pre-claim, no-network skip audits in one bounded transaction."""
+        ...
+
     def record_http_attempt(
         self,
         *,

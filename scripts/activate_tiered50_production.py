@@ -182,12 +182,27 @@ def _validate_operational_evidence(*, now: datetime) -> dict[str, Any]:
     sql = evidence.get("sql")
     if not isinstance(host, dict) or not isinstance(sql, dict):
         raise RuntimeError("administrator operational evidence is structurally incomplete")
+    admin_authorization = sql.get("admin_authorization")
+    if not isinstance(admin_authorization, dict) or admin_authorization.get("status") != "PASS":
+        raise RuntimeError("MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: administrative-query authorization is not proven")
+    admin_connection = sql.get("admin_connection")
+    if not isinstance(admin_connection, dict) or admin_connection.get("status") != "PASS":
+        raise RuntimeError("MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: administrative connection is not authorized")
     backup = sql.get("backup_verifyonly")
     if not isinstance(backup, dict) or backup.get("status") != "PASS":
         raise RuntimeError("latest SQL backup VERIFYONLY evidence is not passing")
+    backup_gate = sql.get("backup_gate")
+    if not isinstance(backup_gate, dict) or backup_gate.get("status") != "PASS":
+        raise RuntimeError("administrator backup gate is not independently proven")
     volumes = sql.get("volume_capacity")
     if not isinstance(volumes, list) or not any(int(row.get("available_bytes", 0) or 0) > 0 for row in volumes if isinstance(row, dict)):
         raise RuntimeError("SQL database-host volume capacity is not proven")
+    capacity_gate = sql.get("capacity_gate")
+    if not isinstance(capacity_gate, dict) or capacity_gate.get("status") != "PASS":
+        raise RuntimeError("administrator SQL capacity gate is not independently proven")
+    log_space_gate = sql.get("log_space_gate")
+    if not isinstance(log_space_gate, dict) or log_space_gate.get("status") != "PASS":
+        raise RuntimeError("administrator SQL log-space capacity gate is not independently proven")
     vmware = host.get("vmware")
     vmware_returncode = vmware.get("returncode") if isinstance(vmware, dict) else None
     if not isinstance(vmware, dict) or vmware_returncode is None or int(vmware_returncode) != 0:

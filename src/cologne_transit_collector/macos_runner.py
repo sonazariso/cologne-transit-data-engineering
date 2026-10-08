@@ -61,6 +61,12 @@ from .transport import LiveMddClient, validate_api_key_format
 LEGACY7_MODE = "legacy7"
 TIERED50_MODE = "tiered50"
 
+# These are the earliest timestamps available to the Python process.  They
+# are useful runtime observations, but they are not independent evidence of
+# the exact launchd calendar-trigger instant.
+_PYTHON_MODULE_ENTRY_AT_UTC = datetime.now(timezone.utc)
+_PYTHON_MODULE_ENTRY_MONOTONIC = time.monotonic()
+
 
 def _parse_utc(value: str | None) -> datetime | None:
     if value is None:
@@ -70,6 +76,10 @@ def _parse_utc(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         raise argparse.ArgumentTypeError("--at must include a UTC offset")
     return parsed.astimezone(timezone.utc)
+
+
+def _duration_ms(started_monotonic: float) -> float:
+    return max(0.0, (time.monotonic() - started_monotonic) * 1000.0)
 
 
 def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
@@ -194,42 +204,77 @@ def _validate_runtime_login(login_status: dict[str, object], *, mode: str) -> No
 
 
 def main(argv: list[str] | None = None) -> int:
+    main_function_entry_at = datetime.now(timezone.utc)
+    main_function_entry_monotonic = time.monotonic()
     args = _parser().parse_args(argv)
-    process_started_at = datetime.now(timezone.utc)
-    process_started_monotonic = time.monotonic()
-    injected_at = _parse_utc(args.at_utc)
+    preflight_started_at = datetime.now(timezone.utc)
+    preflight_started_monotonic = time.monotonic()
     configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
     root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
     runtime_mode = args.mode
     try:
+        if args.at_utc is not None:
+            _parse_utc(args.at_utc)
+            raise LiveModeBlocked(
+                "--at is restricted to isolated offline validation; the live Tiered50 runner "
+                "always uses the current runtime clock"
+            )
         if runtime_mode == LEGACY7_MODE:
             raise LiveModeBlocked("Legacy7 production runtime is retired; no network request performed")
         if runtime_mode != TIERED50_MODE:
             raise LiveModeBlocked(f"unsupported production runtime mode: {runtime_mode}")
         collector_mode = "mac-tiered50"
         collection_context = MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
-        base_configuration_started = time.monotonic()
+        phase_durations_ms: dict[str, float] = {}
+        phase_started = time.monotonic()
         base_configuration = merge_non_secret_runtime_values()
         _require_nonsecret_cutover_gate(dict(base_configuration.values), mode=runtime_mode)
+        phase_durations_ms["nonsecret_configuration_and_gate_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         configuration = resolve_required_secrets(base_configuration)
         runtime_values = dict(configuration.values)
+        phase_durations_ms["secret_resolution_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         require_tiered50_cutover_gate(runtime_values)
         mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
         if mssql_settings.database != EXPECTED_SQL_DATABASE:
             raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
-        at_utc = injected_at or process_started_at
+        phase_durations_ms["runtime_configuration_validation_ms"] = _duration_ms(phase_started)
+
+        # The logical bucket is selected from the earliest process timestamp
+        # available to Python.  It is not an exact launchd trigger timestamp.
+        logical_bucket_at_utc = _PYTHON_MODULE_ENTRY_AT_UTC
+
+        phase_started = time.monotonic()
         base_manifest = load_default_manifest(root)
+        phase_durations_ms["manifest_load_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         persistence = MssqlPersistence(
             settings=mssql_settings,
             raw_evidence_directory=runtime_values.get("MSSQL_RAW_EVIDENCE_DIR"),
             collection_context=collection_context,
         )
+        phase_durations_ms["persistence_construction_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         login_status = persistence.runtime_login_status()
         _validate_runtime_login(login_status, mode=runtime_mode)
+        phase_durations_ms["runtime_login_validation_ms"] = _duration_ms(phase_started)
 
+        phase_started = time.monotonic()
         schema = persistence.validate_runtime_schema()
+        phase_durations_ms["runtime_schema_validation_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         tiered_schema = persistence.validate_tiered50_runtime_schema()
+        phase_durations_ms["tiered50_schema_validation_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
         targets = persistence.load_tiered50_production_targets(base_manifest)
+        phase_durations_ms["target_materialization_ms"] = _duration_ms(phase_started)
         manifest = replace(
             base_manifest,
             status="ACTIVE_TIERED50_PRODUCTION",
@@ -246,24 +291,19 @@ def main(argv: list[str] | None = None) -> int:
         }
         schema_details = {"base": schema, "tiered50": tiered_schema}
         quota_recovery_started = time.monotonic()
-        quota_recovery = persistence.recover_stale_quota_permits(at_utc=at_utc)
-        runtime_timing = {
-            "scheduler_trigger_at_utc": process_started_at.isoformat().replace("+00:00", "Z"),
-            "scheduler_trigger_time_source": (
-                "INJECTED_VALIDATION_TIME" if injected_at is not None else "PROCESS_STARTUP_OBSERVED"
-            ),
-            "preflight_and_sql_initialization_duration_ms": max(
-                0.0, (quota_recovery_started - base_configuration_started) * 1000.0
-            ),
-            "quota_recovery_duration_ms": max(
-                0.0, (time.monotonic() - quota_recovery_started) * 1000.0
-            ),
-            "process_startup_observed_duration_ms": max(
-                0.0, (time.monotonic() - process_started_monotonic) * 1000.0
-            ),
-        }
+        quota_recovery = persistence.recover_stale_quota_permits(at_utc=datetime.now(timezone.utc))
+        phase_durations_ms["quota_permit_recovery_ms"] = max(
+            0.0, (time.monotonic() - quota_recovery_started) * 1000.0
+        )
 
+        settings_started_at = datetime.now(timezone.utc)
+        settings_started_monotonic = time.monotonic()
         settings = CollectorSettings.for_repository(root, environ=runtime_values)
+        settings_completed_at = datetime.now(timezone.utc)
+        phase_durations_ms["settings_initialization_ms"] = _duration_ms(settings_started_monotonic)
+
+        collector_construction_started_at = datetime.now(timezone.utc)
+        collector_construction_started_monotonic = time.monotonic()
         collector = Collector(
             manifest=manifest,
             persistence=persistence,
@@ -276,6 +316,49 @@ def main(argv: list[str] | None = None) -> int:
             quota_guard=QuotaGuard(persistence, reservation_scope="LIVE_PROVIDER"),
             safety_margin_seconds=settings.safety_margin_seconds,
         )
+        collector_construction_completed_at = datetime.now(timezone.utc)
+        phase_durations_ms["collector_construction_ms"] = _duration_ms(collector_construction_started_monotonic)
+        preflight_completed_at = datetime.now(timezone.utc)
+        preflight_completed_monotonic = time.monotonic()
+        runtime_timing = {
+            "python_module_entry_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "python_module_entry_time_source": "PYTHON_MODULE_IMPORT_OBSERVED_NOT_EXACT_LAUNCHD_TRIGGER",
+            "observed_process_entry_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "observed_process_entry_time_source": "PYTHON_MODULE_IMPORT_OBSERVED_NOT_EXACT_LAUNCHD_TRIGGER",
+            "main_function_entry_at_utc": main_function_entry_at.isoformat().replace("+00:00", "Z"),
+            "main_function_entry_time_source": "PYTHON_MAIN_ENTRY_OBSERVED",
+            "scheduler_trigger_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "scheduler_trigger_time_source": "PYTHON_PROCESS_ENTRY_OBSERVED_NOT_LAUNCHD_TRIGGER",
+            "expected_launchd_calendar_boundary_at_utc": None,
+            "launchd_trigger_at_utc": None,
+            "launchd_trigger_time_source": "NOT_INDEPENDENTLY_OBSERVED",
+            "preflight_started_at_utc": preflight_started_at.isoformat().replace("+00:00", "Z"),
+            "preflight_completed_at_utc": preflight_completed_at.isoformat().replace("+00:00", "Z"),
+            "settings_initialization_started_at_utc": settings_started_at.isoformat().replace("+00:00", "Z"),
+            "settings_initialization_completed_at_utc": settings_completed_at.isoformat().replace("+00:00", "Z"),
+            "collector_construction_started_at_utc": collector_construction_started_at.isoformat().replace("+00:00", "Z"),
+            "collector_construction_completed_at_utc": collector_construction_completed_at.isoformat().replace("+00:00", "Z"),
+            "preflight_and_sql_initialization_duration_ms": _duration_ms(preflight_started_monotonic),
+            "preflight_duration_ms": _duration_ms(preflight_started_monotonic),
+            "main_function_entry_delay_ms": max(
+                0.0, (main_function_entry_monotonic - _PYTHON_MODULE_ENTRY_MONOTONIC) * 1000.0
+            ),
+            "process_startup_observed_duration_ms": max(
+                0.0, (preflight_completed_monotonic - _PYTHON_MODULE_ENTRY_MONOTONIC) * 1000.0
+            ),
+            "quota_recovery_duration_ms": phase_durations_ms["quota_permit_recovery_ms"],
+            "phase_durations_ms": phase_durations_ms,
+            "clock_source_provenance": {
+                "python_process_entry": "PYTHON_MODULE_IMPORT_WALL_CLOCK_UTC",
+                "main_function_entry": "PYTHON_MAIN_WALL_CLOCK_UTC",
+                "preflight": "PYTHON_WALL_CLOCK_UTC",
+                "phase_durations": "MONOTONIC_CLOCK",
+                "dispatcher_entry": "COLLECTOR_WALL_CLOCK_UTC_CAPTURED_INSIDE_RUN_ONCE",
+                "sql_authorization": "SQL_SYSUTCDATETIME",
+                "absolute_bucket_deadline": "UTC_BUCKET_END_DERIVED_FROM_LOGICAL_BUCKET",
+                "launchd_trigger": "NOT_INDEPENDENTLY_OBSERVED",
+            },
+        }
         previous_handlers: dict[int, object] = {}
         for signal_name in ("SIGINT", "SIGTERM"):
             signal_number = getattr(signal, signal_name, None)
@@ -286,7 +369,9 @@ def main(argv: list[str] | None = None) -> int:
             result = collector.run_once(
                 mode=collector_mode,
                 allow_live=True,
-                at_utc=at_utc,
+                execution_started_at_utc=_PYTHON_MODULE_ENTRY_AT_UTC,
+                execution_started_monotonic=_PYTHON_MODULE_ENTRY_MONOTONIC,
+                logical_bucket_at_utc=logical_bucket_at_utc,
                 runtime_timing=runtime_timing,
             )
         finally:
@@ -299,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
             "collection_context": collection_context,
             "target_count": len(targets),
             "selection_policy_version": selection_policy_version,
-            "logical_due_bucket": int(at_utc.timestamp() // 300),
+            "logical_due_bucket": int(logical_bucket_at_utc.timestamp() // 300),
             "sql_login_status": login_status,
             "schema": schema_details,
             "selection": selection_details,

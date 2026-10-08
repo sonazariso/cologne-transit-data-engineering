@@ -44,7 +44,11 @@ def architecture_check() -> list[str]:
         lowered = source.lower()
         if "pymssql" in lowered and path != MSSQL_ADAPTER:
             errors.append(f"{path}: optional database client is confined to the direct adapter")
-        if path != SQLITE_IMPORTER:
+        # The direct adapter is the approved SQL Server persistence boundary;
+        # its implementation and explanatory comments may name that
+        # authoritative database.  Keep all other architecture text bans
+        # unchanged, including PostgreSQL/SQLite/runtime-intermediary checks.
+        if path not in {SQLITE_IMPORTER, MSSQL_ADAPTER}:
             for term in BANNED_TEXT:
                 if term in lowered:
                     errors.append(f"{path}: banned architecture text {term!r}")

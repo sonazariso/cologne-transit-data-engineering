@@ -186,6 +186,7 @@ class HttpResponse:
     http_response_received: bool = True
     transport_kind: str = "UNKNOWN"
     live_client_invocation: bool = False
+    transport_execution_entered: bool = False
 
     @property
     def retry_after(self) -> Optional[str]:
@@ -205,6 +206,11 @@ class TransportFailure:
     http_response_received: bool = False
     transport_kind: str = "UNKNOWN"
     live_client_invocation: bool = False
+    # ``True`` means the live adapter entered its open/read/close path, but
+    # does not prove that bytes reached the provider.  This is deliberately
+    # separate from ``network_attempted`` so physical transport is never
+    # invented merely to preserve quota conservatism.
+    transport_execution_entered: bool = False
 
 
 @dataclass(frozen=True)

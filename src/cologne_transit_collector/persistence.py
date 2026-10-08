@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .domain import (
     HttpResponse,
@@ -1218,6 +1218,123 @@ class SQLitePersistence:
             self._connection.commit()
             return int(cursor.lastrowid)
 
+    def persist_skipped_target_audits(
+        self,
+        *,
+        run_id: str,
+        logical_due_bucket: int,
+        skipped_audits: Sequence[Mapping[str, Any]],
+        collection_context: str | None = None,
+    ) -> None:
+        """Persist a pre-claim skip tail without creating target claims.
+
+        The collector uses this path after the absolute bucket budget can no
+        longer accommodate another request.  It deliberately writes the
+        target-audit rows directly: a target that never reached the just-in-
+        time claim gate must not appear as claimed or RUNNING in
+        ``target_claims``.  Existing terminal rows are left untouched so a
+        retry after an ambiguous commit is idempotent.
+        """
+
+        context = str(collection_context or self.collection_context)
+        with self._lock:
+            try:
+                for entry in skipped_audits:
+                    target = entry["target"]
+                    outcome = dict(entry["outcome"])
+                    started_at = entry["started_at"]
+                    completed_at = entry.get("completed_at", started_at)
+                    target_identity = target.source_parent_station_id
+                    row = self._connection.execute(
+                        """
+                        SELECT audit_id, status
+                        FROM target_audits
+                        WHERE collector_run_id = ?
+                          AND source_parent_station_id = ?
+                          AND logical_due_bucket = ?
+                        ORDER BY audit_id
+                        LIMIT 1
+                        """,
+                        (run_id, target_identity, int(logical_due_bucket)),
+                    ).fetchone()
+                    encoded = json.dumps(outcome, sort_keys=True, default=str)
+                    duration_ms = float(outcome.get("duration_seconds", 0) or 0) * 1000.0
+                    if row is None:
+                        self._connection.execute(
+                            """
+                            INSERT INTO target_audits
+                            (collector_run_id, panel_version, source_parent_station_id,
+                             station_name, tier, phase_index, number_of_results,
+                             logical_due_bucket, sampling_era, continuity_classification,
+                             collection_context, started_at_utc, completed_at_utc,
+                             status, http_attempts, http_status, stop_event_result_count,
+                             parser_outcome, persistence_outcome, duration_ms,
+                             skip_reason, error_category, retry_decision, retry_outcome,
+                             outcome_json)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                run_id,
+                                target.panel_version,
+                                target_identity,
+                                target.station_name,
+                                target.tier,
+                                int(target.phase_index),
+                                int(target.number_of_results),
+                                int(logical_due_bucket),
+                                target.sampling_era.value,
+                                target.continuity_classification,
+                                context,
+                                _iso(started_at),
+                                _iso(completed_at),
+                                "SKIPPED",
+                                int(outcome.get("http_attempts", 0) or 0),
+                                outcome.get("http_status"),
+                                outcome.get("stop_event_result_count"),
+                                outcome.get("parser_outcome"),
+                                outcome.get("persistence_outcome"),
+                                duration_ms,
+                                outcome.get("skip_reason"),
+                                _safe_error_category(outcome.get("error_category")),
+                                outcome.get("retry_decision"),
+                                outcome.get("retry_outcome"),
+                                encoded,
+                            ),
+                        )
+                    elif str(row["status"] or "") in {"RUNNING", "SKIPPED"}:
+                        self._connection.execute(
+                            """
+                            UPDATE target_audits
+                            SET completed_at_utc = ?, status = ?, http_status = ?,
+                                http_attempts = ?, stop_event_result_count = ?,
+                                parser_outcome = ?, persistence_outcome = ?,
+                                duration_ms = ?, skip_reason = ?, error_category = ?,
+                                retry_decision = ?, retry_outcome = ?, outcome_json = ?
+                            WHERE audit_id = ?
+                            """,
+                            (
+                                _iso(completed_at),
+                                "SKIPPED",
+                                outcome.get("http_status"),
+                                int(outcome.get("http_attempts", 0) or 0),
+                                outcome.get("stop_event_result_count"),
+                                outcome.get("parser_outcome"),
+                                outcome.get("persistence_outcome"),
+                                duration_ms,
+                                outcome.get("skip_reason"),
+                                _safe_error_category(outcome.get("error_category")),
+                                outcome.get("retry_decision"),
+                                outcome.get("retry_outcome"),
+                                encoded,
+                                int(row["audit_id"]),
+                            ),
+                        )
+                self._connection.commit()
+            except BaseException:
+                self._connection.rollback()
+                raise
+
     def record_http_attempt(
         self,
         *,
@@ -1267,7 +1384,18 @@ class SQLitePersistence:
         if live_client_invocation is not None:
             result_live_client_invocation = bool(live_client_invocation)
         provider_attempt_confirmed = network_attempted and http_response_received
-        conservative_quota_accounted = network_attempted and not http_response_received
+        transport_execution_entered = bool(
+            getattr(response, "transport_execution_entered", False)
+            if response is not None
+            else getattr(transport_failure, "transport_execution_entered", False)
+            if transport_failure is not None
+            else False
+        )
+        conservative_quota_accounted = (network_attempted and not http_response_received) or (
+            result_live_client_invocation
+            and transport_execution_entered
+            and not http_response_received
+        )
         provider_quota_status = (
             "CONFIRMED"
             if provider_attempt_confirmed

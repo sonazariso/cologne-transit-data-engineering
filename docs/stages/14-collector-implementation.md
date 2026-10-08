@@ -154,6 +154,20 @@ default five-second safety margin is explicitly marked a development,
 non-production default; the final nonzero persistence/cleanup margin belongs
 to the future live dry-run gate.
 
+The corrected production timing record separates the derived calendar
+boundary, observed Python process/module entry, main-function entry, preflight
+start/completion, settings and Collector construction, dispatcher entry,
+first target claim, first HTTP transmission, and run completion. The launchd
+trigger is not claimed unless independently observed. The actual budget is
+captured inside `run_once()` from the current wall clock and absolute bucket
+end; monotonic elapsed time remains the duration source, and clock corrections
+cannot give remaining budget back. When no useful request fits, all pending
+targets are written as one bounded transactional skip-audit batch without
+retroactive claims. Timing includes HTTP-to-snapshot persistence delay and
+target/run finalization. With cap-2 concurrency and a 30-second timeout, 19
+worst-case targets require ten request batches/300 seconds before margin and
+overhead, so fixed configuration cannot guarantee worst-case full coverage.
+
 ## Quota guardrail
 
 `QuotaGuard` is injected separately from the dispatcher and accepts a shared
@@ -395,7 +409,7 @@ in SQL while the runtime is stopped; no stations are currently active.
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 272 tests per run and
+repository suite passed in five consecutive runs with 294 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule

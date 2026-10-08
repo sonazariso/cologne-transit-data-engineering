@@ -36,6 +36,11 @@ class MddCredentialError(RuntimeError):
 class MddLiveDisabled(RuntimeError):
     """Live HTTP requires an explicit opt-in even when used as a library."""
 
+    network_attempted = False
+    http_response_received = False
+    live_client_invocation = True
+    transport_execution_entered = False
+
 
 class NoRedirectHandler(HTTPRedirectHandler):
     """Surface 3xx responses instead of following them implicitly."""
@@ -194,6 +199,7 @@ class LiveMddClient:
                 http_response_received=False,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=False,
             )
         try:
             body = build_request_body(
@@ -219,9 +225,12 @@ class LiveMddClient:
                 http_response_received=False,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=False,
             )
         started = time.monotonic()
+        transport_execution_entered = False
         try:
+            transport_execution_entered = True
             if self._urlopen is not None:
                 # Injected callables are test seams; the production default
                 # always goes through the no-redirect opener below.
@@ -229,23 +238,74 @@ class LiveMddClient:
             else:
                 opener = self._opener_factory()
                 response = opener.open(request, timeout=float(timeout_seconds))  # type: ignore[attr-defined]
+            content: bytes | None = None
+            response_status: int | None = None
+            read_failure: BaseException | None = None
             try:
-                content = _read_bounded(response, self.max_response_bytes)
-                status = int(getattr(response, "status", getattr(response, "code", 200)))
-                return HttpResponse(
-                    status,
-                    content,
-                    _headers(response),
-                    time.monotonic() - started,
-                    network_attempted=True,
-                    http_response_received=True,
-                    transport_kind=LIVE_TRANSPORT_KIND,
-                    live_client_invocation=True,
-                )
+                try:
+                    content = _read_bounded(response, self.max_response_bytes)
+                    response_status = int(getattr(response, "status", getattr(response, "code", 200)))
+                except ResponseTooLarge:
+                    return TransportFailure(
+                        RESPONSE_SIZE_EXCEEDED,
+                        "bounded response failure",
+                        network_attempted=True,
+                        http_response_received=True,
+                        transport_kind=LIVE_TRANSPORT_KIND,
+                        live_client_invocation=True,
+                        transport_execution_entered=True,
+                    )
+                except Exception as error:
+                    read_failure = error
             finally:
                 close = getattr(response, "close", None)
                 if callable(close):
-                    close()
+                    try:
+                        close()
+                    except Exception as error:
+                        # The body may or may not have been complete when the
+                        # close failed.  Preserve quota conservatism without
+                        # claiming a successful response.
+                        return TransportFailure(
+                            "RESPONSE_CLOSE_FAILURE",
+                            "response close failure",
+                            network_attempted=True,
+                            http_response_received=False,
+                            transport_kind=LIVE_TRANSPORT_KIND,
+                            live_client_invocation=True,
+                            transport_execution_entered=True,
+                        )
+            if read_failure is not None:
+                return TransportFailure(
+                    "RESPONSE_READ_FAILURE",
+                    "response read failure",
+                    network_attempted=True,
+                    http_response_received=False,
+                    transport_kind=LIVE_TRANSPORT_KIND,
+                    live_client_invocation=True,
+                    transport_execution_entered=True,
+                )
+            if content is None or response_status is None:
+                return TransportFailure(
+                    "RESPONSE_READ_FAILURE",
+                    "response body was not available",
+                    network_attempted=True,
+                    http_response_received=False,
+                    transport_kind=LIVE_TRANSPORT_KIND,
+                    live_client_invocation=True,
+                    transport_execution_entered=True,
+                )
+            return HttpResponse(
+                response_status,
+                content,
+                _headers(response),
+                time.monotonic() - started,
+                network_attempted=True,
+                http_response_received=True,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+                transport_execution_entered=True,
+            )
         except HTTPError as error:
             try:
                 content = _read_bounded(error, self.max_response_bytes)
@@ -257,6 +317,7 @@ class LiveMddClient:
                     http_response_received=True,
                     transport_kind=LIVE_TRANSPORT_KIND,
                     live_client_invocation=True,
+                    transport_execution_entered=True,
                 )
             except Exception:
                 content = b""
@@ -269,6 +330,7 @@ class LiveMddClient:
                 http_response_received=True,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=True,
             )
         except ResponseTooLarge:
             return TransportFailure(
@@ -278,15 +340,19 @@ class LiveMddClient:
                 http_response_received=True,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=True,
             )
         except ValueError:
             return TransportFailure(
                 REQUEST_CONTRACT_FAILURE,
                 "request contract failure",
-                network_attempted=True,
+                # The exception occurred after entering the transport path;
+                # it is not evidence that the provider received no bytes.
+                network_attempted=False,
                 http_response_received=False,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=transport_execution_entered,
             )
         except (OSError, URLError, TimeoutError) as error:
             return TransportFailure(
@@ -296,6 +362,19 @@ class LiveMddClient:
                 http_response_received=False,
                 transport_kind=LIVE_TRANSPORT_KIND,
                 live_client_invocation=True,
+                transport_execution_entered=transport_execution_entered,
+            )
+        except Exception:
+            return TransportFailure(
+                "CLIENT_EXECUTION_FAILURE",
+                "live transport execution failure",
+                # A generic error after entering the transport path is
+                # ambiguous, not proof of a transmitted request.
+                network_attempted=False,
+                http_response_received=False,
+                transport_kind=LIVE_TRANSPORT_KIND,
+                live_client_invocation=True,
+                transport_execution_entered=transport_execution_entered,
             )
 
 

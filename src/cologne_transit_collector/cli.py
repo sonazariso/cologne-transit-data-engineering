@@ -67,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         manifest = _load_manifest(args, root)
         at_utc = _parse_utc(args.at_utc)
+        if args.at_utc is not None and args.mode not in {"plan", "dry-run", "simulate"}:
+            raise LiveModeBlocked(
+                "--at is permitted only for isolated offline validation; live and maintenance "
+                "paths must use their actual runtime clock"
+            )
         if args.mode == "plan":
             from .schedule import plan_for, schedule_reconciliation
 

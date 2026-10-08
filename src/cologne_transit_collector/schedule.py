@@ -26,6 +26,8 @@ def validate_launchd_wall_clock_schedule(plist: Mapping[str, Any]) -> dict[str, 
 
     if "StartInterval" in plist:
         raise ValueError("wall-clock Tiered50 schedule must not use StartInterval")
+    if "ThrottleInterval" in plist:
+        raise ValueError("wall-clock Tiered50 schedule must not override launchd throttling")
     if bool(plist.get("RunAtLoad")):
         raise ValueError("Tiered50 RunAtLoad must remain disabled")
     if plist.get("StartCalendarInterval") != launchd_wall_clock_schedule():

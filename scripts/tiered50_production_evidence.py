@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -33,12 +34,259 @@ from cologne_transit_collector.runtime_configuration import EXPECTED_SQL_DATABAS
 LEGACY_LABEL = "com.cologne-transit-intelligence.mdd-collector"
 TIERED_LABEL = "com.cologne-transit-intelligence.mdd-tiered50-collector"
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
+MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS = "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS"
 
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
     if isinstance(row, dict):
         return row.get(name)
     return row[index] if row is not None else None
+
+
+def _role_environment(role: str) -> tuple[dict[str, str], str]:
+    """Resolve runtime/admin connection inputs without cross-role fallback.
+
+    Runtime evidence may use the installed collector configuration.  Admin
+    evidence is different: every credential-bearing admin field must be
+    explicitly supplied under ``MSSQL_ADMIN_*``.  In particular, a partial
+    admin environment never inherits the runtime user or password.
+    """
+
+    if role == "admin":
+        values: dict[str, str] = {}
+        required: list[str] = []
+        for suffix in ("HOST", "DATABASE", "USER", "PASSWORD"):
+            name = f"MSSQL_ADMIN_{suffix}"
+            value = os.environ.get(name)
+            if value is None or not value.strip():
+                required.append(name)
+                continue
+            values[f"MSSQL_{suffix}"] = value
+        for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
+            name = f"MSSQL_ADMIN_{suffix}"
+            value = os.environ.get(name)
+            if value is not None and value.strip():
+                values[f"MSSQL_{suffix}"] = value
+        if required:
+            values["__ADMIN_MISSING_FIELDS__"] = ",".join(required)
+            return values, "MSSQL_ADMIN_*_REQUIRED"
+        return values, "MSSQL_ADMIN_*_EXPLICIT"
+
+    values = dict(os.environ)
+    prefix = role.upper()
+    found = False
+    for suffix in (
+        "HOST",
+        "DATABASE",
+        "USER",
+        "PASSWORD",
+        "PORT",
+        "LOGIN_TIMEOUT_SECONDS",
+        "QUERY_TIMEOUT_SECONDS",
+    ):
+        role_name = f"MSSQL_{prefix}_{suffix}"
+        if role_name in values:
+            values[f"MSSQL_{suffix}"] = values[role_name]
+            found = True
+    return values, (f"MSSQL_{prefix}_*" if found else "BASE_MSSQL_*_FALLBACK")
+
+
+def _sql_error_code(exc: BaseException) -> int | None:
+    match = re.search(r"\b(\d{3,5})\b", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def _sanitize_sql_reason(exc: BaseException) -> str:
+    """Retain diagnostic text without credential or physical-path leakage."""
+
+    reason = str(exc)
+    reason = re.sub(
+        r"(?i)(password|secret|token|apikey|credential)\s*[=:]\s*[^,;\s]+",
+        r"\1=<redacted>",
+        reason,
+    )
+    reason = re.sub(r"(?i)(?:[A-Za-z]:[\\/]|/)[^\s']+", "<path redacted>", reason)
+    return reason[:500]
+
+
+def _statement_id(statement: str) -> str:
+    normalized = " ".join(statement.lower().split())
+    if "dm_os_volume_stats" in normalized:
+        return "capacity.volume_capacity_dm_os_volume_stats"
+    if "dm_db_log_space_usage" in normalized:
+        return "capacity.database_log_space_dm_db_log_space_usage"
+    if "backupset" in normalized or "backupmediafamily" in normalized:
+        return "backup.latest_full_backup_history"
+    if "restore verifyonly" in normalized:
+        return "backup.restore_verifyonly_with_checksum"
+    if "sys.database_files" in normalized:
+        return "capacity.database_files"
+    if "mddmac" in normalized or "mdd_mac" in normalized:
+        return "collector_runtime_history_or_materialization"
+    if "@@servername" in normalized or "suser_sname" in normalized:
+        return "admin.identity"
+    return "admin.read_only_query"
+
+
+def _evaluate_admin_permissions(permission_values: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the minimum read-only evidence permissions returned by SQL Server."""
+
+    def granted(name: str) -> bool:
+        return permission_values.get(name) in (1, True, "1", "TRUE", "true")
+
+    try:
+        product_major_version = int(permission_values.get("product_major_version") or 0)
+    except (TypeError, ValueError):
+        product_major_version = 0
+    if product_major_version >= 16:
+        server_dmv_permission = "VIEW SERVER PERFORMANCE STATE"
+        server_dmv_granted = granted("has_view_server_performance_state")
+    elif product_major_version > 0:
+        server_dmv_permission = "VIEW SERVER STATE"
+        server_dmv_granted = granted("has_view_server_state")
+    else:
+        server_dmv_permission = "VIEW SERVER STATE or VIEW SERVER PERFORMANCE STATE"
+        server_dmv_granted = granted("has_view_server_state") or granted("has_view_server_performance_state")
+
+    checks = {
+        "database_view_definition": granted("has_view_definition"),
+        "server_dmv_state": server_dmv_granted,
+        "backup_history_backupset_select": granted("has_msdb_backupset_select"),
+        "backup_history_backupmediafamily_select": granted("has_msdb_backupmediafamily_select"),
+        "operational_history_database_select": granted("has_database_select"),
+        # RESTORE VERIFYONLY is an administrative operation. SQL Server
+        # versions expose its authorization through database-creation or
+        # equivalent administrative role membership rather than a distinct
+        # VERIFYONLY permission name.
+        "backup_verifyonly_authorization": (
+            granted("has_create_any_database")
+            or granted("is_sysadmin")
+            or granted("is_dbcreator")
+        ),
+    }
+    missing = [name for name, present in checks.items() if not present]
+    return {
+        "status": "PASS" if not missing else "NOT_PROVEN",
+        "product_major_version": product_major_version or None,
+        "server_dmv_required_permission": server_dmv_permission,
+        "permission_checks": checks,
+        "missing_permissions": missing,
+    }
+
+
+class _SafeAdminCursor:
+    """Keep one denied admin statement from hiding independent evidence."""
+
+    def __init__(self, connection: Any, failures: list[dict[str, Any]]) -> None:
+        self._connection = connection
+        self._failures = failures
+        self._cursor: Any | None = None
+        self._last_statement = ""
+        self._last_statement_id = ""
+        self._failed = False
+        self.last_failure: dict[str, Any] | None = None
+
+    def _record_failure(self, exc: BaseException, *, phase: str = "execute") -> None:
+        failure = {
+            "statement_id": self._last_statement_id or "admin.read_only_query",
+            "phase": phase,
+            "statement": self._last_statement,
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": _sanitize_sql_reason(exc),
+            "status": "NOT_PROVEN",
+        }
+        self.last_failure = failure
+        self._failures.append(failure)
+
+    def execute(self, statement: str, params: Any = None) -> None:
+        self._last_statement = " ".join(str(statement).strip().split())
+        self._last_statement_id = _statement_id(self._last_statement)
+        self._failed = False
+        self.last_failure = None
+        try:
+            if self._cursor is None:
+                self._cursor = self._connection.cursor()
+            if params is None:
+                self._cursor.execute(statement)
+            else:
+                self._cursor.execute(statement, params)
+        except Exception as exc:
+            self._failed = True
+            self._record_failure(exc)
+
+    def fetchone(self) -> Any:
+        if self._failed:
+            return None
+        try:
+            return self._cursor.fetchone() if self._cursor is not None else None
+        except Exception as exc:
+            self._failed = True
+            self._record_failure(exc, phase="fetchone")
+            return None
+
+    def fetchall(self) -> list[Any]:
+        if self._failed:
+            return []
+        try:
+            return list(self._cursor.fetchall()) if self._cursor is not None else []
+        except Exception as exc:
+            self._failed = True
+            self._record_failure(exc, phase="fetchall")
+            return []
+
+
+def _query_evidence(cursor: _SafeAdminCursor, *, statement_id: str) -> dict[str, Any]:
+    """Return explicit query status; never turn a denied query into zeros."""
+
+    if cursor.last_failure is not None:
+        return dict(cursor.last_failure)
+    return {"status": "PASS", "statement_id": statement_id}
+
+
+class _UnavailableConnection:
+    """Cursor-compatible placeholder used when the admin connection itself fails."""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def cursor(self) -> Any:
+        error = self._error
+
+        class _UnavailableCursor:
+            def execute(self, *_args: Any, **_kwargs: Any) -> None:
+                raise error
+
+            def fetchone(self) -> None:
+                return None
+
+            def fetchall(self) -> list[Any]:
+                return []
+
+        return _UnavailableCursor()
+
+    def close(self) -> None:
+        return None
+
+
+def _safe_runtime_read(label: str, callback: Any) -> dict[str, Any]:
+    try:
+        value = callback()
+        if isinstance(value, dict):
+            result = dict(value)
+            result.setdefault("status", "PASS")
+            result["evidence_role"] = "DEDICATED_RUNTIME_LOGIN"
+            return result
+        return {"status": "PASS", "value": value, "evidence_role": "DEDICATED_RUNTIME_LOGIN"}
+    except Exception as exc:
+        return {
+            "status": "NOT_PROVEN",
+            "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+            "read": label,
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+        }
 
 
 def _command(command: list[str], *, limit: int = 5000) -> dict[str, Any]:
@@ -94,8 +342,15 @@ def _plist_state(path: Path) -> dict[str, Any]:
 
 
 def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
-    """Run VERIFYONLY on a path read from msdb, with no path in output."""
+    """Run VERIFYONLY on a path read from msdb, with no path in output.
 
+    Error 3013 is deliberately reported as undetermined.  It can accompany a
+    permission, service-account file-access, driver, unavailable-file, or
+    integrity problem; the evidence must retain those alternatives until the
+    server-side diagnostics resolve them.
+    """
+
+    statement = "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM"
     try:
         autocommit = getattr(connection, "autocommit", None)
         if callable(autocommit):
@@ -107,9 +362,107 @@ def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
             cursor.fetchall()
         except Exception:
             pass
-        return {"status": "PASS"}
+        return {
+            "status": "PASS",
+            "statement_id": "backup.restore_verifyonly_with_checksum",
+            "statement": statement,
+            "checksum_verified": True,
+            "cause_classification": "VERIFIED",
+        }
     except Exception as exc:
-        return {"status": "NOT_PROVEN", "error_type": type(exc).__name__}
+        return {
+            "status": "NOT_PROVEN",
+            "statement_id": "backup.restore_verifyonly_with_checksum",
+            "statement": statement,
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": _sanitize_sql_reason(exc),
+            "diagnostic_messages": [_sanitize_sql_reason(exc)],
+            "cause_classification": "UNDETERMINED",
+            "checksum_verified": False,
+        }
+
+
+def _safe_backup_access_diagnostics(connection: Any, path: str) -> dict[str, Any]:
+    """Probe server-side backup visibility without changing production data."""
+
+    result: dict[str, Any] = {
+        "statement_id": "backup.server_side_file_access",
+        "statement": "EXEC master.dbo.xp_fileexist N'<backup path redacted>'",
+        "execution_context": "SQL_SERVER_SERVICE_ACCOUNT",
+        "status": "NOT_PROVEN",
+    }
+    try:
+        cursor = connection.cursor()
+        escaped = str(path).replace("'", "''")
+        cursor.execute(f"EXEC master.dbo.xp_fileexist N'{escaped}'")
+        rows = []
+        try:
+            rows = list(cursor.fetchall())
+        except Exception:
+            row = cursor.fetchone()
+            if row is not None:
+                rows = [row]
+        row = rows[0] if rows else None
+        file_exists = _row_value(row, "File Exists", 0) if row is not None else None
+        parent_exists = _row_value(row, "Parent Directory Exists", 2) if row is not None else None
+        result.update(
+            {
+                "status": "PASS" if bool(file_exists) else "NOT_PROVEN",
+                "file_exists": bool(file_exists),
+                "parent_directory_exists": bool(parent_exists),
+            }
+        )
+        if not file_exists:
+            result["reason"] = "SQL Server service-account file visibility was not proven"
+    except Exception as exc:
+        result.update(
+            {
+                "status": "NOT_PROVEN",
+                "error_code": _sql_error_code(exc),
+                "error_type": type(exc).__name__,
+                "reason": _sanitize_sql_reason(exc),
+            }
+        )
+    return result
+
+
+def _safe_backup_header(connection: Any, path: str) -> dict[str, Any]:
+    """Read backup header metadata without treating it as checksum proof."""
+
+    result: dict[str, Any] = {
+        "statement_id": "backup.restore_headeronly",
+        "statement": "RESTORE HEADERONLY FROM DISK = N'<backup path redacted>'",
+        "status": "NOT_PROVEN",
+    }
+    try:
+        cursor = connection.cursor()
+        escaped = str(path).replace("'", "''")
+        cursor.execute(f"RESTORE HEADERONLY FROM DISK = N'{escaped}'")
+        try:
+            rows = list(cursor.fetchall())
+        except Exception:
+            rows = []
+        result.update(
+            {
+                "status": "PASS" if rows else "NOT_PROVEN",
+                "header_row_count": len(rows),
+                "checksum_verified": False,
+            }
+        )
+        if not rows:
+            result["reason"] = "RESTORE HEADERONLY returned no rows"
+    except Exception as exc:
+        result.update(
+            {
+                "status": "NOT_PROVEN",
+                "error_code": _sql_error_code(exc),
+                "error_type": type(exc).__name__,
+                "reason": _sanitize_sql_reason(exc),
+                "diagnostic_messages": [_sanitize_sql_reason(exc)],
+            }
+        )
+    return result
 
 
 def collect() -> dict[str, Any]:
@@ -118,7 +471,8 @@ def collect() -> dict[str, Any]:
     legacy_plist = user_agent_dir / f"{LEGACY_LABEL}.plist"
     tiered_plist = user_agent_dir / f"{TIERED_LABEL}.plist"
     evidence: dict[str, Any] = {
-        "artifact_version": "TIERED50_PRODUCTION_EVIDENCE_V1",
+        "artifact_version": "TIERED50_PRODUCTION_EVIDENCE_V2",
+        "capture_role": "CURRENT_READ_ONLY_ROLE_SEPARATED_CAPTURE",
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
         "mdd_requests_issued": 0,
         "writes_performed": 0,
@@ -140,28 +494,173 @@ def collect() -> dict[str, Any]:
         _command([vmrun, "list"]) if Path(vmrun).exists() else {"status": "NOT_OBSERVABLE", "reason": "vmrun unavailable"}
     )
 
-    settings = MssqlConnectionSettings.from_environment()
-    if settings.database != EXPECTED_SQL_DATABASE:
-        raise RuntimeError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
-    persistence = MssqlPersistence(settings=settings)
-    evidence["sql"] = {
-        "connection": settings.redacted(),
-        "runtime_login": persistence.runtime_login_status(),
-        "runtime_schema": persistence.validate_runtime_schema(),
-        "tiered50_schema": persistence.validate_tiered50_runtime_schema(),
-        "quota_usage": persistence.current_month_usage(at_utc=generated_at),
+    runtime_environment, runtime_role_source = _role_environment("runtime")
+    admin_environment, admin_role_source = _role_environment("admin")
+    sql_evidence: dict[str, Any] = {
+        "runtime_role_source": runtime_role_source,
+        "admin_role_source": admin_role_source,
+        "privileged_query_failures": [],
+        "permission_error_297": [],
     }
-
-    connection = connect_mssql(settings)
     try:
-        cursor = connection.cursor()
+        runtime_settings = MssqlConnectionSettings.from_environment(runtime_environment)
+        runtime_persistence = MssqlPersistence(settings=runtime_settings)
+        sql_evidence["runtime_connection"] = runtime_settings.redacted()
+        sql_evidence["runtime_login"] = _safe_runtime_read(
+            "runtime_login_status", runtime_persistence.runtime_login_status
+        )
+        sql_evidence["runtime_schema"] = _safe_runtime_read(
+            "validate_runtime_schema", runtime_persistence.validate_runtime_schema
+        )
+        sql_evidence["tiered50_schema"] = _safe_runtime_read(
+            "validate_tiered50_runtime_schema", runtime_persistence.validate_tiered50_runtime_schema
+        )
+        sql_evidence["quota_usage"] = _safe_runtime_read(
+            "current_month_usage", lambda: runtime_persistence.current_month_usage(at_utc=generated_at)
+        )
+    except Exception as exc:
+        sql_evidence["runtime_connection"] = {
+            "status": "NOT_PROVEN",
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+        }
+        for name in ("runtime_login", "runtime_schema", "tiered50_schema", "quota_usage"):
+            sql_evidence[name] = {
+                "status": "NOT_PROVEN",
+                "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+                "reason": "runtime connection configuration was unavailable",
+            }
+
+    admin_configuration_error: BaseException | None = None
+    admin_settings: MssqlConnectionSettings | None = None
+    try:
+        missing_admin = str(admin_environment.get("__ADMIN_MISSING_FIELDS__") or "")
+        if missing_admin:
+            raise RuntimeError(
+                f"{MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS}: explicitly configure {missing_admin}"
+            )
+        admin_settings = MssqlConnectionSettings.from_environment(
+            {key: value for key, value in admin_environment.items() if not key.startswith("__")}
+        )
+        if admin_settings.database != EXPECTED_SQL_DATABASE:
+            raise RuntimeError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
+        sql_evidence["admin_connection"] = {
+            "status": "NOT_PROVEN",
+            "connection_status": "CONFIGURED",
+            "authorization_status": "NOT_PROVEN",
+            "connection": admin_settings.redacted(),
+            "evidence_role": "PRIVILEGED_READ_ONLY_ADMIN",
+        }
+    except Exception as exc:
+        admin_configuration_error = exc
+        sql_evidence["admin_connection"] = {
+            "status": "NOT_PROVEN",
+            "connection_status": "NOT_CONFIGURED",
+            "authorization_status": "NOT_PROVEN",
+            "evidence_role": "PRIVILEGED_READ_ONLY_ADMIN",
+            "blocker_code": MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS,
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": _sanitize_sql_reason(exc),
+        }
+
+    try:
+        if admin_configuration_error is not None or admin_settings is None:
+            raise admin_configuration_error or RuntimeError("admin SQL configuration is unavailable")
+        connection = connect_mssql(admin_settings)
+        sql_evidence["admin_connection"]["connection_status"] = "PASS"
+    except Exception as exc:
+        sql_evidence["admin_connection"] = {
+            **sql_evidence.get("admin_connection", {}),
+            "status": "NOT_PROVEN",
+            "connection_status": "FAILED",
+            "authorization_status": "NOT_PROVEN",
+            "blocker_code": MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS,
+            "error_code": _sql_error_code(exc),
+            "error_type": type(exc).__name__,
+            "reason": _sanitize_sql_reason(exc),
+        }
+        connection = _UnavailableConnection(exc)
+    evidence["sql"] = sql_evidence
+    try:
+        cursor = _SafeAdminCursor(connection, evidence["sql"]["privileged_query_failures"])
         cursor.execute("SELECT @@SERVERNAME AS ServerName, DB_NAME() AS DatabaseName, SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc")
         identity = cursor.fetchone()
+        identity_failure = cursor.last_failure
+        effective_login = str(_row_value(identity, "LoginName", 2) or "")
+        runtime_login = str(
+            (sql_evidence.get("runtime_login") or {}).get("login_name")
+            if isinstance(sql_evidence.get("runtime_login"), dict)
+            else ""
+        )
         evidence["sql"]["identity"] = {
+            "status": "PASS" if identity_failure is None and effective_login else "NOT_PROVEN",
             "server_name": str(_row_value(identity, "ServerName", 0) or ""),
             "database_name": str(_row_value(identity, "DatabaseName", 1) or ""),
-            "login_name": str(_row_value(identity, "LoginName", 2) or ""),
+            "login_name": effective_login,
             "captured_at_utc": _row_value(identity, "CapturedAtUtc", 3),
+        }
+        cursor.execute(
+            """
+            SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS product_major_version,
+                   IS_SRVROLEMEMBER(N'sysadmin') AS is_sysadmin,
+                   IS_SRVROLEMEMBER(N'serveradmin') AS is_serveradmin,
+                   IS_SRVROLEMEMBER(N'securityadmin') AS is_securityadmin,
+                   IS_SRVROLEMEMBER(N'dbcreator') AS is_dbcreator,
+                   IS_MEMBER(N'db_owner') AS is_db_owner,
+                   HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DEFINITION') AS has_view_definition,
+                   HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DATABASE STATE') AS has_view_database_state,
+                   HAS_PERMS_BY_NAME(NULL, N'SERVER', N'VIEW SERVER STATE') AS has_view_server_state,
+                   HAS_PERMS_BY_NAME(NULL, N'SERVER', N'VIEW SERVER PERFORMANCE STATE') AS has_view_server_performance_state,
+                   HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'BACKUP DATABASE') AS has_backup_database,
+                   HAS_PERMS_BY_NAME(NULL, N'SERVER', N'CREATE ANY DATABASE') AS has_create_any_database,
+                   HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'SELECT') AS has_database_select,
+                   HAS_PERMS_BY_NAME(N'msdb.dbo.backupset', N'OBJECT', N'SELECT') AS has_msdb_backupset_select,
+                   HAS_PERMS_BY_NAME(N'msdb.dbo.backupmediafamily', N'OBJECT', N'SELECT') AS has_msdb_backupmediafamily_select
+            """
+        )
+        permission_row = cursor.fetchone()
+        permission_failure = cursor.last_failure
+        permission_fields = (
+            "product_major_version",
+            "is_sysadmin",
+            "is_serveradmin",
+            "is_securityadmin",
+            "is_dbcreator",
+            "is_db_owner",
+            "has_view_definition",
+            "has_view_database_state",
+            "has_view_server_state",
+            "has_view_server_performance_state",
+            "has_backup_database",
+            "has_create_any_database",
+            "has_database_select",
+            "has_msdb_backupset_select",
+            "has_msdb_backupmediafamily_select",
+        )
+        if permission_failure is None and permission_row is not None:
+            permission_values = {
+                field: _row_value(permission_row, field, index)
+                for index, field in enumerate(permission_fields)
+            }
+            evidence["sql"]["admin_permissions"] = {
+                **permission_values,
+                **_evaluate_admin_permissions(permission_values),
+            }
+        else:
+            evidence["sql"]["admin_permissions"] = {
+                "status": "NOT_PROVEN",
+                "reason": "effective SQL permission inspection failed",
+            }
+        same_as_runtime = bool(effective_login and runtime_login and effective_login.casefold() == runtime_login.casefold())
+        evidence["sql"]["admin_identity_gate"] = {
+            "status": "NOT_PROVEN" if identity_failure is not None or not effective_login else (
+                "FAILED" if same_as_runtime else "PASS"
+            ),
+            "effective_login": effective_login,
+            "runtime_login_match": same_as_runtime,
+            "reason": "administrative identity matches the dedicated runtime login" if same_as_runtime else None,
         }
         cursor.execute(
             """
@@ -171,6 +670,8 @@ def collect() -> dict[str, Any]:
             ORDER BY file_id
             """
         )
+        database_files_evidence = _query_evidence(cursor, statement_id="capacity.database_files")
+        database_file_rows = cursor.fetchall()
         evidence["sql"]["database_files"] = [
             {
                 "name": str(_row_value(row, "name", 0)),
@@ -181,8 +682,9 @@ def collect() -> dict[str, Any]:
                 "max_size_pages": int(_row_value(row, "max_size", 5)),
                 "space_used_pages": int(_row_value(row, "space_used_pages", 6) or 0),
             }
-            for row in cursor.fetchall()
+            for row in database_file_rows
         ]
+        evidence["sql"]["database_files_evidence"] = database_files_evidence
         cursor.execute(
             """
             SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes
@@ -191,14 +693,17 @@ def collect() -> dict[str, Any]:
             ORDER BY vs.volume_mount_point
             """
         )
+        volume_evidence = _query_evidence(cursor, statement_id="capacity.volume_capacity_dm_os_volume_stats")
+        volume_rows = cursor.fetchall()
         evidence["sql"]["volume_capacity"] = [
             {
                 "volume": str(_row_value(row, "volume_mount_point", 0) or ""),
                 "total_bytes": int(_row_value(row, "total_bytes", 1) or 0),
                 "available_bytes": int(_row_value(row, "available_bytes", 2) or 0),
             }
-            for row in cursor.fetchall()
+            for row in volume_rows
         ]
+        evidence["sql"]["volume_capacity_evidence"] = volume_evidence
         cursor.execute(
             """
             SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent
@@ -206,12 +711,18 @@ def collect() -> dict[str, Any]:
             WHERE database_id = DB_ID()
             """
         )
+        log_space_evidence = _query_evidence(cursor, statement_id="capacity.database_log_space_dm_db_log_space_usage")
         log_row = cursor.fetchone()
-        evidence["sql"]["log_space"] = {
-            "total_bytes": int(_row_value(log_row, "total_log_size_in_bytes", 0) or 0),
-            "used_bytes": int(_row_value(log_row, "used_log_space_in_bytes", 1) or 0),
-            "used_percent": float(_row_value(log_row, "used_log_space_in_percent", 2) or 0),
-        }
+        evidence["sql"]["log_space"] = (
+            {
+                "total_bytes": int(_row_value(log_row, "total_log_size_in_bytes", 0)),
+                "used_bytes": int(_row_value(log_row, "used_log_space_in_bytes", 1)),
+                "used_percent": float(_row_value(log_row, "used_log_space_in_percent", 2)),
+            }
+            if log_space_evidence.get("status") == "PASS" and log_row is not None
+            else None
+        )
+        evidence["sql"]["log_space_evidence"] = log_space_evidence
         cursor.execute(
             """
             SELECT TOP (1) bs.backup_finish_date, bs.is_copy_only,
@@ -224,6 +735,7 @@ def collect() -> dict[str, Any]:
             ORDER BY bs.backup_finish_date DESC
             """
         )
+        backup_history_evidence = _query_evidence(cursor, statement_id="backup.latest_full_backup_history")
         backup = cursor.fetchone()
         backup_path = str(_row_value(backup, "physical_device_name", 4) or "") if backup else ""
         evidence["sql"]["latest_full_backup"] = (
@@ -234,17 +746,53 @@ def collect() -> dict[str, Any]:
                 "compressed_backup_size": int(_row_value(backup, "compressed_backup_size", 3) or 0),
                 "device_name_present": bool(backup_path),
             }
-            if backup
+            if backup_history_evidence.get("status") == "PASS" and backup
             else None
         )
+        evidence["sql"]["latest_full_backup_evidence"] = backup_history_evidence
         if backup_path:
-            verify_connection = connect_mssql(settings)
             try:
-                evidence["sql"]["backup_verifyonly"] = _safe_backup_verify(verify_connection, backup_path)
-            finally:
-                verify_connection.close()
+                if admin_settings is None:
+                    raise RuntimeError("admin SQL settings are unavailable")
+                verify_connection = connect_mssql(admin_settings)
+                try:
+                    evidence["sql"]["backup_server_side_access"] = _safe_backup_access_diagnostics(
+                        verify_connection, backup_path
+                    )
+                    evidence["sql"]["backup_headeronly"] = _safe_backup_header(
+                        verify_connection, backup_path
+                    )
+                    evidence["sql"]["backup_verifyonly"] = _safe_backup_verify(verify_connection, backup_path)
+                finally:
+                    verify_connection.close()
+            except Exception as exc:
+                evidence["sql"]["backup_verifyonly"] = {
+                    "status": "NOT_PROVEN",
+                    "statement_id": "backup.restore_verifyonly_with_checksum",
+                    "statement": "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM",
+                    "error_code": _sql_error_code(exc),
+                    "error_type": type(exc).__name__,
+                    "reason": _sanitize_sql_reason(exc),
+                    "cause_classification": "UNDETERMINED",
+                }
         else:
-            evidence["sql"]["backup_verifyonly"] = {"status": "NOT_PROVEN", "reason": "no full backup path"}
+            evidence["sql"]["backup_server_side_access"] = {
+                "status": "NOT_PROVEN",
+                "statement_id": "backup.server_side_file_access",
+                "reason": "no full backup path was returned by msdb history",
+            }
+            evidence["sql"]["backup_headeronly"] = {
+                "status": "NOT_PROVEN",
+                "statement_id": "backup.restore_headeronly",
+                "reason": "no full backup path was returned by msdb history",
+            }
+            evidence["sql"]["backup_verifyonly"] = {
+                "status": "NOT_PROVEN",
+                "statement_id": "backup.restore_verifyonly_with_checksum",
+                "statement": "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM",
+                "reason": "no full backup path was returned by msdb history",
+                "cause_classification": "UNDETERMINED",
+            }
 
         cursor.execute(
             f"""
@@ -257,14 +805,17 @@ def collect() -> dict[str, Any]:
             """,
             ("TIERED50_PANEL_V1", "Tiered50"),
         )
+        materialization_evidence = _query_evidence(cursor, statement_id="collector.tiered50_materialization")
         targets = cursor.fetchone()
         evidence["sql"]["tiered50_materialization"] = {
-            "target_count": int(_row_value(targets, "total_count", 0) or 0),
-            "active_count": int(_row_value(targets, "active_count", 1) or 0),
-            "prepared_count": int(_row_value(targets, "prepared_count", 2) or 0),
-            "minimum_id": int(_row_value(targets, "minimum_id", 3) or 0),
-            "maximum_id": int(_row_value(targets, "maximum_id", 4) or 0),
+            "status": materialization_evidence.get("status", "NOT_PROVEN"),
+            "target_count": int(_row_value(targets, "total_count", 0) or 0) if targets else None,
+            "active_count": int(_row_value(targets, "active_count", 1) or 0) if targets else None,
+            "prepared_count": int(_row_value(targets, "prepared_count", 2) or 0) if targets else None,
+            "minimum_id": int(_row_value(targets, "minimum_id", 3) or 0) if targets else None,
+            "maximum_id": int(_row_value(targets, "maximum_id", 4) or 0) if targets else None,
         }
+        evidence["sql"]["tiered50_materialization_evidence"] = materialization_evidence
         cursor.execute(
             """
             SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count,
@@ -277,6 +828,7 @@ def collect() -> dict[str, Any]:
             ORDER BY LogicalDueBucket DESC
             """
         )
+        legacy_audit_evidence = _query_evidence(cursor, statement_id="collector.legacy7_audit_history")
         audit_rows = list(cursor.fetchall())
         recent = [
             {
@@ -289,6 +841,7 @@ def collect() -> dict[str, Any]:
             for row in audit_rows
         ]
         evidence["sql"]["legacy7_recent_audit_buckets"] = recent[:12]
+        evidence["sql"]["legacy7_audit_history_evidence"] = legacy_audit_evidence
         if recent:
             latest_bucket = recent[0]["logical_due_bucket"]
             expected = list(range(latest_bucket - 5, latest_bucket + 1))
@@ -312,6 +865,7 @@ def collect() -> dict[str, Any]:
             ORDER BY CompletedAtUtc DESC, MacCollectorRunId DESC
             """
         )
+        final_run_evidence = _query_evidence(cursor, statement_id="collector.legacy7_final_run")
         final_run = cursor.fetchone()
         evidence["sql"]["final_legacy7_run"] = (
             {
@@ -323,6 +877,7 @@ def collect() -> dict[str, Any]:
             if final_run
             else None
         )
+        evidence["sql"]["final_legacy7_run_evidence"] = final_run_evidence
         cursor.execute(
             """
             SELECT TOP (20) h.HttpStatus, h.NetworkAttempted, h.HttpResponseReceived,
@@ -333,6 +888,7 @@ def collect() -> dict[str, Any]:
             ORDER BY h.CompletedAtUtc DESC
             """
         )
+        recent_http_evidence = _query_evidence(cursor, statement_id="collector_runtime_history_or_materialization")
         evidence["sql"]["recent_http_attempts"] = [
             {
                 "http_status": _row_value(row, "HttpStatus", 0),
@@ -343,6 +899,7 @@ def collect() -> dict[str, Any]:
             }
             for row in cursor.fetchall()
         ]
+        evidence["sql"]["recent_http_attempts_evidence"] = recent_http_evidence
         cursor.execute(
             """
             SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count,
@@ -357,6 +914,7 @@ def collect() -> dict[str, Any]:
             ORDER BY LogicalDueBucket ASC
             """
         )
+        tiered_audit_evidence = _query_evidence(cursor, statement_id="collector.tiered50_audit_history")
         tiered_rows = list(cursor.fetchall())
         evidence["sql"]["tiered50_recent_audit_buckets"] = [
             {
@@ -370,6 +928,7 @@ def collect() -> dict[str, Any]:
             }
             for row in tiered_rows
         ]
+        evidence["sql"]["tiered50_audit_history_evidence"] = tiered_audit_evidence
         tiered_by_bucket = {
             int(_row_value(row, "LogicalDueBucket", 0)): {
                 "audit_count": int(_row_value(row, "audit_count", 1) or 0),
@@ -411,10 +970,12 @@ def collect() -> dict[str, Any]:
             ORDER BY MacCollectorRunId ASC
             """
         )
+        first_run_evidence = _query_evidence(cursor, statement_id="collector.tiered50_first_run")
         first_tiered_run = cursor.fetchone()
         first_cycle: dict[str, Any] = {
             "observed": bool(first_tiered_run),
-            "validation_status": "NOT_OBSERVED",
+            "validation_status": "NOT_OBSERVED" if first_run_evidence.get("status") == "PASS" else "NOT_PROVEN",
+            "run_query_evidence": first_run_evidence,
         }
         if first_tiered_run:
             first_bucket = int(_row_value(first_tiered_run, "LogicalDueBucket", 1) or 0)
@@ -440,6 +1001,7 @@ def collect() -> dict[str, Any]:
                 """,
                 (first_bucket,),
             )
+            audit_summary_evidence = _query_evidence(cursor, statement_id="collector.tiered50_first_run_audits")
             audit_summary = cursor.fetchone()
             cursor.execute(
                 """
@@ -456,6 +1018,7 @@ def collect() -> dict[str, Any]:
                 """,
                 (first_bucket,),
             )
+            attempt_summary_evidence = _query_evidence(cursor, statement_id="collector.tiered50_first_run_attempts")
             attempt_summary = cursor.fetchone()
             cursor.execute(
                 """
@@ -473,6 +1036,7 @@ def collect() -> dict[str, Any]:
                 """,
                 (first_bucket,),
             )
+            permit_summary_evidence = _query_evidence(cursor, statement_id="collector.tiered50_first_run_permits")
             permit_summary = cursor.fetchone()
             cursor.execute(
                 """
@@ -485,6 +1049,9 @@ def collect() -> dict[str, Any]:
                 ORDER BY persistence_outcome
                 """,
                 (first_bucket,),
+            )
+            persistence_summary_evidence = _query_evidence(
+                cursor, statement_id="collector.tiered50_first_run_persistence"
             )
             persistence_summary = [
                 {
@@ -500,29 +1067,81 @@ def collect() -> dict[str, Any]:
                 "started_at_utc": _row_value(first_tiered_run, "StartedAtUtc", 2),
                 "completed_at_utc": _row_value(first_tiered_run, "CompletedAtUtc", 3),
                 "run_status": str(_row_value(first_tiered_run, "Status", 4) or ""),
-                "target_audits": int(_row_value(audit_summary, "target_audits", 0) or 0),
-                "successful_target_audits": int(_row_value(audit_summary, "succeeded", 1) or 0),
-                "skipped_target_audits": int(_row_value(audit_summary, "skipped", 2) or 0),
-                "failed_target_audits": int(_row_value(audit_summary, "failed", 3) or 0),
-                "persisted_target_audits": int(_row_value(audit_summary, "persisted", 5) or 0),
-                "audit_error_count": int(_row_value(audit_summary, "errors", 6) or 0),
-                "http_attempts": int(_row_value(attempt_summary, "attempts", 0) or 0),
-                "network_attempts": int(_row_value(attempt_summary, "network_attempts", 1) or 0),
-                "retry_attempts": int(_row_value(attempt_summary, "retries", 2) or 0),
-                "http_responses": int(_row_value(attempt_summary, "responses", 3) or 0),
-                "transport_error_attempts": int(_row_value(attempt_summary, "transport_errors", 4) or 0),
-                "attempts_without_permit": int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0),
-                "quota_permits": int(_row_value(permit_summary, "quota_permits", 0) or 0),
-                "permitted_amount": int(_row_value(permit_summary, "permitted_amount", 1) or 0),
-                "initial_permits": int(_row_value(permit_summary, "initial_permits", 2) or 0),
-                "retry_permits": int(_row_value(permit_summary, "retry_permits", 3) or 0),
-                "confirmed_permits": int(_row_value(permit_summary, "confirmed_permits", 4) or 0),
-                "uncertain_permits": int(_row_value(permit_summary, "uncertain_permits", 5) or 0),
+                "target_audits": int(_row_value(audit_summary, "target_audits", 0) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "successful_target_audits": int(_row_value(audit_summary, "succeeded", 1) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "skipped_target_audits": int(_row_value(audit_summary, "skipped", 2) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "failed_target_audits": int(_row_value(audit_summary, "failed", 3) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "persisted_target_audits": int(_row_value(audit_summary, "persisted", 5) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "audit_error_count": int(_row_value(audit_summary, "errors", 6) or 0)
+                if audit_summary_evidence.get("status") == "PASS" and audit_summary is not None
+                else None,
+                "http_attempts": int(_row_value(attempt_summary, "attempts", 0) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "network_attempts": int(_row_value(attempt_summary, "network_attempts", 1) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "retry_attempts": int(_row_value(attempt_summary, "retries", 2) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "http_responses": int(_row_value(attempt_summary, "responses", 3) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "transport_error_attempts": int(_row_value(attempt_summary, "transport_errors", 4) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "attempts_without_permit": int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0)
+                if attempt_summary_evidence.get("status") == "PASS" and attempt_summary is not None
+                else None,
+                "quota_permits": int(_row_value(permit_summary, "quota_permits", 0) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
+                "permitted_amount": int(_row_value(permit_summary, "permitted_amount", 1) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
+                "initial_permits": int(_row_value(permit_summary, "initial_permits", 2) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
+                "retry_permits": int(_row_value(permit_summary, "retry_permits", 3) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
+                "confirmed_permits": int(_row_value(permit_summary, "confirmed_permits", 4) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
+                "uncertain_permits": int(_row_value(permit_summary, "uncertain_permits", 5) or 0)
+                if permit_summary_evidence.get("status") == "PASS" and permit_summary is not None
+                else None,
                 "persistence_outcomes": persistence_summary,
+                "query_evidence": {
+                    "audits": audit_summary_evidence,
+                    "attempts": attempt_summary_evidence,
+                    "permits": permit_summary_evidence,
+                    "persistence": persistence_summary_evidence,
+                },
                 "coverage": summary.get("coverage"),
                 "timing": summary.get("timing"),
                 "validation_status": (
-                    "PASS"
+                    "NOT_PROVEN"
+                    if any(
+                        item.get("status") != "PASS"
+                        for item in (
+                            audit_summary_evidence,
+                            attempt_summary_evidence,
+                            permit_summary_evidence,
+                            persistence_summary_evidence,
+                        )
+                    )
+                    else "PASS"
                     if int(_row_value(audit_summary, "failed", 3) or 0) == 0
                     and int(_row_value(audit_summary, "skipped", 2) or 0) == 0
                     and int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0) == 0
@@ -542,6 +1161,7 @@ def collect() -> dict[str, Any]:
             ORDER BY CutoverId DESC
             """
         )
+        cutover_evidence = _query_evidence(cursor, statement_id="collector.latest_cutover")
         cutover = cursor.fetchone()
         evidence["sql"]["latest_cutover_record"] = (
             {
@@ -553,15 +1173,116 @@ def collect() -> dict[str, Any]:
             if cutover
             else None
         )
+        evidence["sql"]["latest_cutover_evidence"] = cutover_evidence
     finally:
         connection.close()
+    privileged_failures = evidence["sql"]["privileged_query_failures"]
+    evidence["sql"]["permission_error_297"] = [
+        failure for failure in privileged_failures if failure.get("error_code") == 297
+    ]
+    volume_rows = evidence["sql"].get("volume_capacity") or []
+    volume_failure = any(
+        failure.get("statement_id") == "capacity.volume_capacity_dm_os_volume_stats"
+        for failure in privileged_failures
+    )
+    log_space = evidence["sql"].get("log_space")
+    log_space_evidence = evidence["sql"].get("log_space_evidence") or {}
+    log_space_ok = bool(
+        log_space_evidence.get("status") == "PASS"
+        and isinstance(log_space, dict)
+        and int(log_space.get("total_bytes", 0) or 0) > 0
+        and 0 <= float(log_space.get("used_percent", -1) or -1) <= 100
+    )
+    evidence["sql"]["log_space_gate"] = {
+        "status": "PASS" if log_space_ok else "NOT_PROVEN",
+        "reason": None if log_space_ok else "log-space DMV evidence is unavailable or invalid",
+        "required_statement_id": "capacity.database_log_space_dm_db_log_space_usage",
+    }
+    volume_ok = bool(
+        volume_rows
+        and not volume_failure
+        and evidence["sql"].get("volume_capacity_evidence", {}).get("status") == "PASS"
+        and all(int(row.get("available_bytes", 0) or 0) > 0 for row in volume_rows if isinstance(row, dict))
+    )
+    evidence["sql"]["capacity_gate"] = {
+        "status": "PASS" if volume_ok and log_space_ok else "NOT_PROVEN",
+        "reason": None
+        if volume_ok and log_space_ok
+        else "volume and log-space capacity evidence is incomplete or invalid",
+        "required_statement_ids": [
+            "capacity.volume_capacity_dm_os_volume_stats",
+            "capacity.database_log_space_dm_db_log_space_usage",
+        ],
+    }
+    backup_verify = evidence["sql"].get("backup_verifyonly") or {}
+    if backup_verify.get("status") != "PASS" and backup_verify.get("error_code") is not None:
+        evidence["sql"]["privileged_query_failures"].append(
+            {
+                "statement_id": backup_verify.get("statement_id", "backup.restore_verifyonly_with_checksum"),
+                "phase": "execute",
+                "statement": backup_verify.get("statement"),
+                "error_code": backup_verify.get("error_code"),
+                "error_type": backup_verify.get("error_type"),
+                "reason": backup_verify.get("reason"),
+                "status": "NOT_PROVEN",
+            }
+        )
+    evidence["sql"]["permission_error_297"] = [
+        failure
+        for failure in evidence["sql"]["privileged_query_failures"]
+        if failure.get("error_code") == 297
+    ]
+    evidence["sql"]["backup_gate"] = {
+        "status": "PASS" if backup_verify.get("status") == "PASS" else "NOT_PROVEN",
+        "reason": "backup verification did not complete successfully"
+        if backup_verify.get("status") != "PASS"
+        else None,
+        "required_statement_id": "backup.restore_verifyonly_with_checksum",
+    }
+    identity_gate = evidence["sql"].get("admin_identity_gate") or {}
+    permissions = evidence["sql"].get("admin_permissions") or {}
+    required_query_statuses = (
+        evidence["sql"].get("volume_capacity_evidence", {}).get("status"),
+        evidence["sql"].get("log_space_evidence", {}).get("status"),
+        evidence["sql"].get("latest_full_backup_evidence", {}).get("status"),
+        evidence["sql"].get("recent_http_attempts_evidence", {}).get("status"),
+        evidence["sql"].get("tiered50_audit_history_evidence", {}).get("status"),
+    )
+    admin_authorized = (
+        evidence["sql"].get("identity", {}).get("status") == "PASS"
+        and identity_gate.get("status") == "PASS"
+        and permissions.get("status") == "PASS"
+        and all(status == "PASS" for status in required_query_statuses)
+        and evidence["sql"].get("capacity_gate", {}).get("status") == "PASS"
+        and evidence["sql"].get("backup_gate", {}).get("status") == "PASS"
+    )
+    evidence["sql"]["admin_authorization"] = {
+        "status": "PASS" if admin_authorized else "NOT_PROVEN",
+        "required_query_statuses": {
+            "volume_capacity": required_query_statuses[0],
+            "log_space": required_query_statuses[1],
+            "latest_full_backup_history": required_query_statuses[2],
+            "operational_history": required_query_statuses[3],
+            "tiered50_audit_history": required_query_statuses[4],
+        },
+        "reason": None
+        if admin_authorized
+        else "one or more administrative identity, permission, capacity, backup, or operational-history checks is not proven",
+    }
+    admin_connection = evidence["sql"].get("admin_connection")
+    if isinstance(admin_connection, dict):
+        admin_connection["authorization_status"] = evidence["sql"]["admin_authorization"]["status"]
+        admin_connection["status"] = "PASS" if admin_authorized else "NOT_PROVEN"
+        if not admin_authorized:
+            admin_connection.setdefault("blocker_code", MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS)
     latest_cutover = evidence["sql"].get("latest_cutover_record") or {}
     latest_cutover_status = str(latest_cutover.get("status") or "") if isinstance(latest_cutover, dict) else ""
     tiered_plist = evidence["host"].get("tiered50_plist", {})
     evidence["status"] = (
         "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED"
         if latest_cutover_status == "OUTAGE"
-        or evidence["sql"]["tiered50_materialization"]["active_count"] == 0
+        or evidence["sql"].get("admin_authorization", {}).get("status") != "PASS"
+        or evidence["sql"]["tiered50_materialization"].get("active_count") in {None, 0}
         or bool(isinstance(tiered_plist, dict) and tiered_plist.get("disabled"))
         else "ACTIVE — VALIDATION INCOMPLETE"
     )

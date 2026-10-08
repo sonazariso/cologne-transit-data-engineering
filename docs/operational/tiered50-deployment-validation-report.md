@@ -10,12 +10,93 @@ the Tiered50 target state and sampling era, but the scheduled runtime was
 stopped after its first heartbeat failed the cadence gate. The separate
 versioned LaunchAgent is disabled and zero stations are currently collecting.
 
-Fresh validation confirms the final Legacy7 run, six consecutive expected
-Legacy7 buckets with accounted and successful SQL persistence, current SQL
-capacity, the latest checksum-verified native full backup, launchd state,
-Mac power/uptime evidence, and an observable VMware guest. Legacy7 was then
-unloaded and disabled. No Windows collector or competing Legacy7 writer is
-active, and no manual MDD or Heumarkt request was issued.
+The historical deployment evidence captured before this correction pass records
+the final Legacy7 run, six consecutive expected Legacy7 buckets with accounted
+and successful SQL persistence, SQL capacity, the latest checksum-verified
+native full backup, launchd state, Mac power/uptime evidence, and an observable
+VMware guest. Legacy7 was then unloaded and disabled. No Windows collector or
+competing Legacy7 writer was active in that evidence, and no manual MDD or
+Heumarkt request was issued.
+
+## Latest correction and gate reconciliation — 2026-10-08
+
+The source correction pass preserves the historical first-heartbeat record and
+does not change `TIERED50_PANEL_V1`, target identities, quota permits, October
+bootstrap authorization, Legacy7 retirement, or Power BI. It now accounts for
+the absolute UTC bucket deadline from actual post-preflight execution time,
+rejects production `--at` timestamps, fails closed when SQL UTC is unavailable,
+rechecks permit expiry with SQL UTC immediately before transmission, narrows
+the Stage 14 architecture-text exception to the direct SQL adapter, and
+removes the Tiered50 plist's `ThrottleInterval` override.
+
+The timing contract now distinguishes the derived UTC calendar boundary from
+observed Python module/process entry, main-function entry, preflight start and
+completion, settings/Collector construction, dispatcher entry, first target
+claim, first HTTP transmission, and completion. The launchd trigger itself is
+recorded as not independently observed. Wall-clock budget remaining is
+monotone non-increasing across clock corrections, while monotonic time remains
+the duration source. Late pending targets use one bounded idempotent skip-audit
+transaction with no retroactive target claims. The current fixed capacity is
+also explicit: 19 due targets at cap-2 and 30 seconds require ten request
+batches/300 seconds before the five-second safety margin and SQL, parsing, and
+audit overhead, so worst-case full coverage is not guaranteed.
+The disposable SQLite benchmark in
+[`tiered50-skip-audit-benchmark-20261008.json`](tiered50-skip-audit-benchmark-20261008.json)
+measured 19 current batch audits at 1.582 ms versus 7.033 ms for the former
+per-target start/complete shape (4.44x in that local run); this is an overhead
+comparison, not a production SQL latency percentile.
+
+This correction pass also fixed the SQL Server skip-audit construction defect:
+the source now binds all 28 target-audit columns in schema order, emits 28
+`%s` parameters per row, and rejects batches above 75 rows so no statement can
+exceed SQL Server's 2,100-parameter limit. The `MERGE` is insert-only for
+missing audit identities under `HOLDLOCK`; repeated batches are idempotent,
+existing running or terminal audits are not rewritten, and no target claim is
+created for a pre-claim skip. The offline DB-API statement-path regression
+covers 1/16/18/19-row batches, interrupted retries, and existing-audit
+conflicts. Actual SQL Server execution of this corrected statement remains
+NOT_PROVEN because no separately authorized administrative SQL identity was
+available in the current capture.
+
+Unexpected live-client exceptions now carry an explicit transport-entry
+boundary. Proven pre-network failures release their permit; exceptions after
+the live open/read/close path conservatively retain quota without claiming
+that a request was physically transmitted or that an HTTP response succeeded.
+Attempt-record persistence remains atomic; a persistence failure leaves the
+pending permit unavailable for crash recovery.
+
+The corrected Tiered50 artifact was installed locally in the disabled state and
+validated with `plutil`: `RunAtLoad=false`, twelve wall-clock minute entries
+`00..55`, no `StartInterval`, no `ThrottleInterval`, and no loaded launchd
+service. The read-only live preflight observed 43 materialized active rows
+(sampling IDs 8–50), the limited `CologneTransitCollector` login, no competing
+writer, current October quota accounting, and the Windows VM. It issued no MDD
+requests and performed no SQL writes.
+
+The fresh read-only evidence capture at
+[`tiered50-production-evidence-current-20261008.json`](tiered50-production-evidence-current-20261008.json)
+identified the exact SQL failures instead of aborting at the first exception.
+The current capture at `2026-10-08T15:22:22.531041Z` records separate
+connection, identity, permission, DMV, backup, and operational-history states
+without converting denied reads into zeros. It used the installed runtime
+login `CologneTransitCollector` for least-privilege evidence and reports
+`admin_role_source=MSSQL_ADMIN_*_REQUIRED`. No separately configured
+`MSSQL_ADMIN_*` identity was available, so the precise blocker is
+`MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`; no privileged query was falsely
+marked PASS. `log_space` is `null`, capacity and backup are `NOT_PROVEN`, and
+the administrative identity/permission gate is `NOT_PROVEN`. The earlier
+capture's sanitized observations of errors 297, 229, and 3013 remain
+historical unresolved findings; they were not reclassified as corruption or
+missing permission without a correctly authorized rerun. No SQL writes or MDD
+requests were issued. Tiered50 remains stopped, zero stations are currently
+collecting, and no catch-up request was issued. The historical first heartbeat
+remains the preserved 2-of-18 record below; a new successful six-bucket cycle
+has not been claimed.
+The permission gate now requires explicit evidence for the version-appropriate
+server DMV state permission, database definition/catalog access, `msdb` backup
+history reads, operational-history reads, and `CREATE ANY DATABASE` or an
+equivalent `RESTORE VERIFYONLY` authorization; a successful permission query
+with false grants is not treated as authorization.
 
 The administrator migration validation passed with historical preservation
 checks intact. The dedicated `CologneTransitCollector` login received the
@@ -67,7 +148,11 @@ headroom is not used as operational headroom. The original image is retained
 at `mdd-october-monitoring-dashboard.png` with SHA-256
 `9b25d4d28cf57f77feccb3b1da30e7e2c8629cec2319ff5a46877e3fac23088f`. The
 registered bootstrap overcounts the dashboard value with every locally observed
-October component through the explicit approval cutoff. No provider measurement
+October component through the explicit approval cutoff. The latest runtime
+ledger read shows `808` conservatively accounted October attempts (`721`
+confirmed HTTP responses plus `87` uncertain live attempts), `2` post-cutoff
+local attempts, and `0` pending permits; this is not provider-wide usage
+proof. No provider measurement
 cutoff, freshness, reset period/timezone, external-consumer reservation, or
 operational headroom has been fabricated.
 The existing SQL HTTP attempts,
@@ -98,9 +183,16 @@ its `approved` field remains false. The separate SQL authorization and
 machine-readable registration evidence are in
 [`mdd-october-conservative-bootstrap-evidence.json`](mdd-october-conservative-bootstrap-evidence.json).
 
+In the current capture, no administrative identity was accessed: the only
+effective SQL identity observed was the restricted runtime login
+`CologneTransitCollector`, and the admin evidence status is
+`MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`.
+
 Power BI and analytics permissions were not modified. No manual Heumarkt
 request was issued. Full sanitized machine-readable evidence is in
 [`tiered50-production-evidence.json`](tiered50-production-evidence.json),
+the current correction capture
+[`tiered50-production-evidence-current-20261008.json`](tiered50-production-evidence-current-20261008.json),
 [`mdd-october-conservative-bootstrap-evidence.json`](mdd-october-conservative-bootstrap-evidence.json),
 and [`tiered50-deployment-validation-evidence.json`](tiered50-deployment-validation-evidence.json).
 

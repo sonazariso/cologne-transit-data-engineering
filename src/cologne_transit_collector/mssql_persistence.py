@@ -101,6 +101,97 @@ class MssqlSafetyError(RuntimeError):
     """Raised when a prepared collector operation would cross its safety gate."""
 
 
+# SQL Server accepts at most 2,100 parameters in one prepared statement.  A
+# skipped-target audit carries one value for every target-audit column below;
+# keeping these values together makes the parameter-limit calculation and the
+# statement construction impossible to drift independently.
+MSSQL_PARAMETER_LIMIT = 2_100
+SKIPPED_TARGET_AUDIT_COLUMNS = (
+    "RunId",
+    "PanelVersion",
+    "TargetIdentity",
+    "StationName",
+    "Tier",
+    "PhaseIndex",
+    "NumberOfResults",
+    "LogicalDueBucket",
+    "SamplingEra",
+    "SamplingTargetId",
+    "SamplingSlot",
+    "SelectionPolicyVersion",
+    "ContinuityClassification",
+    "CollectionContext",
+    "StartedAtUtc",
+    "CompletedAtUtc",
+    "Status",
+    "HttpAttempts",
+    "HttpStatus",
+    "StopEventResultCount",
+    "ParserOutcome",
+    "PersistenceOutcome",
+    "ErrorCategory",
+    "DurationMs",
+    "SkipReason",
+    "RetryDecision",
+    "RetryOutcome",
+    "OutcomeJson",
+)
+SKIPPED_TARGET_AUDIT_PARAMETERS_PER_ROW = len(SKIPPED_TARGET_AUDIT_COLUMNS)
+MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT = (
+    MSSQL_PARAMETER_LIMIT // SKIPPED_TARGET_AUDIT_PARAMETERS_PER_ROW
+)
+
+
+def _build_skipped_target_audit_merge_statement(
+    rows: Sequence[Sequence[Any]],
+) -> tuple[str, tuple[Any, ...]]:
+    """Build the SQL Server skip-audit MERGE and its positional parameters.
+
+    ``pymssql`` uses ``%s`` placeholders.  The source and target column lists
+    deliberately come from the same tuple, and the MERGE has only an insert
+    arm: a late pre-claim skip is allowed to fill a missing audit row but is
+    never allowed to rewrite an audit or claim that another worker already
+    owns.
+    """
+
+    row_values = [tuple(row) for row in rows]
+    if not row_values:
+        raise ValueError("at least one skipped-target audit row is required")
+    if len(row_values) > MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT:
+        raise MssqlSafetyError(
+            "pre-claim skip batch exceeds the SQL Server 2,100-parameter limit; "
+            f"maximum supported rows per statement is {MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT}"
+        )
+    if any(len(row) != SKIPPED_TARGET_AUDIT_PARAMETERS_PER_ROW for row in row_values):
+        raise ValueError(
+            "skipped-target audit row parameter count does not match the target-audit column contract"
+        )
+
+    placeholders = "(" + ", ".join("%s" for _ in SKIPPED_TARGET_AUDIT_COLUMNS) + ")"
+    source_columns = ", ".join(SKIPPED_TARGET_AUDIT_COLUMNS)
+    source_values = ", ".join(placeholders for _ in row_values)
+    source_projection = ", ".join(f"source.{column}" for column in SKIPPED_TARGET_AUDIT_COLUMNS)
+    statement = f"""
+        SET NOCOUNT ON;
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+        MERGE ctl.MddMacTargetAudit WITH (HOLDLOCK) AS target
+        USING (VALUES {source_values}) AS source ({source_columns})
+          ON target.RunId = source.RunId
+         AND target.TargetIdentity = source.TargetIdentity
+         AND target.LogicalDueBucket = source.LogicalDueBucket
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT ({source_columns})
+            VALUES ({source_projection});
+        COMMIT TRANSACTION;
+    """
+    parameters = tuple(value for row in row_values for value in row)
+    expected_parameters = len(row_values) * SKIPPED_TARGET_AUDIT_PARAMETERS_PER_ROW
+    if len(parameters) != expected_parameters or len(parameters) > MSSQL_PARAMETER_LIMIT:
+        raise AssertionError("constructed skip-audit statement exceeds its SQL parameter contract")
+    return statement, parameters
+
+
 # These lists are deliberately separate.  The full list belongs to an
 # administrator/migration context; the runtime list is the smallest object
 # surface used by one normal Mac Legacy7 heartbeat and its read-only startup
@@ -924,6 +1015,13 @@ class MssqlPersistence:
         self.settings = settings or MssqlConnectionSettings.from_environment()
         self._connection_factory = connection_factory or (lambda: connect_mssql(self.settings))
         self.collection_context = collection_context
+        if (
+            (authorization_clock_fn is not None or allow_injected_authorization_time)
+            and collection_context != "OFFLINE_DEVELOPMENT"
+        ):
+            raise MssqlSafetyError(
+                "injected authorization clocks are permitted only in the isolated offline context"
+            )
         self._authorization_clock_fn = authorization_clock_fn
         self._allow_injected_authorization_time = bool(allow_injected_authorization_time)
         configured_raw = raw_evidence_directory or os.environ.get("MSSQL_RAW_EVIDENCE_DIR")
@@ -947,32 +1045,44 @@ class MssqlPersistence:
     def _cursor(connection: Any) -> Any:
         return connection.cursor()
 
-    def _authoritative_authorization_time(self, fallback: datetime) -> datetime:
+    def _authoritative_authorization_time(self, fallback: datetime, *, cursor: Any | None = None) -> datetime:
         """Read the SQL Server clock for live permit authorization.
 
         An injected clock is available to deterministic tests. Production
         callers cannot make a stale ``at_utc`` value bypass bootstrap expiry:
-        the default path asks SQL Server for its current UTC time.
+        the default path asks SQL Server for its current UTC time and denies
+        authorization if that read fails.
         """
 
         if self._allow_injected_authorization_time:
             return _utc(fallback)
         if self._authorization_clock_fn is not None:
             return _utc(self._authorization_clock_fn())
-        with self._connection() as connection:
-            cursor = self._cursor(connection)
+        def read_authoritative(active_cursor: Any) -> datetime:
             try:
-                cursor.execute("SELECT SYSUTCDATETIME() AS AuthoritativeUtc")
-                row = cursor.fetchone()
+                active_cursor.execute("SELECT SYSUTCDATETIME() AS AuthoritativeUtc")
+                row = active_cursor.fetchone()
                 value = _row_named(row, "AuthoritativeUtc", index=0)
-                if value is not None:
-                    return _utc(_optional_utc(value) or fallback)
-            except Exception:
-                # A later reservation query still validates its explicit
-                # period bounds. Falling back to the local clock is safer than
-                # accepting an arbitrary caller-supplied historical timestamp.
-                pass
-        return _utc(datetime.now(timezone.utc))
+                if value is None:
+                    raise ValueError("SQL time query returned no value")
+                parsed = _optional_utc(value)
+                if parsed is None:
+                    raise ValueError("SQL time query returned an invalid value")
+                return _utc(parsed)
+            except BaseException as exc:
+                raise MssqlSafetyError(
+                    "authoritative SQL UTC time is unavailable; network authorization denied"
+                ) from exc
+
+        if cursor is not None:
+            return read_authoritative(cursor)
+        with self._connection() as connection:
+            return read_authoritative(self._cursor(connection))
+
+    def authoritative_utc_now(self) -> datetime:
+        """Return SQL UTC time for a final pre-transmission safety check."""
+
+        return self._authoritative_authorization_time(datetime.now(timezone.utc))
 
     def validate_full_schema(self) -> Mapping[str, Any]:
         """Validate the complete additive schema under an admin context.
@@ -2320,6 +2430,99 @@ class MssqlPersistence:
                 raise
         return audit_id
 
+    def persist_skipped_target_audits(
+        self,
+        *,
+        run_id: str,
+        logical_due_bucket: int,
+        skipped_audits: Sequence[Mapping[str, Any]],
+        collection_context: str | None = None,
+    ) -> None:
+        """Persist a bounded pre-claim skip tail in one idempotent transaction.
+
+        This path intentionally does not touch ``ctl.MddMacTargetClaim``.
+        A target which never passed the just-in-time claim gate is represented
+        by a terminal audit row only.  ``HOLDLOCK`` plus the existing unique
+        audit identity makes an ambiguous retry safe, while terminal rows are
+        never overwritten by a later skip batch.
+        """
+
+        entries = list(skipped_audits)
+        if not entries:
+            return
+        if len(entries) > MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT:
+            raise MssqlSafetyError(
+                "pre-claim skip batch exceeds the SQL Server 2,100-parameter limit; "
+                f"maximum supported rows per statement is {MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT}"
+            )
+        context = str(collection_context or self.collection_context)
+        rows: list[tuple[Any, ...]] = []
+        for entry in entries:
+            target = entry["target"]
+            if context == MAC_SQL_COLLECTION_CONTEXT and (
+                target.sampling_era is not SamplingEra.LEGACY7
+                or _target_sampling_id(target) is None
+                or target.selected_sampling_slot is None
+                or target.selection_policy_version != LEGACY7_SELECTION_POLICY_VERSION
+            ):
+                raise MssqlSafetyError(
+                    "MAC_LEGACY7 pre-claim audits require target ID, SamplingSlot, and selection-policy lineage"
+                )
+            if context == MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT and (
+                target.sampling_era is not SamplingEra.TIERED50
+                or _target_sampling_id(target) is None
+                or target.production_sampling_target_id is None
+                or target.selection_policy_version != TIERED50_SELECTION_POLICY_VERSION
+            ):
+                raise MssqlSafetyError(
+                    "MAC_TIERED50 pre-claim audits require production ID and phase-policy lineage"
+                )
+            outcome = dict(entry["outcome"])
+            started_at = entry["started_at"]
+            completed_at = entry.get("completed_at", started_at)
+            encoded = json.dumps(_safe_document(outcome), ensure_ascii=False, sort_keys=True, default=str)
+            rows.append(
+                (
+                    run_id,
+                    target.panel_version,
+                    target.source_parent_station_id,
+                    target.station_name,
+                    target.tier,
+                    int(target.phase_index),
+                    int(target.number_of_results),
+                    int(logical_due_bucket),
+                    target.sampling_era.value,
+                    _target_sampling_id(target),
+                    target.selected_sampling_slot,
+                    target.selection_policy_version,
+                    target.continuity_classification,
+                    context,
+                    _utc(started_at),
+                    _utc(completed_at),
+                    "SKIPPED",
+                    int(outcome.get("http_attempts", 0) or 0),
+                    outcome.get("http_status"),
+                    outcome.get("stop_event_result_count"),
+                    outcome.get("parser_outcome"),
+                    outcome.get("persistence_outcome"),
+                    outcome.get("error_category"),
+                    float(outcome.get("duration_seconds", 0) or 0) * 1000.0,
+                    outcome.get("skip_reason"),
+                    outcome.get("retry_decision"),
+                    outcome.get("retry_outcome"),
+                    encoded,
+                )
+            )
+        statement, parameters = _build_skipped_target_audit_merge_statement(rows)
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            try:
+                cursor.execute(statement, parameters)
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
     @staticmethod
     def _attempt_fields(
         *,
@@ -2362,7 +2565,16 @@ class MssqlPersistence:
         if live_client_invocation is not None:
             resolved_live = bool(live_client_invocation)
         confirmed = network_attempted and http_received
-        conservative = network_attempted and not http_received
+        transport_execution_entered = bool(
+            getattr(response, "transport_execution_entered", False)
+            if response is not None
+            else getattr(transport_failure, "transport_execution_entered", False)
+            if transport_failure is not None
+            else False
+        )
+        conservative = (network_attempted and not http_received) or (
+            resolved_live and transport_execution_entered and not http_received
+        )
         return {
             "http_status": http_status,
             "category": category,
@@ -2372,6 +2584,7 @@ class MssqlPersistence:
             "network_attempted": network_attempted,
             "http_response_received": http_received,
             "live_client_invocation": resolved_live,
+            "transport_execution_entered": transport_execution_entered,
             "conservative_quota_accounted": conservative,
             "provider_quota_status": "CONFIRMED" if confirmed else "UNKNOWN" if conservative else "NOT_CONSUMED",
             "provider_attempt_confirmed": confirmed,
@@ -2723,7 +2936,8 @@ class MssqlPersistence:
         attempt.  The update is idempotent because only pending rows qualify.
         """
 
-        at = _utc(at_utc or datetime.now(timezone.utc))
+        requested_at = _utc(at_utc or datetime.now(timezone.utc))
+        at = self._authoritative_authorization_time(requested_at)
         cutoff = at - timedelta(seconds=max(1, int(stale_after_seconds)))
         self.ensure_automatic_quota_rollover(at_utc=at)
         with self._connection() as connection:
@@ -4309,12 +4523,18 @@ class MssqlPersistence:
         if key is not None and len(key) > 240:
             raise ValueError("authorization_key must be at most 240 characters")
         permit_id = str(uuid.uuid4())
+        # Read once before rollover so a verified new provider period can be
+        # materialized, then read again on the reservation connection.  The
+        # second read is the timestamp used by every authorization query and
+        # the permit insert in that transaction; a local/caller clock can
+        # never substitute for either SQL read.
         at = self._authoritative_authorization_time(requested_at)
         self.ensure_automatic_quota_rollover(at_utc=at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                at = self._authoritative_authorization_time(requested_at, cursor=cursor)
                 candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
                 if len(candidates) > 1:
                     cursor.execute("COMMIT TRANSACTION;")
