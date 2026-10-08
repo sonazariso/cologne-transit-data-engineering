@@ -2,31 +2,33 @@
 
 > **Current status note (2026-10-08):** This readiness record remains the
 > version-controlled offline contract for later Tiered50 validation. SQL Server
-> is the sole authoritative project database. Tiered50 is prepared but
-> inactive, and Legacy7 is retired; no activation or Stage 15B claim is made.
+> is the sole authoritative project database. The first scheduled Tiered50
+> heartbeat failed its cadence gate; the LaunchAgent is stopped and disabled,
+> no stations are active, and Legacy7 is retired.
 
 **Current Stage 15A status:** `IN PROGRESS`
-**Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`
+**Stage 15B live post-cutover validation:** `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`
 
-This document is the authoritative Stage 15 readiness handoff. It does not
-claim that the Tiered50 panel has been activated, that production evidence
-exists, or that Stage 15B has started. S78's `LIVE_RESEARCH_SINGLE_1` SQLite
-observations are research evidence only and are never treated as a production
-sampling-era transition.
+This document is the authoritative Stage 15 readiness handoff. It records the
+bounded Tiered50 activation attempt and first-heartbeat evidence, but does not
+claim that Stage 15B has started or that a complete validated production cycle
+exists. S78's `LIVE_RESEARCH_SINGLE_1` SQLite observations are research
+evidence only and are never treated as a production sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`
+- Stage 14 overall: `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
-- Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`
+- Stage 15 live post-cutover validation: `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`
 
 The historical Mac Legacy7 runtime completed its corrected selector and
 heartbeat evidence, then was unloaded and disabled at the recorded boundary.
-The exact Tiered50 materialization and offline preflight are complete, but the
-supplied Monitoring screenshot does not establish the provider-wide scope,
-freshness, reset period, or accounting model required for activation. The
-Tiered50 LaunchAgent remains disabled. This does not start Stage 15B.
+The exact Tiered50 materialization and offline preflight are complete. The
+bounded October authorization is registered, but the first scheduled heartbeat
+completed only 2 of 18 target audits before the cadence gate stopped it. The
+Tiered50 LaunchAgent remains disabled, and this does not establish a validated
+Stage 15B cycle.
 
 ## 15A — Pre-cutover validation framework/readiness
 

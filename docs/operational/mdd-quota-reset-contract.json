@@ -1,0 +1,38 @@
+{
+  "artifact_version": "MDD_QUOTA_RESET_CONTRACT_V1",
+  "provider": "MDD NRW",
+  "monthly_quota_ceiling": 250000,
+  "public_sources_reviewed": [
+    {
+      "kind": "official_mdd_interface_description",
+      "url": "https://mdd.gorheinland.com/schnittstellenbeschreibung",
+      "finding": "The public interface page documents the MDD data access surface but does not expose a provider API-key quota reset timezone or exact reset instant."
+    },
+    {
+      "kind": "official_mdd_terms",
+      "url": "https://mdd.gorheinland.com/nutzungsbedingungen",
+      "finding": "The public terms page does not establish a machine-readable monthly quota reset boundary for this credential."
+    },
+    {
+      "kind": "official_mdd_portal",
+      "url": "https://mdd.gorheinland.com",
+      "finding": "The portal exposes a monthly quota field and month/year request history, but the exact reset timezone and boundary are not independently evidenced here."
+    }
+  ],
+  "reset_contract_status": "UNVERIFIED",
+  "reset_model": null,
+  "reset_timezone": null,
+  "effective_from_utc": null,
+  "activation_delay_seconds": 1800,
+  "credential_exclusivity_confirmed": true,
+  "provider_reset_boundary_verified": false,
+  "automatic_rollover_implementation": "READY_BUT_FAIL_CLOSED_UNTIL_ADMIN_CONTRACT",
+  "runtime_behavior": {
+    "october_bootstrap_hard_stop_utc": "2026-10-30T23:00:00Z",
+    "future_period_creation": "SQL procedure is called only after a verified administrator reset contract, its provider-timezone calendar boundary, and the conservative post-boundary delay are all satisfied.",
+    "without_contract": "No zero-based future period is created and quota authorization remains unavailable after the applicable existing authorization expires.",
+    "outstanding_permits": "Prior-period pending permits or untracked Tiered50 network attempts block rollover.",
+    "idempotence": "The contract, MonthKey, period bounds, and evidence hash are locked and compared before any insert."
+  },
+  "unresolved_dependency": "Obtain provider-issued evidence for the exact MDD credential quota reset timezone/boundary and register it through the administrator-only SQL workflow before relying on automatic November or later rollover."
+}

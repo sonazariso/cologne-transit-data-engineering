@@ -1,6 +1,6 @@
 {
   "artifact_version": "TIERED50_PRODUCTION_EVIDENCE_V1",
-  "generated_at_utc": "2026-10-08T09:59:38.074020Z",
+  "generated_at_utc": "2026-10-08T12:41:46.425576Z",
   "host": {
     "legacy7_launchd": {
       "command": "/bin/launchctl",
@@ -20,14 +20,14 @@
       "start_interval_seconds": 300
     },
     "mac_disk": {
-      "free_bytes": 80494108672,
+      "free_bytes": 80399306752,
       "total_bytes": 250685575168
     },
     "power_assertions": {
       "command": "/usr/bin/pmset",
       "returncode": 0,
       "stderr": "",
-      "stdout": "2026-10-08 11:59:38 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:00:50 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000746 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 02:00:12 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 02:00:12 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 02:00:12 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=08.10.26, 08:59 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
+      "stdout": "2026-10-08 14:41:46 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:21:14 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000746 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 04:42:20 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 04:42:20 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 04:42:20 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=08.10.26, 08:59 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
     },
     "tiered50_launchd": {
       "command": "/bin/launchctl",
@@ -41,7 +41,7 @@
       "exists": true,
       "program_arguments": [
         "/Library/Developer/CommandLineTools/usr/bin/python3",
-        "/Users/admin/Library/Application Support/CologneTransitIntelligence/runtime-bundles/tiered50-v1-707688926440b991/macos_launchd_entry.py",
+        "/Users/admin/Library/Application Support/CologneTransitIntelligence/runtime-bundles/tiered50-v1-52b9ef6db5059e51/macos_launchd_entry.py",
         "--mode",
         "tiered50"
       ],
@@ -52,7 +52,7 @@
       "command": "/usr/bin/uptime",
       "returncode": 0,
       "stderr": "",
-      "stdout": "11:59  up  3:13, 2 users, load averages: 4.31 3.97 3.95\n"
+      "stdout": "14:41  up  5:55, 2 users, load averages: 3.52 3.63 3.65\n"
     },
     "vmware": {
       "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
@@ -81,8 +81,8 @@
         "is_percent_growth": false,
         "max_size_pages": -1,
         "name": "CologneTransitIntelligence",
-        "size_pages": 727840,
-        "space_used_pages": 723688,
+        "size_pages": 736032,
+        "space_used_pages": 729208,
         "type": "ROWS"
       },
       {
@@ -91,7 +91,7 @@
         "max_size_pages": 268435456,
         "name": "CologneTransitIntelligence_log",
         "size_pages": 238592,
-        "space_used_pages": 14224,
+        "space_used_pages": 11616,
         "type": "LOG"
       }
     ],
@@ -101,16 +101,53 @@
       "run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
       "status": "COMPLETE"
     },
+    "first_tiered50_scheduled_cycle": {
+      "attempts_without_permit": 0,
+      "audit_error_count": 0,
+      "completed_at_utc": "2026-10-08 12:30:47.931000",
+      "confirmed_permits": 2,
+      "failed_target_audits": 0,
+      "http_attempts": 2,
+      "http_responses": 2,
+      "initial_permits": 2,
+      "logical_due_bucket": 5971541,
+      "network_attempts": 2,
+      "observed": true,
+      "permitted_amount": 2,
+      "persisted_target_audits": 2,
+      "persistence_outcomes": [
+        {
+          "count": 16,
+          "persistence_outcome": "NONE"
+        },
+        {
+          "count": 2,
+          "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT"
+        }
+      ],
+      "quota_permits": 2,
+      "retry_attempts": 0,
+      "retry_permits": 0,
+      "run_id": "177056c4-1e5a-4db8-9f8d-fa3eaabf0661",
+      "run_status": "COMPLETE",
+      "skipped_target_audits": 16,
+      "started_at_utc": "2026-10-08 12:29:03.586000",
+      "successful_target_audits": 2,
+      "target_audits": 18,
+      "transport_error_attempts": 0,
+      "uncertain_permits": 0,
+      "validation_status": "FAILED_CADENCE_OR_PERSISTENCE_GATE"
+    },
     "identity": {
-      "captured_at_utc": "2026-10-08 09:59:39.877604",
+      "captured_at_utc": "2026-10-08 12:41:48.063129",
       "database_name": "CologneTransitIntelligence",
       "login_name": "sa",
       "server_name": "DataAnalyst-VM"
     },
     "latest_cutover_record": {
-      "activation_at_utc": "2026-10-08 09:58:07.991000",
-      "cutover_key": "TIERED50_PANEL_V1:2026-10-08T09:58:07.991246+00:00:OUTAGE",
-      "recorded_at_utc": "2026-10-08 09:58:08.618114",
+      "activation_at_utc": "2026-10-08 12:32:47.759000",
+      "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842Z:OUTAGE_AFTER_HEARTBEAT_5971541",
+      "recorded_at_utc": "2026-10-08 12:32:48.033308",
       "status": "OUTAGE"
     },
     "latest_full_backup": {
@@ -208,23 +245,43 @@
     ],
     "log_space": {
       "total_bytes": 1954537472,
-      "used_bytes": 116523008,
-      "used_percent": 5.961666584014893
+      "used_bytes": 95158272,
+      "used_percent": 4.868582725524902
     },
     "quota_usage": {
-      "availability_reason": "no complete provider-wide accounting row covers the current provider billing period; provider dashboard scope and reset metadata remain unverified",
-      "provider_dashboard_evidence": "docs/operational/mdd-october-monitoring-dashboard-evidence.json",
-      "dashboard_displayed_cumulative_requests": 554,
-      "dashboard_displayed_monthly_limit": 250000,
-      "dashboard_nominal_headroom": 249446,
-      "operational_headroom": null,
-      "known_total": null,
-      "dashboard_selection": {
-        "month_label": "Oktober",
-        "year": 2026
+      "accounting_model": "EXCLUSIVE_CREDENTIAL",
+      "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "automatic_rollover": {
+        "mdd_requests_issued": 0,
+        "reason": "October bounded bootstrap remains inside its approved interval",
+        "status": "NOT_APPLICABLE"
       },
-      "source": "MDD_MONITORING_DASHBOARD_OBSERVED_FACTS_ONLY",
-      "state_available": false
+      "baseline_as_of_utc": "2026-10-08T12:19:11Z",
+      "baseline_component_total": 806,
+      "confirmed_provider_attempts": 721,
+      "conservative_live_attempts": 87,
+      "http_responses_received": 721,
+      "known_total": 808,
+      "live_client_invocations": 2,
+      "local_usage_included_through_utc": "2026-10-08T12:19:11Z",
+      "month_key": "2026-10",
+      "post_cutoff_local_usage": {
+        "confirmed": 2,
+        "conservative": 0,
+        "pending": 0,
+        "total": 2
+      },
+      "projected_non_retry_attempts": 0,
+      "provider_measurement_cutoff_utc": null,
+      "provider_period_metadata_verified": false,
+      "provider_period_timezone": null,
+      "provider_quota_unknown_attempts": 87,
+      "reconciliation_key": "MDD-OCTOBER-CONSERVATIVE-BOOTSTRAP:2026-10-08T12:19:11Z",
+      "reserved_shared_usage": 0,
+      "source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59",
+      "stale_after_utc": "2026-10-30T23:00:00Z",
+      "state_available": true
     },
     "recent_http_attempts": [
       {
@@ -379,8 +436,8 @@
       "login_name": "sa"
     },
     "runtime_schema": {
-      "expected_routine_count": 2,
-      "expected_table_count": 14,
+      "expected_routine_count": 3,
+      "expected_table_count": 16,
       "missing": [],
       "required_legacy7_audit_columns": [
         "SamplingSlot",
@@ -447,15 +504,26 @@
       ]
     },
     "tiered50_materialization": {
-      "active_count": 0,
+      "active_count": 43,
       "maximum_id": 50,
       "minimum_id": 8,
-      "prepared_count": 43,
+      "prepared_count": 0,
       "target_count": 43
     },
+    "tiered50_recent_audit_buckets": [
+      {
+        "audit_count": 18,
+        "failed_count": 0,
+        "http_attempts": 2,
+        "last_completed_at_utc": "2026-10-08 12:30:47.705000",
+        "logical_due_bucket": 5971541,
+        "skipped_count": 16,
+        "succeeded_count": 2
+      }
+    ],
     "tiered50_schema": {
-      "expected_routine_count": 2,
-      "expected_table_count": 15,
+      "expected_routine_count": 3,
+      "expected_table_count": 17,
       "missing": [],
       "required_claim_identity_columns": [
         "ctl.MddMacTargetClaim.SamplingTargetId",
@@ -482,12 +550,12 @@
     },
     "volume_capacity": [
       {
-        "available_bytes": 44889190400,
+        "available_bytes": 44540116992,
         "total_bytes": 95511638016,
         "volume": "C:\\"
       }
     ]
   },
-  "status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
+  "status": "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED",
   "writes_performed": 0
 }

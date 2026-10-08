@@ -49,6 +49,20 @@ from .quota import (
     RELEASED_NO_NETWORK,
 )
 from .quota_baseline import validate_stored_baseline_row
+from .conservative_bootstrap import (
+    BOOTSTRAP_AUTHORIZATION_MODE,
+    BOOTSTRAP_LATEST_STOP_UTC,
+    BOOTSTRAP_MONTH_KEY,
+    ConservativeBootstrapError,
+    KNOWN_PREBOOTSTRAP_RESEARCH_CONTEXT,
+    bootstrap_local_counts,
+    validate_stored_bootstrap_row,
+)
+from .quota_rollover import (
+    AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+    QuotaRolloverError,
+    build_automatic_rollover_period,
+)
 from .runtime_configuration import (
     MSSQL_CREDENTIAL,
     SecretProvider,
@@ -108,6 +122,8 @@ FULL_SCHEMA_TABLES = (
     "ctl.MddMacQuotaAudit",
     "ctl.MddMacSharedQuotaAccounting",
     "ctl.MddMacSharedQuotaReconciliation",
+    "ctl.MddMacConservativeBootstrapAuthorization",
+    "ctl.MddMacQuotaResetContract",
     "ctl.MddMacSamplingEra",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
@@ -129,6 +145,7 @@ FULL_SCHEMA_TABLES = (
 
 FULL_SCHEMA_ROUTINES = (
     "ctl.uspGetMddRealtimeSamplingTarget",
+    "ctl.uspEnsureMddMacQuotaPeriod",
     "stg.uspPersistMddMacSnapshot",
     "analytics.vwMddMacRecordedAtTimeHistory",
     "analytics.vwMddMacSourceFieldCoverage",
@@ -149,10 +166,13 @@ RUNTIME_SCHEMA_TABLES = (
     "ctl.MddMacQuotaPermit",
     "ctl.MddMacQuotaAudit",
     "ctl.MddMacSharedQuotaAccounting",
+    "ctl.MddMacConservativeBootstrapAuthorization",
+    "ctl.MddMacQuotaResetContract",
 )
 
 RUNTIME_SCHEMA_ROUTINES = (
     "ctl.uspGetMddRealtimeSamplingTarget",
+    "ctl.uspEnsureMddMacQuotaPeriod",
     "stg.uspPersistMddMacSnapshot",
 )
 
@@ -182,6 +202,57 @@ QUOTA_BASELINE_COLUMNS = (
     "ProviderPeriodTimezone",
     "ProviderPeriodStartUtc",
     "ProviderPeriodEndUtc",
+)
+BOOTSTRAP_AUTHORIZATION_COLUMNS = (
+    "AuthorizationId",
+    "AuthorizationKey",
+    "MonthKey",
+    "AuthorizationMode",
+    "AccountingModel",
+    "ScreenshotCumulativeRequests",
+    "ScreenshotMonthlyLimit",
+    "ScreenshotSha256",
+    "ConfirmedLocalAttempts",
+    "ConservativeUnknownLocalAttempts",
+    "PendingLocalReservations",
+    "AccountedTotalAtAuthorization",
+    "ProviderQuotaCeiling",
+    "NormalOperationalMaximum",
+    "RetryProtectionBoundary",
+    "ValidFromUtc",
+    "LocalUsageIncludedThroughUtc",
+    "StopAtUtc",
+    "OperatorApprovalAtUtc",
+    "OperatorApprovalStatementHash",
+    "CredentialExclusivityConfirmed",
+    "ProviderScopeVerified",
+    "ProviderMeasurementCutoffEstablished",
+    "ProviderResetTimezoneEstablished",
+    "UnexpectedExternalUsage",
+    "SourceEvidenceHash",
+    "AuthorizationStatus",
+    "EvidenceJson",
+    "RecordedAtUtc",
+    "RevokedAtUtc",
+    "RevocationReason",
+)
+RESET_CONTRACT_COLUMNS = (
+    "ContractId",
+    "ContractKey",
+    "ProviderName",
+    "ResetModel",
+    "ResetTimezone",
+    "EffectiveFromUtc",
+    "ActivationDelaySeconds",
+    "ProviderQuotaCeiling",
+    "CredentialExclusivityConfirmed",
+    "ProviderResetBoundaryVerified",
+    "SourceEvidenceHash",
+    "EvidenceJson",
+    "ContractStatus",
+    "RecordedAtUtc",
+    "RevokedAtUtc",
+    "RevocationReason",
 )
 
 
@@ -891,6 +962,7 @@ class MssqlPersistence:
                 WHERE s.name IN ('ctl', 'stg', 'analytics')
                   AND (o.name LIKE 'MddMac%' OR o.name LIKE 'MddImport%' OR o.name LIKE 'MddRealtime%'
                        OR o.name IN ('uspGetMddRealtimeSamplingTarget', 'uspPersistMddMacSnapshot',
+                                     'uspEnsureMddMacQuotaPeriod',
                                      'vwMddMacRecordedAtTimeHistory', 'vwMddMacSourceFieldCoverage'))
                 """
             )
@@ -2614,12 +2686,20 @@ class MssqlPersistence:
 
         at = _utc(at_utc or datetime.now(timezone.utc))
         cutoff = at - timedelta(seconds=max(1, int(stale_after_seconds)))
+        self.ensure_automatic_quota_rollover(at_utc=at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
                 candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
-                if len(candidates) != 1:
+                month: str | None = None
+                if len(candidates) == 1:
+                    month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
+                elif not candidates:
+                    bootstrap_candidates = self._conservative_bootstrap_candidates(cursor, at=at, lock=True)
+                    if len(bootstrap_candidates) == 1:
+                        month = str(_row_named(bootstrap_candidates[0], "MonthKey", index=2) or "")
+                if not month:
                     cursor.execute("COMMIT TRANSACTION;")
                     connection.commit()
                     return {
@@ -2632,7 +2712,6 @@ class MssqlPersistence:
                         "recovered_permits": 0,
                         "cutoff_utc": _iso(cutoff),
                     }
-                month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
                 cursor.execute(
                     """
                     UPDATE ctl.MddMacQuotaPermit
@@ -2704,6 +2783,226 @@ class MssqlPersistence:
         )
         return list(cursor.fetchall())
 
+    @staticmethod
+    def _conservative_bootstrap_candidates(
+        cursor: Any,
+        *,
+        at: datetime,
+        lock: bool = False,
+    ) -> list[Any]:
+        """Return active bounded bootstrap rows covering ``at``.
+
+        The validity interval is stored explicitly because the provider's
+        billing period is intentionally unknown.  The query never substitutes
+        a UTC calendar month for provider metadata.
+        """
+
+        lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        cursor.execute(
+            """
+            SELECT TOP (2) AuthorizationId, AuthorizationKey, MonthKey,
+                   AuthorizationMode, AccountingModel,
+                   ScreenshotCumulativeRequests, ScreenshotMonthlyLimit,
+                   ScreenshotSha256, ConfirmedLocalAttempts,
+                   ConservativeUnknownLocalAttempts, PendingLocalReservations,
+                   AccountedTotalAtAuthorization, ProviderQuotaCeiling,
+                   NormalOperationalMaximum, RetryProtectionBoundary,
+                   ValidFromUtc, LocalUsageIncludedThroughUtc, StopAtUtc,
+                   OperatorApprovalAtUtc, OperatorApprovalStatementHash,
+                   CredentialExclusivityConfirmed, ProviderScopeVerified,
+                   ProviderMeasurementCutoffEstablished,
+                   ProviderResetTimezoneEstablished, UnexpectedExternalUsage,
+                   SourceEvidenceHash, AuthorizationStatus, EvidenceJson,
+                   RecordedAtUtc, RevokedAtUtc, RevocationReason
+            FROM ctl.MddMacConservativeBootstrapAuthorization"""
+            + lock_hint
+            + """
+            WHERE AuthorizationStatus = 'ACTIVE'
+              AND ValidFromUtc <= %s
+              AND StopAtUtc > %s
+            ORDER BY ValidFromUtc DESC, AuthorizationId DESC
+            """,
+            (_utc(at), _utc(at)),
+        )
+        return list(cursor.fetchall())
+
+    @staticmethod
+    def _bootstrap_permit_counts(
+        cursor: Any,
+        *,
+        month: str,
+        observed_through: datetime,
+        lock: bool = False,
+    ) -> Mapping[str, Any]:
+        """Read every relevant October permit through one local cutoff."""
+
+        lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        cursor.execute(
+            """
+            SELECT Status, COALESCE(SUM(Amount), 0) AS amount
+            FROM ctl.MddMacQuotaPermit"""
+            + lock_hint
+            + """
+            WHERE MonthKey = %s
+              AND ReservedAtUtc >= %s
+              AND ReservedAtUtc <= %s
+            GROUP BY Status
+            """,
+            (
+                month,
+                datetime(2026, 10, 1, tzinfo=timezone.utc),
+                _utc(observed_through),
+            ),
+        )
+        counts = {"confirmed": 0, "unknown": 0, "pending": 0, "released_no_network": 0}
+        unexpected: list[str] = []
+        for row in cursor.fetchall():
+            status = str(_row_named(row, "Status", index=0) or "")
+            amount = int(_row_named(row, "amount", index=1) or 0)
+            if amount < 0:
+                raise MssqlSafetyError("local quota permit amount is negative")
+            if status == HTTP_PROVIDER_ATTEMPT_CONFIRMED:
+                counts["confirmed"] += amount
+            elif status == CONSERVATIVE_LIVE_ATTEMPT:
+                counts["unknown"] += amount
+            elif status == PENDING_AUTHORIZATION:
+                counts["pending"] += amount
+            elif status == RELEASED_NO_NETWORK:
+                counts["released_no_network"] += amount
+            else:
+                unexpected.append(status)
+
+        cursor.execute(
+            """
+            SELECT COALESCE(a.CollectionContext, '') AS collection_context,
+                   COUNT_BIG(*) AS attempts_without_permit
+            FROM ctl.MddMacHttpAttempt AS h
+            INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+            WHERE h.CompletedAtUtc >= %s
+              AND h.CompletedAtUtc <= %s
+              AND h.NetworkAttempted = 1
+              AND h.QuotaPermitId IS NULL
+            GROUP BY a.CollectionContext
+            ORDER BY a.CollectionContext
+            """,
+            (
+                datetime(2026, 10, 1, tzinfo=timezone.utc),
+                _utc(observed_through),
+            ),
+        )
+        untracked_research_attempts = 0
+        untracked_research_contexts: list[str] = []
+        attempts_without_permit = 0
+        for attempt_row in cursor.fetchall():
+            context = str(_row_named(attempt_row, "collection_context", index=0) or "")
+            count = int(_row_named(attempt_row, "attempts_without_permit", index=1) or 0)
+            if count < 0:
+                raise MssqlSafetyError("untracked network attempt count is negative")
+            if context == KNOWN_PREBOOTSTRAP_RESEARCH_CONTEXT:
+                untracked_research_attempts += count
+                untracked_research_contexts.append(context)
+            else:
+                attempts_without_permit += count
+                unexpected.append("NETWORK_ATTEMPT_WITHOUT_QUOTA_PERMIT")
+        return {
+            **counts,
+            "total": counts["confirmed"] + counts["unknown"] + counts["pending"] + untracked_research_attempts,
+            "unexpected_statuses": sorted(set(unexpected)),
+            "attempts_without_permit": attempts_without_permit,
+            "known_untracked_research_attempts": untracked_research_attempts,
+            "untracked_research_attempt_contexts": sorted(set(untracked_research_contexts)),
+        }
+
+    def ensure_automatic_quota_rollover(self, *, at_utc: datetime) -> Mapping[str, Any]:
+        """Create the next verified provider period atomically when eligible.
+
+        October's bounded bootstrap is intentionally independent.  After its
+        hard stop, a future period can be created only when an administrator
+        has registered an evidence-backed reset contract.  The stored
+        procedure locks that contract, the period key, and prior pending
+        permits before inserting a zero-based accounting row; repeated
+        five-minute heartbeats therefore become idempotent.
+        """
+
+        at = _utc(at_utc)
+        if at < BOOTSTRAP_LATEST_STOP_UTC:
+            return {
+                "status": "NOT_APPLICABLE",
+                "reason": "October bounded bootstrap remains inside its approved interval",
+                "mdd_requests_issued": 0,
+            }
+        select_columns = """
+            ContractId, ContractKey, ProviderName, ResetModel, ResetTimezone,
+            EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
+            CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
+            SourceEvidenceHash, EvidenceJson, ContractStatus, RecordedAtUtc,
+            RevokedAtUtc, RevocationReason
+        """
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                f"""
+                SELECT TOP (1) {select_columns}
+                FROM ctl.MddMacQuotaResetContract WITH (READCOMMITTEDLOCK)
+                WHERE ContractStatus = 'ACTIVE'
+                ORDER BY EffectiveFromUtc DESC, ContractId DESC
+                """
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return {
+                    "status": "NOT_CONFIGURED",
+                    "reason": "no verified provider reset contract is registered",
+                    "mdd_requests_issued": 0,
+                }
+            contract = _row_mapping(row, RESET_CONTRACT_COLUMNS)
+            try:
+                period = build_automatic_rollover_period(contract=contract, at_utc=at)
+            except QuotaRolloverError as exc:
+                message = str(exc)
+                if "activation delay" in message or "not effective" in message:
+                    return {
+                        "status": "NOT_READY",
+                        "reason": message,
+                        "contract_key": str(contract.get("ContractKey") or ""),
+                        "mdd_requests_issued": 0,
+                    }
+                raise MssqlSafetyError(message) from exc
+
+            cursor.execute(
+                """
+                EXEC ctl.uspEnsureMddMacQuotaPeriod
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s
+                """,
+                (
+                    period["contract_key"],
+                    period["month_key"],
+                    period["provider_period_timezone"],
+                    _optional_utc(period["provider_period_start_utc"]),
+                    _optional_utc(period["provider_period_end_utc"]),
+                    _optional_utc(period["local_usage_included_through_utc"]),
+                    _optional_utc(period["at_utc"]),
+                    period["source_evidence_hash"],
+                    period["reconciliation_key"],
+                ),
+            )
+            fetchall = getattr(cursor, "fetchall", None)
+            if callable(fetchall):
+                try:
+                    fetchall()
+                except Exception:
+                    pass
+        return {
+            "status": "APPLIED_OR_IDEMPOTENT",
+            "contract_key": period["contract_key"],
+            "month_key": period["month_key"],
+            "provider_period_timezone": period["provider_period_timezone"],
+            "provider_period_start_utc": period["provider_period_start_utc"],
+            "provider_period_end_utc": period["provider_period_end_utc"],
+            "activation_not_before_utc": period["activation_not_before_utc"],
+            "mdd_requests_issued": 0,
+        }
+
     def _quota_baseline_row(self, cursor: Any, *, month: str, at: datetime) -> Any:
         cursor.execute(
             """
@@ -2736,10 +3035,12 @@ class MssqlPersistence:
         month: str,
         local_cutoff: datetime,
         observed_through: datetime | None = None,
+        include_cutoff: bool = False,
     ) -> Mapping[str, int]:
         observed = _utc(observed_through or datetime.now(timezone.utc))
+        cutoff_operator = ">=" if include_cutoff else ">"
         cursor.execute(
-            """
+            f"""
             SELECT
                 COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS confirmed,
                 COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS conservative,
@@ -2747,7 +3048,7 @@ class MssqlPersistence:
                 COALESCE(SUM(CASE WHEN LiveClientInvocation = 1 THEN Amount ELSE 0 END), 0) AS invocations
             FROM ctl.MddMacQuotaPermit WITH (READCOMMITTEDLOCK)
             WHERE MonthKey = %s
-              AND ReservedAtUtc > %s
+              AND ReservedAtUtc {cutoff_operator} %s
               AND ReservedAtUtc <= %s
             """,
             (
@@ -2768,50 +3069,132 @@ class MssqlPersistence:
         }
 
     def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
-        """Read the provider-wide baseline plus post-baseline local permits.
+        """Read a complete baseline or the explicitly bounded bootstrap.
 
-        Missing or incomplete shared-consumer evidence is deliberately not
-        converted to zero.  The production quota adapter therefore exposes an
-        unavailable state and the atomic reservation path fails closed.
+        Missing, stale, ambiguous, or inconsistent shared-consumer evidence is
+        never converted to zero.  The bootstrap branch is selected only when
+        no usable provider-period baseline covers the authorization instant.
         """
 
         at = _utc(at_utc or datetime.now(timezone.utc))
         try:
+            rollover = self.ensure_automatic_quota_rollover(at_utc=at)
             with self._connection() as connection:
                 cursor = self._cursor(connection)
-                candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
-                if len(candidates) != 1:
-                    reason = (
-                        "no complete provider-wide accounting row covers the current provider billing period"
-                        if not candidates
-                        else "multiple provider-wide accounting rows cover the current provider billing period"
-                    )
+                complete_candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
+                baseline: Any | None = None
+                mapped_baseline: Mapping[str, Any] | None = None
+                baseline_as_of: datetime | None = None
+                local_cutoff: datetime | None = None
+                mode = "COMPLETE"
+                complete_reason = ""
+
+                if len(complete_candidates) > 1:
                     return {
                         "state_available": False,
                         "source": QUOTA_BASELINE_UNAVAILABLE,
-                        "availability_reason": reason,
+                        "availability_reason": "multiple provider-wide accounting rows cover the current provider billing period",
                         "month_key": None,
                         "known_total": None,
                     }
-                baseline = candidates[0]
-                month = str(_row_named(baseline, "MonthKey", index=0) or "")
-                mapped_baseline = _row_mapping(baseline, QUOTA_BASELINE_COLUMNS)
-                usable, reason = validate_stored_baseline_row(mapped_baseline, at_utc=at)
-                if not usable:
+                if len(complete_candidates) == 1:
+                    candidate = complete_candidates[0]
+                    candidate_mapping = _row_mapping(candidate, QUOTA_BASELINE_COLUMNS)
+                    usable, complete_reason = validate_stored_baseline_row(candidate_mapping, at_utc=at)
+                    if usable:
+                        baseline = candidate
+                        mapped_baseline = candidate_mapping
+                        baseline_as_of = _optional_utc(candidate_mapping["BaselineAsOfUtc"])
+                        local_cutoff = _optional_utc(candidate_mapping["LocalUsageIncludedThroughUtc"])
+                    else:
+                        mode = "BOOTSTRAP"
+                else:
+                    mode = "BOOTSTRAP"
+
+                if mode == "BOOTSTRAP":
+                    bootstrap_candidates = self._conservative_bootstrap_candidates(cursor, at=at, lock=False)
+                    if len(bootstrap_candidates) != 1:
+                        reason = (
+                            "no complete provider-wide baseline or active bounded bootstrap covers the authorization time"
+                            if not bootstrap_candidates
+                            else "multiple active bounded bootstrap authorizations cover the authorization time"
+                        )
+                        return {
+                            "state_available": False,
+                            "source": QUOTA_BASELINE_INCOMPLETE if complete_reason else QUOTA_BASELINE_UNAVAILABLE,
+                            "availability_reason": complete_reason or reason,
+                            "month_key": None,
+                            "known_total": None,
+                        }
+                    bootstrap = bootstrap_candidates[0]
+                    mapped_bootstrap = _row_mapping(bootstrap, BOOTSTRAP_AUTHORIZATION_COLUMNS)
+                    usable, reason = validate_stored_bootstrap_row(mapped_bootstrap, at_utc=at)
+                    if not usable:
+                        return {
+                            "state_available": False,
+                            "source": QUOTA_BASELINE_INCOMPLETE,
+                            "availability_reason": reason,
+                            "month_key": str(mapped_bootstrap.get("MonthKey") or ""),
+                            "known_total": None,
+                        }
+                    month = str(mapped_bootstrap["MonthKey"] or "")
+                    local_cutoff = _optional_utc(mapped_bootstrap["LocalUsageIncludedThroughUtc"])
+                    local = self._quota_usage_totals(
+                        cursor,
+                        month=month,
+                        local_cutoff=local_cutoff,
+                        observed_through=at,
+                    )
+                    baseline_confirmed = int(mapped_bootstrap["ScreenshotCumulativeRequests"] or 0) + int(
+                        mapped_bootstrap["ConfirmedLocalAttempts"] or 0
+                    )
+                    baseline_conservative = int(mapped_bootstrap["ConservativeUnknownLocalAttempts"] or 0)
+                    baseline_reserved = int(mapped_bootstrap["PendingLocalReservations"] or 0)
+                    baseline_total = baseline_confirmed + baseline_conservative + baseline_reserved
+                    post_cutoff_total = local["confirmed"] + local["conservative"] + local["pending"]
                     return {
-                        "state_available": False,
-                        "source": QUOTA_BASELINE_INCOMPLETE,
-                        "availability_reason": reason,
+                        "confirmed_provider_attempts": baseline_confirmed + local["confirmed"],
+                        "reserved_shared_usage": baseline_reserved + local["pending"],
+                        "projected_non_retry_attempts": 0,
+                        "conservative_live_attempts": baseline_conservative + local["conservative"],
+                        "live_client_invocations": local["invocations"],
+                        "http_responses_received": baseline_confirmed + local["confirmed"],
+                        "provider_quota_unknown_attempts": baseline_conservative + local["conservative"],
+                        "state_available": True,
+                        "source": BOOTSTRAP_AUTHORIZATION_MODE,
+                        "authorization_mode": BOOTSTRAP_AUTHORIZATION_MODE,
                         "month_key": month,
-                        "known_total": None,
+                        "baseline_as_of_utc": _iso(_optional_utc(mapped_bootstrap["OperatorApprovalAtUtc"])),
+                        "local_usage_included_through_utc": _iso(local_cutoff),
+                        "provider_measurement_cutoff_utc": None,
+                        "stale_after_utc": _iso(_optional_utc(mapped_bootstrap["StopAtUtc"])),
+                        "accounting_model": str(mapped_bootstrap["AccountingModel"] or ""),
+                        "source_evidence_hash": str(mapped_bootstrap["SourceEvidenceHash"] or ""),
+                        "reconciliation_key": str(mapped_bootstrap["AuthorizationKey"] or ""),
+                        "provider_period_timezone": None,
+                        "provider_period_metadata_verified": False,
+                        "baseline_component_total": baseline_total,
+                        "post_cutoff_local_usage": {
+                            "confirmed": local["confirmed"],
+                            "conservative": local["conservative"],
+                            "pending": local["pending"],
+                            "total": post_cutoff_total,
+                        },
+                        "known_total": baseline_total + post_cutoff_total,
+                        "automatic_rollover": rollover,
                     }
-                baseline_as_of = _optional_utc(mapped_baseline["BaselineAsOfUtc"])
-                local_cutoff = _optional_utc(mapped_baseline["LocalUsageIncludedThroughUtc"])
+
+                assert baseline is not None and mapped_baseline is not None and local_cutoff is not None
+                month = str(_row_named(baseline, "MonthKey", index=0) or "")
                 local = self._quota_usage_totals(
                     cursor,
                     month=month,
                     local_cutoff=local_cutoff,
                     observed_through=at,
+                    include_cutoff=(
+                        str(mapped_baseline["AccountingModel"] or "")
+                        == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL
+                    ),
                 )
         except Exception:
             # A schema/permission/connectivity failure is itself unavailable
@@ -2842,6 +3225,7 @@ class MssqlPersistence:
             "provider_quota_unknown_attempts": conservative,
             "state_available": True,
             "source": str(_row_named(baseline, "SourceDescription", index=11) or "SHARED_PROVIDER_BASELINE"),
+            "authorization_mode": str(mapped_baseline["AccountingModel"] or "COMPLETE"),
             "month_key": month,
             "baseline_as_of_utc": _iso(baseline_as_of),
             "local_usage_included_through_utc": _iso(local_cutoff),
@@ -2851,6 +3235,7 @@ class MssqlPersistence:
             "source_evidence_hash": str(mapped_baseline["SourceEvidenceHash"] or ""),
             "reconciliation_key": str(mapped_baseline["ReconciliationKey"] or ""),
             "provider_period_timezone": str(mapped_baseline["ProviderPeriodTimezone"] or ""),
+            "provider_period_metadata_verified": True,
             "baseline_component_total": baseline_total,
             "post_cutoff_local_usage": {
                 "confirmed": local["confirmed"],
@@ -2859,6 +3244,7 @@ class MssqlPersistence:
                 "total": post_cutoff_total,
             },
             "known_total": baseline_total + post_cutoff_total,
+            "automatic_rollover": rollover,
         }
 
     @staticmethod
@@ -3117,6 +3503,58 @@ class MssqlPersistence:
             ],
         }
 
+    def read_conservative_bootstrap_inputs(
+        self,
+        *,
+        observed_through_utc: datetime,
+        month_key: str = BOOTSTRAP_MONTH_KEY,
+    ) -> Mapping[str, Any]:
+        """Read the local ledger needed by the bounded bootstrap.
+
+        This administrator/read-only path deliberately has no provider cutoff
+        argument.  The dashboard cutoff is unknown, so all relevant local
+        permits from the UTC October evidence window through the explicit
+        approval cutoff are included in the conservative seed.
+        """
+
+        observed = _utc(observed_through_utc)
+        if month_key != BOOTSTRAP_MONTH_KEY:
+            raise MssqlSafetyError("conservative bootstrap is limited to October 2026")
+        if observed.strftime("%Y-%m") != BOOTSTRAP_MONTH_KEY:
+            raise MssqlSafetyError("bootstrap local evidence cutoff is outside October 2026")
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            counts = self._bootstrap_permit_counts(
+                cursor,
+                month=month_key,
+                observed_through=observed,
+                lock=False,
+            )
+        return {
+            "month_key": month_key,
+            "observed_through_utc": _iso(observed),
+            "confirmed": int(counts["confirmed"]),
+            "unknown": int(counts["unknown"]),
+            "pending": int(counts["pending"]),
+            "released_no_network": int(counts["released_no_network"]),
+            "total": int(counts["total"]),
+            "unexpected_statuses": list(counts["unexpected_statuses"]),
+            "attempts_without_permit": int(counts["attempts_without_permit"]),
+            "known_untracked_research_attempts": int(counts["known_untracked_research_attempts"]),
+            "untracked_research_attempt_contexts": list(counts["untracked_research_attempt_contexts"]),
+            "permit_counts": {
+                "confirmed": int(counts["confirmed"]),
+                "unknown": int(counts["unknown"]),
+                "pending": int(counts["pending"]),
+            },
+            "accounting_rule": (
+                "dashboard lower bound plus every confirmed, conservative-uncertain, "
+                "pending October permit, plus explicitly identified pre-bootstrap research attempts, "
+                "through the explicit approval cutoff; "
+                "RELEASED_NO_NETWORK is not provider consumption"
+            ),
+        }
+
     def quota_administrator_context(self) -> Mapping[str, Any]:
         """Verify that the current connection is an administrative writer."""
 
@@ -3129,7 +3567,9 @@ class MssqlPersistence:
                        IS_ROLEMEMBER(N'db_owner') AS is_db_owner,
                        HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaAccounting', N'OBJECT', N'INSERT') AS baseline_insert,
                        HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaAccounting', N'OBJECT', N'UPDATE') AS baseline_update,
-                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaReconciliation', N'OBJECT', N'INSERT') AS history_insert
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacSharedQuotaReconciliation', N'OBJECT', N'INSERT') AS history_insert,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacConservativeBootstrapAuthorization', N'OBJECT', N'INSERT') AS bootstrap_insert,
+                       HAS_PERMS_BY_NAME(N'ctl.MddMacQuotaResetContract', N'OBJECT', N'INSERT') AS reset_contract_insert
                 """
             )
             row = cursor.fetchone()
@@ -3140,13 +3580,367 @@ class MssqlPersistence:
             "baseline_insert": bool(_row_named(row, "baseline_insert", index=3)),
             "baseline_update": bool(_row_named(row, "baseline_update", index=4)),
             "history_insert": bool(_row_named(row, "history_insert", index=5)),
+            "bootstrap_insert": bool(_row_named(row, "bootstrap_insert", index=6)),
+            "reset_contract_insert": bool(_row_named(row, "reset_contract_insert", index=7)),
         }
         if result["login_name"].casefold() == "colognetransitcollector":
             raise MssqlSafetyError("shared quota baseline registration requires a separate administrator login")
         if not (result["is_sysadmin"] or result["is_db_owner"]):
-            if not all(result[key] for key in ("baseline_insert", "baseline_update", "history_insert")):
+            if not all(
+                result[key]
+                for key in (
+                    "baseline_insert",
+                    "baseline_update",
+                    "history_insert",
+                    "bootstrap_insert",
+                    "reset_contract_insert",
+                )
+            ):
                 raise MssqlSafetyError("current login lacks the explicit shared quota registration privileges")
         return result
+
+    def register_conservative_october_bootstrap(
+        self,
+        *,
+        authorization: Mapping[str, Any],
+        local_usage: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Atomically register the explicitly approved bounded bootstrap.
+
+        This administrator-only write never changes the verified baseline,
+        releases a permit, or rewrites an existing authorization. The active
+        authorization row is locked before the local permit ledger, matching
+        the runtime reservation path.
+        """
+
+        self.quota_administrator_context()
+        mode = str(authorization.get("authorization_mode") or "")
+        key = str(authorization.get("authorization_key") or "")
+        source_hash = str(authorization.get("source_evidence_hash") or "")
+        approval_at = _optional_utc(authorization.get("operator_approval_at_utc"))
+        local_cutoff = _optional_utc(authorization.get("local_usage_included_through_utc"))
+        stop_at = _optional_utc(authorization.get("stop_at_utc"))
+        if mode != BOOTSTRAP_AUTHORIZATION_MODE or not key or not source_hash:
+            raise MssqlSafetyError("validated bootstrap is missing its immutable mode, key, or evidence hash")
+        if approval_at is None or local_cutoff is None or stop_at is None:
+            raise MssqlSafetyError("validated bootstrap is missing its explicit validity interval")
+        if len(source_hash) != 64 or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+            raise MssqlSafetyError("validated bootstrap evidence hash is malformed")
+        try:
+            expected_counts = bootstrap_local_counts(local_usage)
+        except ConservativeBootstrapError as exc:
+            raise MssqlSafetyError(str(exc)) from exc
+        declared_counts = {
+            "confirmed": int(authorization.get("confirmed_local_attempts", 0) or 0),
+            "unknown": int(authorization.get("conservative_unknown_local_attempts", 0) or 0),
+            "pending": int(authorization.get("pending_local_reservations", 0) or 0),
+        }
+        if declared_counts != {name: expected_counts[name] for name in ("confirmed", "unknown", "pending")}:
+            raise MssqlSafetyError("local SQL evidence does not match the validated bootstrap reconciliation")
+        declared_total = int(authorization.get("accounted_total_at_authorization", -1) or -1)
+        if declared_total != int(authorization.get("screenshot_cumulative_requests", 0) or 0) + expected_counts["total"]:
+            raise MssqlSafetyError("bootstrap accounted total does not equal its components")
+        proposed_row = {
+            "MonthKey": str(authorization.get("month_key") or ""),
+            "AuthorizationMode": mode,
+            "AccountingModel": str(authorization.get("accounting_model") or ""),
+            "AuthorizationStatus": str(authorization.get("authorization_status") or "ACTIVE"),
+            "ScreenshotCumulativeRequests": authorization.get("screenshot_cumulative_requests"),
+            "ScreenshotMonthlyLimit": authorization.get("screenshot_monthly_limit"),
+            "ScreenshotSha256": authorization.get("screenshot_sha256"),
+            "ConfirmedLocalAttempts": expected_counts["confirmed"],
+            "ConservativeUnknownLocalAttempts": expected_counts["unknown"],
+            "PendingLocalReservations": expected_counts["pending"],
+            "AccountedTotalAtAuthorization": declared_total,
+            "ProviderQuotaCeiling": authorization.get("provider_quota_ceiling"),
+            "NormalOperationalMaximum": authorization.get("normal_operational_maximum"),
+            "RetryProtectionBoundary": authorization.get("retry_protection_boundary"),
+            "ValidFromUtc": authorization.get("valid_from_utc"),
+            "LocalUsageIncludedThroughUtc": authorization.get("local_usage_included_through_utc"),
+            "StopAtUtc": authorization.get("stop_at_utc"),
+            "OperatorApprovalAtUtc": authorization.get("operator_approval_at_utc"),
+            "OperatorApprovalStatementHash": authorization.get("operator_approval_statement_hash"),
+            "CredentialExclusivityConfirmed": authorization.get("credential_exclusivity_confirmed"),
+            "ProviderScopeVerified": authorization.get("provider_scope_verified"),
+            "ProviderMeasurementCutoffEstablished": authorization.get(
+                "provider_measurement_cutoff_established"
+            ),
+            "ProviderResetTimezoneEstablished": authorization.get("provider_reset_timezone_established"),
+            "UnexpectedExternalUsage": authorization.get("unexpected_external_usage"),
+            "SourceEvidenceHash": source_hash,
+            "AuthorizationKey": key,
+        }
+        usable, reason = validate_stored_bootstrap_row(proposed_row, at_utc=approval_at)
+        if not usable:
+            raise MssqlSafetyError("bootstrap authorization failed immutable validation: " + reason)
+
+        select_columns = """
+            AuthorizationId, AuthorizationKey, MonthKey, AuthorizationMode,
+            AccountingModel, ScreenshotCumulativeRequests, ScreenshotMonthlyLimit,
+            ScreenshotSha256, ConfirmedLocalAttempts,
+            ConservativeUnknownLocalAttempts, PendingLocalReservations,
+            AccountedTotalAtAuthorization, ProviderQuotaCeiling,
+            NormalOperationalMaximum, RetryProtectionBoundary, ValidFromUtc,
+            LocalUsageIncludedThroughUtc, StopAtUtc, OperatorApprovalAtUtc,
+            OperatorApprovalStatementHash, CredentialExclusivityConfirmed,
+            ProviderScopeVerified, ProviderMeasurementCutoffEstablished,
+            ProviderResetTimezoneEstablished, UnexpectedExternalUsage,
+            SourceEvidenceHash, AuthorizationStatus, EvidenceJson, RecordedAtUtc,
+            RevokedAtUtc, RevocationReason
+        """
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                cursor.execute(
+                    f"""
+                    SELECT {select_columns}
+                    FROM ctl.MddMacConservativeBootstrapAuthorization WITH (UPDLOCK, HOLDLOCK)
+                    WHERE AuthorizationKey = %s
+                    """,
+                    (key,),
+                )
+                existing = cursor.fetchone()
+                if existing is not None:
+                    existing_mapping = _row_mapping(existing, BOOTSTRAP_AUTHORIZATION_COLUMNS)
+                    if str(existing_mapping.get("SourceEvidenceHash") or "") != source_hash:
+                        raise MssqlSafetyError("bootstrap authorization key already exists with conflicting evidence")
+                    if str(existing_mapping.get("AuthorizationStatus") or "") != "ACTIVE":
+                        raise MssqlSafetyError("bootstrap authorization key already exists but is not active")
+                    usable, reason = validate_stored_bootstrap_row(existing_mapping, at_utc=approval_at)
+                    if not usable:
+                        raise MssqlSafetyError("existing bootstrap authorization is not valid: " + reason)
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    return {
+                        "status": "IDEMPOTENT",
+                        "authorization_key": key,
+                        "source_evidence_hash": source_hash,
+                        "writes_performed": 0,
+                        "outstanding_permits_preserved": True,
+                    }
+
+                cursor.execute(
+                    f"""
+                    SELECT TOP (2) {select_columns}
+                    FROM ctl.MddMacConservativeBootstrapAuthorization WITH (UPDLOCK, HOLDLOCK)
+                    WHERE MonthKey = %s AND AuthorizationStatus = 'ACTIVE'
+                    """,
+                    (str(authorization.get("month_key") or BOOTSTRAP_MONTH_KEY),),
+                )
+                active_rows = list(cursor.fetchall())
+                if active_rows:
+                    raise MssqlSafetyError("another active October bootstrap authorization already exists")
+
+                cursor.execute(
+                    """
+                    SELECT TOP (1) MonthKey
+                    FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
+                    WHERE MonthKey = %s
+                      AND AccountingStatus = 'COMPLETE'
+                      AND ProviderPeriodStartUtc <= %s
+                      AND ProviderPeriodEndUtc > %s
+                    """,
+                    (BOOTSTRAP_MONTH_KEY, approval_at, approval_at),
+                )
+                if cursor.fetchone() is not None:
+                    raise MssqlSafetyError(
+                        "a verified provider-period baseline already covers the bootstrap approval time"
+                    )
+
+                observed = self._bootstrap_permit_counts(
+                    cursor,
+                    month=BOOTSTRAP_MONTH_KEY,
+                    observed_through=local_cutoff,
+                    lock=True,
+                )
+                try:
+                    observed_normalized = bootstrap_local_counts(observed)
+                except ConservativeBootstrapError as exc:
+                    raise MssqlSafetyError(str(exc)) from exc
+                for name in ("confirmed", "unknown", "pending"):
+                    if int(observed_normalized[name]) != int(expected_counts[name]):
+                        raise MssqlSafetyError(
+                            f"local permit counts changed during bootstrap registration for {name}; rerun the dry-run"
+                        )
+                if observed["unexpected_statuses"]:
+                    raise MssqlSafetyError(
+                        "local quota evidence contains unsupported statuses: "
+                        + ", ".join(observed["unexpected_statuses"])
+                    )
+
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacConservativeBootstrapAuthorization
+                    (
+                        AuthorizationKey, MonthKey, AuthorizationMode, AccountingModel,
+                        ScreenshotCumulativeRequests, ScreenshotMonthlyLimit,
+                        ScreenshotSha256, ConfirmedLocalAttempts,
+                        ConservativeUnknownLocalAttempts, PendingLocalReservations,
+                        AccountedTotalAtAuthorization, ProviderQuotaCeiling,
+                        NormalOperationalMaximum, RetryProtectionBoundary,
+                        ValidFromUtc, LocalUsageIncludedThroughUtc, StopAtUtc,
+                        OperatorApprovalAtUtc, OperatorApprovalStatementHash,
+                        CredentialExclusivityConfirmed, ProviderScopeVerified,
+                        ProviderMeasurementCutoffEstablished,
+                        ProviderResetTimezoneEstablished, UnexpectedExternalUsage,
+                        SourceEvidenceHash, AuthorizationStatus, EvidenceJson
+                    )
+                    VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        key,
+                        str(authorization.get("month_key") or BOOTSTRAP_MONTH_KEY),
+                        mode,
+                        str(authorization.get("accounting_model") or ""),
+                        int(authorization.get("screenshot_cumulative_requests", 0) or 0),
+                        int(authorization.get("screenshot_monthly_limit", 0) or 0),
+                        str(authorization.get("screenshot_sha256") or ""),
+                        expected_counts["confirmed"],
+                        expected_counts["unknown"],
+                        expected_counts["pending"],
+                        declared_total,
+                        int(authorization.get("provider_quota_ceiling", 0) or 0),
+                        int(authorization.get("normal_operational_maximum", 0) or 0),
+                        int(authorization.get("retry_protection_boundary", 0) or 0),
+                        approval_at,
+                        local_cutoff,
+                        stop_at,
+                        approval_at,
+                        str(authorization.get("operator_approval_statement_hash") or ""),
+                        int(bool(authorization.get("credential_exclusivity_confirmed"))),
+                        int(bool(authorization.get("provider_scope_verified"))),
+                        int(bool(authorization.get("provider_measurement_cutoff_established"))),
+                        int(bool(authorization.get("provider_reset_timezone_established"))),
+                        int(bool(authorization.get("unexpected_external_usage"))),
+                        source_hash,
+                        "ACTIVE",
+                        str(authorization.get("evidence_json") or "{}"),
+                    ),
+                )
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return {
+            "status": "APPLIED",
+            "authorization_key": key,
+            "source_evidence_hash": source_hash,
+            "writes_performed": 1,
+            "outstanding_permits_preserved": True,
+            "provider_metadata_unverified": True,
+        }
+
+    def register_quota_reset_contract(self, *, contract: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Register one verified future-month reset contract idempotently."""
+
+        self.quota_administrator_context()
+        key = str(contract.get("contract_key") or "")
+        provider_name = str(contract.get("provider_name") or "")
+        reset_model = str(contract.get("reset_model") or "")
+        timezone_name = str(contract.get("reset_timezone") or "")
+        effective_from = _optional_utc(contract.get("effective_from_utc"))
+        source_hash = str(contract.get("source_evidence_hash") or "")
+        evidence_json = str(contract.get("evidence_json") or "")
+        if not key or provider_name != "MDD NRW" or reset_model != "CALENDAR_MONTH_PROVIDER_TIMEZONE":
+            raise MssqlSafetyError("reset contract is missing its immutable provider/reset model")
+        if not timezone_name or effective_from is None or len(source_hash) != 64 or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+            raise MssqlSafetyError("reset contract is missing a valid timezone, effective boundary, or evidence hash")
+        if int(contract.get("activation_delay_seconds", 0) or 0) not in range(0, 86_401):
+            raise MssqlSafetyError("reset contract activation delay is outside the approved range")
+        if int(contract.get("provider_quota_ceiling", 0) or 0) != ABSOLUTE_PROVIDER_CEILING:
+            raise MssqlSafetyError("reset contract does not preserve the approved provider ceiling")
+        if not bool(contract.get("credential_exclusivity_confirmed")) or not bool(
+            contract.get("provider_reset_boundary_verified")
+        ):
+            raise MssqlSafetyError("reset contract lacks exclusive-credential or reset-boundary verification")
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                cursor.execute(
+                    """
+                    SELECT TOP (1) ContractKey, ResetModel, ResetTimezone,
+                           EffectiveFromUtc, ActivationDelaySeconds,
+                           ProviderQuotaCeiling, CredentialExclusivityConfirmed,
+                           ProviderResetBoundaryVerified, SourceEvidenceHash,
+                           ContractStatus
+                    FROM ctl.MddMacQuotaResetContract WITH (UPDLOCK, HOLDLOCK)
+                    WHERE ContractKey = %s
+                    """,
+                    (key,),
+                )
+                existing = cursor.fetchone()
+                if existing is not None:
+                    same = (
+                        str(_row_named(existing, "ResetModel", index=1) or "") == reset_model
+                        and str(_row_named(existing, "ResetTimezone", index=2) or "") == timezone_name
+                        and _optional_utc(_row_named(existing, "EffectiveFromUtc", index=3)) == effective_from
+                        and int(_row_named(existing, "ActivationDelaySeconds", index=4) or 0)
+                        == int(contract["activation_delay_seconds"])
+                        and int(_row_named(existing, "ProviderQuotaCeiling", index=5) or 0)
+                        == ABSOLUTE_PROVIDER_CEILING
+                        and bool(_row_named(existing, "CredentialExclusivityConfirmed", index=6))
+                        and bool(_row_named(existing, "ProviderResetBoundaryVerified", index=7))
+                        and str(_row_named(existing, "SourceEvidenceHash", index=8) or "") == source_hash
+                    )
+                    if same and str(_row_named(existing, "ContractStatus", index=9) or "") == "ACTIVE":
+                        cursor.execute("COMMIT TRANSACTION;")
+                        connection.commit()
+                        return {
+                            "status": "IDEMPOTENT",
+                            "contract_key": key,
+                            "writes_performed": 0,
+                        }
+                    raise MssqlSafetyError("reset contract key already exists with conflicting or revoked evidence")
+
+                cursor.execute(
+                    """
+                    SELECT TOP (1) ContractKey
+                    FROM ctl.MddMacQuotaResetContract WITH (UPDLOCK, HOLDLOCK)
+                    WHERE ContractStatus = 'ACTIVE'
+                    """
+                )
+                if cursor.fetchone() is not None:
+                    raise MssqlSafetyError("another active MDD quota reset contract already exists")
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacQuotaResetContract
+                    (
+                        ContractKey, ProviderName, ResetModel, ResetTimezone,
+                        EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
+                        CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
+                        SourceEvidenceHash, EvidenceJson, ContractStatus
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
+                    """,
+                    (
+                        key,
+                        provider_name,
+                        reset_model,
+                        timezone_name,
+                        effective_from,
+                        int(contract["activation_delay_seconds"]),
+                        ABSOLUTE_PROVIDER_CEILING,
+                        1,
+                        1,
+                        source_hash,
+                        evidence_json,
+                    ),
+                )
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return {
+            "status": "APPLIED",
+            "contract_key": key,
+            "writes_performed": 1,
+        }
 
     def register_shared_quota_baseline(
         self,
@@ -3476,12 +4270,13 @@ class MssqlPersistence:
         if key is not None and len(key) > 240:
             raise ValueError("authorization_key must be at most 240 characters")
         permit_id = str(uuid.uuid4())
+        self.ensure_automatic_quota_rollover(at_utc=at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
                 candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
-                if len(candidates) != 1:
+                if len(candidates) > 1:
                     cursor.execute("COMMIT TRANSACTION;")
                     connection.commit()
                     decision = (
@@ -3489,21 +4284,49 @@ class MssqlPersistence:
                         if decision_kind == "INITIAL"
                         else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
                     )
-                    reason = (
-                        "current provider billing period is missing"
-                        if not candidates
-                        else "current provider billing period is ambiguous"
-                    )
                     return {
                         "allowed": False,
                         "decision": decision,
                         "proposed_attempts": amount,
                         "known_total": None,
                         "boundary": effective_boundary,
-                        "reason": reason,
+                        "reason": "current provider billing period is ambiguous",
                         "permit_id": None,
                     }
-                month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
+                baseline = candidates[0] if candidates else None
+                bootstrap = None
+                if baseline is None or self._quota_baseline_row(
+                    cursor,
+                    month=str(_row_named(baseline, "MonthKey", index=0) or ""),
+                    at=at,
+                ) is None:
+                    bootstrap_candidates = self._conservative_bootstrap_candidates(cursor, at=at, lock=True)
+                    if len(bootstrap_candidates) != 1:
+                        cursor.execute("COMMIT TRANSACTION;")
+                        connection.commit()
+                        decision = (
+                            "INITIAL_DENIED_QUOTA_STATE_UNAVAILABLE"
+                            if decision_kind == "INITIAL"
+                            else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
+                        )
+                        reason = (
+                            "current provider-wide shared-credential quota evidence is not registrable"
+                            if not bootstrap_candidates
+                            else "multiple active bounded bootstrap authorizations cover the authorization time"
+                        )
+                        return {
+                            "allowed": False,
+                            "decision": decision,
+                            "proposed_attempts": amount,
+                            "known_total": None,
+                            "boundary": effective_boundary,
+                            "reason": reason,
+                            "permit_id": None,
+                        }
+                    bootstrap = bootstrap_candidates[0]
+                    month = str(_row_named(bootstrap, "MonthKey", index=2) or "")
+                else:
+                    month = str(_row_named(baseline, "MonthKey", index=0) or "")
                 # A stale pending permit is conservatively finalized while the
                 # same transaction holds the month/accounting lock.
                 stale_cutoff = at - timedelta(seconds=300)
@@ -3581,37 +4404,57 @@ class MssqlPersistence:
                             "reason": "authorization key already has a finalized permit",
                             "permit_id": None,
                         }
-                baseline = self._quota_baseline_row(cursor, month=month, at=at)
-                if baseline is None:
-                    cursor.execute("COMMIT TRANSACTION;")
-                    connection.commit()
-                    decision = (
-                        "INITIAL_DENIED_QUOTA_STATE_UNAVAILABLE"
-                        if decision_kind == "INITIAL"
-                        else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
+                if bootstrap is not None:
+                    bootstrap_mapping = _row_mapping(bootstrap, BOOTSTRAP_AUTHORIZATION_COLUMNS)
+                    valid_bootstrap, bootstrap_reason = validate_stored_bootstrap_row(
+                        bootstrap_mapping,
+                        at_utc=at,
                     )
-                    return {
-                        "allowed": False,
-                        "decision": decision,
-                        "proposed_attempts": amount,
-                        "known_total": None,
-                        "boundary": effective_boundary,
-                        "reason": "current provider-wide shared-credential quota evidence is not registrable",
-                        "permit_id": None,
-                    }
-                local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
+                    if not valid_bootstrap:
+                        cursor.execute("COMMIT TRANSACTION;")
+                        connection.commit()
+                        decision = (
+                            "INITIAL_DENIED_QUOTA_STATE_UNAVAILABLE"
+                            if decision_kind == "INITIAL"
+                            else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
+                        )
+                        return {
+                            "allowed": False,
+                            "decision": decision,
+                            "proposed_attempts": amount,
+                            "known_total": None,
+                            "boundary": effective_boundary,
+                            "reason": bootstrap_reason,
+                            "permit_id": None,
+                        }
+                    local_cutoff = _optional_utc(bootstrap_mapping["LocalUsageIncludedThroughUtc"])
+                else:
+                    local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
                 assert local_cutoff is not None
                 local = self._quota_usage_totals(
                     cursor,
                     month=month,
                     local_cutoff=local_cutoff,
                     observed_through=at,
+                    include_cutoff=(
+                        bootstrap is None
+                        and str(_row_named(baseline, "AccountingModel", index=12) or "")
+                        == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL
+                    ),
                 )
-                baseline_total = (
-                    int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0)
-                    + int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0)
-                    + int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0)
-                )
+                if bootstrap is not None:
+                    baseline_total = (
+                        int(_row_named(bootstrap, "ScreenshotCumulativeRequests", index=5) or 0)
+                        + int(_row_named(bootstrap, "ConfirmedLocalAttempts", index=8) or 0)
+                        + int(_row_named(bootstrap, "ConservativeUnknownLocalAttempts", index=9) or 0)
+                        + int(_row_named(bootstrap, "PendingLocalReservations", index=10) or 0)
+                    )
+                else:
+                    baseline_total = (
+                        int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0)
+                        + int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0)
+                        + int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0)
+                    )
                 known_total = baseline_total + local["confirmed"] + local["conservative"] + local["pending"]
 
                 projected = known_total + amount

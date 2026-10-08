@@ -176,7 +176,7 @@ class Stage78LiveResearchTests(unittest.TestCase):
             window_start_utc=AT,
             window_end_utc=AT + timedelta(minutes=5),
         ).analyze()
-        self.assertEqual(report["stage15_live_status"], "NOT STARTED — AWAITS TIERED50 CUTOVER")
+        self.assertEqual(report["stage15_live_status"], "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED")
         self.assertEqual(report["evidence"]["source"], "sqlite-live-research")
         self.assertTrue(report["evidence"]["live_research_is_not_production_evidence"])
         self.assertTrue(

@@ -28,6 +28,7 @@ ACCOUNTING_MODELS = frozenset(
         "EXCLUSIVE_CREDENTIAL",
         "CENTRAL_AUTHORIZATION",
         "REFRESHED_PROVIDER_ACCOUNTING",
+        "AUTOMATIC_MONTHLY_ROLLOVER",
     }
 )
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")

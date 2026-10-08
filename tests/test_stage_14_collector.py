@@ -354,7 +354,7 @@ class Stage14QuotaAndOfflineExecutionTests(unittest.TestCase):
         self.assertNotIn("MDD_API_KEY", (package / "trias.py").read_text(encoding="utf-8"))
         roadmap = (REPOSITORY_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         self.assertIn("## Stage 15 — Post-Cutover Validation", roadmap)
-        self.assertIn("Stage 15 remains **NOT STARTED — AWAITS TIERED50 CUTOVER**", roadmap)
+        self.assertIn("Stage 15 remains **NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED**", roadmap)
 
     def test_approved_retry_statuses_are_exact(self) -> None:
         self.assertEqual(APPROVED_TRANSIENT_HTTP_STATUS_CODES, frozenset({408, 429, 500, 502, 503, 504}))

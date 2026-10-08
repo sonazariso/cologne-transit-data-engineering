@@ -95,6 +95,21 @@ RUNTIME_PERMISSION_MATRIX = (
     RuntimePermission("finalize quota permit", "ctl.MddMacQuotaPermit", "UPDATE"),
     RuntimePermission("verify quota permit finalization", "ctl.MddMacQuotaPermit", "SELECT"),
     RuntimePermission("read provider-wide shared quota baseline", "ctl.MddMacSharedQuotaAccounting", "SELECT"),
+    RuntimePermission(
+        "read bounded October bootstrap authorization",
+        "ctl.MddMacConservativeBootstrapAuthorization",
+        "SELECT",
+    ),
+    RuntimePermission(
+        "read the verified automatic quota reset contract",
+        "ctl.MddMacQuotaResetContract",
+        "SELECT",
+    ),
+    RuntimePermission(
+        "create an authorized future quota period atomically",
+        "ctl.uspEnsureMddMacQuotaPeriod",
+        "EXECUTE",
+    ),
     RuntimePermission("record quota decision", "ctl.MddMacQuotaAudit", "INSERT"),
     RuntimePermission("persist parsed MDD snapshot", "stg.uspPersistMddMacSnapshot", "EXECUTE"),
 )

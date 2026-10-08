@@ -2,32 +2,32 @@
 
 > **Current status (2026-10-08):** The earlier SQLite-first/deferred-runtime
 > position and the corrected Legacy7 SQL runtime are retained as historical
-> chronology. The current production design is Tiered50-only; Legacy7 is
-> retired and the prepared Tiered50 LaunchAgent is disabled pending verified
-> provider-wide quota scope, freshness, reset-period, and accounting evidence.
+> chronology. The current production design is Tiered50-only; the first
+> scheduled Tiered50 heartbeat failed its cadence gate, so the LaunchAgent is
+> stopped and disabled. Legacy7 is retired. Future automatic rollover remains
+> fail-closed pending verified provider reset-period and timezone evidence.
 
 ## Authoritative status
 
 Overall Stage 14 status:
 
-`TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`
+`TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
-The prepared production path is the additive macOS-to-SQL Server Tiered50
-runtime. Its exact 43 new SQL target rows use IDs 8–50, preserve Legacy7 IDs
-1–7, and remain disabled. The separate versioned user-local LaunchAgent is
-installed but disabled after the final Legacy7 boundary was captured and the
-Legacy7 job was unloaded. The historical SQLite research profile and Legacy7
-SQL evidence remain immutable, lineage-separated records. The Tiered50
-runtime selects only the current five-minute bucket, does not replay missed
-buckets, and does not fabricate snapshots. The supplied Monitoring screenshot
-shows 554 requests against a 250000 monthly limit, but activation and Stage 15B
-live validation remain blocked until the provider-wide October scope, cutoff,
-reset-period, and accounting evidence is verified. Stage 15A readiness remains
-`IN PROGRESS`.
+The production path is the additive macOS-to-SQL Server Tiered50 runtime. Its
+43 new SQL target rows use IDs 8–50 and preserve Legacy7 IDs 1–7. An
+administrator activation transaction and sampling era were committed, then the
+first scheduled bucket `5971541` completed only 2 of 18 target audits before
+the heartbeat cadence gate stopped the runtime; the LaunchAgent is now
+disabled and no stations are active. The historical SQLite research profile
+and Legacy7 SQL evidence remain immutable, lineage-separated records. The
+bounded October bootstrap is registered for 554 dashboard requests plus all
+local evidence through approval, while future automatic rollover remains
+fail-closed until the provider reset contract is verified. Stage 15A readiness
+remains `IN PROGRESS`.
 
 ## Current Legacy7 operational correction
 
@@ -58,8 +58,8 @@ platform without changing collector policy code.
 The historical collector package remains scheduler-neutral and offline-safe.
 The current production path is a five-minute user-local Tiered50 LaunchAgent
 that writes directly to SQL Server; it is installed in a separate versioned
-bundle but remains disabled while the quota gate is blocked. The corrected
-Legacy7 path is historical evidence and is retired.
+bundle and is currently disabled after its first scheduled heartbeat failed the
+cadence gate. The corrected Legacy7 path is historical evidence and is retired.
 The explicit `live-research` command
 remains a separate historical SQLite mode; it is not production runtime
 evidence. SQLite is disposable only in the `DEVELOPMENT` profile, while the
@@ -388,20 +388,20 @@ The runtime manifest remains the approved Tiered50 design, while the live pilot
 uses the separate operational context `LIVE_RESEARCH_SINGLE_1`; it does not
 create an active Tiered50 era or a production cutover timestamp. Live research
 observations cannot satisfy Stage 15B continuity. Legacy history is not
-deleted or rewritten, and the 43 new production target IDs are prepared but
-not active.
+deleted or rewritten, and the 43 new production target IDs remain configured
+in SQL while the runtime is stopped; no stations are currently active.
 
 ## Offline closeout validation
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 257 tests per run and
+repository suite passed in five consecutive runs with 265 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
 `[19, 18, 18, 18, 19, 18]`, 220 requests/hour, zero live-network calls, and
-Stage 15B live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`; Stage 15A
-readiness is tracked in the [Stage 15 readiness document](15-post-cutover-validation-readiness.md).
+Stage 15B live validation `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT
+FAILED`; Stage 15A readiness is tracked in the [Stage 15 readiness document](15-post-cutover-validation-readiness.md).
 Python compilation, static architecture validation,
 and `git diff --check` passed. The parser regression coverage includes
 call-scope isolation, event/service-operational-field grain, independent
@@ -414,11 +414,10 @@ Offline plan/simulate validation produced 19 due targets, 19 simulated
 transport calls, and zero live-network calls; CLI `live` remained blocked
 before transport.
 
-No Tiered50 production `live` request, PostgreSQL installation/object change,
-Tiered50 cutover, or Power BI change was performed. The exact Tiered50 target
-materialization was applied without MDD requests; all new targets remain
-disabled. The corrected Legacy7 path is retired after its final boundary; no
-manual Heumarkt request was made. The one authorized
+The first real Tiered50 scheduled heartbeat issued two MDD requests and then
+stopped on its cadence gate; no manual Heumarkt request, PostgreSQL
+installation/object change, or Power BI change was performed. The corrected
+Legacy7 path is retired after its final boundary. The one authorized
 S78 research heartbeat used the
 `LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
 `de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
@@ -434,10 +433,12 @@ The following are intentional deferrals, not implementation defects:
 1. establish the complete provider-wide billing-period quota baseline,
    including verified reset timezone/bounds, confirmed, conservative unknown,
    outstanding, and shared-consumer reservations;
-2. record a Tiered50 sampling-era cutover timestamp only after Tiered50 is
-   actually activated;
-3. activate the disabled Tiered50 LaunchAgent only after every independent
-   cutover gate passes; and
+2. resolve and register the provider reset contract before any future-month
+   automatic rollover can authorize requests;
+3. repair the scheduled cadence/persistence gate and perform a fresh bounded
+   activation only after every independent cutover gate passes; and
 4. begin live Stage 15B validation after six normal Tiered50 buckets exist.
 
-No item above is performed by the current implementation.
+The October bootstrap registration and the first bounded activation attempt are
+performed; the reset-contract and successful post-cutover validation items are
+not.

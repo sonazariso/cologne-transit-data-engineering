@@ -99,11 +99,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     historical/deferred-cleanup material and is superseded for the active
     roadmap by S87. Microsoft SQL Server is the sole authoritative project
     database. The current Stage 14 overall status is
-    `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`; its
+    `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`; its
     collector implementation remains `STAGE 14 COLLECTOR IMPLEMENTATION
-    COMPLETE`, and Stage 15 live remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
-    This does not change source availability, create PostgreSQL tables, or
-    authorize production persistence outside the current Tiered50-only gates.
+    COMPLETE`, and Stage 15 live remains `NOT STARTED — FIRST SCHEDULED
+    TIERED50 HEARTBEAT FAILED`. This does not change source availability,
+    create PostgreSQL tables, or authorize production persistence outside the
+    current Tiered50-only gates.
 41. A future short-term raw-payload retention option may be evaluated for
     forensic reprocessing and parser improvements. No duration is approved;
     storage volume, privacy/data considerations, reprocessing need, and
@@ -383,7 +384,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's current status is `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`. The SQLite research profile and Legacy7 implementation are retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is Tiered50-only, with exact prepared IDs 8–50, a separate versioned bundle, durable SQL claims/lease, and a disabled LaunchAgent. Stage 15A readiness is in progress; Stage 15 live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+116. Stage 14's current status is `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`. The SQLite research profile and Legacy7 implementation are retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is Tiered50-only, with exact IDs 8–50, a separate versioned bundle, durable SQL claims/lease, and a disabled LaunchAgent after the failed first scheduled heartbeat. Stage 15A readiness is in progress; Stage 15 live validation remains `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`.
 117. The offline Stage 14 runtime remains a Python, cross-platform,
      standard-library-first collector package. Its offline core must not import
      PostgreSQL/SQL-driver modules, platform-specific APIs, shell orchestration,
@@ -457,7 +458,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 15A validation-readiness guardrails
 
-127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`.
 128. Stage 15A must not start live Stage 15, issue MDD requests, perform DNS or
      live-network activity, install/configure PostgreSQL, create production
      database objects, materialize the 43 new production targets, create a

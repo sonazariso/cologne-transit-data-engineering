@@ -539,7 +539,7 @@ class Stage15Analyzer:
                 policy_state="APPROVED_INVARIANT",
                 evidence_count=len(research_contexts),
                 reason="Research observations are identifiable but cannot satisfy the production sampling-era transition check.",
-                limitations=("Stage 15B remains NOT STARTED — AWAITS TIERED50 CUTOVER.",),
+                limitations=("Stage 15B remains NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED.",),
                 window=window,
             ))
 
@@ -562,8 +562,8 @@ class Stage15Analyzer:
         limitations = list(evidence.limitations if evidence else ())
         limitations.extend(
             [
-                "Stage 15B live post-cutover validation has not started.",
-                "No real Tiered50 cutover timestamp is present or inferred.",
+                "Stage 15B live post-cutover validation has not started; the first scheduled Tiered50 heartbeat failed before a validated cycle.",
+                "A Tiered50 activation timestamp exists in the production SQL history, but this backend-neutral analyzer does not treat it as validated post-cutover evidence.",
                 "No policy threshold is inferred from industry practice or absence of evidence.",
             ]
         )
@@ -816,12 +816,12 @@ class Stage15Analyzer:
                 validation_id="stage15.live_post_cutover_validation",
                 category="READINESS",
                 grain="stage",
-                expected_value="NOT STARTED — AWAITS TIERED50 CUTOVER",
+                expected_value="NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED",
                 actual_value="NO_REAL_CUTOVER_EVIDENCE",
                 status="INSUFFICIENT_EVIDENCE",
                 policy_state="MEASUREMENT_ONLY",
                 evidence_count=0,
-                reason="Stage 15B cannot begin until Tiered50 is actually activated and real post-cutover evidence exists.",
+                reason="Stage 15B cannot begin until a complete validated Tiered50 post-cutover evidence window exists; the first scheduled heartbeat failed its cadence gate.",
                 limitations=limitations,
                 window=window,
             )
@@ -1981,7 +1981,7 @@ class Stage15Analyzer:
             transition_reason = "Only synthetic/offline era metadata exists; it is not production cutover evidence."
         else:
             transition_status = "INSUFFICIENT_EVIDENCE"
-            transition_reason = "No real Tiered50 cutover evidence exists; Stage 15B remains not started."
+            transition_reason = "No validated Tiered50 post-cutover evidence window exists; the first scheduled heartbeat failed and Stage 15B remains not started."
         checks = [
             _result(
                 validation_id="continuity.sampling_era_transition",
@@ -2043,5 +2043,5 @@ class Stage15Analyzer:
             "legacy7_lineage_ids": sorted(LEGACY7_SAMPLING_TARGET_IDS.values()),
             "real_tiered50_transitions": [_json_value(row) for row in real_tiered],
             "synthetic_tiered50_transitions": [_json_value(row) for row in synthetic_tiered],
-            "stage15_live_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+            "stage15_live_status": "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED",
         }, checks

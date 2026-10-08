@@ -8,8 +8,10 @@ fresh host/VM/SQL evidence are complete. The historical Legacy7 `launchd` job
 was unloaded and disabled after its final recorded boundary; its implementation
 and evidence remain available for audit, but it is not a production fallback.
 The Tiered50 LaunchAgent is installed in a separate versioned bundle and is
-currently disabled because the supplied dashboard values do not establish the
-provider-wide quota scope, freshness, reset period, and accounting metadata.
+currently disabled after the first scheduled heartbeat failed its cadence gate.
+The bounded October bootstrap is registered for the observed dashboard value
+and conservative local accounting; future automatic rollover remains
+fail-closed until the provider reset timezone/boundary contract is verified.
 
 ## Current Tiered50 deployment validation
 
@@ -21,22 +23,26 @@ LaunchAgent template. The Tiered50 path reuses the source-faithful collector,
 claims, quota, retry, parser, and transactional SQL persistence core only
 after its own gates pass; it does not turn the Legacy7 target count into 50.
 
-The current status is **BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED**.
+The current status is **BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED
+HEARTBEAT; LEGACY7 RETIRED**.
 Offline validation passes for the exact 50-target manifest, six-phase
 schedule, source-field persistence contract, stable target/bucket claims,
 retry/quota boundaries, durable lease, and fail-closed credential handling.
-The migration is applied and IDs 8–50 are prepared; all Tiered50 targets and
-the LaunchAgent remain disabled. No MDD request or manual Heumarkt request was
-issued by materialization, retirement, or preflight.
+The migration is applied and IDs 8–50 are represented; administrator activation
+committed the target state and sampling era, then the scheduled runtime was
+stopped after its first bucket failed the cadence gate. No manual MDD request
+or manual Heumarkt request was issued by materialization, retirement, or
+preflight.
 
 Fresh evidence records six consecutive expected Legacy7 buckets before its
 retirement, current SQL capacity and checksum-verified backup readiness,
 launchd and power state, and an observable VMware guest. The supplied
 Monitoring screenshot records 554 cumulative requests against a 250000
-monthly limit for the selected October 2026 category, but provider-wide scope,
+monthly limit for the selected October 2026 category. Provider cutoff,
 freshness, reset bounds/timezone, and post-cutoff/external usage remain
-unverified. Activation remains blocked and missing causes are not inferred. The
-machine-readable result is
+unverified; the automatic future-month path therefore fails closed. The first
+scheduled Tiered50 bucket ran 18 target audits, with 2 successes and 16
+heartbeat-budget skips, and is recorded as an outage. The machine-readable result is
 [`docs/operational/tiered50-deployment-validation-evidence.json`](operational/tiered50-deployment-validation-evidence.json), with the operator
 summary in [`docs/operational/tiered50-deployment-validation-report.md`](operational/tiered50-deployment-validation-report.md).
 
@@ -86,7 +92,8 @@ It is generated from the code-backed heartbeat permission matrix in
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit` |
 | `INSERT` | `ctl.MddMacDispatcherClaimEvent`, `ctl.MddMacTargetClaimEvent`, `ctl.MddMacHttpAttempt`, `ctl.MddMacQuotaAudit` |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacQuotaPermit` |
-| `SELECT` | `ctl.MddMacSharedQuotaAccounting` |
+| `SELECT` | `ctl.MddMacSharedQuotaAccounting`, `ctl.MddMacConservativeBootstrapAuthorization`, `ctl.MddMacQuotaResetContract` |
+| `EXECUTE` | `ctl.uspEnsureMddMacQuotaPeriod` |
 | `EXECUTE` | `stg.uspPersistMddMacSnapshot` |
 
 The runtime role receives no `DELETE`, schema, migration, broad server-role,

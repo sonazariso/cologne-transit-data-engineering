@@ -33,6 +33,8 @@ REQUIRED_MARKERS = (
     "ctl.MddMacProductionLeaseEvent",
     "ctl.MddMacSharedQuotaAccounting",
     "ctl.MddMacSharedQuotaReconciliation",
+    "ctl.MddMacConservativeBootstrapAuthorization",
+    "ctl.MddMacQuotaResetContract",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
     "stg.MddMacSourceSnapshot",
@@ -73,6 +75,8 @@ def validate_static(path: Path = MIGRATION) -> dict[str, object]:
         errors.append("migration does not contain the expected additive batch structure")
     if "CREATE OR ALTER PROCEDURE stg.uspPersistMddMacSnapshot" not in text:
         errors.append("persistence procedure is not idempotent")
+    if "CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod" not in text:
+        errors.append("automatic quota rollover procedure is not idempotent")
     if "CREATE OR ALTER VIEW analytics.vwMddMacRecordedAtTimeHistory" not in text:
         errors.append("RecordedAtTime reporting view is not idempotent")
     if "RecordedAtTimeSourceText" not in text or "RecordedAtTimeSourcePath" not in text:

@@ -128,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             "schema_version": "stage15-validation-report-1.0",
             "stage": "15A",
             "status": "FAIL",
-            "stage15_live_status": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+            "stage15_live_status": "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED",
             "error": {"type": type(exc).__name__, "reason": str(exc)},
         }
     indent = 2 if "--pretty" in requested_args else None

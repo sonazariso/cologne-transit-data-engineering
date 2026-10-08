@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -398,21 +398,24 @@ validated online backups retain three UTC daily versions. The implementation
 status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
 source-contract corrections and S78 live-research safety controls. SQL Server
 is the sole official database. The exact Tiered50 materialization is applied
-with prepared IDs 8–50, while historical Legacy7 IDs 1–7 remain unchanged.
+with IDs 8–50, while historical Legacy7 IDs 1–7 remain unchanged.
 Dedicated-login provisioning, preflight, fresh six-bucket evidence,
 capacity/backup checks, and runtime isolation passed. Legacy7 was unloaded and
 disabled; the separate versioned Tiered50 LaunchAgent is installed but
-disabled. Tiered50 activation and Stage 15B live validation remain **NOT
-STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A readiness is in progress below.
+disabled after the first scheduled heartbeat failed its cadence gate. The
+bounded October authorization is registered, but Stage 15B live validation
+remains **NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED**; Stage 15A
+readiness is in progress below.
 
-The current Tiered50 deployment validation is **BLOCKED — TIERED50 INACTIVE;
-LEGACY7 RETIRED**. The separately guarded runtime, additive 43-row
-materialization, stable production claim identity, durable lease, disabled
-Tiered50 LaunchAgent, and offline preflight are implemented. Activation and a
-complete scheduled 30-minute Tiered50 cycle remain outstanding because the
-supplied Monitoring screenshot shows 554 requests against a 250000 monthly
-limit but does not verify provider-wide scope, freshness, reset bounds, or the
-accounting model needed for registration. Legacy7 remains disabled without an
+The current Tiered50 deployment validation is **BLOCKED — TIERED50 STOPPED AFTER
+FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED**. The separately guarded
+runtime, additive 43-row materialization, stable production claim identity,
+durable lease, disabled Tiered50 LaunchAgent, and offline preflight are
+implemented. Administrator activation committed the target state and sampling
+era, but bucket `5971541` completed only 2 of 18 target audits before the
+cadence gate stopped the runtime. The 554 dashboard observation is registered
+through the bounded conservative bootstrap; exact future reset timezone and
+boundary evidence remain unresolved. Legacy7 remains disabled without an
 overlapping writer.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
@@ -429,9 +432,10 @@ audit is recorded in [the Stage 14 audit artifact](stages/14-live-research-first
 
 ## Stage 15 — Post-Cutover Validation
 
-Stage 15 remains **NOT STARTED — AWAITS TIERED50 CUTOVER** as a live
-post-cutover stage; its readiness work is separately tracked below as Stage
-15A. The retired Legacy7 history and prior heartbeat evidence do not
+Stage 15 remains **NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED** as
+a live post-cutover stage; its readiness work is separately tracked below as
+Stage 15A. A bounded Tiered50 activation was attempted, but the first
+scheduled heartbeat did not pass its cadence gate. The retired Legacy7 history and prior heartbeat evidence do not
 constitute Tiered50 cutover evidence.
 
 ### Stage 15A — Post-Cutover Validation Readiness — IN PROGRESS
@@ -444,7 +448,7 @@ read-only evidence and reports hard invariants separately from policy-pending
 metrics. The analyzer does not claim buckets, mutate collector state, finalize
 quota permits, send transport, or infer missing evidence as success.
 
-### Stage 15B — Real Post-Cutover Validation — NOT STARTED — AWAITS TIERED50 CUTOVER
+### Stage 15B — Real Post-Cutover Validation — NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED
 
 Stage 15B will monitor from the first real Tiered50 bucket and establish when
 the new sampling era has enough evidence for broader interpretation. It cannot

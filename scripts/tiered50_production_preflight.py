@@ -57,6 +57,8 @@ from validate_tiered50_migration import validate_static  # noqa: E402
 
 
 MIGRATION = ROOT / "sql" / "mdd-mac-collector" / "materialize-tiered50-production.sql"
+QUOTA_RESET_CONTRACT = ROOT / "docs" / "operational" / "mdd-quota-reset-contract.json"
+OPERATIONAL_EVIDENCE = ROOT / "docs" / "operational" / "tiered50-production-evidence.json"
 LAUNCHD_TEMPLATES = (
     ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-collector.plist",
     ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-tiered50-collector.plist",
@@ -160,6 +162,31 @@ def validate_runtime_guardrails() -> dict[str, Any]:
             "provider_ceiling": ABSOLUTE_PROVIDER_CEILING,
         },
         "credential_gate_fail_closed": True,
+    }
+
+
+def validate_quota_rollover_contract() -> dict[str, Any]:
+    """Validate the future rollover artifact without inventing reset metadata."""
+
+    document = json.loads(QUOTA_RESET_CONTRACT.read_text(encoding="utf-8"))
+    if document.get("provider") != "MDD NRW" or document.get("monthly_quota_ceiling") != ABSOLUTE_PROVIDER_CEILING:
+        raise ValueError("quota reset contract artifact has the wrong provider or ceiling")
+    if document.get("reset_contract_status") not in {"UNVERIFIED", "VERIFIED"}:
+        raise ValueError("quota reset contract status is not explicit")
+    if document.get("provider_reset_boundary_verified") is not (
+        document.get("reset_contract_status") == "VERIFIED"
+    ):
+        raise ValueError("quota reset contract verification flags are inconsistent")
+    if not document.get("automatic_rollover_implementation"):
+        raise ValueError("automatic rollover implementation status is missing")
+    return {
+        "status": "PASS",
+        "contract_status": document["reset_contract_status"],
+        "reset_model": document.get("reset_model"),
+        "reset_timezone": document.get("reset_timezone"),
+        "automatic_rollover_implementation": document["automatic_rollover_implementation"],
+        "future_authorization_fail_closed_without_contract": True,
+        "unresolved_dependency": document.get("unresolved_dependency"),
     }
 
 
@@ -374,6 +401,7 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
         "manifest": validate_manifest(),
         "schedule": validate_schedule(),
         "runtime_guardrails": validate_runtime_guardrails(),
+        "quota_rollover_contract": validate_quota_rollover_contract(),
         "claim_identity": validate_claim_identity(),
         "source_persistence": validate_source_persistence_contract(),
         "deployment_and_sql": validate_deployment_and_sql(),
@@ -391,6 +419,13 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
                 "writes_performed": 0,
                 "error_type": live_error,
             }
+    operational_evidence: dict[str, Any] | None = None
+    try:
+        loaded_evidence = json.loads(OPERATIONAL_EVIDENCE.read_text(encoding="utf-8"))
+        if isinstance(loaded_evidence, dict):
+            operational_evidence = loaded_evidence
+    except (OSError, ValueError):
+        operational_evidence = None
     blockers = []
     if not live:
         blockers.extend(
@@ -399,34 +434,50 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
                 "The Tiered50 writer remains disabled until the live materialization and activation gates pass.",
             ]
         )
-    elif live_result and live_result.get("tiered50_materialization") == {
-        "target_count": 43,
-        "active_count": 0,
-        "prepared_count": 43,
-        "minimum_id": 8,
-        "maximum_id": 50,
-    }:
-        blockers.append(
-            "Tiered50 materialization is complete and prepared, but activation/current-era recording has not passed all gates."
-        )
+    elif live_result and (
+        live_result.get("tiered50_materialization", {}).get("target_count") == 43
+        and live_result.get("tiered50_materialization", {}).get("minimum_id") == 8
+        and live_result.get("tiered50_materialization", {}).get("maximum_id") == 50
+    ):
+        first_cycle = ((operational_evidence or {}).get("sql") or {}).get("first_tiered50_scheduled_cycle")
+        if isinstance(first_cycle, dict) and first_cycle.get("validation_status") == "FAILED_CADENCE_OR_PERSISTENCE_GATE":
+            blockers.append(
+                "The first scheduled Tiered50 heartbeat failed its cadence/persistence gate; the LaunchAgent is stopped and no stations are currently collecting."
+            )
+        elif live_result.get("tiered50_materialization", {}).get("active_count") == 0:
+            blockers.append(
+                "Tiered50 materialization is complete and prepared, but activation/current-era recording has not passed all gates."
+            )
+        else:
+            blockers.append(
+                "The SQL Tiered50 target state is activated, but a complete successful production validation cycle is not yet proven."
+            )
     else:
-        blockers.append("Live Tiered50 materialization is not proven with exactly 43 prepared IDs 8–50.")
-    blockers.extend(
-        [
-            "A complete provider-wide shared-credential quota baseline for the current verified provider billing period is not evidenced; the UTC calendar month is not an authorization boundary.",
-            "At least six consecutive expected five-minute heartbeats, plus database-host capacity and backup evidence, must be retained before activation.",
-        ]
-    )
+        blockers.append("Live Tiered50 materialization is not proven with exactly 43 IDs 8–50.")
+    quota_contract = checks["quota_rollover_contract"]
+    if quota_contract["contract_status"] != "VERIFIED":
+        blockers.append(
+            "Future automatic monthly rollover is implemented but remains fail-closed until the provider supplies and an administrator registers the exact reset timezone/boundary contract."
+        )
+    if not live_result or not live_result.get("quota_usage", {}).get("state_available", False):
+        blockers.append(
+            "The current shared-credential quota authorization is not proven by a complete provider baseline or the approved bounded October bootstrap."
+        )
+    if not isinstance(((operational_evidence or {}).get("sql") or {}).get("first_tiered50_scheduled_cycle"), dict):
+        blockers.append(
+            "A complete successful Tiered50 30-minute validation cycle and its database-host capacity/backup evidence remain required."
+        )
     if live_error:
         blockers.append(f"Read-only live SQL preflight was not proven ({live_error}).")
     return {
         "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
         "status": "PASS" if not live_error else "PASS_WITH_LIVE_EVIDENCE_GAP",
-        "production_status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
+        "production_status": "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED",
         "tiered50_active": False,
         "legacy7_retired": True,
         "stations_actually_collecting": 0,
         "first_completed_live_cycle": None,
+        "first_scheduled_heartbeat": ((operational_evidence or {}).get("sql") or {}).get("first_tiered50_scheduled_cycle"),
         "mdd_requests_issued": 0,
         "writes_performed": 0,
         "checks": checks,
@@ -445,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {
             "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
             "status": "FAIL",
-            "production_status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
+            "production_status": "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED",
             "tiered50_active": False,
             "mdd_requests_issued": 0,
             "error_type": type(exc).__name__,

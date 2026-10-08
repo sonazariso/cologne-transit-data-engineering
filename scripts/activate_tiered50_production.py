@@ -33,6 +33,10 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     connect_mssql,
 )
 from cologne_transit_collector.quota_baseline import validate_stored_baseline_row  # noqa: E402
+from cologne_transit_collector.conservative_bootstrap import (  # noqa: E402
+    BOOTSTRAP_AUTHORIZATION_MODE,
+    validate_stored_bootstrap_row,
+)
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     EXPECTED_SQL_DATABASE,
     MSSQL_CREDENTIAL,
@@ -48,6 +52,7 @@ from install_macos_launch_agent import (  # noqa: E402
 
 
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
+OPERATIONAL_EVIDENCE_PATH = ROOT / "docs" / "operational" / "tiered50-production-evidence.json"
 ERA_CODE = "TIERED50_PRODUCTION"
 TIMESTAMP_KIND = "REAL_TIERED50_CUTOVER"
 
@@ -160,6 +165,57 @@ def _validate_launch_agent_template(*, runtime_config_path: str) -> dict[str, An
         "runtime_config_path": runtime_config_path,
         "secret_free": True,
         "activation_gate": "VALIDATED",
+    }
+
+
+def _validate_operational_evidence(*, now: datetime) -> dict[str, Any]:
+    """Require fresh administrator evidence before changing production state."""
+
+    try:
+        evidence = json.loads(OPERATIONAL_EVIDENCE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("fresh administrator operational evidence is unavailable") from exc
+    generated_at = _utc_datetime(evidence.get("generated_at_utc"))
+    if generated_at is None or generated_at > now + timedelta(seconds=5) or now - generated_at > timedelta(hours=24):
+        raise RuntimeError("administrator operational evidence is missing or stale")
+    host = evidence.get("host")
+    sql = evidence.get("sql")
+    if not isinstance(host, dict) or not isinstance(sql, dict):
+        raise RuntimeError("administrator operational evidence is structurally incomplete")
+    backup = sql.get("backup_verifyonly")
+    if not isinstance(backup, dict) or backup.get("status") != "PASS":
+        raise RuntimeError("latest SQL backup VERIFYONLY evidence is not passing")
+    volumes = sql.get("volume_capacity")
+    if not isinstance(volumes, list) or not any(int(row.get("available_bytes", 0) or 0) > 0 for row in volumes if isinstance(row, dict)):
+        raise RuntimeError("SQL database-host volume capacity is not proven")
+    vmware = host.get("vmware")
+    vmware_returncode = vmware.get("returncode") if isinstance(vmware, dict) else None
+    if not isinstance(vmware, dict) or vmware_returncode is None or int(vmware_returncode) != 0:
+        raise RuntimeError("running Windows VM evidence is not proven")
+    plist = host.get("tiered50_plist")
+    if (
+        not isinstance(plist, dict)
+        or not plist.get("exists")
+        or bool(plist.get("contains_secret_marker"))
+    ):
+        raise RuntimeError("installed Tiered50 LaunchAgent evidence is missing or unsafe")
+    if plist.get("start_interval_seconds") != 300:
+        raise RuntimeError("installed Tiered50 LaunchAgent interval is not five minutes")
+    heartbeat = sql.get("six_consecutive_expected_heartbeats")
+    if not isinstance(heartbeat, dict) or not heartbeat.get("all_accounted") or not heartbeat.get("all_succeeded"):
+        raise RuntimeError("six consecutive prior scheduled heartbeat records are not proven")
+    mac_disk = host.get("mac_disk")
+    if not isinstance(mac_disk, dict) or int(mac_disk.get("free_bytes", 0) or 0) <= 0:
+        raise RuntimeError("macOS host capacity is not proven")
+    return {
+        "artifact": str(OPERATIONAL_EVIDENCE_PATH),
+        "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
+        "backup_verifyonly": "PASS",
+        "sql_volume_capacity": "PASS",
+        "running_windows_vm": "PASS",
+        "installed_tiered50_launchagent": "PRESENT_SECRET_FREE",
+        "prior_scheduled_heartbeat_evidence": "SIX_CONSECUTIVE_SUCCESSFUL_LEGACY7_BUCKETS",
+        "mac_host_capacity": "PASS",
     }
 
 
@@ -353,13 +409,17 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
     settings = MssqlConnectionSettings.from_environment()
     if settings.database != EXPECTED_SQL_DATABASE:
         raise RuntimeError(f"SQL Server target database must be {EXPECTED_SQL_DATABASE}")
+    if str(settings.user or "").casefold() == "colognetransitcollector":
+        raise RuntimeError("Tiered50 activation writes require the separately authorized administrator connection")
     limited_runtime = _validate_limited_runtime(now=now)
     launch_agent = _validate_launch_agent_template(runtime_config_path=str(limited_runtime["config_path"]))
+    operational_evidence = _validate_operational_evidence(now=now)
     connection = connect_mssql(settings)
     evidence: dict[str, object] = {
         "legacy7_status": "ALREADY_RETIRED_NOT_MUTATED",
         "limited_runtime": limited_runtime,
         "launch_agent_template": launch_agent,
+        "operational_evidence": operational_evidence,
         "requested_effective_at_utc": effective_at.isoformat().replace("+00:00", "Z"),
     }
     try:
@@ -429,14 +489,16 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             (effective_at, effective_at),
         )
         baseline_candidates = list(cursor.fetchall())
-        if len(baseline_candidates) != 1:
+        authorization_mode = "COMPLETE"
+        baseline = baseline_candidates[0] if len(baseline_candidates) == 1 else None
+        if len(baseline_candidates) > 1:
             raise RuntimeError(
-                "current provider billing period is missing or ambiguous; activation cannot select a UTC calendar month"
+                "multiple provider billing-period baselines cover the cutover boundary; activation is ambiguous"
             )
-        baseline = baseline_candidates[0]
-        month_key = str(_row_value(baseline, "MonthKey", 0) or "")
-        baseline_mapping = (
-            {
+        baseline_mapping: dict[str, Any] | None = None
+        bootstrap_mapping: dict[str, Any] | None = None
+        if baseline is not None:
+            baseline_mapping = {
                 "MonthKey": _row_value(baseline, "MonthKey", 0),
                 "ProviderQuotaCeiling": _row_value(baseline, "ProviderQuotaCeiling", 1),
                 "NormalOperationalMaximum": _row_value(baseline, "NormalOperationalMaximum", 2),
@@ -458,17 +520,92 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
                 "ProviderPeriodStartUtc": _row_value(baseline, "ProviderPeriodStartUtc", 18),
                 "ProviderPeriodEndUtc": _row_value(baseline, "ProviderPeriodEndUtc", 19),
             }
-        )
-        baseline_valid, baseline_reason = validate_stored_baseline_row(
-            baseline_mapping,
-            at_utc=effective_at,
-        )
-        if not baseline_valid:
-            raise RuntimeError(
-                f"current provider-wide shared-credential quota evidence is not registrable: {baseline_reason}"
+            baseline_valid, baseline_reason = validate_stored_baseline_row(
+                baseline_mapping,
+                at_utc=effective_at,
             )
+            if not baseline_valid:
+                baseline = None
 
-        local_cutoff = _utc_datetime(baseline_mapping["LocalUsageIncludedThroughUtc"])
+        if baseline is None:
+            cursor.execute(
+                """
+                SELECT TOP (2) AuthorizationId, AuthorizationKey, MonthKey,
+                       AuthorizationMode, AccountingModel,
+                       ScreenshotCumulativeRequests, ScreenshotMonthlyLimit,
+                       ScreenshotSha256, ConfirmedLocalAttempts,
+                       ConservativeUnknownLocalAttempts, PendingLocalReservations,
+                       AccountedTotalAtAuthorization, ProviderQuotaCeiling,
+                       NormalOperationalMaximum, RetryProtectionBoundary,
+                       ValidFromUtc, LocalUsageIncludedThroughUtc, StopAtUtc,
+                       OperatorApprovalAtUtc, OperatorApprovalStatementHash,
+                       CredentialExclusivityConfirmed, ProviderScopeVerified,
+                       ProviderMeasurementCutoffEstablished,
+                       ProviderResetTimezoneEstablished, UnexpectedExternalUsage,
+                       SourceEvidenceHash, AuthorizationStatus, EvidenceJson,
+                       RecordedAtUtc, RevokedAtUtc, RevocationReason
+                FROM ctl.MddMacConservativeBootstrapAuthorization WITH (UPDLOCK, HOLDLOCK)
+                WHERE AuthorizationStatus = 'ACTIVE'
+                  AND ValidFromUtc <= %s
+                  AND StopAtUtc > %s
+                ORDER BY ValidFromUtc DESC, AuthorizationId DESC
+                """,
+                (effective_at, effective_at),
+            )
+            bootstrap_rows = list(cursor.fetchall())
+            if len(bootstrap_rows) != 1:
+                raise RuntimeError(
+                    "current provider baseline is unavailable and no single active bounded October bootstrap covers the cutover boundary"
+                )
+            bootstrap = bootstrap_rows[0]
+            bootstrap_mapping = {
+                "AuthorizationId": _row_value(bootstrap, "AuthorizationId", 0),
+                "AuthorizationKey": _row_value(bootstrap, "AuthorizationKey", 1),
+                "MonthKey": _row_value(bootstrap, "MonthKey", 2),
+                "AuthorizationMode": _row_value(bootstrap, "AuthorizationMode", 3),
+                "AccountingModel": _row_value(bootstrap, "AccountingModel", 4),
+                "ScreenshotCumulativeRequests": _row_value(bootstrap, "ScreenshotCumulativeRequests", 5),
+                "ScreenshotMonthlyLimit": _row_value(bootstrap, "ScreenshotMonthlyLimit", 6),
+                "ScreenshotSha256": _row_value(bootstrap, "ScreenshotSha256", 7),
+                "ConfirmedLocalAttempts": _row_value(bootstrap, "ConfirmedLocalAttempts", 8),
+                "ConservativeUnknownLocalAttempts": _row_value(bootstrap, "ConservativeUnknownLocalAttempts", 9),
+                "PendingLocalReservations": _row_value(bootstrap, "PendingLocalReservations", 10),
+                "AccountedTotalAtAuthorization": _row_value(bootstrap, "AccountedTotalAtAuthorization", 11),
+                "ProviderQuotaCeiling": _row_value(bootstrap, "ProviderQuotaCeiling", 12),
+                "NormalOperationalMaximum": _row_value(bootstrap, "NormalOperationalMaximum", 13),
+                "RetryProtectionBoundary": _row_value(bootstrap, "RetryProtectionBoundary", 14),
+                "ValidFromUtc": _row_value(bootstrap, "ValidFromUtc", 15),
+                "LocalUsageIncludedThroughUtc": _row_value(bootstrap, "LocalUsageIncludedThroughUtc", 16),
+                "StopAtUtc": _row_value(bootstrap, "StopAtUtc", 17),
+                "OperatorApprovalAtUtc": _row_value(bootstrap, "OperatorApprovalAtUtc", 18),
+                "OperatorApprovalStatementHash": _row_value(bootstrap, "OperatorApprovalStatementHash", 19),
+                "CredentialExclusivityConfirmed": _row_value(bootstrap, "CredentialExclusivityConfirmed", 20),
+                "ProviderScopeVerified": _row_value(bootstrap, "ProviderScopeVerified", 21),
+                "ProviderMeasurementCutoffEstablished": _row_value(bootstrap, "ProviderMeasurementCutoffEstablished", 22),
+                "ProviderResetTimezoneEstablished": _row_value(bootstrap, "ProviderResetTimezoneEstablished", 23),
+                "UnexpectedExternalUsage": _row_value(bootstrap, "UnexpectedExternalUsage", 24),
+                "SourceEvidenceHash": _row_value(bootstrap, "SourceEvidenceHash", 25),
+                "AuthorizationStatus": _row_value(bootstrap, "AuthorizationStatus", 26),
+                "EvidenceJson": _row_value(bootstrap, "EvidenceJson", 27),
+                "RecordedAtUtc": _row_value(bootstrap, "RecordedAtUtc", 28),
+                "RevokedAtUtc": _row_value(bootstrap, "RevokedAtUtc", 29),
+                "RevocationReason": _row_value(bootstrap, "RevocationReason", 30),
+            }
+            bootstrap_valid, bootstrap_reason = validate_stored_bootstrap_row(
+                bootstrap_mapping,
+                at_utc=effective_at,
+            )
+            if not bootstrap_valid:
+                raise RuntimeError(f"bounded October bootstrap is not valid: {bootstrap_reason}")
+            authorization_mode = BOOTSTRAP_AUTHORIZATION_MODE
+
+        month_key = str(
+            (baseline_mapping if baseline is not None else bootstrap_mapping)["MonthKey"]  # type: ignore[index]
+            or ""
+        )
+        selected_mapping = baseline_mapping if baseline is not None else bootstrap_mapping
+        assert selected_mapping is not None
+        local_cutoff = _utc_datetime(selected_mapping["LocalUsageIncludedThroughUtc"])
         assert local_cutoff is not None
         cursor.execute(
             """
@@ -481,11 +618,14 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             (local_cutoff, month_key),
         )
         local_quota = cursor.fetchone()
-        baseline_total = (
-            int(baseline_mapping["ConfirmedProviderAttempts"] or 0)
-            + int(baseline_mapping["ConservativeUnknownAttempts"] or 0)
-            + int(baseline_mapping["ExplicitSharedConsumerReservedAttempts"] or 0)
-        )
+        if authorization_mode == BOOTSTRAP_AUTHORIZATION_MODE:
+            baseline_total = int(selected_mapping["AccountedTotalAtAuthorization"] or 0)
+        else:
+            baseline_total = (
+                int(selected_mapping["ConfirmedProviderAttempts"] or 0)
+                + int(selected_mapping["ConservativeUnknownAttempts"] or 0)
+                + int(selected_mapping["ExplicitSharedConsumerReservedAttempts"] or 0)
+            )
         current_accounted = baseline_total + int(_row_value(local_quota, "local_after_cutoff", 0) or 0)
         if current_accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
             raise RuntimeError(
@@ -501,12 +641,21 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             "retry_protection_headroom": AUTOMATIC_RETRY_PROTECTION_BOUNDARY - current_accounted,
             "provider_ceiling_headroom": ABSOLUTE_PROVIDER_CEILING - current_accounted,
         }
-        evidence["provider_period"] = {
-            "month_key": month_key,
-            "start_utc": _utc_datetime(baseline_mapping["ProviderPeriodStartUtc"]),
-            "end_utc": _utc_datetime(baseline_mapping["ProviderPeriodEndUtc"]),
-            "timezone": str(baseline_mapping["ProviderPeriodTimezone"] or ""),
-        }
+        evidence["authorization_mode"] = authorization_mode
+        evidence["provider_period"] = (
+            {
+                "month_key": month_key,
+                "start_utc": _utc_datetime(selected_mapping["ProviderPeriodStartUtc"]),
+                "end_utc": _utc_datetime(selected_mapping["ProviderPeriodEndUtc"]),
+                "timezone": str(selected_mapping["ProviderPeriodTimezone"] or ""),
+            }
+            if authorization_mode == "COMPLETE"
+            else {
+                "provider_metadata_verified": False,
+                "valid_from_utc": _utc_datetime(selected_mapping["ValidFromUtc"]),
+                "stop_at_utc": _utc_datetime(selected_mapping["StopAtUtc"]),
+            }
+        )
 
         cursor.execute(
             """

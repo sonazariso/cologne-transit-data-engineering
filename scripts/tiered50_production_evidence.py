@@ -330,6 +330,152 @@ def collect() -> dict[str, Any]:
         ]
         cursor.execute(
             """
+            SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count,
+                   SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_count,
+                   SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped_count,
+                   SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+                   SUM(HttpAttempts) AS http_attempts,
+                   MAX(CompletedAtUtc) AS last_completed_at_utc
+            FROM ctl.MddMacTargetAudit
+            WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+            GROUP BY LogicalDueBucket
+            ORDER BY LogicalDueBucket ASC
+            """
+        )
+        tiered_rows = list(cursor.fetchall())
+        evidence["sql"]["tiered50_recent_audit_buckets"] = [
+            {
+                "logical_due_bucket": int(_row_value(row, "LogicalDueBucket", 0)),
+                "audit_count": int(_row_value(row, "audit_count", 1) or 0),
+                "succeeded_count": int(_row_value(row, "succeeded_count", 2) or 0),
+                "skipped_count": int(_row_value(row, "skipped_count", 3) or 0),
+                "failed_count": int(_row_value(row, "failed_count", 4) or 0),
+                "http_attempts": int(_row_value(row, "http_attempts", 5) or 0),
+                "last_completed_at_utc": _row_value(row, "last_completed_at_utc", 6),
+            }
+            for row in tiered_rows
+        ]
+        cursor.execute(
+            """
+            SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc,
+                   Status, SummaryJson
+            FROM ctl.MddMacCollectorRun
+            WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+            ORDER BY MacCollectorRunId ASC
+            """
+        )
+        first_tiered_run = cursor.fetchone()
+        first_cycle: dict[str, Any] = {
+            "observed": bool(first_tiered_run),
+            "validation_status": "NOT_OBSERVED",
+        }
+        if first_tiered_run:
+            first_bucket = int(_row_value(first_tiered_run, "LogicalDueBucket", 1) or 0)
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS target_audits,
+                       SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded,
+                       SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped,
+                       SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+                       SUM(HttpAttempts) AS http_attempts,
+                       SUM(CASE WHEN PersistenceOutcome LIKE 'PERSISTED%%' THEN 1 ELSE 0 END) AS persisted,
+                       SUM(CASE WHEN ErrorCategory IS NOT NULL THEN 1 ELSE 0 END) AS errors
+                FROM ctl.MddMacTargetAudit
+                WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+                  AND LogicalDueBucket = %s
+                """,
+                (first_bucket,),
+            )
+            audit_summary = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS attempts,
+                       SUM(CASE WHEN h.NetworkAttempted = 1 THEN 1 ELSE 0 END) AS network_attempts,
+                       SUM(CASE WHEN h.AttemptNumber > 1 THEN 1 ELSE 0 END) AS retries,
+                       SUM(CASE WHEN h.HttpResponseReceived = 1 THEN 1 ELSE 0 END) AS responses,
+                       SUM(CASE WHEN h.HttpResponseReceived = 0 AND h.NetworkAttempted = 1 THEN 1 ELSE 0 END) AS transport_errors,
+                       SUM(CASE WHEN h.QuotaPermitId IS NULL AND h.NetworkAttempted = 1 THEN 1 ELSE 0 END) AS attempts_without_permit
+                FROM ctl.MddMacHttpAttempt AS h
+                INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+                WHERE a.CollectionContext = 'MAC_TIERED50_PRODUCTION'
+                  AND a.LogicalDueBucket = %s
+                """,
+                (first_bucket,),
+            )
+            attempt_summary = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT p.PermitId) AS quota_permits,
+                       COALESCE(SUM(p.Amount), 0) AS permitted_amount,
+                       SUM(CASE WHEN p.DecisionKind = 'INITIAL' THEN 1 ELSE 0 END) AS initial_permits,
+                       SUM(CASE WHEN p.DecisionKind = 'RETRY' THEN 1 ELSE 0 END) AS retry_permits,
+                       SUM(CASE WHEN p.Status = 'HTTP_PROVIDER_ATTEMPT_CONFIRMED' THEN 1 ELSE 0 END) AS confirmed_permits,
+                       SUM(CASE WHEN p.Status = 'CONSERVATIVE_LIVE_ATTEMPT' THEN 1 ELSE 0 END) AS uncertain_permits
+                FROM ctl.MddMacQuotaPermit AS p
+                INNER JOIN ctl.MddMacHttpAttempt AS h ON h.QuotaPermitId = p.PermitId
+                INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+                WHERE a.CollectionContext = 'MAC_TIERED50_PRODUCTION'
+                  AND a.LogicalDueBucket = %s
+                """,
+                (first_bucket,),
+            )
+            permit_summary = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT COALESCE(PersistenceOutcome, 'NONE') AS persistence_outcome,
+                       COUNT_BIG(*) AS outcome_count
+                FROM ctl.MddMacTargetAudit
+                WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+                  AND LogicalDueBucket = %s
+                GROUP BY COALESCE(PersistenceOutcome, 'NONE')
+                ORDER BY persistence_outcome
+                """,
+                (first_bucket,),
+            )
+            persistence_summary = [
+                {
+                    "persistence_outcome": str(_row_value(row, "persistence_outcome", 0) or ""),
+                    "count": int(_row_value(row, "outcome_count", 1) or 0),
+                }
+                for row in cursor.fetchall()
+            ]
+            first_cycle = {
+                "observed": True,
+                "run_id": str(_row_value(first_tiered_run, "RunId", 0) or ""),
+                "logical_due_bucket": first_bucket,
+                "started_at_utc": _row_value(first_tiered_run, "StartedAtUtc", 2),
+                "completed_at_utc": _row_value(first_tiered_run, "CompletedAtUtc", 3),
+                "run_status": str(_row_value(first_tiered_run, "Status", 4) or ""),
+                "target_audits": int(_row_value(audit_summary, "target_audits", 0) or 0),
+                "successful_target_audits": int(_row_value(audit_summary, "succeeded", 1) or 0),
+                "skipped_target_audits": int(_row_value(audit_summary, "skipped", 2) or 0),
+                "failed_target_audits": int(_row_value(audit_summary, "failed", 3) or 0),
+                "persisted_target_audits": int(_row_value(audit_summary, "persisted", 5) or 0),
+                "audit_error_count": int(_row_value(audit_summary, "errors", 6) or 0),
+                "http_attempts": int(_row_value(attempt_summary, "attempts", 0) or 0),
+                "network_attempts": int(_row_value(attempt_summary, "network_attempts", 1) or 0),
+                "retry_attempts": int(_row_value(attempt_summary, "retries", 2) or 0),
+                "http_responses": int(_row_value(attempt_summary, "responses", 3) or 0),
+                "transport_error_attempts": int(_row_value(attempt_summary, "transport_errors", 4) or 0),
+                "attempts_without_permit": int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0),
+                "quota_permits": int(_row_value(permit_summary, "quota_permits", 0) or 0),
+                "permitted_amount": int(_row_value(permit_summary, "permitted_amount", 1) or 0),
+                "initial_permits": int(_row_value(permit_summary, "initial_permits", 2) or 0),
+                "retry_permits": int(_row_value(permit_summary, "retry_permits", 3) or 0),
+                "confirmed_permits": int(_row_value(permit_summary, "confirmed_permits", 4) or 0),
+                "uncertain_permits": int(_row_value(permit_summary, "uncertain_permits", 5) or 0),
+                "persistence_outcomes": persistence_summary,
+                "validation_status": (
+                    "PASS"
+                    if int(_row_value(audit_summary, "failed", 3) or 0) == 0
+                    and int(_row_value(audit_summary, "skipped", 2) or 0) == 0
+                    and int(_row_value(attempt_summary, "attempts_without_permit", 5) or 0) == 0
+                    else "FAILED_CADENCE_OR_PERSISTENCE_GATE"
+                ),
+            }
+        evidence["sql"]["first_tiered50_scheduled_cycle"] = first_cycle
+        cursor.execute(
+            """
             SELECT TOP (1) CutoverKey, Tiered50ActivationStatus,
                    Tiered50ActivationAtUtc, RecordedAtUtc
             FROM ctl.MddMacProductionCutover
@@ -349,9 +495,14 @@ def collect() -> dict[str, Any]:
         )
     finally:
         connection.close()
+    latest_cutover = evidence["sql"].get("latest_cutover_record") or {}
+    latest_cutover_status = str(latest_cutover.get("status") or "") if isinstance(latest_cutover, dict) else ""
+    tiered_plist = evidence["host"].get("tiered50_plist", {})
     evidence["status"] = (
-        "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED"
-        if evidence["sql"]["tiered50_materialization"]["active_count"] == 0
+        "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED"
+        if latest_cutover_status == "OUTAGE"
+        or evidence["sql"]["tiered50_materialization"]["active_count"] == 0
+        or bool(isinstance(tiered_plist, dict) and tiered_plist.get("disabled"))
         else "ACTIVE — VALIDATION INCOMPLETE"
     )
     return evidence

@@ -117,7 +117,7 @@ class Tiered50ProductionTests(unittest.TestCase):
     def test_offline_preflight_reconciles_approved_invariants_without_live_requests(self) -> None:
         result = run_preflight()
         self.assertEqual(result["status"], "PASS")
-        self.assertEqual(result["production_status"], "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED")
+        self.assertEqual(result["production_status"], "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED")
         self.assertTrue(result["legacy7_retired"])
         self.assertEqual(result["stations_actually_collecting"], 0)
         self.assertFalse(result["tiered50_active"])
@@ -242,7 +242,7 @@ class Tiered50ProductionTests(unittest.TestCase):
 
     def test_legacy_availability_audit_does_not_infer_vm_sleep_or_stability(self) -> None:
         result = AVAILABILITY.reconcile()
-        self.assertEqual(result["status"], "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED")
+        self.assertEqual(result["status"], "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED")
         self.assertEqual(result["missing_buckets_within_observed_window"], [])
         self.assertEqual(result["evidence_window"]["bucket_span_minutes"], 15)
         self.assertEqual(result["availability"]["missing_bucket_cause"], "NOT_INFERRED")

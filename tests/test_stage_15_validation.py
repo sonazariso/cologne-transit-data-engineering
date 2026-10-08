@@ -57,11 +57,11 @@ class Stage15ValidationTests(unittest.TestCase):
         report = Stage15Analyzer(self.manifest, contract=self.contract).analyze()
         self.assertEqual(
             report["stage14_overall_status"],
-            "TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED",
+            "TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED",
         )
         self.assertEqual(report["stage14_collector_status"], "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE")
         self.assertEqual(report["stage15_readiness_status"], "IN PROGRESS")
-        self.assertEqual(report["stage15_live_status"], "NOT STARTED — AWAITS TIERED50 CUTOVER")
+        self.assertEqual(report["stage15_live_status"], "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED")
         self.assertEqual(self._check(report, "panel.target_count")["actual_value"], 50)
         self.assertEqual(self._check(report, "panel.legacy7_count")["actual_value"], 7)
         self.assertEqual(self._check(report, "panel.new_tiered50_count")["actual_value"], 43)
@@ -82,16 +82,16 @@ class Stage15ValidationTests(unittest.TestCase):
         guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
         historical_prompt = (ROOT / "prompts" / "S80.md").read_text(encoding="utf-8")
 
-        self.assertIn("TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED", stage14_doc)
-        self.assertIn("TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED", guardrails)
-        self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", guardrails)
+        self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", stage14_doc)
+        self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", guardrails)
+        self.assertIn("NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED", guardrails)
         self.assertIn("IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED", historical_prompt)
 
     def test_all_success_reconciles_every_expected_target_and_leaves_live_stage_unstarted(self) -> None:
         report = self._report(self._state())
         self.assertEqual(report["reconciliation"]["expected_count"], 19)
         self.assertEqual(report["reconciliation"]["counts"], {"EXPECTED_AND_SUCCEEDED": 19})
-        self.assertEqual(report["stage15_live_status"], "NOT STARTED — AWAITS TIERED50 CUTOVER")
+        self.assertEqual(report["stage15_live_status"], "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED")
         self.assertFalse(report["evidence"]["collector_evidence_mutated"])
         self.assertEqual(self._check(report, "architecture.read_only_evidence_adapter")["status"], "PASS")
 
@@ -382,7 +382,7 @@ class Stage15ValidationTests(unittest.TestCase):
         self.assertEqual(set(report["continuity"]["legacy7_source_ids"]), set(LEGACY7_IDS))
         self.assertEqual(self._check(report, "continuity.sampling_era_transition")["status"], "INSUFFICIENT_EVIDENCE")
         self.assertEqual(self._check(report, "continuity.post_cutover_attribution")["status"], "INSUFFICIENT_EVIDENCE")
-        self.assertEqual(report["stage15_live_status"], "NOT STARTED — AWAITS TIERED50 CUTOVER")
+        self.assertEqual(report["stage15_live_status"], "NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED")
 
 
 if __name__ == "__main__":

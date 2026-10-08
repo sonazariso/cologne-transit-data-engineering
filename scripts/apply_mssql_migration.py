@@ -30,6 +30,8 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddMacProductionLeaseEvent",
     "ctl.MddMacSharedQuotaAccounting",
     "ctl.MddMacSharedQuotaReconciliation",
+    "ctl.MddMacConservativeBootstrapAuthorization",
+    "ctl.MddMacQuotaResetContract",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
     "stg.MddMacSourceSnapshot",
@@ -44,6 +46,7 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddImportSourceRow",
     "ctl.MddImportOverlap",
     "ctl.MddMacMethodologyEvidence",
+    "ctl.uspEnsureMddMacQuotaPeriod",
 )
 
 

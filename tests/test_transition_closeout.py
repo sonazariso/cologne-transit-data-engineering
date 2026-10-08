@@ -349,9 +349,9 @@ class TransitionCloseoutTests(unittest.TestCase):
             )
         self.assertIn(f"current repository suite reports {discovered} tests per run", project_status)
         self.assertIn(f"repository suite passed in five consecutive runs with {discovered} tests per run", stage14)
-        self.assertIn("TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED", project_status)
+        self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", project_status)
         self.assertIn("STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE", project_status)
-        self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", project_status)
+        self.assertIn("NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED", project_status)
 
 
 if __name__ == "__main__":
