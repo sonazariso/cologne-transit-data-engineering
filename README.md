@@ -33,10 +33,14 @@ have been applied: target IDs 8–50 are prepared, while all Tiered50 targets
 remain disabled. Fresh evidence confirms the final Legacy7 boundary, six
 consecutive expected Legacy7 buckets, current SQL capacity and backup
 readiness, the separate versioned Tiered50 bundle, and no competing Legacy7
-writer. Activation is correctly blocked because the complete provider-wide
-October shared-credential quota baseline is unavailable; both INITIAL and
-RETRY permits therefore fail closed. No Tiered50 MDD request or live cycle has
-been issued. See the [sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
+writer. The supplied Monitoring screenshot visibly reports 554 cumulative
+requests against a 250000 monthly limit for the selected October 2026
+category, but it does not prove provider scope, freshness, reset
+bounds/timezone, accounting model, or post-cutoff/external usage. Activation
+therefore remains correctly blocked; both INITIAL and RETRY permits fail
+closed. No Tiered50 MDD request or live cycle has been issued. See the
+[dashboard evidence](docs/operational/mdd-october-monitoring-dashboard-evidence.json),
+[sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
 [fresh operational evidence](docs/operational/tiered50-production-evidence.json),
 and [operator report](docs/operational/tiered50-deployment-validation-report.md).
 

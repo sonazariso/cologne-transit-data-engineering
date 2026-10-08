@@ -413,7 +413,7 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
         blockers.append("Live Tiered50 materialization is not proven with exactly 43 prepared IDs 8–50.")
     blockers.extend(
         [
-            "A complete provider-wide shared-credential quota baseline for the current calendar month is not evidenced.",
+            "A complete provider-wide shared-credential quota baseline for the current verified provider billing period is not evidenced; the UTC calendar month is not an authorization boundary.",
             "At least six consecutive expected five-minute heartbeats, plus database-host capacity and backup evidence, must be retained before activation.",
         ]
     )

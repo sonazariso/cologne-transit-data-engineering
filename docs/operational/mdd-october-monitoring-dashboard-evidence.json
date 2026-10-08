@@ -1,0 +1,44 @@
+{
+  "artifact_version": "MDD_MONITORING_DASHBOARD_EVIDENCE_V1",
+  "status": "OBSERVED_FACTS_ONLY_SCOPE_AND_FRESHNESS_UNVERIFIED",
+  "source": {
+    "provider": "MDD NRW",
+    "dashboard": "Monitoring",
+    "usage_category": "Nutzungszweck: Auskunfts- und Informationssysteme",
+    "provenance": "User-supplied screenshot in the S112 task context",
+    "original_image_file_available_in_workspace": false,
+    "original_image_sha256": null,
+    "original_image_excluded_from_review_zip": true
+  },
+  "observed": {
+    "selected_month_label": "Oktober",
+    "selected_year": 2026,
+    "cumulative_requests": 554,
+    "monthly_limit": 250000,
+    "nominal_provider_headroom_at_display": 249446
+  },
+  "not_established": [
+    "exact provider measurement timestamp or usage cutoff",
+    "dashboard latest refresh or update timestamp",
+    "whether the displayed usage aggregates one credential, multiple credentials, or application-wide activity",
+    "whether all Tiered50 credential consumers are included",
+    "provider billing or reset timezone and exact UTC period boundaries",
+    "exclusive credential, central authorization, or refreshed provider accounting model",
+    "post-cutoff consumption",
+    "outstanding permits, unknown attempts, external reservations, or unexplained discrepancy"
+  ],
+  "local_reconciliation": {
+    "status": "BLOCKED_BY_UNVERIFIED_PROVIDER_METADATA",
+    "provider_total_added_to_local_sql_counts": false,
+    "local_sql_counts_partitioned_at_provider_cutoff": false,
+    "local_sql_counts_classified_as_post_cutoff": false,
+    "reason": "Without a verified provider cutoff and scope, local SQL attempts cannot be classified as included in, after, or external to the displayed 554."
+  },
+  "registration": {
+    "eligible": false,
+    "accounting_status": "NOT_REGISTERED",
+    "reason": "Displayed values do not establish the required scope, freshness, reset-period, and accounting metadata.",
+    "sql_writes_performed": 0,
+    "mdd_requests_issued": 0
+  }
+}

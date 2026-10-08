@@ -19,6 +19,7 @@ from cologne_transit_collector.domain import (  # noqa: E402
 )
 from cologne_transit_collector.quota_baseline import (  # noqa: E402
     QuotaBaselineError,
+    provider_period_month_key,
     reconcile_provider_evidence,
     validate_stored_baseline_row,
 )
@@ -71,6 +72,22 @@ def _evidence(**overrides: object) -> dict[str, object]:
 
 
 class QuotaBaselineTests(unittest.TestCase):
+    def test_provider_period_key_uses_verified_timezone_at_dst_boundary(self) -> None:
+        self.assertEqual(
+            provider_period_month_key(
+                datetime(2026, 10, 31, 22, 59, tzinfo=timezone.utc),
+                timezone_name="Europe/Berlin",
+            ),
+            "2026-10",
+        )
+        self.assertEqual(
+            provider_period_month_key(
+                datetime(2026, 10, 31, 23, 0, tzinfo=timezone.utc),
+                timezone_name="Europe/Berlin",
+            ),
+            "2026-11",
+        )
+
     def test_reconciliation_separates_provider_and_local_cutoff_usage(self) -> None:
         result = reconcile_provider_evidence(
             _evidence(),
@@ -91,6 +108,14 @@ class QuotaBaselineTests(unittest.TestCase):
         document["provider"] = provider
         with self.assertRaisesRegex(QuotaBaselineError, "double counting"):
             reconcile_provider_evidence(document, local_usage=_local_usage(), now_utc=NOW)
+
+    def test_local_cutoff_must_cover_provider_cutoff_and_stay_inside_period(self) -> None:
+        with self.assertRaisesRegex(QuotaBaselineError, "cover the provider usage cutoff"):
+            reconcile_provider_evidence(
+                _evidence(local_usage_included_through_utc="2026-10-08T07:59:59Z"),
+                local_usage=_local_usage(),
+                now_utc=NOW,
+            )
 
     def test_stored_baseline_fails_closed_after_stale_deadline(self) -> None:
         result = reconcile_provider_evidence(_evidence(), local_usage=_local_usage(), now_utc=NOW)
@@ -127,7 +152,7 @@ class QuotaBaselineTests(unittest.TestCase):
 
     def test_current_month_and_secret_shaped_evidence_are_required(self) -> None:
         old_month = _evidence(month_key="2026-09")
-        with self.assertRaisesRegex(QuotaBaselineError, "current calendar month"):
+        with self.assertRaisesRegex(QuotaBaselineError, "does not map to the supplied month_key|current calendar month"):
             reconcile_provider_evidence(old_month, local_usage=_local_usage(), now_utc=NOW)
         secret_evidence = _evidence(provider={**_evidence()["provider"], "api_key": "redacted"})  # type: ignore[arg-type]
         with self.assertRaisesRegex(QuotaBaselineError, "credential-shaped"):

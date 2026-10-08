@@ -24,8 +24,9 @@ The surrounding status remains:
 The historical Mac Legacy7 runtime completed its corrected selector and
 heartbeat evidence, then was unloaded and disabled at the recorded boundary.
 The exact Tiered50 materialization and offline preflight are complete, but the
-Tiered50 LaunchAgent remains disabled because the provider-wide quota baseline
-is unavailable. This does not start Stage 15B.
+supplied Monitoring screenshot does not establish the provider-wide scope,
+freshness, reset period, or accounting model required for activation. The
+Tiered50 LaunchAgent remains disabled. This does not start Stage 15B.
 
 ## 15A — Pre-cutover validation framework/readiness
 

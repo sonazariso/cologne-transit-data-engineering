@@ -410,8 +410,10 @@ LEGACY7 RETIRED**. The separately guarded runtime, additive 43-row
 materialization, stable production claim identity, durable lease, disabled
 Tiered50 LaunchAgent, and offline preflight are implemented. Activation and a
 complete scheduled 30-minute Tiered50 cycle remain outstanding because the
-complete provider-wide October quota baseline is unavailable. Legacy7 remains
-disabled without an overlapping writer.
+supplied Monitoring screenshot shows 554 requests against a 250000 monthly
+limit but does not verify provider-wide scope, freshness, reset bounds, or the
+accounting model needed for registration. Legacy7 remains disabled without an
+overlapping writer.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,

@@ -533,6 +533,45 @@ IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderPeriodEndUtc') IS NU
     ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderPeriodEndUtc DATETIME2(7) NULL;
 GO
 
+/* COMPLETE is an authorization input, so SQL must reject rows that omit the
+   provider scope, freshness, reset-period, or immutable evidence fields that
+   the Python validator requires.  Existing non-COMPLETE historical rows stay
+   nullable and remain unavailable to the runtime. */
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacSharedQuotaAccounting')
+      AND name = N'CK_ctl_MddMacSharedQuotaAccounting_CompleteEvidence'
+)
+    ALTER TABLE ctl.MddMacSharedQuotaAccounting
+        ADD CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_CompleteEvidence
+            CHECK
+            (
+                AccountingStatus <> 'COMPLETE'
+                OR
+                (
+                    IncludesAllSharedConsumers = 1
+                    AND AccountingModel IN
+                    (
+                        'EXCLUSIVE_CREDENTIAL',
+                        'CENTRAL_AUTHORIZATION',
+                        'REFRESHED_PROVIDER_ACCOUNTING'
+                    )
+                    AND ProviderMeasurementCutoffUtc IS NOT NULL
+                    AND StaleAfterUtc IS NOT NULL
+                    AND SourceEvidenceHash IS NOT NULL
+                    AND ReconciliationKey IS NOT NULL
+                    AND ProviderPeriodTimezone IS NOT NULL
+                    AND ProviderPeriodStartUtc IS NOT NULL
+                    AND ProviderPeriodEndUtc IS NOT NULL
+                    AND ProviderPeriodStartUtc < ProviderPeriodEndUtc
+                    AND ProviderMeasurementCutoffUtc <= BaselineAsOfUtc
+                    AND LocalUsageIncludedThroughUtc >= ProviderMeasurementCutoffUtc
+                    AND StaleAfterUtc <= ProviderPeriodEndUtc
+                )
+            );
+GO
+
 IF NOT EXISTS
 (
     SELECT 1 FROM sys.indexes

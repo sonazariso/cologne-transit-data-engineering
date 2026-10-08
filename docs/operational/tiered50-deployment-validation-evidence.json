@@ -95,11 +95,24 @@
     "windows_vm_disk": "NOT_OBSERVABLE_FROM_MACOS_EVIDENCE"
   },
   "shared_credential_quota": {
-    "calendar_month": "2026-10",
+    "dashboard_selection": {
+      "month_label": "Oktober",
+      "year": 2026
+    },
     "state_available": false,
-    "source": "SHARED_PROVIDER_BASELINE_UNAVAILABLE",
+    "source": "MDD_MONITORING_DASHBOARD_OBSERVED_FACTS_ONLY",
+    "provider_dashboard_evidence": "docs/operational/mdd-october-monitoring-dashboard-evidence.json",
+    "displayed_cumulative_requests": 554,
+    "displayed_monthly_limit": 250000,
+    "nominal_display_headroom": 249446,
+    "measurement_cutoff_utc": null,
+    "provider_period_timezone": null,
+    "provider_period_bounds_utc": null,
+    "scope_verified": false,
+    "accounting_model_verified": false,
+    "operational_headroom": null,
     "known_total": null,
-    "activation_blocker": "complete provider-wide baseline including confirmed, conservative unknown, outstanding, and explicit shared-consumer reservations is absent",
+    "activation_blocker": "dashboard values are observed but required scope, freshness, reset-period, accounting-model, post-cutoff, permit, and external-reservation metadata are not verified",
     "atomic_contract": "IMPLEMENTED; INITIAL and RETRY deny without complete baseline",
     "http_500_is_quota_exhaustion": false,
     "duplicate_authorization": "durable AuthorizationKey idempotence implemented"
@@ -108,7 +121,7 @@
     "status": "NOT_RUN",
     "first_completed_30_minute_tiered50_cycle": null,
     "mdd_requests_issued": 0,
-    "reason": "activation remained blocked by the absent provider-wide quota baseline"
+    "reason": "activation remained blocked because the observed dashboard values do not establish a registrable provider-wide quota baseline"
   },
   "cutover_record": {
     "status": "OUTAGE",
@@ -131,7 +144,7 @@
     "mdd_requests_issued_by_evidence": 0
   },
   "blockers": [
-    "The current calendar month's provider-wide shared-credential baseline is absent, so both INITIAL and RETRY quota permits fail closed.",
+    "The October dashboard displays 554 cumulative requests against a 250000 monthly limit, but provider scope, freshness, reset period, accounting model, post-cutoff usage, permits, and external reservations remain unverified; both INITIAL and RETRY quota permits fail closed.",
     "Tiered50 activation and live validation remain unperformed; the installed Tiered50 LaunchAgent is disabled.",
     "Legacy7 is retired and recorded as an outage after the blocked cutover; it is not a fallback writer."
   ],

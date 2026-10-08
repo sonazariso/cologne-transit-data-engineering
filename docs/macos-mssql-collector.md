@@ -8,7 +8,8 @@ fresh host/VM/SQL evidence are complete. The historical Legacy7 `launchd` job
 was unloaded and disabled after its final recorded boundary; its implementation
 and evidence remain available for audit, but it is not a production fallback.
 The Tiered50 LaunchAgent is installed in a separate versioned bundle and is
-currently disabled because the provider-wide quota baseline is unavailable.
+currently disabled because the supplied dashboard values do not establish the
+provider-wide quota scope, freshness, reset period, and accounting metadata.
 
 ## Current Tiered50 deployment validation
 
@@ -30,9 +31,12 @@ issued by materialization, retirement, or preflight.
 
 Fresh evidence records six consecutive expected Legacy7 buckets before its
 retirement, current SQL capacity and checksum-verified backup readiness,
-launchd and power state, and an observable VMware guest. Activation remains
-blocked because complete provider-wide October shared-credential accounting is
-unavailable. Missing causes are not inferred. The machine-readable result is
+launchd and power state, and an observable VMware guest. The supplied
+Monitoring screenshot records 554 cumulative requests against a 250000
+monthly limit for the selected October 2026 category, but provider-wide scope,
+freshness, reset bounds/timezone, and post-cutoff/external usage remain
+unverified. Activation remains blocked and missing causes are not inferred. The
+machine-readable result is
 [`docs/operational/tiered50-deployment-validation-evidence.json`](operational/tiered50-deployment-validation-evidence.json), with the operator
 summary in [`docs/operational/tiered50-deployment-validation-report.md`](operational/tiered50-deployment-validation-report.md).
 

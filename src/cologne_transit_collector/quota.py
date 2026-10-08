@@ -38,7 +38,7 @@ PERMIT_HTTP_PROVIDER_ATTEMPT_CONFIRMED = HTTP_PROVIDER_ATTEMPT_CONFIRMED
 
 @dataclass(frozen=True)
 class UsageSnapshot:
-    """Known shared-credential usage for the current calendar month."""
+    """Known shared-credential usage for the active accounting period."""
 
     confirmed_provider_attempts: int = 0
     reserved_shared_usage: int = 0

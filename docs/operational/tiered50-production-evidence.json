@@ -212,10 +212,18 @@
       "used_percent": 5.961666584014893
     },
     "quota_usage": {
-      "availability_reason": "no complete provider-wide accounting row exists for the calendar month",
+      "availability_reason": "no complete provider-wide accounting row covers the current provider billing period; provider dashboard scope and reset metadata remain unverified",
+      "provider_dashboard_evidence": "docs/operational/mdd-october-monitoring-dashboard-evidence.json",
+      "dashboard_displayed_cumulative_requests": 554,
+      "dashboard_displayed_monthly_limit": 250000,
+      "dashboard_nominal_headroom": 249446,
+      "operational_headroom": null,
       "known_total": null,
-      "month_key": "2026-10",
-      "source": "SHARED_PROVIDER_BASELINE_UNAVAILABLE",
+      "dashboard_selection": {
+        "month_label": "Oktober",
+        "year": 2026
+      },
+      "source": "MDD_MONITORING_DASHBOARD_OBSERVED_FACTS_ONLY",
       "state_available": false
     },
     "recent_http_attempts": [

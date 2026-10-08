@@ -3,8 +3,8 @@
 > **Current status (2026-10-08):** The earlier SQLite-first/deferred-runtime
 > position and the corrected Legacy7 SQL runtime are retained as historical
 > chronology. The current production design is Tiered50-only; Legacy7 is
-> retired and the prepared Tiered50 LaunchAgent is disabled pending the
-> provider-wide quota baseline.
+> retired and the prepared Tiered50 LaunchAgent is disabled pending verified
+> provider-wide quota scope, freshness, reset-period, and accounting evidence.
 
 ## Authoritative status
 
@@ -22,10 +22,12 @@ runtime. Its exact 43 new SQL target rows use IDs 8–50, preserve Legacy7 IDs
 installed but disabled after the final Legacy7 boundary was captured and the
 Legacy7 job was unloaded. The historical SQLite research profile and Legacy7
 SQL evidence remain immutable, lineage-separated records. The Tiered50
-runtime selects only the current UTC five-minute bucket, does not replay missed
-buckets, and does not fabricate snapshots. Activation and Stage 15B live
-validation are blocked by the absent provider-wide October quota baseline;
-Stage 15A readiness remains `IN PROGRESS`.
+runtime selects only the current five-minute bucket, does not replay missed
+buckets, and does not fabricate snapshots. The supplied Monitoring screenshot
+shows 554 requests against a 250000 monthly limit, but activation and Stage 15B
+live validation remain blocked until the provider-wide October scope, cutoff,
+reset-period, and accounting evidence is verified. Stage 15A readiness remains
+`IN PROGRESS`.
 
 ## Current Legacy7 operational correction
 
@@ -393,7 +395,7 @@ not active.
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 251 tests per run and
+repository suite passed in five consecutive runs with 253 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
@@ -429,9 +431,9 @@ not rewritten. It remains excluded from Stage 15B.
 
 The following are intentional deferrals, not implementation defects:
 
-1. establish the complete provider-wide calendar-month quota baseline,
-   including confirmed, conservative unknown, outstanding, and shared-consumer
-   reservations;
+1. establish the complete provider-wide billing-period quota baseline,
+   including verified reset timezone/bounds, confirmed, conservative unknown,
+   outstanding, and shared-consumer reservations;
 2. record a Tiered50 sampling-era cutover timestamp only after Tiered50 is
    actually activated;
 3. activate the disabled Tiered50 LaunchAgent only after every independent

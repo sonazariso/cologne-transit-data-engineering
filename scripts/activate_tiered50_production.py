@@ -164,6 +164,7 @@ def _validate_launch_agent_template(*, runtime_config_path: str) -> dict[str, An
 
 
 def read_only_status() -> dict[str, object]:
+    now = datetime.now(timezone.utc)
     manifest = load_default_manifest(ROOT)
     settings = MssqlConnectionSettings.from_environment()
     if settings.database != EXPECTED_SQL_DATABASE:
@@ -201,7 +202,7 @@ def read_only_status() -> dict[str, object]:
         writers = cursor.fetchall()
         cursor.execute(
             """
-            SELECT MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+            SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
                    RetryProtectionBoundary, ConfirmedProviderAttempts,
                    ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                    AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
@@ -210,11 +211,21 @@ def read_only_status() -> dict[str, object]:
                    SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
                    ProviderPeriodStartUtc, ProviderPeriodEndUtc
             FROM ctl.MddMacSharedQuotaAccounting
-            WHERE MonthKey = %s
+            WHERE ProviderPeriodStartUtc <= %s
+              AND ProviderPeriodEndUtc > %s
+            ORDER BY ProviderPeriodStartUtc DESC, MonthKey
             """,
-            (datetime.now(timezone.utc).strftime("%Y-%m"),),
+            (now, now),
         )
-        quota_baseline = cursor.fetchone()
+        quota_baselines = list(cursor.fetchall())
+        quota_baseline = quota_baselines[0] if len(quota_baselines) == 1 else None
+        quota_baseline_resolution = (
+            "ONE_CURRENT_PROVIDER_PERIOD"
+            if len(quota_baselines) == 1
+            else "MISSING_CURRENT_PROVIDER_PERIOD"
+            if not quota_baselines
+            else "AMBIGUOUS_CURRENT_PROVIDER_PERIOD"
+        )
         cursor.execute(
             """
             SELECT TOP (1) RunId, LogicalDueBucket, CompletedAtUtc, Status
@@ -292,6 +303,7 @@ def read_only_status() -> dict[str, object]:
         "running_production_writers": serialized_writers,
         "sampling_era_read_scope": "ADMINISTRATOR_ONLY",
         "quota_baseline": serialized_quota_baseline,
+        "quota_baseline_resolution": quota_baseline_resolution,
         "latest_legacy7_run": serialized_final_run,
         "mdd_requests_issued": 0,
         "writes_performed": 0,
@@ -399,10 +411,9 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             for row in competing
         ]
 
-        month_key = effective_at.strftime("%Y-%m")
         cursor.execute(
             """
-            SELECT ProviderQuotaCeiling, NormalOperationalMaximum,
+            SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
                    RetryProtectionBoundary, ConfirmedProviderAttempts,
                    ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
                    AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
@@ -411,42 +422,51 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
                    SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
                    ProviderPeriodStartUtc, ProviderPeriodEndUtc
             FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
-            WHERE MonthKey = %s
+            WHERE ProviderPeriodStartUtc <= %s
+              AND ProviderPeriodEndUtc > %s
+            ORDER BY ProviderPeriodStartUtc DESC, MonthKey
             """,
-            (month_key,),
+            (effective_at, effective_at),
         )
-        baseline = cursor.fetchone()
+        baseline_candidates = list(cursor.fetchall())
+        if len(baseline_candidates) != 1:
+            raise RuntimeError(
+                "current provider billing period is missing or ambiguous; activation cannot select a UTC calendar month"
+            )
+        baseline = baseline_candidates[0]
+        month_key = str(_row_value(baseline, "MonthKey", 0) or "")
         baseline_mapping = (
             {
-                "ProviderQuotaCeiling": _row_value(baseline, "ProviderQuotaCeiling", 0),
-                "NormalOperationalMaximum": _row_value(baseline, "NormalOperationalMaximum", 1),
-                "RetryProtectionBoundary": _row_value(baseline, "RetryProtectionBoundary", 2),
-                "ConfirmedProviderAttempts": _row_value(baseline, "ConfirmedProviderAttempts", 3),
-                "ConservativeUnknownAttempts": _row_value(baseline, "ConservativeUnknownAttempts", 4),
-                "ExplicitSharedConsumerReservedAttempts": _row_value(baseline, "ExplicitSharedConsumerReservedAttempts", 5),
-                "AccountingStatus": _row_value(baseline, "AccountingStatus", 6),
-                "IncludesAllSharedConsumers": _row_value(baseline, "IncludesAllSharedConsumers", 7),
-                "BaselineAsOfUtc": _row_value(baseline, "BaselineAsOfUtc", 8),
-                "LocalUsageIncludedThroughUtc": _row_value(baseline, "LocalUsageIncludedThroughUtc", 9),
-                "SourceDescription": _row_value(baseline, "SourceDescription", 10),
-                "AccountingModel": _row_value(baseline, "AccountingModel", 11),
-                "ProviderMeasurementCutoffUtc": _row_value(baseline, "ProviderMeasurementCutoffUtc", 12),
-                "StaleAfterUtc": _row_value(baseline, "StaleAfterUtc", 13),
-                "SourceEvidenceHash": _row_value(baseline, "SourceEvidenceHash", 14),
-                "ReconciliationKey": _row_value(baseline, "ReconciliationKey", 15),
-                "ProviderPeriodTimezone": _row_value(baseline, "ProviderPeriodTimezone", 16),
-                "ProviderPeriodStartUtc": _row_value(baseline, "ProviderPeriodStartUtc", 17),
-                "ProviderPeriodEndUtc": _row_value(baseline, "ProviderPeriodEndUtc", 18),
+                "MonthKey": _row_value(baseline, "MonthKey", 0),
+                "ProviderQuotaCeiling": _row_value(baseline, "ProviderQuotaCeiling", 1),
+                "NormalOperationalMaximum": _row_value(baseline, "NormalOperationalMaximum", 2),
+                "RetryProtectionBoundary": _row_value(baseline, "RetryProtectionBoundary", 3),
+                "ConfirmedProviderAttempts": _row_value(baseline, "ConfirmedProviderAttempts", 4),
+                "ConservativeUnknownAttempts": _row_value(baseline, "ConservativeUnknownAttempts", 5),
+                "ExplicitSharedConsumerReservedAttempts": _row_value(baseline, "ExplicitSharedConsumerReservedAttempts", 6),
+                "AccountingStatus": _row_value(baseline, "AccountingStatus", 7),
+                "IncludesAllSharedConsumers": _row_value(baseline, "IncludesAllSharedConsumers", 8),
+                "BaselineAsOfUtc": _row_value(baseline, "BaselineAsOfUtc", 9),
+                "LocalUsageIncludedThroughUtc": _row_value(baseline, "LocalUsageIncludedThroughUtc", 10),
+                "SourceDescription": _row_value(baseline, "SourceDescription", 11),
+                "AccountingModel": _row_value(baseline, "AccountingModel", 12),
+                "ProviderMeasurementCutoffUtc": _row_value(baseline, "ProviderMeasurementCutoffUtc", 13),
+                "StaleAfterUtc": _row_value(baseline, "StaleAfterUtc", 14),
+                "SourceEvidenceHash": _row_value(baseline, "SourceEvidenceHash", 15),
+                "ReconciliationKey": _row_value(baseline, "ReconciliationKey", 16),
+                "ProviderPeriodTimezone": _row_value(baseline, "ProviderPeriodTimezone", 17),
+                "ProviderPeriodStartUtc": _row_value(baseline, "ProviderPeriodStartUtc", 18),
+                "ProviderPeriodEndUtc": _row_value(baseline, "ProviderPeriodEndUtc", 19),
             }
-            if baseline is not None
-            else None
         )
         baseline_valid, baseline_reason = validate_stored_baseline_row(
             baseline_mapping,
-            at_utc=now,
+            at_utc=effective_at,
         )
         if not baseline_valid:
-            raise RuntimeError(f"complete current provider-wide shared-credential quota baseline is unavailable: {baseline_reason}")
+            raise RuntimeError(
+                f"current provider-wide shared-credential quota evidence is not registrable: {baseline_reason}"
+            )
 
         local_cutoff = _utc_datetime(baseline_mapping["LocalUsageIncludedThroughUtc"])
         assert local_cutoff is not None
@@ -480,6 +500,12 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             "normal_operational_headroom": NORMAL_OPERATIONAL_MAXIMUM - current_accounted,
             "retry_protection_headroom": AUTOMATIC_RETRY_PROTECTION_BOUNDARY - current_accounted,
             "provider_ceiling_headroom": ABSOLUTE_PROVIDER_CEILING - current_accounted,
+        }
+        evidence["provider_period"] = {
+            "month_key": month_key,
+            "start_utc": _utc_datetime(baseline_mapping["ProviderPeriodStartUtc"]),
+            "end_utc": _utc_datetime(baseline_mapping["ProviderPeriodEndUtc"]),
+            "timezone": str(baseline_mapping["ProviderPeriodTimezone"] or ""),
         }
 
         cursor.execute(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconcile and optionally register the provider-wide monthly MDD quota.
+"""Reconcile and optionally register the provider-wide MDD billing-period quota.
 
 The default operation is read-only.  A provider usage report/confirmation is
 required as a JSON evidence document; missing external usage is never treated
@@ -70,6 +70,7 @@ def _summary(reconciliation: Mapping[str, Any], *, local_usage: Mapping[str, Any
         "provider_period_timezone": reconciliation["provider_period_timezone"],
         "provider_period_start_utc": reconciliation["provider_period_start_utc"],
         "provider_period_end_utc": reconciliation["provider_period_end_utc"],
+        "provider_period_selection": reconciliation.get("provider_period_selection", "EXPLICIT_PROVIDER_PERIOD"),
         "current_conservative_accounted_total": reconciliation["current_conservative_accounted_total"],
         "remaining_headroom": reconciliation["remaining_headroom"],
         "sql_writes_performed": 0,
@@ -105,21 +106,12 @@ def run(*, evidence_path: Path | None, apply: bool = False, approve: bool = Fals
             ),
             "sql_writes_performed": 0,
             "mdd_requests_issued": 0,
+            "local_sql_evidence_status": "NOT_PROVEN",
+            "local_sql_evidence_reason": (
+                "provider billing period metadata is required before local SQL reconciliation; "
+                "the UTC calendar month is not an authorization boundary"
+            ),
         }
-        try:
-            settings = MssqlConnectionSettings.from_environment()
-            persistence = MssqlPersistence(settings=settings)
-            local_usage = persistence.read_quota_reconciliation_inputs(
-                month_key=now.strftime("%Y-%m"),
-                local_usage_included_through_utc=now,
-            )
-            result["local_sql_evidence_status"] = "READ_ONLY_CAPTURED"
-            result["local_sql_evidence"] = _local_evidence_summary(local_usage)
-        except Exception as exc:
-            # The provider report is still the primary blocker. Do not expose
-            # driver text, hosts, connection strings, or credential details.
-            result["local_sql_evidence_status"] = "NOT_PROVEN"
-            result["local_sql_evidence_error_type"] = type(exc).__name__
         return result
     if apply and not approve:
         return {
@@ -131,12 +123,21 @@ def run(*, evidence_path: Path | None, apply: bool = False, approve: bool = Fals
         }
 
     document = load_evidence_file(evidence_path)
+    provider = document.get("provider")
+    if not isinstance(provider, Mapping):
+        raise QuotaBaselineError("provider evidence must contain a provider object")
     local_cutoff = _utc(document.get("local_usage_included_through_utc"))
+    provider_cutoff = _utc(provider.get("usage_through_utc", provider.get("measurement_cutoff_utc")))
+    provider_period_start = _utc(provider.get("period_start_utc"))
+    provider_period_end = _utc(provider.get("period_end_utc"))
     settings = MssqlConnectionSettings.from_environment()
     persistence = MssqlPersistence(settings=settings)
     local_usage = persistence.read_quota_reconciliation_inputs(
         month_key=str(document.get("month_key") or ""),
         local_usage_included_through_utc=local_cutoff,
+        provider_measurement_cutoff_utc=provider_cutoff,
+        provider_period_start_utc=provider_period_start,
+        provider_period_end_utc=provider_period_end,
     )
     reconciliation = reconcile_provider_evidence(
         document,

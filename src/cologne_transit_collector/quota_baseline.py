@@ -135,6 +135,21 @@ def _provider_period(provider: Mapping[str, Any], *, month_key: str) -> dict[str
     }
 
 
+def provider_period_month_key(at_utc: datetime, *, timezone_name: str) -> str:
+    """Return the provider billing-period key for a UTC instant.
+
+    This helper deliberately requires the provider's verified IANA timezone.
+    The collector must not substitute the host or UTC calendar timezone when
+    deciding which monthly accounting row authorizes a request.
+    """
+
+    try:
+        zone = ZoneInfo(_required_text(timezone_name, field="provider_period_timezone", maximum=80))
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise QuotaBaselineError("provider_period_timezone is not a recognized IANA timezone") from exc
+    return _utc(at_utc, field="at_utc").astimezone(zone).strftime("%Y-%m")
+
+
 def reconcile_provider_evidence(
     document: Mapping[str, Any],
     *,
@@ -161,9 +176,6 @@ def reconcile_provider_evidence(
     month_key = _required_text(document.get("month_key"), field="month_key", maximum=7)
     if not _MONTH_PATTERN.fullmatch(month_key):
         raise QuotaBaselineError("month_key must use YYYY-MM format")
-    if require_current_month and month_key != now.strftime("%Y-%m"):
-        raise QuotaBaselineError("provider evidence is not for the current calendar month")
-
     accounting_model = _required_text(document.get("accounting_model"), field="accounting_model", maximum=40)
     if accounting_model not in ACCOUNTING_MODELS:
         raise QuotaBaselineError("accounting_model is not one of the approved shared-consumer models")
@@ -206,6 +218,18 @@ def reconcile_provider_evidence(
     period = _provider_period(provider, month_key=month_key)
     if not period["start_utc"] <= provider_cutoff < period["end_utc"]:
         raise QuotaBaselineError("provider usage cutoff is outside the declared billing period")
+    if not period["start_utc"] <= measured_at < period["end_utc"]:
+        raise QuotaBaselineError("provider measured_at_utc is outside the declared billing period")
+    if require_current_month:
+        provider_month_now = provider_period_month_key(now, timezone_name=period["timezone"])
+        if (
+            month_key != provider_month_now
+            or not period["start_utc"] <= now < period["end_utc"]
+        ):
+            raise QuotaBaselineError(
+                "provider evidence is not for the current provider billing period "
+                "(current calendar month in the verified provider timezone)"
+            )
 
     cumulative = _nonnegative(
         provider.get("cumulative_attempts", provider.get("reported_cumulative_usage")),
@@ -232,9 +256,13 @@ def reconcile_provider_evidence(
         document.get("local_usage_included_through_utc"),
         field="local_usage_included_through_utc",
     )
-    if local_cutoff > now or local_cutoff > provider_cutoff:
+    if local_cutoff > now or local_cutoff < provider_cutoff:
         raise QuotaBaselineError(
-            "local_usage_included_through_utc must be no later than the provider usage cutoff and current time"
+            "local_usage_included_through_utc must cover the provider usage cutoff and not be in the future"
+        )
+    if local_cutoff >= period["end_utc"]:
+        raise QuotaBaselineError(
+            "local_usage_included_through_utc must be inside the provider billing period"
         )
     provider_includes_local = provider.get("includes_local_usage")
     if not isinstance(provider_includes_local, bool):
@@ -439,14 +467,24 @@ def validate_stored_baseline_row(row: Mapping[str, Any] | None, *, at_utc: datet
             return False, "provider billing period is invalid"
         if period_start.astimezone(period_zone).strftime("%Y-%m") != month_key:
             return False, "provider billing period does not map to the baseline month"
+        if not period_start <= at < period_end:
+            return False, "baseline does not cover the current provider billing period"
+        if at.astimezone(period_zone).strftime("%Y-%m") != month_key:
+            return False, "baseline month key does not match the provider timezone at authorization time"
         if not period_start <= measurement_cutoff < period_end:
             return False, "provider measurement cutoff is outside the billing period"
+        if not period_start <= baseline_as_of < period_end:
+            return False, "baseline timestamp is outside the provider billing period"
+        if not period_start <= local_cutoff < period_end:
+            return False, "local usage cutoff is outside the provider billing period"
         if stale_after > period_end:
             return False, "baseline staleness deadline extends beyond the billing period"
         if baseline_as_of > at or local_cutoff > at or measurement_cutoff > at:
             return False, "baseline timestamps are in the future"
-        if local_cutoff > measurement_cutoff:
-            return False, "local usage cutoff is after provider measurement cutoff"
+        if measurement_cutoff > baseline_as_of:
+            return False, "provider measurement cutoff is after the baseline timestamp"
+        if local_cutoff < measurement_cutoff:
+            return False, "local usage cutoff does not cover provider measurement cutoff"
         if stale_after <= at:
             return False, "baseline is stale"
         model = str(row.get("AccountingModel") or "")
@@ -488,6 +526,7 @@ __all__ = [
     "QuotaBaselineError",
     "canonical_evidence_hash",
     "load_evidence_file",
+    "provider_period_month_key",
     "reconcile_provider_evidence",
     "validate_stored_baseline_row",
 ]

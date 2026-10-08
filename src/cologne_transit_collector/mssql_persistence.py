@@ -355,10 +355,6 @@ def _stored_run_ids(value: Any) -> tuple[str, ...]:
     return tuple(sorted(normalized))
 
 
-def _month_key(value: datetime) -> str:
-    return _utc(value).strftime("%Y-%m")
-
-
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
     if row is None:
         return None
@@ -2618,11 +2614,25 @@ class MssqlPersistence:
 
         at = _utc(at_utc or datetime.now(timezone.utc))
         cutoff = at - timedelta(seconds=max(1, int(stale_after_seconds)))
-        month = _month_key(at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
+                if len(candidates) != 1:
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    return {
+                        "status": "NOT_AVAILABLE",
+                        "reason": (
+                            "current provider billing period is missing or ambiguous; "
+                            "stale permit recovery remains fail-closed"
+                        ),
+                        "month_key": None,
+                        "recovered_permits": 0,
+                        "cutoff_utc": _iso(cutoff),
+                    }
+                month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
                 cursor.execute(
                     """
                     UPDATE ctl.MddMacQuotaPermit
@@ -2656,6 +2666,43 @@ class MssqlPersistence:
             "recovered_permits": recovered,
             "cutoff_utc": _iso(cutoff),
         }
+
+    @staticmethod
+    def _provider_period_baseline_candidates(
+        cursor: Any,
+        *,
+        at: datetime,
+        lock: bool = False,
+    ) -> list[Any]:
+        """Return baselines whose declared provider period covers ``at``.
+
+        Selecting by the persisted UTC period bounds avoids assuming that the
+        host's UTC calendar month is the provider's billing month.  More than
+        one covering row is unsafe and is handled as an ambiguous state by
+        callers.
+        """
+
+        lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        cursor.execute(
+            """
+            SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+                   RetryProtectionBoundary, ConfirmedProviderAttempts,
+                   ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
+                   AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
+                   LocalUsageIncludedThroughUtc, SourceDescription,
+                   AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
+                   SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
+                   ProviderPeriodStartUtc, ProviderPeriodEndUtc
+            FROM ctl.MddMacSharedQuotaAccounting"""
+            + lock_hint
+            + """
+            WHERE ProviderPeriodStartUtc <= %s
+              AND ProviderPeriodEndUtc > %s
+            ORDER BY ProviderPeriodStartUtc DESC, MonthKey
+            """,
+            (_utc(at), _utc(at)),
+        )
+        return list(cursor.fetchall())
 
     def _quota_baseline_row(self, cursor: Any, *, month: str, at: datetime) -> Any:
         cursor.execute(
@@ -2720,34 +2767,25 @@ class MssqlPersistence:
         """
 
         at = _utc(at_utc or datetime.now(timezone.utc))
-        month = _month_key(at)
         try:
             with self._connection() as connection:
                 cursor = self._cursor(connection)
-                cursor.execute(
-                    """
-                    SELECT MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
-                           RetryProtectionBoundary, ConfirmedProviderAttempts,
-                           ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
-                           AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
-                           LocalUsageIncludedThroughUtc, SourceDescription,
-                           AccountingModel, ProviderMeasurementCutoffUtc, StaleAfterUtc,
-                           SourceEvidenceHash, ReconciliationKey, ProviderPeriodTimezone,
-                           ProviderPeriodStartUtc, ProviderPeriodEndUtc
-                    FROM ctl.MddMacSharedQuotaAccounting
-                    WHERE MonthKey = %s
-                    """,
-                    (month,),
-                )
-                baseline = cursor.fetchone()
-                if baseline is None:
+                candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
+                if len(candidates) != 1:
+                    reason = (
+                        "no complete provider-wide accounting row covers the current provider billing period"
+                        if not candidates
+                        else "multiple provider-wide accounting rows cover the current provider billing period"
+                    )
                     return {
                         "state_available": False,
                         "source": QUOTA_BASELINE_UNAVAILABLE,
-                        "availability_reason": "no complete provider-wide accounting row exists for the calendar month",
-                        "month_key": month,
+                        "availability_reason": reason,
+                        "month_key": None,
                         "known_total": None,
                     }
+                baseline = candidates[0]
+                month = str(_row_named(baseline, "MonthKey", index=0) or "")
                 mapped_baseline = _row_mapping(baseline, QUOTA_BASELINE_COLUMNS)
                 usable, reason = validate_stored_baseline_row(mapped_baseline, at_utc=at)
                 if not usable:
@@ -2768,7 +2806,7 @@ class MssqlPersistence:
                 "state_available": False,
                 "source": QUOTA_BASELINE_UNAVAILABLE,
                 "availability_reason": "provider-wide accounting state could not be read",
-                "month_key": month,
+                "month_key": None,
                 "known_total": None,
             }
 
@@ -2803,20 +2841,27 @@ class MssqlPersistence:
         *,
         month: str,
         cutoff: datetime,
+        observed_through: datetime | None = None,
         lock: bool = False,
     ) -> Mapping[str, int]:
-        """Read permit counts on both sides of the provider measurement cutoff."""
+        """Read permit counts around the provider measurement cutoff.
+
+        ``cutoff`` is the provider measurement boundary. ``observed_through``
+        bounds post-cutoff rows to the local SQL evidence actually read, so a
+        reconciliation cannot classify future or unobserved permits as usage.
+        """
 
         lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        observed = _utc(observed_through or cutoff)
         cursor.execute(
             """
             SELECT
                 COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS confirmed_through_cutoff,
                 COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS unknown_through_cutoff,
                 COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS pending_through_cutoff,
-                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS confirmed_after_cutoff,
-                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS unknown_after_cutoff,
-                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s THEN Amount ELSE 0 END), 0) AS pending_after_cutoff
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS confirmed_after_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS unknown_after_cutoff,
+                COALESCE(SUM(CASE WHEN Status = %s AND ReservedAtUtc > %s AND ReservedAtUtc <= %s THEN Amount ELSE 0 END), 0) AS pending_after_cutoff
             FROM ctl.MddMacQuotaPermit"""
             + lock_hint
             + """
@@ -2831,10 +2876,13 @@ class MssqlPersistence:
                 cutoff,
                 HTTP_PROVIDER_ATTEMPT_CONFIRMED,
                 cutoff,
+                observed,
                 CONSERVATIVE_LIVE_ATTEMPT,
                 cutoff,
+                observed,
                 PENDING_AUTHORIZATION,
                 cutoff,
+                observed,
                 month,
             ),
         )
@@ -2853,6 +2901,9 @@ class MssqlPersistence:
         *,
         month_key: str,
         local_usage_included_through_utc: datetime,
+        provider_measurement_cutoff_utc: datetime | None = None,
+        provider_period_start_utc: datetime | None = None,
+        provider_period_end_utc: datetime | None = None,
     ) -> Mapping[str, Any]:
         """Read local quota, HTTP, and collector evidence without writing.
 
@@ -2862,15 +2913,36 @@ class MssqlPersistence:
         """
 
         cutoff = _utc(local_usage_included_through_utc)
-        month_start = datetime.strptime(month_key + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if (provider_period_start_utc is None) != (provider_period_end_utc is None):
+            raise ValueError("provider period start and end must be supplied together")
+        if provider_period_start_utc is None:
+            # Kept for old read-only diagnostics. Registration supplies the
+            # explicit provider period and never uses this UTC fallback.
+            month_start = datetime.strptime(month_key + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            period_end = None
+            period_selection = "UTC_CALENDAR_FALLBACK_NOT_FOR_REGISTRATION"
+        else:
+            month_start = _utc(provider_period_start_utc)
+            period_end = _utc(provider_period_end_utc)
+            if month_start >= period_end:
+                raise ValueError("provider period must have a positive duration")
+            period_selection = "EXPLICIT_PROVIDER_PERIOD"
+        provider_cutoff = _utc(provider_measurement_cutoff_utc or cutoff)
+        if provider_cutoff > cutoff:
+            raise ValueError("provider measurement cutoff cannot be after the local SQL evidence cutoff")
+        if period_end is not None and not month_start <= provider_cutoff < period_end:
+            raise ValueError("provider measurement cutoff must be inside the provider period")
+        if period_end is not None and not month_start <= cutoff < period_end:
+            raise ValueError("local SQL evidence cutoff must be inside the provider period")
         if month_start > cutoff:
-            raise ValueError("local usage cutoff must be within the requested month")
+            raise ValueError("local usage cutoff must be after the provider period start")
         with self._connection() as connection:
             cursor = self._cursor(connection)
             permit_counts = self._quota_permit_reconciliation_counts(
                 cursor,
                 month=month_key,
-                cutoff=cutoff,
+                cutoff=provider_cutoff,
+                observed_through=cutoff,
                 lock=False,
             )
             cursor.execute(
@@ -2953,6 +3025,10 @@ class MssqlPersistence:
         return {
             "month_key": month_key,
             "local_usage_included_through_utc": _iso(cutoff),
+            "provider_measurement_cutoff_utc": _iso(provider_cutoff),
+            "provider_period_start_utc": _iso(month_start),
+            "provider_period_end_utc": _iso(period_end),
+            "provider_period_selection": period_selection,
             "confirmed_through_cutoff": permit_counts["confirmed_through_cutoff"],
             "unknown_through_cutoff": permit_counts["unknown_through_cutoff"],
             "pending_through_cutoff": permit_counts["pending_through_cutoff"],
@@ -3065,7 +3141,8 @@ class MssqlPersistence:
         key = str(reconciliation.get("reconciliation_key") or "")
         source_hash = str(reconciliation.get("source_evidence_hash") or "")
         cutoff = _optional_utc(reconciliation.get("local_usage_included_through_utc"))
-        if not month or not key or not source_hash or cutoff is None:
+        provider_cutoff = _optional_utc(reconciliation.get("provider_measurement_cutoff_utc"))
+        if not month or not key or not source_hash or cutoff is None or provider_cutoff is None:
             raise MssqlSafetyError("validated quota reconciliation is missing its immutable identity or cutoff")
 
         expected_local = dict(reconciliation.get("local_usage") or {})
@@ -3094,7 +3171,8 @@ class MssqlPersistence:
                 observed_local = self._quota_permit_reconciliation_counts(
                     cursor,
                     month=month,
-                    cutoff=cutoff,
+                    cutoff=provider_cutoff,
+                    observed_through=cutoff,
                     lock=True,
                 )
                 cursor.execute(
@@ -3348,9 +3426,32 @@ class MssqlPersistence:
         permit_id = str(uuid.uuid4())
         with self._connection() as connection:
             cursor = self._cursor(connection)
-            month = _month_key(at)
             try:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                candidates = self._provider_period_baseline_candidates(cursor, at=at, lock=False)
+                if len(candidates) != 1:
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    decision = (
+                        "INITIAL_DENIED_QUOTA_STATE_UNAVAILABLE"
+                        if decision_kind == "INITIAL"
+                        else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
+                    )
+                    reason = (
+                        "current provider billing period is missing"
+                        if not candidates
+                        else "current provider billing period is ambiguous"
+                    )
+                    return {
+                        "allowed": False,
+                        "decision": decision,
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": effective_boundary,
+                        "reason": reason,
+                        "permit_id": None,
+                    }
+                month = str(_row_named(candidates[0], "MonthKey", index=0) or "")
                 # A stale pending permit is conservatively finalized while the
                 # same transaction holds the month/accounting lock.
                 stale_cutoff = at - timedelta(seconds=300)
@@ -3443,7 +3544,7 @@ class MssqlPersistence:
                         "proposed_attempts": amount,
                         "known_total": None,
                         "boundary": effective_boundary,
-                        "reason": "complete provider-wide shared-credential quota baseline is unavailable",
+                        "reason": "current provider-wide shared-credential quota evidence is not registrable",
                         "permit_id": None,
                     }
                 local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))

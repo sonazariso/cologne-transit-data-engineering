@@ -16,8 +16,10 @@ tooling. The authoritative project database is
 The Tiered50-only collector is implemented as Python on macOS and connects to
 SQL Server here under the production context `MAC_TIERED50_PRODUCTION`. The
 separate user-local Tiered50 LaunchAgent is installed with a five-minute,
-no-`RunAtLoad` schedule but remains disabled because the provider-wide quota
-baseline gate is blocked. Legacy7 is retired; Power BI is unchanged.
+no-`RunAtLoad` schedule but remains disabled because the supplied dashboard
+reading does not verify provider-wide scope, freshness, reset bounds, or the
+accounting model required by the quota gate. Legacy7 is retired; Power BI is
+unchanged.
 
 Access the same macOS working tree through VMware Shared Folders:
 
@@ -94,4 +96,5 @@ Power BI consumes SQL Server analytical/warehouse data. The historical Stage 14
 Python/SQLite implementation and Legacy7 SQL evidence remain retained
 research/history; the prepared direct adapter writes Tiered50 evidence to the
 additive `ctl.MddMac*` / `stg.MddMac*` contract. Tiered50 production activation
-remains blocked by the provider-wide quota baseline.
+remains blocked because the observed provider dashboard reading is not yet a
+registrable provider-wide quota baseline.
