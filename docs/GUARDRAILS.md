@@ -98,12 +98,12 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 40. The earlier PostgreSQL 18 direction for the redesigned architecture is
     historical/deferred-cleanup material and is superseded for the active
     roadmap by S87. Microsoft SQL Server is the sole authoritative project
-    database. The temporary Stage 14 overall status is
-    `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`; its
+    database. The current Stage 14 overall status is
+    `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`; its
     collector implementation remains `STAGE 14 COLLECTOR IMPLEMENTATION
     COMPLETE`, and Stage 15 live remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
-    This does not change source availability, create PostgreSQL
-    tables, migrate SQL Server assets, or authorize production persistence.
+    This does not change source availability, create PostgreSQL tables, or
+    authorize production persistence outside the current Tiered50-only gates.
 41. A future short-term raw-payload retention option may be evaluated for
     forensic reprocessing and parser improvements. No duration is approved;
     storage volume, privacy/data considerations, reprocessing need, and
@@ -383,7 +383,7 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 
 ## Stage 14 implementation guardrails
 
-116. Stage 14's active status is `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`. The SQLite research profile is retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is the Legacy7 production path. Its corrected ten-slot lineage, additive migration, bounded oversampling evidence, dedicated login, preflight, Windows-task retirement, scheduler activation, corrected-era record, and three ordinary scheduled heartbeats passed. Stage 15A readiness is in progress; Stage 15 live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+116. Stage 14's current status is `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`. The SQLite research profile and Legacy7 implementation are retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is Tiered50-only, with exact prepared IDs 8–50, a separate versioned bundle, durable SQL claims/lease, and a disabled LaunchAgent. Stage 15A readiness is in progress; Stage 15 live validation remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 117. The offline Stage 14 runtime remains a Python, cross-platform,
      standard-library-first collector package. Its offline core must not import
      PostgreSQL/SQL-driver modules, platform-specific APIs, shell orchestration,
@@ -446,20 +446,18 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
      whitespace/diff review. No validation step may consume MDD quota or issue
      DNS activity.
 126. Tiered50 production cutover remains gated on a real sampling-era
-     timestamp, production target-ID materialization, final heartbeat safety
-     margin, deployment platform, authorized live dry-run, Tiered50 activation,
-     and post-activation smoke validation. The prepared existing-seven-target
-     macOS path has separate gates: current Windows runtime identification and
-     retirement, explicit cutover approval, direct-database schema validation,
-     read-only reconciliation/import of the proven `LIVE_RESEARCH_SINGLE_1`
-     source, and idempotency proof. A manually authorized live Heumarkt probe
-     is not a gate; the first new request must be a normal scheduled Legacy7
-     heartbeat after all gates pass. PostgreSQL host/runtime is not active
-     architecture.
+     timestamp, final heartbeat safety margin, deployment platform,
+     provider-wide quota baseline, capacity/backup readiness, Tiered50
+     activation, and post-activation smoke validation. The Tiered50 path has
+     separate gates for Windows/Legacy7 retirement, direct-database schema and
+     target validation, current-era exclusion, and idempotency. A manually
+     authorized live Heumarkt probe is not a gate; the first new request must
+     be a normal scheduled Tiered50 heartbeat after all gates pass.
+     PostgreSQL host/runtime is not active architecture.
 
 ## Stage 15A validation-readiness guardrails
 
-127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — AWAITS TIERED50 CUTOVER`.
 128. Stage 15A must not start live Stage 15, issue MDD requests, perform DNS or
      live-network activity, install/configure PostgreSQL, create production
      database objects, materialize the 43 new production targets, create a

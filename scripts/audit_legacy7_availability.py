@@ -75,7 +75,7 @@ def reconcile() -> dict[str, Any]:
             "missing_bucket_cause": "NOT_INFERRED",
         },
         "legacy7_preserved": True,
-        "status": "BLOCKED — LEGACY7 PRESERVED",
+        "status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
     }
 
 

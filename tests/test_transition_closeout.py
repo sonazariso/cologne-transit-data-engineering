@@ -288,7 +288,7 @@ class TransitionCloseoutTests(unittest.TestCase):
             )
         self.assertEqual(backend.era_inserts, 0)
 
-    def test_tiered50_active_protection_and_historical_rows_are_untouched(self) -> None:
+    def test_tiered50_active_recording_and_historical_rows_are_untouched(self) -> None:
         historical_methodology = _methodology_row(
             7,
             era_code="HISTORICAL_LEGACY7",
@@ -311,19 +311,20 @@ class TransitionCloseoutTests(unittest.TestCase):
         backend = _EvidenceBackend(methodology=[historical_methodology], eras=[historical_era])
         original_methodology = json.loads(json.dumps(backend.methodology, default=str))
         original_eras = json.loads(json.dumps(backend.eras, default=str))
-        with self.assertRaisesRegex(MssqlSafetyError, "Tiered50 activation"):
-            _adapter(backend).record_sampling_era_cutover(
-                era_code="Tiered50",
-                panel_version="TIERED50_PANEL_V1",
-                effective_at_utc=AT,
-                timestamp_kind="REAL_CUTOVER",
-                is_active=True,
-                is_synthetic=False,
-            )
+        result = _adapter(backend).record_sampling_era_cutover(
+            era_code="Tiered50",
+            panel_version="TIERED50_PANEL_V1",
+            effective_at_utc=AT,
+            timestamp_kind="REAL_CUTOVER",
+            is_active=True,
+            is_synthetic=False,
+        )
+        self.assertEqual(result, 5)
+        self.assertEqual(backend.era_inserts, 1)
         _adapter(backend).record_methodology_evidence_idempotent(**_methodology_kwargs())
         self.assertEqual(json.loads(json.dumps(backend.methodology, default=str))[:1], original_methodology)
-        self.assertEqual(json.loads(json.dumps(backend.eras, default=str)), original_eras)
-        self.assertEqual(backend.update_or_delete_statements, 0)
+        self.assertEqual(json.loads(json.dumps(backend.eras, default=str))[:1], original_eras)
+        self.assertEqual(backend.update_or_delete_statements, 1)
 
     def test_closeout_evidence_contains_no_secret_values(self) -> None:
         path = ROOT / "docs" / "operational" / "legacy7-production-transition-closeout-evidence.json"
@@ -348,7 +349,7 @@ class TransitionCloseoutTests(unittest.TestCase):
             )
         self.assertIn(f"current repository suite reports {discovered} tests per run", project_status)
         self.assertIn(f"repository suite passed in five consecutive runs with {discovered} tests per run", stage14)
-        self.assertIn("LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED", project_status)
+        self.assertIn("TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED", project_status)
         self.assertIn("STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE", project_status)
         self.assertIn("NOT STARTED — AWAITS TIERED50 CUTOVER", project_status)
 

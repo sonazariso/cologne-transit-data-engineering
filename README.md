@@ -17,27 +17,27 @@ sufficient recorded/actual timing evidence.
 
 ## Current status
 
-S87 is the active architecture decision: **Microsoft SQL Server is the sole
-authoritative project database**, and the expected database is
-`CologneTransitIntelligence` on the current Windows VM. The approved Legacy7
-collector is implemented as Python on macOS and connects directly to that SQL
-Server; its user-local LaunchAgent is active on the corrected five-minute
-schedule after dedicated-login provisioning, preflight, Windows retirement,
-and three ordinary scheduled heartbeat gates passed. Power BI is unchanged.
-The existing PostgreSQL contracts and SQLite collector/research
+S87 remains the active architecture decision: **Microsoft SQL Server is the
+sole authoritative project database**, using `CologneTransitIntelligence` on
+the current Windows VM. Under the current Tiered50-only decision, macOS
+launchd is the sole intended production scheduler and the Tiered50 runner is
+the sole intended production collector. The historical Legacy7 implementation,
+observations, and sampling-target IDs 1–7 are preserved, but its LaunchAgent
+has been unloaded and disabled and it is not a production fallback. Power BI
+is unchanged. The existing PostgreSQL contracts and SQLite collector/research
 implementation remain historical/legacy artifacts for deferred cleanup.
-Tiered50 remains inactive.
 
-The current Tiered50 deployment validation is **BLOCKED — LEGACY7 PRESERVED**:
-the explicit separately guarded runner, additive 43-row SQL materialization,
-disabled LaunchAgent, and offline preflight are source-controlled, but live
-materialization and activation were not performed. Offline checks reconcile
-the approved 50-target panel, exact six-phase schedule, source-field contract,
-claims, retry/quota boundaries, and fail-closed credentials. The available
-Legacy7 evidence does not prove the required stable 30-minute availability
-interval or database capacity/backup/quota gates, so there is no completed
-Tiered50 live cycle and no Tiered50 station is collecting. See the [sanitized
-validation evidence](docs/operational/tiered50-deployment-validation-evidence.json)
+The current production status is **BLOCKED — TIERED50 INACTIVE; LEGACY7
+RETIRED**. The additive SQL migration and exact 43-row Tiered50 materialization
+have been applied: target IDs 8–50 are prepared, while all Tiered50 targets
+remain disabled. Fresh evidence confirms the final Legacy7 boundary, six
+consecutive expected Legacy7 buckets, current SQL capacity and backup
+readiness, the separate versioned Tiered50 bundle, and no competing Legacy7
+writer. Activation is correctly blocked because the complete provider-wide
+October shared-credential quota baseline is unavailable; both INITIAL and
+RETRY permits therefore fail closed. No Tiered50 MDD request or live cycle has
+been issued. See the [sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
+[fresh operational evidence](docs/operational/tiered50-production-evidence.json),
 and [operator report](docs/operational/tiered50-deployment-validation-report.md).
 
 - Stage 0 — Project Definition: **APPROVED**
@@ -61,7 +61,7 @@ and [operator report](docs/operational/tiered50-deployment-validation-report.md)
 - Stage 11 — [Power BI Model](docs/stages/11-power-bi-model-design.md): **COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED**. The semantic subject areas, table grains, physical-fact versus semantic Scheduled Trip relationship boundary, relationship/filter-direction contract, governed Date strategy, static-versus-canonical identity boundary, DAX measure contract, service-date-scoped matching coverage with separate missing-service-date evidence, threshold/NULL semantics, terminology, and sampling/coverage/reporting limits are approved. `Dim Sampling Era` currently filters only the `Fact Matching Decision` population; Data Quality classifications carried by those decisions inherit that context, while the independent `Fact Data Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in the base model. Sampling Era is not an operational KPI slicer until validated operational-event lineage exists. [Completion decision](docs/stages/11-power-bi-model-completion-decision.md).
 - Stage 12 — [50-Station Selection](docs/stages/12-50-station-selection.md): **COMPLETE — APPROVED FIXED 50-STATION PANEL**. `TIERED50_PANEL_V1` contains exactly 50 unique validated VRS parent stations, preserves all seven Legacy7 continuity anchors, measures current core-mode representation and geographic concentration, and passes a bounded sequential MDD compatibility probe with 50 HTTP 200/parseable application responses and source `StopPointRef` evidence. The complete sanitized 864-candidate population is retained in [candidate evidence](docs/stages/12-50-station-candidate-evidence.json), and the authoritative selector reproduces the fixed panel offline without the ZIP, network, MDD, or credentials. See the [completion decision](docs/stages/12-50-station-selection-completion-decision.md) and [sanitized evidence artifact](docs/stages/12-50-station-selection-evidence.json).
 - Stage 13 — [Tiered Collector Readiness](docs/stages/13-tiered-collector-readiness.md): **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**. Explicit approval recorded in `prompts/S68.md` finalizes `TIERED50_PANEL_V1` as exactly 50 fixed stations with density ranks 1–8 / 9–28 / 29–50 for Tier A/B/C, cadence 5/15/30 minutes, 110 requests per 30-minute super-cycle, Tier A/B/C `NumberOfResults` 20/30/30, bounded concurrency 2, and `MaxAttempts=2` with one approved transient retry. Static support is 50/50 at the approved tier-specific limits; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The 182,980 / 189,076 conservative shared-credential totals are valid safely below the 210,000 normal operational maximum and 207,500 automatic-retry protection boundary; the 31-day guardrail example is 189,076 with 18,424 headroom, while the Tiered50-only component is 180,048. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days. See the [completion decision](docs/stages/13-tiered-collector-readiness-completion-decision.md) and [evidence artifact](docs/stages/13-tiered-collector-readiness-evidence.json).
-- Stage 14 — [Collector Implementation and Legacy7 SQL Runtime](docs/stages/14-collector-implementation.md): **LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED**. The historical Python/SQLite research implementation remains source-controlled and untouched; the corrected Legacy7 path uses the additive SQL Server contract, the existing seven target IDs, one target per ten-slot cycle, `MAC_LEGACY7_PRODUCTION`, and the dedicated `CologneTransitCollector` login. The user-local LaunchAgent is active with no `RunAtLoad`; the tracked template remains disabled by design.
+- Stage 14 — [Collector Implementation and Legacy7 SQL Runtime](docs/stages/14-collector-implementation.md): **TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED**. The historical Python/SQLite research implementation and Legacy7 SQL history remain source-controlled and untouched. The Tiered50-only runtime uses the additive SQL Server contract, prepared target IDs 8–50, a separate versioned bundle, and the dedicated `CologneTransitCollector` login; its LaunchAgent is installed but disabled until the provider-wide quota baseline is complete.
 - Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The three preserved Mac cutover runs are bounded oversampling evidence, not Tiered50 transition evidence. Stage 15B live Tiered50 validation remains **NOT STARTED — AWAITS TIERED50 CUTOVER**.
 - Stage 4 evidence: [approved reference snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The approved reference contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Approved reference ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`. The separate Stage 9 current official snapshot is `VERSION__20260929_0106` with SHA-256 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` and passed all 17 Stage 4 revalidation checks.
 - Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.

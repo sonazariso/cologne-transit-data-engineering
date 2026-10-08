@@ -44,6 +44,54 @@ BEGIN
 END;
 GO
 
+/*
+    A production lease is durable SQL state, not an inference from the
+    latest RUNNING row.  The singleton row is acquired/released by the
+    runtime inside short SQL transactions; the event table keeps stale-lease
+    recovery auditable without rewriting collector history.
+*/
+
+IF OBJECT_ID(N'ctl.MddMacProductionLease', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacProductionLease
+    (
+        LeaseName VARCHAR(80) NOT NULL
+            CONSTRAINT PK_ctl_MddMacProductionLease PRIMARY KEY CLUSTERED,
+        CollectionContext VARCHAR(80) NOT NULL,
+        RunId NVARCHAR(100) NULL,
+        LeaseToken UNIQUEIDENTIFIER NOT NULL,
+        AcquiredAtUtc DATETIME2(7) NOT NULL,
+        ExpiresAtUtc DATETIME2(7) NOT NULL,
+        LastHeartbeatAtUtc DATETIME2(7) NOT NULL,
+        Status VARCHAR(20) NOT NULL,
+        ReleasedAtUtc DATETIME2(7) NULL,
+        CONSTRAINT CK_ctl_MddMacProductionLease_Status
+            CHECK (Status IN ('ACTIVE', 'EXPIRED', 'RELEASED')),
+        CONSTRAINT FK_ctl_MddMacProductionLease_Run
+            FOREIGN KEY (RunId) REFERENCES ctl.MddMacCollectorRun (RunId)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'ctl.MddMacProductionLeaseEvent', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacProductionLeaseEvent
+    (
+        LeaseEventId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddMacProductionLeaseEvent PRIMARY KEY CLUSTERED,
+        LeaseName VARCHAR(80) NOT NULL,
+        CollectionContext VARCHAR(80) NOT NULL,
+        RunId NVARCHAR(100) NULL,
+        EventAtUtc DATETIME2(7) NOT NULL,
+        Outcome VARCHAR(40) NOT NULL,
+        PreviousRunId NVARCHAR(100) NULL,
+        PreviousStatus VARCHAR(20) NULL,
+        CONSTRAINT FK_ctl_MddMacProductionLeaseEvent_Run
+            FOREIGN KEY (RunId) REFERENCES ctl.MddMacCollectorRun (RunId)
+    );
+END;
+GO
+
 IF NOT EXISTS
 (
     SELECT 1 FROM sys.indexes
@@ -155,6 +203,29 @@ IF NOT EXISTS
             (PanelVersion, TargetIdentity, LogicalDueBucket, EventAtUtc DESC);
 GO
 
+/* Tiered50 claims carry the immutable numeric production identity in addition
+   to the historical text identity.  The nullable additive columns preserve
+   all existing Legacy7 claim rows. */
+
+IF COL_LENGTH(N'ctl.MddMacTargetClaim', N'SamplingTargetId') IS NULL
+    ALTER TABLE ctl.MddMacTargetClaim ADD SamplingTargetId INT NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacTargetClaimEvent', N'SamplingTargetId') IS NULL
+    ALTER TABLE ctl.MddMacTargetClaimEvent ADD SamplingTargetId INT NULL;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddMacTargetClaim')
+      AND name = N'UX_ctl_MddMacTargetClaim_SamplingTarget_Bucket'
+)
+    CREATE UNIQUE INDEX UX_ctl_MddMacTargetClaim_SamplingTarget_Bucket
+        ON ctl.MddMacTargetClaim (PanelVersion, SamplingTargetId, LogicalDueBucket)
+        WHERE SamplingTargetId IS NOT NULL;
+GO
+
 IF OBJECT_ID(N'ctl.MddMacTargetAudit', N'U') IS NULL
 BEGIN
     CREATE TABLE ctl.MddMacTargetAudit
@@ -258,6 +329,7 @@ BEGIN
         Amount INT NOT NULL,
         Boundary INT NOT NULL,
         ReservedAtUtc DATETIME2(7) NOT NULL,
+        AuthorizationKey NVARCHAR(240) NULL,
         Status VARCHAR(40) NOT NULL,
         FinalizedAtUtc DATETIME2(7) NULL,
         LiveClientInvocation BIT NOT NULL
@@ -265,6 +337,68 @@ BEGIN
         CONSTRAINT CK_ctl_MddMacQuotaPermit_Amount CHECK (Amount > 0)
     );
 END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddMacQuotaPermit')
+      AND name = N'IX_ctl_MddMacQuotaPermit_Month_Status_Reserved'
+)
+    CREATE INDEX IX_ctl_MddMacQuotaPermit_Month_Status_Reserved
+        ON ctl.MddMacQuotaPermit (MonthKey, Status, ReservedAtUtc);
+GO
+
+IF OBJECT_ID(N'ctl.MddMacSharedQuotaAccounting', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacSharedQuotaAccounting
+    (
+        MonthKey CHAR(7) NOT NULL
+            CONSTRAINT PK_ctl_MddMacSharedQuotaAccounting PRIMARY KEY CLUSTERED,
+        ProviderQuotaCeiling INT NOT NULL,
+        NormalOperationalMaximum INT NOT NULL,
+        RetryProtectionBoundary INT NOT NULL,
+        ConfirmedProviderAttempts BIGINT NOT NULL,
+        ConservativeUnknownAttempts BIGINT NOT NULL,
+        ExplicitSharedConsumerReservedAttempts BIGINT NOT NULL,
+        AccountingStatus VARCHAR(30) NOT NULL,
+        IncludesAllSharedConsumers BIT NOT NULL,
+        BaselineAsOfUtc DATETIME2(7) NOT NULL,
+        LocalUsageIncludedThroughUtc DATETIME2(7) NOT NULL,
+        SourceDescription NVARCHAR(1000) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacSharedQuotaAccounting_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_Boundaries
+            CHECK (
+                ProviderQuotaCeiling = 250000
+                AND NormalOperationalMaximum = 210000
+                AND RetryProtectionBoundary = 207500
+            ),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_Counts
+            CHECK (
+                ConfirmedProviderAttempts >= 0
+                AND ConservativeUnknownAttempts >= 0
+                AND ExplicitSharedConsumerReservedAttempts >= 0
+            ),
+        CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_Status
+            CHECK (AccountingStatus IN ('COMPLETE', 'INCOMPLETE', 'SUPERSEDED'))
+    );
+END;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'AuthorizationKey') IS NULL
+    ALTER TABLE ctl.MddMacQuotaPermit ADD AuthorizationKey NVARCHAR(240) NULL;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'ctl.MddMacQuotaPermit')
+      AND name = N'UX_ctl_MddMacQuotaPermit_AuthorizationKey'
+)
+    CREATE UNIQUE INDEX UX_ctl_MddMacQuotaPermit_AuthorizationKey
+        ON ctl.MddMacQuotaPermit (AuthorizationKey)
+        WHERE AuthorizationKey IS NOT NULL;
 GO
 
 IF NOT EXISTS
@@ -311,6 +445,56 @@ BEGIN
         IsSynthetic BIT NOT NULL,
         RecordedAtUtc DATETIME2(7) NOT NULL
             CONSTRAINT DF_ctl_MddMacSamplingEra_RecordedAtUtc DEFAULT (SYSUTCDATETIME())
+    );
+END;
+GO
+
+/*
+    IsActive is retained as historical evidence.  This singleton is the
+    append-only-safe current-production pointer used at cutover, so the
+    historical era rows do not need to be rewritten to identify the current
+    era.
+*/
+
+IF OBJECT_ID(N'ctl.MddMacCurrentProductionEra', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacCurrentProductionEra
+    (
+        CurrentMarkerId TINYINT NOT NULL
+            CONSTRAINT PK_ctl_MddMacCurrentProductionEra PRIMARY KEY CLUSTERED,
+        SamplingEraId BIGINT NOT NULL,
+        EraCode VARCHAR(40) NOT NULL,
+        PanelVersion NVARCHAR(100) NOT NULL,
+        EffectiveAtUtc DATETIME2(7) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacCurrentProductionEra_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT CK_ctl_MddMacCurrentProductionEra_Marker CHECK (CurrentMarkerId = 1),
+        CONSTRAINT FK_ctl_MddMacCurrentProductionEra_Era
+            FOREIGN KEY (SamplingEraId) REFERENCES ctl.MddMacSamplingEra (SamplingEraId)
+    );
+END;
+GO
+
+IF OBJECT_ID(N'ctl.MddMacProductionCutover', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacProductionCutover
+    (
+        CutoverId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddMacProductionCutover PRIMARY KEY CLUSTERED,
+        CutoverKey VARCHAR(240) NOT NULL
+            CONSTRAINT UQ_ctl_MddMacProductionCutover_Key UNIQUE,
+        PanelVersion NVARCHAR(100) NOT NULL,
+        FinalLegacy7RunId NVARCHAR(100) NULL,
+        FinalLegacy7LogicalDueBucket BIGINT NULL,
+        FinalLegacy7PersistenceAtUtc DATETIME2(7) NULL,
+        FinalLegacy7AuditStatus VARCHAR(40) NULL,
+        Tiered50ActivationAtUtc DATETIME2(7) NULL,
+        Tiered50ActivationStatus VARCHAR(40) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacProductionCutover_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        EvidenceJson NVARCHAR(MAX) NULL,
+        CONSTRAINT CK_ctl_MddMacProductionCutover_Status
+            CHECK (Tiered50ActivationStatus IN ('BLOCKED', 'ACTIVATED', 'OUTAGE'))
     );
 END;
 GO
@@ -1288,6 +1472,10 @@ GO
 
 IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'SourceRepresentationJson') IS NULL
     ALTER TABLE ctl.MddMacQuotaPermit ADD SourceRepresentationJson NVARCHAR(MAX) NULL;
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaPermit', N'AuthorizationKey') IS NULL
+    ALTER TABLE ctl.MddMacQuotaPermit ADD AuthorizationKey NVARCHAR(240) NULL;
 GO
 
 IF OBJECT_ID(N'ctl.MddImportBatch', N'U') IS NULL

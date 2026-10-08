@@ -13,12 +13,11 @@ Planned path:
 Role: host for the official Microsoft SQL Server instance and optional Power BI
 tooling. The authoritative project database is
 `CologneTransitIntelligence`; the SQL Server instance remains on this VM.
-The corrected Legacy7 collector is implemented as Python on macOS and connects
-to SQL Server here under the production context
-`MAC_LEGACY7_PRODUCTION`. The user-local LaunchAgent is active on its
-five-minute, no-`RunAtLoad` schedule after the live SQL, provisioning,
-retirement, and heartbeat gates passed. Tiered50 remains inactive; Power BI is
-unchanged.
+The Tiered50-only collector is implemented as Python on macOS and connects to
+SQL Server here under the production context `MAC_TIERED50_PRODUCTION`. The
+separate user-local Tiered50 LaunchAgent is installed with a five-minute,
+no-`RunAtLoad` schedule but remains disabled because the provider-wide quota
+baseline gate is blocked. Legacy7 is retired; Power BI is unchanged.
 
 Access the same macOS working tree through VMware Shared Folders:
 
@@ -31,8 +30,8 @@ Do not create a separate Git clone on Windows under the current workflow.
 The existing collector runtime, SQLite research database path, PostgreSQL
 contracts, Windows scheduled-task material, and historical realtime files remain
 untouched and are marked for deferred cleanup only. The tracked Mac LaunchAgent
-template remains disabled by design; the generated user-local Legacy7 artifact
-is active.
+templates remain disabled by design; the generated Legacy7 artifact is retired
+and the generated Tiered50 artifact is installed but disabled.
 S87 does not migrate,
 delete, or rewrite them. The S87 stabilization work left `NRWTransportDW`
 untouched; it was later classified
@@ -51,13 +50,13 @@ intermediary database. The additive `ctl.MddMac*` and `stg.MddMac*` contract is
 separate from the existing Windows collector tables and is documented in
 [`docs/macos-mssql-collector.md`](macos-mssql-collector.md).
 
-The tracked `launchd` definition at
-`deployment/launchd/com.cologne-transit-intelligence.mdd-collector.plist` is a
-safe-by-default disabled template. The active generated artifact is
-`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`
-and invokes `/Library/Developer/CommandLineTools/usr/bin/python3` from an
-owner-only runtime bundle. It uses a five-minute interval, no `RunAtLoad`, and
-the approved Legacy7 cutover gates.
+The tracked `launchd` definitions are safe-by-default disabled templates. The
+Tiered50 generated artifact is
+`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-tiered50-collector.plist`
+and invokes `/Library/Developer/CommandLineTools/usr/bin/python3` from a
+separate owner-only versioned runtime bundle. It uses a five-minute interval,
+no `RunAtLoad`, and the approved Tiered50 gates; it remains disabled until
+activation is safe.
 
 The explicit historical source is
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3`; its
@@ -91,7 +90,8 @@ artifact contains no API key or database credential.
 
 The collector/pipeline direction is Python on macOS with SQL Server as its
 only official persistence platform. SQL Server remains on the Windows VM, and
-Power BI consumes SQL Server analytical/warehouse data. The historical
-Stage 14 Python/SQLite implementation remains retained research evidence; the
-active direct adapter writes Legacy7 evidence to the additive `ctl.MddMac*` /
-`stg.MddMac*` contract. Tiered50 production activation remains deferred.
+Power BI consumes SQL Server analytical/warehouse data. The historical Stage 14
+Python/SQLite implementation and Legacy7 SQL evidence remain retained
+research/history; the prepared direct adapter writes Tiered50 evidence to the
+additive `ctl.MddMac*` / `stg.MddMac*` contract. Tiered50 production activation
+remains blocked by the provider-wide quota baseline.

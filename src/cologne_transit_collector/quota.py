@@ -136,6 +136,7 @@ class _Permit:
     amount: int
     decision_kind: str
     boundary: int
+    authorization_key: str | None = None
     status: str = PENDING_AUTHORIZATION
 
 
@@ -179,11 +180,54 @@ class InMemoryUsageProvider:
         proposed_attempts: int = 1,
         at_utc: datetime | None = None,
         reservation_scope: str = "LIVE_PROVIDER",
+        authorization_key: str | None = None,
     ) -> Mapping[str, Any]:
         amount = int(proposed_attempts)
         if amount <= 0:
             raise ValueError("proposed_attempts must be positive")
+        key = str(authorization_key) if authorization_key else None
+        if key is not None and len(key) > 240:
+            raise ValueError("authorization_key must be at most 240 characters")
+        effective_boundary = min(int(boundary), ABSOLUTE_PROVIDER_CEILING)
         with self._lock:
+            if key is not None:
+                for existing_id, existing_permit in self._permits.items():
+                    if existing_permit.authorization_key != key:
+                        continue
+                    same_contract = (
+                        existing_permit.scope == str(reservation_scope)
+                        and existing_permit.amount == amount
+                        and existing_permit.decision_kind == decision_kind
+                    )
+                    if not same_contract:
+                        return {
+                            "allowed": False,
+                            "decision": "DUPLICATE_AUTHORIZATION_CONFLICT",
+                            "proposed_attempts": amount,
+                            "known_total": None,
+                            "boundary": effective_boundary,
+                            "reason": "authorization key was already used with a different permit contract",
+                            "permit_id": None,
+                        }
+                    if existing_permit.status == PENDING_AUTHORIZATION:
+                        return {
+                            "allowed": True,
+                            "decision": "DUPLICATE_AUTHORIZATION_REUSED",
+                            "proposed_attempts": amount,
+                            "known_total": None,
+                            "boundary": effective_boundary,
+                            "reason": "existing pending permit reused idempotently",
+                            "permit_id": existing_id,
+                        }
+                    return {
+                        "allowed": False,
+                        "decision": "DUPLICATE_AUTHORIZATION_FINALIZED",
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": effective_boundary,
+                        "reason": "authorization key already has a finalized permit",
+                        "permit_id": None,
+                    }
             if not self.snapshot.state_available:
                 if decision_kind != "INITIAL":
                     return {
@@ -203,14 +247,15 @@ class InMemoryUsageProvider:
                     scope=reservation_scope,
                     amount=amount,
                     decision_kind=decision_kind,
-                    boundary=int(boundary),
+                    boundary=effective_boundary,
+                    authorization_key=key,
                 )
                 return {
                     "allowed": True,
                     "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
                     "proposed_attempts": amount,
                     "known_total": None,
-                    "boundary": int(boundary),
+                    "boundary": effective_boundary,
                     "reason": "shared-credential state is unavailable",
                     "permit_id": permit_id,
                 }
@@ -222,7 +267,7 @@ class InMemoryUsageProvider:
             known_total = self.snapshot.known_total + active
             projected = known_total + amount
             permit_id: str | None = None
-            if projected > int(boundary):
+            if projected > effective_boundary:
                 return {
                     "allowed": False,
                     "decision": (
@@ -232,7 +277,7 @@ class InMemoryUsageProvider:
                     ),
                     "proposed_attempts": amount,
                     "known_total": known_total,
-                    "boundary": int(boundary),
+                    "boundary": effective_boundary,
                     "reason": "quota boundary would be exceeded",
                     "permit_id": None,
                 }
@@ -241,14 +286,15 @@ class InMemoryUsageProvider:
                 scope=reservation_scope,
                 amount=amount,
                 decision_kind=decision_kind,
-                boundary=int(boundary),
+                boundary=effective_boundary,
+                authorization_key=key,
             )
             return {
                 "allowed": True,
                 "decision": "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
                 "proposed_attempts": amount,
                 "known_total": known_total,
-                "boundary": int(boundary),
+                "boundary": effective_boundary,
                 "reason": "within atomic quota headroom",
                 "permit_id": permit_id,
             }
@@ -415,6 +461,7 @@ class QuotaGuard:
         boundary: int,
         at_utc: datetime | None,
         proposed_attempts: int,
+        authorization_key: str | None,
     ) -> QuotaDecision:
         reserve = getattr(self.usage_provider, "reserve_quota_attempt", None)
         if callable(reserve):
@@ -427,6 +474,7 @@ class QuotaGuard:
                 proposed_attempts=int(proposed_attempts),
                 at_utc=at_utc,
                 reservation_scope=self.reservation_scope,
+                authorization_key=authorization_key,
             )
             if isinstance(result, QuotaDecision):
                 return result
@@ -492,7 +540,13 @@ class QuotaGuard:
             "within quota headroom",
         )
 
-    def allow_initial(self, *, at_utc: datetime | None = None, proposed_attempts: int = 1) -> QuotaDecision:
+    def allow_initial(
+        self,
+        *,
+        at_utc: datetime | None = None,
+        proposed_attempts: int = 1,
+        authorization_key: str | None = None,
+    ) -> QuotaDecision:
         """Atomically authorize one scheduled initial attempt."""
 
         return self._atomic_or_snapshot(
@@ -500,9 +554,16 @@ class QuotaGuard:
             boundary=self.normal_maximum,
             at_utc=at_utc,
             proposed_attempts=proposed_attempts,
+            authorization_key=authorization_key,
         )
 
-    def allow_retry(self, *, at_utc: datetime | None = None, proposed_attempts: int = 1) -> QuotaDecision:
+    def allow_retry(
+        self,
+        *,
+        at_utc: datetime | None = None,
+        proposed_attempts: int = 1,
+        authorization_key: str | None = None,
+    ) -> QuotaDecision:
         """Atomically authorize one automatic retry, failing closed without state."""
 
         return self._atomic_or_snapshot(
@@ -510,6 +571,7 @@ class QuotaGuard:
             boundary=self.retry_boundary,
             at_utc=at_utc,
             proposed_attempts=proposed_attempts,
+            authorization_key=authorization_key,
         )
 
     def release(self, decision: QuotaDecision | None) -> None:

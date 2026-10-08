@@ -1,13 +1,14 @@
 # Prepared macOS direct-persistence collector
 
-This document describes the macOS Legacy7 collector path that writes
-source-faithful MDD/TRIAS evidence directly to the authoritative Microsoft
-database. The original additive SQL contract was applied and live-validated,
-the proven historical SQLite source was imported and reconciled, and the exact
-Windows task was manually disabled by the operator on 2026-10-07. The corrected
-Legacy7 `launchd` job is active on its ordinary five-minute schedule after the
-dedicated-login, preflight, retirement, selector, and heartbeat gates passed.
-The tracked template remains disabled by design; Tiered50 remains inactive.
+This document describes the macOS direct-persistence collector and its
+Tiered50-only production path. Source-faithful MDD/TRIAS evidence is written
+directly to the authoritative Microsoft database. The original additive SQL
+contract, exact 43-row Tiered50 materialization, dedicated-login grants, and
+fresh host/VM/SQL evidence are complete. The historical Legacy7 `launchd` job
+was unloaded and disabled after its final recorded boundary; its implementation
+and evidence remain available for audit, but it is not a production fallback.
+The Tiered50 LaunchAgent is installed in a separate versioned bundle and is
+currently disabled because the provider-wide quota baseline is unavailable.
 
 ## Current Tiered50 deployment validation
 
@@ -19,20 +20,19 @@ LaunchAgent template. The Tiered50 path reuses the source-faithful collector,
 claims, quota, retry, parser, and transactional SQL persistence core only
 after its own gates pass; it does not turn the Legacy7 target count into 50.
 
-The current status is **BLOCKED — LEGACY7 PRESERVED**. Offline validation
-passes for the exact 50-target manifest, six-phase schedule, source-field
-persistence contract, stable target/bucket claims, retry/quota boundaries,
-and fail-closed credential handling. The additive migration is statically
-reconciled to 43 new rows and has not been applied to the live database; the
-Tiered50 LaunchAgent remains disabled. No MDD request, manual Heumarkt
-request, sampling-era activation, or Tiered50 SQL write was issued by this
-validation.
+The current status is **BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED**.
+Offline validation passes for the exact 50-target manifest, six-phase
+schedule, source-field persistence contract, stable target/bucket claims,
+retry/quota boundaries, durable lease, and fail-closed credential handling.
+The migration is applied and IDs 8–50 are prepared; all Tiered50 targets and
+the LaunchAgent remain disabled. No MDD request or manual Heumarkt request was
+issued by materialization, retirement, or preflight.
 
-The available Legacy7 closeout evidence contains three consecutive persisted
-UTC buckets spanning 15 minutes. It does not prove the required recent
-30-minute stable interval, continuous Mac/VM/SQL availability, database
-capacity or backup readiness, or shared-credential quota reconciliation.
-Missing-bucket causes are not inferred. The machine-readable result is
+Fresh evidence records six consecutive expected Legacy7 buckets before its
+retirement, current SQL capacity and checksum-verified backup readiness,
+launchd and power state, and an observable VMware guest. Activation remains
+blocked because complete provider-wide October shared-credential accounting is
+unavailable. Missing causes are not inferred. The machine-readable result is
 [`docs/operational/tiered50-deployment-validation-evidence.json`](operational/tiered50-deployment-validation-evidence.json), with the operator
 summary in [`docs/operational/tiered50-deployment-validation-report.md`](operational/tiered50-deployment-validation-report.md).
 
@@ -77,9 +77,12 @@ It is generated from the code-backed heartbeat permission matrix in
 | `EXECUTE, VIEW DEFINITION` | `ctl.uspGetMddRealtimeSamplingTarget` |
 | `VIEW DEFINITION` | `ctl.MddMacTargetAudit` (lineage-column validation only) |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacCollectorRun` |
+| `SELECT, INSERT, UPDATE` | `ctl.MddMacProductionLease` |
+| `INSERT` | `ctl.MddMacProductionLeaseEvent` |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacDispatcherClaim`, `ctl.MddMacTargetClaim`, `ctl.MddMacTargetAudit` |
 | `INSERT` | `ctl.MddMacDispatcherClaimEvent`, `ctl.MddMacTargetClaimEvent`, `ctl.MddMacHttpAttempt`, `ctl.MddMacQuotaAudit` |
 | `SELECT, INSERT, UPDATE` | `ctl.MddMacQuotaPermit` |
+| `SELECT` | `ctl.MddMacSharedQuotaAccounting` |
 | `EXECUTE` | `stg.uspPersistMddMacSnapshot` |
 
 The runtime role receives no `DELETE`, schema, migration, broad server-role,
@@ -204,7 +207,7 @@ retired Windows collector
         ├── unchanged ctl.MddCollectorRun / stg.MddRealtime* history
         └── existing Power BI-facing views
 
-active macOS Legacy7 runner
+prepared macOS Tiered50 runner (currently disabled)
         │  current-bucket, no catch-up, direct DB-API connection
         ▼
 ctl.MddMac* claims/audit/quota ── transaction ──► stg.MddMac* source evidence
@@ -237,7 +240,7 @@ the new run and audit rows.
 | `ctl.MddMacHttpAttempt` | One actual transport attempt per audit/attempt number | HTTP status, failure, retry, and provider confirmation can be NULL when inapplicable | Unique `(AuditId, AttemptNumber)`; completion-time index; audit and quota-permit FKs |
 | `ctl.MddMacQuotaPermit` | One quota reservation/finalization | Finalization time is NULL while pending | Permit GUID primary key; status is never inferred from local simulation |
 | `ctl.MddMacQuotaAudit` | Append-only decision record for a run/target/bucket | Target/bucket may be NULL for run-level decisions | Identity key; run FK |
-| `ctl.MddMacSamplingEra` | Append-only prepared-era/cutover evidence | Effective time may be NULL; Tiered50 `IsActive=1` is rejected by the adapter | Identity key; no automatic activation |
+| `ctl.MddMacSamplingEra` | Append-only prepared-era/cutover evidence | Effective time may be NULL; production current-era identity is tracked by the append-only current-era pointer and actual nonfuture activation timestamp | Identity key; no historical rewrite |
 | `stg.MddMacSourceSnapshot` | One parsed response observation per audit; identity `SnapshotId` | Source response timestamp is lexical and nullable; `ObservedAtUtc` is collector lineage and required | Unique `AuditId`; target/observed index; run/audit FKs |
 | `stg.MddMacCallObservation` | One source call occurrence: event + `CallScope` + call ordinal | Stop identity, flags, service identity, and source paths are independently nullable | Unique `(SnapshotId, EventOrdinal, CallScope, CallOrdinal)`; snapshot FK |
 | `stg.MddMacTimingObservation` | One timing occurrence: event + call + `ARRIVAL`/`DEPARTURE` | Timetabled, estimated, low/high, and RecordedAtTime are independent nullable lexical source fields | Unique `(SnapshotId, EventOrdinal, CallScope, CallOrdinal, TimingContext)`; source-identity index; snapshot FK |
@@ -302,8 +305,8 @@ failed import batches remain retained and auditable, including the interrupted
 partial batch; no failed history was deleted. The final report records 70
 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, 121 parser
 gaps, zero unexplained differences, and zero source `RecordedAtTime` values.
-The historical capacity/import work is complete; the active Legacy7 path now
-also has dedicated-login, scheduler, and three-heartbeat evidence. See the
+The historical capacity/import work is complete; the former Legacy7 path also
+has preserved dedicated-login, scheduler, and heartbeat evidence. See the
 [operational record](operational/s98-live-research-import-and-cutover.md).
 
 ## Timing and RecordedAtTime
@@ -344,15 +347,16 @@ are not persisted.
 
 - The installed scheduler interval is five minutes with `StartInterval=300`,
   `ThrottleInterval=300`, no `RunAtLoad`, and no missed-bucket replay.
-- With one selected Legacy7 target per five-minute heartbeat, nominal cadence
-  is 12 logical requests/hour, 288/day, 8,640 per 30-day month, and 8,928 per
-  31-day month before retries. The three preserved seven-target oversampling
-  runs remain valid source evidence but are excluded from cadence-equivalent
+- The approved Tiered50 cadence is 110 logical requests per 30-minute
+  super-cycle and 220/hour, with the persisted phase sequence
+  `[19,18,18,18,19,18]`. The historical Legacy7 cadence and three oversampling
+  runs remain source evidence only and are excluded from current production
   volume comparisons.
 - Dispatcher and target claims are durable and stale claims are observable.
-- Initial quota reservations are durable. Because Windows provider-wide usage
-  is still unreconciled, initial attempts can be recorded conservatively but
-  automatic retries fail closed with `RETRY_DENIED_QUOTA_STATE_UNAVAILABLE`.
+- Initial and retry quota reservations are durable and fail closed when the
+  provider-wide baseline is incomplete. Unknown shared-consumer usage is not
+  treated as zero; HTTP 500 is not classified as quota exhaustion without
+  provider evidence.
 - A temporary raw-evidence directory is optional, owner-only (`0700`), with
   owner-only files (`0600`), secret-marker rejection, and automatic maximum
   retention of 24 hours. It is outside Git and is not a database source of
@@ -360,14 +364,13 @@ are not persisted.
 
 ## Connectivity and validation evidence
 
-The pre-activation SQL validation established reachability to
-`172.16.192.128:1433`, selected database `CologneTransitIntelligence`, and
-unchanged sampling-target IDs 1–7. The additive lineage/methodology migration
-was then applied and final live validation confirmed 26 tables and 4
-routines/views.
-The production preflight used the same path and passed without issuing an MDD
-request. Three subsequent normal scheduled Legacy7 runs then proved live
-Mac-to-SQL persistence.
+The live SQL validation established reachability to `172.16.192.128:1433`,
+selected database `CologneTransitIntelligence`, preserved sampling-target IDs
+1–7, and verified prepared IDs 8–50. The additive migration and exact
+materialization were applied idempotently. The production preflight used the
+same path and passed without issuing an MDD request. Fresh availability evidence
+captured the final Legacy7 boundary and six accounted/successful expected
+buckets; no Tiered50 network request has been issued.
 
 The read-only overlap audit found zero Windows-era collector runs, Heumarkt
 stop observations, or situation observations in the historical six-hour
@@ -392,36 +395,28 @@ database.
 
 ## Current operation and rollback
 
-The historical controlled cutover established the existing Legacy7 scope. The
-tracked plist remains safe-by-default and disabled; the machine-specific plist
-is the generated owner-local artifact at
-`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`.
-It uses the exact interpreter
+The historical controlled cutover established the Legacy7 scope. Its tracked
+and generated plist are retained as disabled audit artifacts. The current
+Tiered50 plist is the owner-local artifact at
+`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-tiered50-collector.plist`;
+it uses the exact interpreter
 `/Library/Developer/CommandLineTools/usr/bin/python3`, `StartInterval=300`,
-`RunAtLoad=false`, and the five approved non-secret gates. Its recorded SHA-256
-is `051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f`.
-
-The generated user-local LaunchAgent is active with `StartInterval=300`,
-`ThrottleInterval=300`, and `RunAtLoad=false`; the tracked template remains
-safe-by-default and disabled. Rollback is scheduler-level and additive: if SQL
-connectivity or a fail-closed gate fails, unload/disable this exact user-local
-job, leave all evidence intact for diagnosis, and do not issue a manual
-Heumarkt request. The retired Windows task must not be resumed without a new
-operator decision. No migration rollback should drop new objects or delete
-historical rows. Tiered50 activation, new Tiered50 production target IDs, and
-Power BI changes remain out of scope.
+`RunAtLoad=false`, and non-secret gates. It points to a separate versioned
+owner-only runtime bundle and is currently disabled. If a fail-closed gate
+fails, preserve evidence and leave both Legacy7 and Tiered50 disabled; do not
+issue a manual Heumarkt request or reactivate a Windows/Legacy7 writer.
 
 During pre-activation recovery, the SQL VM was temporarily unavailable and a
 scheduled invocation exited during connectivity preflight before opening a SQL
 run or issuing an MDD request. The job was re-enabled only after the VM was
 reachable and all live gates passed.
 
-Rollback is scheduler-level and additive: stop/unload the Mac job, leave all
-new evidence intact for diagnosis, and resume the previously approved Windows
-task only after an operator confirms its state. No migration rollback should
-drop the new objects or delete historical rows. Existing tables and Power BI
-objects are untouched, so this preparation has no destructive database
-rollback step.
+Recovery is scheduler-level and additive: stop/unload Tiered50, leave all new
+evidence intact for diagnosis, and resume Tiered50 only after its gates pass
+again. Legacy7 remains retired and no Windows collector may be resumed by this
+runtime. No migration rollback should drop new objects or delete historical
+rows. Existing tables and Power BI objects are untouched, so this preparation
+has no destructive database rollback step.
 
 ## Artifacts
 

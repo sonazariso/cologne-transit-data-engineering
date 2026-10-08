@@ -1,9 +1,9 @@
 # Stage 15 — Post-Cutover Validation Readiness
 
-> **Current status note (2026-10-07):** This readiness record remains the
+> **Current status note (2026-10-08):** This readiness record remains the
 > version-controlled offline contract for later Tiered50 validation. SQL Server
-> is the sole authoritative project database. The Legacy7 runtime is active,
-> but that activation does not authorize Tiered50 or start Stage 15B.
+> is the sole authoritative project database. Tiered50 is prepared but
+> inactive, and Legacy7 is retired; no activation or Stage 15B claim is made.
 
 **Current Stage 15A status:** `IN PROGRESS`
 **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`
@@ -16,16 +16,16 @@ sampling-era transition.
 
 The surrounding status remains:
 
-- Stage 14 overall: `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
+- Stage 14 overall: `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`
 - Stage 14 collector implementation: `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 - Stage 15 validation readiness: `IN PROGRESS`
 - Stage 15 live post-cutover validation: `NOT STARTED — AWAITS TIERED50 CUTOVER`
 
-The Mac Legacy7 runtime is active after the corrected ten-slot selector,
-additive lineage migration, bounded methodology evidence, dedicated-login
-provisioning, production preflight, Windows-task retirement, scheduler
-activation, corrected-era recording, and three ordinary scheduled heartbeats
-passed. This does not activate Tiered50 or start Stage 15B.
+The historical Mac Legacy7 runtime completed its corrected selector and
+heartbeat evidence, then was unloaded and disabled at the recorded boundary.
+The exact Tiered50 materialization and offline preflight are complete, but the
+Tiered50 LaunchAgent remains disabled because the provider-wide quota baseline
+is unavailable. This does not start Stage 15B.
 
 ## 15A — Pre-cutover validation framework/readiness
 

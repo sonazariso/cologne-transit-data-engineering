@@ -525,6 +525,7 @@ class SQLitePersistence:
                 amount INTEGER NOT NULL,
                 boundary INTEGER NOT NULL,
                 reserved_at_utc TEXT NOT NULL,
+                authorization_key TEXT,
                 released_at_utc TEXT,
                 finalized_at_utc TEXT,
                 finalization_reason TEXT,
@@ -728,6 +729,11 @@ class SQLitePersistence:
         self._ensure_column("http_attempts", "provider_attempt_confirmed", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("quota_permits", "finalized_at_utc", "TEXT")
         self._ensure_column("quota_permits", "finalization_reason", "TEXT")
+        self._ensure_column("quota_permits", "authorization_key", "TEXT")
+        self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_quota_permits_authorization_key "
+            "ON quota_permits(authorization_key) WHERE authorization_key IS NOT NULL"
+        )
         self._ensure_column("shared_usage", "confirmed_provider_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("shared_usage", "conservative_live_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("shared_usage", "live_client_invocations", "INTEGER NOT NULL DEFAULT 0")
@@ -2124,6 +2130,7 @@ class SQLitePersistence:
         proposed_attempts: int = 1,
         at_utc: datetime | None = None,
         reservation_scope: str = "LIVE_PROVIDER",
+        authorization_key: str | None = None,
     ) -> Mapping[str, Any]:
         """Atomically reserve quota headroom in SQLite.
 
@@ -2138,9 +2145,58 @@ class SQLitePersistence:
         if amount <= 0:
             raise ValueError("proposed_attempts must be positive")
         scope = str(reservation_scope)
+        key = str(authorization_key) if authorization_key else None
+        if key is not None and len(key) > 240:
+            raise ValueError("authorization_key must be at most 240 characters")
+        effective_boundary = min(int(boundary), 250_000)
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
+                if key is not None:
+                    existing = self._connection.execute(
+                        "SELECT permit_id, month_key, decision_kind, reservation_scope, amount, status "
+                        "FROM quota_permits WHERE authorization_key = ?",
+                        (key,),
+                    ).fetchone()
+                    if existing is not None:
+                        same_contract = (
+                            str(existing["month_key"]) == month
+                            and str(existing["decision_kind"]) == str(decision_kind)
+                            and str(existing["reservation_scope"]) == scope
+                            and int(existing["amount"]) == amount
+                        )
+                        if not same_contract:
+                            decision = {
+                                "allowed": False,
+                                "decision": "DUPLICATE_AUTHORIZATION_CONFLICT",
+                                "proposed_attempts": amount,
+                                "known_total": None,
+                                "boundary": effective_boundary,
+                                "reason": "authorization key was already used with a different permit contract",
+                                "permit_id": None,
+                            }
+                        elif str(existing["status"]) == PENDING_AUTHORIZATION:
+                            decision = {
+                                "allowed": True,
+                                "decision": "DUPLICATE_AUTHORIZATION_REUSED",
+                                "proposed_attempts": amount,
+                                "known_total": None,
+                                "boundary": effective_boundary,
+                                "reason": "existing pending permit reused idempotently",
+                                "permit_id": str(existing["permit_id"]),
+                            }
+                        else:
+                            decision = {
+                                "allowed": False,
+                                "decision": "DUPLICATE_AUTHORIZATION_FINALIZED",
+                                "proposed_attempts": amount,
+                                "known_total": None,
+                                "boundary": effective_boundary,
+                                "reason": "authorization key already has a finalized permit",
+                                "permit_id": None,
+                            }
+                        self._connection.commit()
+                        return decision
                 shared = self._connection.execute(
                     "SELECT * FROM shared_usage WHERE month_key = ?", (month,)
                 ).fetchone()
@@ -2172,7 +2228,7 @@ class SQLitePersistence:
                         "decision": "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
                         "proposed_attempts": amount,
                         "known_total": None,
-                        "boundary": int(boundary),
+                        "boundary": effective_boundary,
                         "reason": "safe shared-credential state is unavailable",
                         "permit_id": None,
                     }
@@ -2182,21 +2238,21 @@ class SQLitePersistence:
                         """
                         INSERT INTO quota_permits
                         (permit_id, month_key, decision_kind, reservation_scope, amount,
-                         boundary, reserved_at_utc, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         boundary, reserved_at_utc, authorization_key, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at), PENDING_AUTHORIZATION),
+                        (permit_id, month, decision_kind, scope, amount, effective_boundary, _iso(at), key, PENDING_AUTHORIZATION),
                     )
                     decision = {
                         "allowed": True,
                         "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
                         "proposed_attempts": amount,
                         "known_total": None,
-                        "boundary": int(boundary),
+                        "boundary": effective_boundary,
                         "reason": "initial scheduled request is not silently converted into a retry",
                         "permit_id": permit_id,
                     }
-                elif known_total + amount > int(boundary):
+                elif known_total + amount > effective_boundary:
                     decision = {
                         "allowed": False,
                         "decision": (
@@ -2206,7 +2262,7 @@ class SQLitePersistence:
                         ),
                         "proposed_attempts": amount,
                         "known_total": known_total,
-                        "boundary": int(boundary),
+                        "boundary": effective_boundary,
                         "reason": "quota boundary would be exceeded",
                         "permit_id": None,
                     }
@@ -2216,17 +2272,17 @@ class SQLitePersistence:
                         """
                         INSERT INTO quota_permits
                         (permit_id, month_key, decision_kind, reservation_scope, amount,
-                         boundary, reserved_at_utc, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         boundary, reserved_at_utc, authorization_key, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (permit_id, month, decision_kind, scope, amount, int(boundary), _iso(at), PENDING_AUTHORIZATION),
+                        (permit_id, month, decision_kind, scope, amount, effective_boundary, _iso(at), key, PENDING_AUTHORIZATION),
                     )
                     decision = {
                         "allowed": True,
                         "decision": "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
                         "proposed_attempts": amount,
                         "known_total": known_total,
-                        "boundary": int(boundary),
+                        "boundary": effective_boundary,
                         "reason": "within atomic quota headroom",
                         "permit_id": permit_id,
                     }

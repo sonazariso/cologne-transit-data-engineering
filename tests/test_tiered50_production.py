@@ -17,6 +17,10 @@ from cologne_transit_collector.domain import (  # noqa: E402
     TIERED50_SELECTION_POLICY_VERSION,
     SamplingEra,
 )
+from cologne_transit_collector.collector import (  # noqa: E402
+    Collector,
+    LiveModeBlocked,
+)
 from cologne_transit_collector.manifest import (  # noqa: E402
     LEGACY7_SAMPLING_TARGET_IDS,
     load_default_manifest,
@@ -24,6 +28,11 @@ from cologne_transit_collector.manifest import (  # noqa: E402
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlConnectionSettings,
     MssqlPersistence,
+)
+from cologne_transit_collector.quota import (  # noqa: E402
+    InMemoryUsageProvider,
+    QuotaGuard,
+    UsageSnapshot,
 )
 from package_source_zip import is_forbidden_source_member  # noqa: E402
 from tiered50_production_preflight import (  # noqa: E402
@@ -108,7 +117,9 @@ class Tiered50ProductionTests(unittest.TestCase):
     def test_offline_preflight_reconciles_approved_invariants_without_live_requests(self) -> None:
         result = run_preflight()
         self.assertEqual(result["status"], "PASS")
-        self.assertEqual(result["production_status"], "BLOCKED — LEGACY7 PRESERVED")
+        self.assertEqual(result["production_status"], "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED")
+        self.assertTrue(result["legacy7_retired"])
+        self.assertEqual(result["stations_actually_collecting"], 0)
         self.assertFalse(result["tiered50_active"])
         self.assertEqual(result["mdd_requests_issued"], 0)
         self.assertEqual(validate_manifest()["observed"]["target_count"], 50)
@@ -136,6 +147,39 @@ class Tiered50ProductionTests(unittest.TestCase):
         self.assertTrue(rendered["Disabled"])
         self.assertEqual(rendered["ProgramArguments"][-2:], ["--mode", "tiered50"])
         self.assertEqual(rendered["EnvironmentVariables"]["COLLECTOR_TIERED50_TARGET_SCOPE"], "UNAPPROVED")
+
+    def test_legacy7_production_mode_and_activation_are_rejected(self) -> None:
+        with self.assertRaises(RuntimeError):
+            INSTALLER.build_installed_plist(activate=True, mode="legacy7")
+
+        collector = Collector(
+            manifest=self.manifest,
+            persistence=object(),
+            mdd_client=object(),
+            quota_guard=QuotaGuard(InMemoryUsageProvider(UsageSnapshot())),
+        )
+        with self.assertRaises(LiveModeBlocked):
+            collector.run_once(mode="mac-sql", allow_live=True)
+
+    def test_authorization_key_reuses_pending_permit_and_rejects_replay(self) -> None:
+        provider = InMemoryUsageProvider(UsageSnapshot())
+        guard = QuotaGuard(provider)
+        key = "run-1:audit-7:attempt-1"
+        first = guard.allow_initial(at_utc=datetime(2026, 10, 8, tzinfo=timezone.utc), authorization_key=key)
+        second = guard.allow_initial(at_utc=datetime(2026, 10, 8, tzinfo=timezone.utc), authorization_key=key)
+        self.assertTrue(first.allowed)
+        self.assertTrue(second.allowed)
+        self.assertEqual(first.permit_id, second.permit_id)
+        self.assertEqual(second.decision, "DUPLICATE_AUTHORIZATION_REUSED")
+
+        conflict = guard.allow_retry(at_utc=datetime(2026, 10, 8, tzinfo=timezone.utc), authorization_key=key)
+        self.assertFalse(conflict.allowed)
+        self.assertEqual(conflict.decision, "DUPLICATE_AUTHORIZATION_CONFLICT")
+
+        guard.finalize_no_network(first)
+        replay = guard.allow_initial(at_utc=datetime(2026, 10, 8, tzinfo=timezone.utc), authorization_key=key)
+        self.assertFalse(replay.allowed)
+        self.assertEqual(replay.decision, "DUPLICATE_AUTHORIZATION_FINALIZED")
 
     def test_source_package_excludes_runtime_state_and_nested_archives(self) -> None:
         for name in ("nested.zip", "collector.sqlite3", "mdd-collector.log", "credentials.json", ".env"):
@@ -198,7 +242,7 @@ class Tiered50ProductionTests(unittest.TestCase):
 
     def test_legacy_availability_audit_does_not_infer_vm_sleep_or_stability(self) -> None:
         result = AVAILABILITY.reconcile()
-        self.assertEqual(result["status"], "BLOCKED — LEGACY7 PRESERVED")
+        self.assertEqual(result["status"], "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED")
         self.assertEqual(result["missing_buckets_within_observed_window"], [])
         self.assertEqual(result["evidence_window"]["bucket_span_minutes"], 15)
         self.assertEqual(result["availability"]["missing_bucket_cause"], "NOT_INFERRED")

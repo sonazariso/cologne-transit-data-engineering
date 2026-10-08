@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision and verify the dedicated Mac Legacy7 SQL runtime login.
+"""Provision and verify the dedicated macOS Tiered50 SQL runtime login.
 
 The current administrator credential is used only for this one-time action.
 The generated password is first anchored in a dedicated pending macOS Keychain
@@ -59,9 +59,10 @@ class RuntimePermission:
     permission: str
 
 
-# Code-backed permission contract for the SQL issued by one ordinary Mac
-# Legacy7 heartbeat and the separately guarded Tiered50 heartbeat, including
-# their startup/schema checks and the atomic quota finalization fallback.
+# Code-backed permission contract for one ordinary macOS Tiered50 heartbeat,
+# including its startup/schema checks, durable writer lease, and atomic quota
+# finalization fallback.  Legacy7 is historical and receives no activation
+# path or separate production grant.
 # Administrator/import/diagnostic reads are intentionally not in this matrix
 # and must use an administrator login.
 RUNTIME_PERMISSION_MATRIX = (
@@ -74,6 +75,10 @@ RUNTIME_PERMISSION_MATRIX = (
     RuntimePermission("read competing production writer status", "ctl.MddMacCollectorRun", "SELECT"),
     RuntimePermission("create collector run", "ctl.MddMacCollectorRun", "INSERT"),
     RuntimePermission("complete collector run", "ctl.MddMacCollectorRun", "UPDATE"),
+    RuntimePermission("read durable production lease", "ctl.MddMacProductionLease", "SELECT"),
+    RuntimePermission("acquire or release durable production lease", "ctl.MddMacProductionLease", "INSERT"),
+    RuntimePermission("acquire or release durable production lease", "ctl.MddMacProductionLease", "UPDATE"),
+    RuntimePermission("record durable production lease event", "ctl.MddMacProductionLeaseEvent", "INSERT"),
     RuntimePermission("claim/read dispatcher bucket", "ctl.MddMacDispatcherClaim", "SELECT"),
     RuntimePermission("claim dispatcher bucket", "ctl.MddMacDispatcherClaim", "INSERT"),
     RuntimePermission("complete dispatcher bucket", "ctl.MddMacDispatcherClaim", "UPDATE"),
@@ -89,6 +94,7 @@ RUNTIME_PERMISSION_MATRIX = (
     RuntimePermission("reserve quota permit", "ctl.MddMacQuotaPermit", "INSERT"),
     RuntimePermission("finalize quota permit", "ctl.MddMacQuotaPermit", "UPDATE"),
     RuntimePermission("verify quota permit finalization", "ctl.MddMacQuotaPermit", "SELECT"),
+    RuntimePermission("read provider-wide shared quota baseline", "ctl.MddMacSharedQuotaAccounting", "SELECT"),
     RuntimePermission("record quota decision", "ctl.MddMacQuotaAudit", "INSERT"),
     RuntimePermission("persist parsed MDD snapshot", "stg.uspPersistMddMacSnapshot", "EXECUTE"),
 )

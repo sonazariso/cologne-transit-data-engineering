@@ -26,6 +26,11 @@ from validate_mssql_migration import split_batches, validate_static  # noqa: E40
 
 REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddMacCollectorRun",
+    "ctl.MddMacProductionLease",
+    "ctl.MddMacProductionLeaseEvent",
+    "ctl.MddMacSharedQuotaAccounting",
+    "ctl.MddMacCurrentProductionEra",
+    "ctl.MddMacProductionCutover",
     "stg.MddMacSourceSnapshot",
     "stg.MddMacTimingObservation",
     "stg.MddMacSituationEvidence",

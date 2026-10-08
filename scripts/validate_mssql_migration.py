@@ -29,6 +29,11 @@ FORBIDDEN_MUTATIONS = re.compile(
 )
 REQUIRED_MARKERS = (
     "ctl.MddMacCollectorRun",
+    "ctl.MddMacProductionLease",
+    "ctl.MddMacProductionLeaseEvent",
+    "ctl.MddMacSharedQuotaAccounting",
+    "ctl.MddMacCurrentProductionEra",
+    "ctl.MddMacProductionCutover",
     "stg.MddMacSourceSnapshot",
     "stg.MddMacTimingObservation",
     "stg.MddMacSituationEvidence",

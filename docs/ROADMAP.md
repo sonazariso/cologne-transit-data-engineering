@@ -377,7 +377,7 @@ Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are 
 
 The Stage 13 closeout issued no MDD request or DNS/live-network operation.
 
-## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED
+## Stage 14 — Collector Implementation and Legacy7 SQL Runtime — TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED
 
 The [Stage 14 implementation record](stages/14-collector-implementation.md)
 documents the collector-first Python architecture and completed hardening
@@ -397,21 +397,21 @@ history is retained, raw forensic bodies are bounded to 24 hours, and
 validated online backups retain three UTC daily versions. The implementation
 status is `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, including the S76
 source-contract corrections and S78 live-research safety controls. SQL Server
-is the sole official database and the direct Mac Legacy7 path uses the
-existing seven target IDs, one target per deterministic UTC five-minute slot,
-with `MAC_LEGACY7_PRODUCTION`. Dedicated-login provisioning, preflight,
-Windows-task retirement, scheduler activation, corrected-era recording, and
-three ordinary scheduled heartbeats passed. The tracked plist remains disabled
-by design; the generated user-local LaunchAgent is active. Tiered50 activation
-and Stage 15B live validation remain **NOT STARTED — AWAITS TIERED50 CUTOVER**;
-Stage 15A readiness is in progress below.
+is the sole official database. The exact Tiered50 materialization is applied
+with prepared IDs 8–50, while historical Legacy7 IDs 1–7 remain unchanged.
+Dedicated-login provisioning, preflight, fresh six-bucket evidence,
+capacity/backup checks, and runtime isolation passed. Legacy7 was unloaded and
+disabled; the separate versioned Tiered50 LaunchAgent is installed but
+disabled. Tiered50 activation and Stage 15B live validation remain **NOT
+STARTED — AWAITS TIERED50 CUTOVER**; Stage 15A readiness is in progress below.
 
-The current Tiered50 deployment validation is **BLOCKED — LEGACY7 PRESERVED**.
-The separately guarded runtime, additive 43-row materialization SQL, stable
-production claim identity, disabled Tiered50 LaunchAgent, and offline preflight
-are implemented. Live materialization, activation, capacity/quota proof, and a
-complete scheduled 30-minute Tiered50 cycle remain outstanding; the Legacy7
-runtime is preserved without an overlapping writer.
+The current Tiered50 deployment validation is **BLOCKED — TIERED50 INACTIVE;
+LEGACY7 RETIRED**. The separately guarded runtime, additive 43-row
+materialization, stable production claim identity, durable lease, disabled
+Tiered50 LaunchAgent, and offline preflight are implemented. Activation and a
+complete scheduled 30-minute Tiered50 cycle remain outstanding because the
+complete provider-wide October quota baseline is unavailable. Legacy7 remains
+disabled without an overlapping writer.
 
 S79 adds append-only `timing_observations` history and a read-only reporting
 projection that preserves the distinction between `TimetabledTime`,
@@ -429,7 +429,8 @@ audit is recorded in [the Stage 14 audit artifact](stages/14-live-research-first
 
 Stage 15 remains **NOT STARTED — AWAITS TIERED50 CUTOVER** as a live
 post-cutover stage; its readiness work is separately tracked below as Stage
-15A. The active Legacy7 runtime does not constitute Tiered50 cutover evidence.
+15A. The retired Legacy7 history and prior heartbeat evidence do not
+constitute Tiered50 cutover evidence.
 
 ### Stage 15A — Post-Cutover Validation Readiness — IN PROGRESS
 

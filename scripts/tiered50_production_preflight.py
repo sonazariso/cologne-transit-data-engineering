@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import subprocess
 import sys
 import zipfile
 from collections import Counter
@@ -42,6 +44,7 @@ from cologne_transit_collector.macos_runner import require_tiered50_cutover_gate
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlConnectionSettings,
     MssqlPersistence,
+    TIERED50_TARGET_TABLE,
     build_mssql_snapshot_rows,
 )
 from cologne_transit_collector.schedule import (  # noqa: E402
@@ -269,6 +272,20 @@ def validate_deployment_and_sql() -> dict[str, Any]:
 def validate_live_read_only() -> dict[str, Any]:
     """Collect read-only SQL and host evidence without activation or MDD."""
 
+    def row_value(row: Any, name: str, index: int = 0) -> Any:
+        if isinstance(row, dict):
+            return row.get(name)
+        return row[index]
+
+    def command(command: list[str]) -> dict[str, Any]:
+        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        return {
+            "command": command[0],
+            "returncode": completed.returncode,
+            "stdout": completed.stdout[-4000:],
+            "stderr": completed.stderr[-1000:],
+        }
+
     settings = MssqlConnectionSettings.from_environment()
     persistence = MssqlPersistence(settings=settings)
     result: dict[str, Any] = {
@@ -282,13 +299,28 @@ def validate_live_read_only() -> dict[str, Any]:
         },
         "windows_vm_disk": {"status": "NOT_PROVEN"},
         "backup_recovery": {"status": "NOT_PROVEN", "reason": "database-host administrator evidence required"},
+        "availability": {
+            "launchd": command([
+                "/bin/launchctl",
+                "print",
+                f"gui/{os.getuid()}/com.cologne-transit-intelligence.mdd-tiered50-collector",
+            ]),
+            "uptime": command(["/usr/bin/uptime"]),
+            "power_assertions": command(["/usr/bin/pmset", "-g", "assertions"]),
+        },
     }
+    vmrun = shutil.which("vmrun")
+    if vmrun:
+        result["windows_vm"] = {"status": "OBSERVED", "vmrun_list": command([vmrun, "list"])}
+    else:
+        result["windows_vm"] = {"status": "NOT_OBSERVABLE", "reason": "vmrun was not on PATH"}
     try:
+        result["runtime_login"] = persistence.runtime_login_status()
         result["runtime_schema"] = persistence.validate_runtime_schema()
         result["tiered50_schema"] = persistence.validate_tiered50_runtime_schema()
         result["quota_usage"] = persistence.current_month_usage()
         result["competing_writers"] = persistence.assert_no_competing_writer(
-            "MAC_TIERED50_PRODUCTION"
+            collection_context="MAC_TIERED50_PRODUCTION"
         )
         with persistence._connection() as connection:
             cursor = connection.cursor()
@@ -301,17 +333,39 @@ def validate_live_read_only() -> dict[str, Any]:
             )
             result["sql_database_files"] = [
                 {
-                    "name": str(row[0]),
-                    "type": str(row[1]),
-                    "size_pages": int(row[2]),
-                    "growth": int(row[3]),
-                    "is_percent_growth": bool(row[4]),
-                    "max_size_pages": int(row[5]),
+                    "name": str(row_value(row, "name", 0)),
+                    "type": str(row_value(row, "type_desc", 1)),
+                    "size_pages": int(row_value(row, "size", 2)),
+                    "growth": int(row_value(row, "growth", 3)),
+                    "is_percent_growth": bool(row_value(row, "is_percent_growth", 4)),
+                    "max_size_pages": int(row_value(row, "max_size", 5)),
                 }
                 for row in cursor.fetchall()
             ]
+            cursor.execute(
+                f"""
+                SELECT COUNT_BIG(*) AS target_count,
+                       COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS active_count,
+                       COALESCE(SUM(CASE WHEN ActivationStatus = 'PREPARED' THEN 1 ELSE 0 END), 0) AS prepared_count,
+                       MIN(SamplingTargetId) AS minimum_id,
+                       MAX(SamplingTargetId) AS maximum_id
+                FROM {TIERED50_TARGET_TABLE}
+                WHERE PanelVersion = %s AND SamplingEra = %s
+                """,
+                ("TIERED50_PANEL_V1", "Tiered50"),
+            )
+            targets = cursor.fetchone()
+            result["tiered50_materialization"] = {
+                "target_count": int(row_value(targets, "target_count", 0) or 0),
+                "active_count": int(row_value(targets, "active_count", 1) or 0),
+                "prepared_count": int(row_value(targets, "prepared_count", 2) or 0),
+                "minimum_id": int(row_value(targets, "minimum_id", 3) or 0),
+                "maximum_id": int(row_value(targets, "maximum_id", 4) or 0),
+            }
     finally:
-        persistence.close()
+        # MssqlPersistence owns each short-lived DB-API connection through its
+        # context manager; there is no long-lived adapter connection to close.
+        pass
     return result
 
 
@@ -337,19 +391,41 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
                 "writes_performed": 0,
                 "error_type": live_error,
             }
-    blockers = [
-        "Tiered50 SQL materialization/activation was not applied by this offline preflight.",
-        "No complete scheduled 30-minute Tiered50 live cycle is evidenced.",
-        "Recent Legacy7 five-minute availability and database-host capacity/backup evidence are incomplete.",
-    ]
+    blockers = []
+    if not live:
+        blockers.extend(
+            [
+                "Live Tiered50 SQL materialization/activation is not evaluated by this offline preflight.",
+                "The Tiered50 writer remains disabled until the live materialization and activation gates pass.",
+            ]
+        )
+    elif live_result and live_result.get("tiered50_materialization") == {
+        "target_count": 43,
+        "active_count": 0,
+        "prepared_count": 43,
+        "minimum_id": 8,
+        "maximum_id": 50,
+    }:
+        blockers.append(
+            "Tiered50 materialization is complete and prepared, but activation/current-era recording has not passed all gates."
+        )
+    else:
+        blockers.append("Live Tiered50 materialization is not proven with exactly 43 prepared IDs 8–50.")
+    blockers.extend(
+        [
+            "A complete provider-wide shared-credential quota baseline for the current calendar month is not evidenced.",
+            "At least six consecutive expected five-minute heartbeats, plus database-host capacity and backup evidence, must be retained before activation.",
+        ]
+    )
     if live_error:
         blockers.append(f"Read-only live SQL preflight was not proven ({live_error}).")
     return {
         "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
         "status": "PASS" if not live_error else "PASS_WITH_LIVE_EVIDENCE_GAP",
-        "production_status": "BLOCKED — LEGACY7 PRESERVED",
+        "production_status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
         "tiered50_active": False,
-        "stations_actually_collecting": 7,
+        "legacy7_retired": True,
+        "stations_actually_collecting": 0,
         "first_completed_live_cycle": None,
         "mdd_requests_issued": 0,
         "writes_performed": 0,
@@ -369,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {
             "artifact_version": "TIERED50_PRODUCTION_PREFLIGHT_V1",
             "status": "FAIL",
-            "production_status": "BLOCKED — LEGACY7 PRESERVED",
+            "production_status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
             "tiered50_active": False,
             "mdd_requests_issued": 0,
             "error_type": type(exc).__name__,

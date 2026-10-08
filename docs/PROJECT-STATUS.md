@@ -2,7 +2,7 @@
 
 **Project:** Cologne Transport Intelligence
 **Repository:** `sonazariso/cologne-transit-intelligence`
-**Status date:** 2026-10-07
+**Status date:** 2026-10-08
 
 ## Authoritative status
 
@@ -23,62 +23,48 @@
 | 11 | Power BI Model | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
 | 12 | 50-Station Selection | COMPLETE — APPROVED FIXED 50-STATION PANEL |
 | 13 | Tiered Collector Readiness | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED |
-| 14 | Collector Implementation and Legacy7 SQL Runtime | LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED |
+| 14 | Collector Implementation and Legacy7 SQL Runtime | TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED |
 | 15 | Post-Cutover Validation | NOT STARTED — AWAITS TIERED50 CUTOVER |
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
 
 ## Current active architecture
 
-### Current operational cutover — 2026-10-07
+### Current operational cutover — 2026-10-08
 
-The operator manually disabled the exact Windows Task Scheduler task
-`\Cologne Transit Realtime Collector`. Read-only SQL confirmation captured two
-post-retirement boundaries with zero newer Windows collector runs or realtime
-observations. The authoritative final Windows run is `CollectorRunId 40393`,
-completed at `2026-10-07T13:43:56Z`; the final Windows observation is at
-`2026-10-07T13:43:55Z`.
+The exact Windows Task Scheduler task `\Cologne Transit Realtime Collector`
+remains retired. SQL evidence confirms no newer Windows collector runs or
+realtime observations after the authoritative final Windows boundary.
 
-The approved Legacy7 Mac runtime is the direct SQL Server path. Its generated
-user-local LaunchAgent at
-`~/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist`
-is active with `StartInterval=300` and `RunAtLoad=false`. The tracked plist
-remains safe-by-default and disabled; neither the plist nor the historical SQL
-rows was deleted. The corrected runtime uses one selected target per
-deterministic UTC five-minute bucket, collection context
-`MAC_LEGACY7_PRODUCTION`, additive `SamplingSlot`/policy lineage, and the
-dedicated `CologneTransitCollector` SQL login.
+The final Legacy7 Mac run was
+`05d97f32-7c4a-4a6c-993c-fd496c609cb8`, logical bucket `5971511`, completed
+at `2026-10-08 09:57:32.860000` UTC. Fresh evidence accounts for and succeeds
+all six expected Legacy7 buckets `5971506` through `5971511`; this is an
+availability and retirement boundary, not evidence that Legacy7 remains a
+production fallback.
 
-The nominal corrected cadence is 12 logical requests/hour, 288/day, 8,640 per
-30-day month, and 8,928 per 31-day month before retries. The three preserved
-seven-target oversampling runs remain valid source evidence but are excluded
-from cadence-equivalent volume comparisons.
+Legacy7 was then unloaded and disabled. Its historical implementation,
+observations, timing history, sampling eras, target IDs 1–7, and methodology
+evidence remain preserved. The replacement Tiered50 LaunchAgent is installed
+in a separate versioned bundle at
+`~/Library/Application Support/CologneTransitIntelligence/runtime-bundles/`
+but is intentionally disabled because activation is blocked. No two
+production writers are running, and no MDD request was issued during
+materialization, retirement, or preflight.
 
-The existing cutover record reports three preserved runs with seven target
-audits, seven initial attempts, and seven snapshots each. They are treated as
-a bounded cutover-validation oversampling window, not as approved Legacy7
-cadence evidence. The read-only live probe confirmed the counts and the
-append-only methodology record captured the 21-versus-3-versus-18 impact.
-The corrected additive lineage migration and live selector reconciliation also
-passed. The local runtime configuration uses the dedicated login, and the
-active scheduler has completed three ordinary scheduled heartbeats. The first
-corrected heartbeat began at
-`2026-10-07T19:51:46.041Z` and is the recorded
-`MAC_LEGACY7_PRODUCTION` sampling-era boundary.
+The additive SQL migration and exact Tiered50 materialization are applied:
+43 prepared target rows use IDs 8–50, all seven historical IDs remain intact,
+and all Tiered50 targets remain inactive. The fixed panel retains 8/20/22
+tier counts, 5/15/30-minute cadences, 20/30/30 result limits, phase sequence
+`19/18/18/18/19/18`, cap-2 concurrency, and two-attempt policy.
 
-Tiered50 remains inactive: no new Tiered50 production target IDs or Tiered50
-sampling era were created, no manual Heumarkt request was made, and Power BI
-was not changed.
-
-The current deployment validation status is **BLOCKED — LEGACY7 PRESERVED**.
-The explicit Tiered50 runtime mode, additive 43-row materialization script,
-stable production claim identity, disabled LaunchAgent template, and offline
-preflight are source-controlled. The live materialization and activation were
-not performed. Offline checks pass, but the available Legacy7 evidence spans
-only 15 minutes of consecutive buckets and does not prove the required
-30-minute stable availability interval, database capacity/backup readiness, or
-shared-credential quota reconciliation. Tiered50 has zero stations collecting
-and has no completed live cycle. See the [deployment validation evidence](operational/tiered50-deployment-validation-evidence.json)
+Current production status is **BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED**.
+The complete provider-wide October shared-credential baseline is unavailable,
+so the durable quota contract denies both INITIAL and RETRY permits rather
+than treating unknown shared usage as zero. The cutover is recorded as an
+auditable outage. Tiered50 has zero active stations, no live cycle has passed,
+and Legacy7 will not be reactivated. See the [deployment validation evidence](operational/tiered50-deployment-validation-evidence.json),
+[fresh operational evidence](operational/tiered50-production-evidence.json),
 and [operator report](operational/tiered50-deployment-validation-report.md).
 
 Microsoft SQL Server is the sole authoritative project database. The official
@@ -114,24 +100,27 @@ instance and remains recoverable from the verified archive.
 
 ### Current cutover transition status
 
-The corrected additive SQL Server contract was applied atomically to
-`CologneTransitIntelligence` and passed live validation with 26 tables and 4
-routines/views present; the existing seven sampling-target IDs and Windows-era
-realtime counts remain unchanged. Dedicated-login provisioning, production
-preflight, Windows-task retirement, and three ordinary corrected scheduled
-heartbeats passed. The safe tracked plist remains disabled by design, while the
-generated user-local LaunchAgent is active. The intended runtime uses the
-validated absolute interpreter
-`/Library/Developer/CommandLineTools/usr/bin/python3`.
+The additive SQL Server contract and the exact 43-row Tiered50 materialization
+were applied atomically to `CologneTransitIntelligence`; the existing seven
+sampling-target IDs and Windows-era realtime counts remain unchanged. The
+prepared Tiered50 rows use IDs 8–50 and are disabled. Dedicated-login
+provisioning, live schema validation, materialization validation, runtime
+preflight, and fresh host/VM/SQL evidence passed. The tracked templates remain
+secret-free and disabled; the installed Tiered50 bundle is separate,
+versioned, and disabled. The intended runtime uses the validated absolute
+interpreter `/Library/Developer/CommandLineTools/usr/bin/python3`.
 
-The successful corrected heartbeats were `85d2d601-ff66-4fd1-b3e6-105a1a384478`
-(bucket `5971342`, slot 3, target 1),
-`8286961f-0edc-4b64-b5ef-15ae776c1389` (bucket `5971343`, slot 4, target 4),
-and `24cb4cab-38f9-4629-bedf-6bf41c52b57a` (bucket `5971344`, slot 5, target
-6). Each used `MAC_LEGACY7_PRODUCTION`, one target, the SQL selector, and
-completed with HTTP 200 persistence. The append-only sampling-era record is
-`MAC_LEGACY7_PRODUCTION` effective at the first heartbeat timestamp above;
-Tiered50 remains deferred.
+The final Legacy7 run is `05d97f32-7c4a-4a6c-993c-fd496c609cb8` in bucket
+`5971511`, completed at `2026-10-08 09:57:32.860000` UTC. Buckets `5971506`
+through `5971511` are all accounted for and succeeded. Legacy7 was unloaded
+and disabled after that boundary. The current cutover record is an auditable
+`OUTAGE` because the complete October provider-wide quota baseline is absent;
+Tiered50 remains inactive and both INITIAL and RETRY authorization fail
+closed.
+
+The three corrected Legacy7 heartbeat records from the prior operational
+window remain preserved as historical evidence in the closeout artifact. They
+are not current production status and do not authorize Legacy7 fallback.
 
 The durable SQLite source is
 `/Users/admin/cologne-transit-data/live-research/collector.sqlite3` (575,041,536
@@ -151,10 +140,10 @@ partial batch; no source rows were deleted. Post-import reconciliation passed
 for 70 snapshots, 38,120 calls, 72,190 timings, 1,400 ServiceSections, and
 121 parser gaps, with zero unexplained differences and zero source
 `RecordedAtTime` values. Offline reconciliation replaced any manual Heumarkt
-validation request. The operator then retired the exact Windows task. Dedicated-
-login provisioning passed, the corrected Mac Legacy7 LaunchAgent is active, and
-three corrected scheduled heartbeats passed. One target is selected per
-historical Legacy7 heartbeat; Tiered50 remains deferred.
+validation request. The operator then retired the exact Windows task.
+Dedicated-login provisioning and the historical corrected-heartbeat evidence
+remain preserved; the Legacy7 LaunchAgent is now unloaded and disabled, and no
+Tiered50 heartbeat has been started.
 
 See the [operational import and cutover record](operational/s98-live-research-import-and-cutover.md)
 and the reusable [read-only validator](../scripts/validate_sqlite_import.py).
@@ -527,16 +516,16 @@ evidence in `stages/09-source-backed-matching-evidence.jsonl`.
   a new version with effective date/time, reason, and predecessor; historical
   identities and sampling/panel eras remain interpretable.
 
-### Stage 13 readiness design — approved; production not started
+### Stage 13 readiness design — approved; Tiered50 production gate blocked
 
 - **Stage 13 — COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED.** The [readiness design](stages/13-tiered-collector-readiness.md), [completion decision](stages/13-tiered-collector-readiness-completion-decision.md), and [machine-readable evidence](stages/13-tiered-collector-readiness-evidence.json) are authoritative. Explicit approval in `prompts/S68.md` finalized the material design choices; D-046 remains historical and D-047/D-048 remain chronology.
 - The fixed Stage 12 panel is `TIERED50_PANEL_V1` with exactly 50 stations and all seven Legacy7 continuity anchors. Stage 12 evidence was not changed. Stage 13 density ranks 1–8 / 9–28 / 29–50 produce Tier A/B/C counts 8 / 20 / 22 at 5 / 15 / 30-minute cadence.
 - The approved result limits are Tier A/B/C `NumberOfResults` 20 / 30 / 30. Retained Stage 13 station-level exact-feed evidence recalculates max station P95 / max observed static scheduled-arrival counts as A 19/20, B 23/23, and C 29/29, with 50/50 total P95 support. Static support is not realtime completeness evidence.
 - The approved load is 110 logical requests per 30-minute super-cycle and 220/hour. The approved 10% retry reserve and conservative shared-credential accounting total 182,980 for 30 days and 189,076 for 31 days, including Legacy7 reserves and the historical diagnostic reserve. These lower-load totals are valid safely below the 210,000 normal operational maximum and the 207,500 automatic-retry protection boundary; no minimum monthly utilization is required. Automatic retries are blocked when projected/current shared-credential monthly consumption would exceed 207,500 across all known consumers. The Tiered50-only 31-day component is 180,048; the main shared-credential guardrail example is 189,076 with 18,424 headroom to 207,500. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days with the same reserve model.
 - Maximum concurrency 2 and `MaxAttempts=2` with one approved transient retry are final design decisions. Retryable HTTP statuses are 408/429/500/502/503/504 plus approved transient transport failures; 429 respects `Retry-After`; 401/403 and deterministic request, parser/schema, and TRIAS application failures are not retryable. Failed station isolation remains required.
-- The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; the additive production materialization script now persists the approved phase fields for the 43 prepared rows, but that script has not been applied to the live database. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
+- The approved phase due sequence is 19/18/18/18/19/18 with capacities A 8, B 7/7/6, and C 4/3/4/3/4/4. Phase assignment uses `source_parent_station_id / parent StopPointRef`; the additive production materialization has been applied idempotently for the 43 prepared rows with IDs 8–50, while all new targets remain disabled. Overlap identity remains `(SamplingTargetId, LogicalDueBucket)` with atomic claims, no duplicate HTTP, no catch-up replay, and continuity-preserving Legacy7 history.
 - `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The retained corrected diagnostic is 24 client invocations, 0 HTTP responses, 0 confirmed provider HTTP attempts, unknown provider quota consumption, and 24 separate conservative quota-accounting attempts; no new MDD request was issued for this offline closeout.
-- The historical Stage 14 collector implementation is complete, with the S78 live-research profile retained as offline/research evidence. The corrected live Legacy7 selector, additive lineage migration, bounded 21/3/18 methodology evidence, dedicated-login provisioning, production preflight, scheduler activation, corrected-era recording, and three post-activation heartbeat validations are complete. The real Tiered50 production cutover remains deferred: production target-ID materialization, Tiered50 sampling-era transition, target activation, and Stage 15B validation are not performed. SQL Server is the active persistence authority under S87; the SQLite profile and PostgreSQL contracts are historical/deferred-cleanup material. Stage 15A readiness remains IN PROGRESS; Stage 15 remains NOT STARTED — AWAITS TIERED50 CUTOVER.
+- The historical Stage 14 collector implementation is complete, with the S78 live-research profile retained as offline/research evidence. The corrected Legacy7 selector, additive lineage migration, bounded 21/3/18 methodology evidence, dedicated-login provisioning, and historical heartbeat validations remain preserved. The Tiered50 SQL target materialization is complete and prepared, but production activation and Stage 15B validation are blocked by the absent provider-wide October quota baseline; the Tiered50 LaunchAgent is disabled and Legacy7 is retired. SQL Server is the active persistence authority under S87; the SQLite profile and PostgreSQL contracts are historical/deferred-cleanup material. Stage 15A readiness remains IN PROGRESS; Stage 15B remains NOT STARTED — AWAITS TIERED50 CUTOVER.
 
 ### Current storage direction — SQL Server authoritative; prior research retained
 
@@ -544,21 +533,22 @@ S87 supersedes the previously discussed PostgreSQL and SQLite-first directions
 for the active roadmap. The official database is SQL Server
 `CologneTransitIntelligence`; the live-research SQLite profile and PostgreSQL
 contracts remain historical/deferred-cleanup evidence only. The additive
-macOS direct-persistence adapter and migration are active for corrected
-Legacy7 runtime collection; Tiered50 cutover remains unresolved.
+macOS direct-persistence adapter, Tiered50 materialization, and Tiered50-only
+runtime are prepared for production; Tiered50 cutover remains blocked by the
+provider-wide quota baseline, and Legacy7 is retired.
 
-### Stage 14 collector implementation — Legacy7 SQL runtime active; Tiered50 cutover deferred
+### Stage 14 collector implementation — Tiered50 prepared; Legacy7 retired
 
-- **Overall status:** `LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`.
+- **Overall status:** `TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`.
 - **Implementation status:** `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`. S76's final source-contract retention correction is complete: JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction remain independent, candidate identity extensions retain source paths, service-only mode/display/origin/destination semantics are enforced, Attribute/GeneralAttribute and affected-entity evidence is retained without causal inference, and recognized-but-unmapped relevant fields become bounded parser-gap evidence. The accepted S75 call-scope and `CLIENT_EXECUTION_FAILURE` behavior remains intact. The package under `src/cologne_transit_collector/`, thin CLI `scripts/stage_14_collector.py`, fixed manifest `config/tiered50_runtime_manifest.json`, offline validation script, sanitized fixtures, and Stage 14 tests are source-controlled.
 - The manifest contains exactly 50 targets, split 7 Legacy7 members / 43 new Tiered50 members, with approved 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits, persisted phase indexes, and no fabricated production SamplingTargetIds. Stage 13 phase evidence is reconciled at load time.
 - Pure UTC bucket scheduling reproduces `[19,18,18,18,19,18]`, 110 executions per 30-minute super-cycle, and 220/hour. The dispatcher is scheduler-neutral, cap-2, MaxAttempts 2, failure-isolated, and deadline-aware.
 - The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. Production `live` remains blocked; `live-research` is a separate one-heartbeat Heumarkt mode with explicit storage, credential, target, and quota preconditions.
 - SQLite has two explicit profiles: disposable `DEVELOPMENT` state under `.local/` and durable, non-disposable `LIVE_RESEARCH` state under the configured live root. The live profile preserves claims, audits, parsed snapshots, append-only `timing_observations`, the `LatestSourceRecordedAtTime`/`LastObservedRecordedAtTime` reporting projection, RecordedAtTime evidence, Attribute/GeneralAttribute, Situation, parser-gap, quota, and raw-evidence lineage; parsed history is indefinite, raw forensic bodies are bounded to 24 hours, and three validated daily backups remain required. It is not a production cutover and does not authorize PostgreSQL work.
 - Live research defaults to `~/cologne-transit-data/live-research/collector.sqlite3` when an explicit live root is supplied, with protected `backups/` and `raw-evidence/` directories. Parsed history is retained indefinitely; raw forensic bodies are sanitized, indexed, and retained for at most 24 hours. Validated SQLite online backups retain the three most recent UTC date versions.
-- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 243 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, provisioning-recovery, append-only idempotency, sanitized-evidence, Tiered50 materialization/runtime, and documentation-drift regressions. The live login, preflight, Windows-retirement, scheduler, corrected-era, and three-heartbeat gates passed; the final five-run offline suite and validators passed in this review.
-- The prepared direct path is documented in [the macOS persistence contract](macos-mssql-collector.md). It uses `pymssql==2.3.2`, additive `ctl.MddMac*`/`stg.MddMac*` objects, source-faithful timing/Situation/Attribute/gap rows, and an active generated user-local `launchd` artifact while the tracked template remains disabled. It does not alter the historical tables or Power BI boundary, and it does not authorize Tiered50 live collection.
-- The corrected Legacy7 runtime selects one SQL-approved target per ten-slot cycle, retains `SamplingSlot`/policy lineage, uses `MAC_LEGACY7_PRODUCTION`, and requires `CologneTransitCollector` rather than `sa`. The generated LaunchAgent is active after live SQL migration, selector, login, and scheduled-heartbeat gates passed.
+- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 245 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, provisioning-recovery, append-only idempotency, sanitized-evidence, Tiered50 materialization/runtime, and documentation-drift regressions. The live login, preflight, Windows-retirement, scheduler, corrected-era, and three-heartbeat gates passed; the final five-run offline suite and validators passed in this review.
+- The prepared direct path is documented in [the macOS persistence contract](macos-mssql-collector.md). It uses `pymssql==2.3.2`, additive `ctl.MddMac*`/`stg.MddMac*` objects, source-faithful timing/Situation/Attribute/gap rows, durable SQL-backed leases and claims, and a separate versioned Tiered50 `launchd` bundle. The installed Tiered50 artifact is disabled, contains no secrets, and does not alter the historical tables or Power BI boundary.
+- The historical corrected Legacy7 runtime selected one SQL-approved target per ten-slot cycle, retained `SamplingSlot`/policy lineage, used `MAC_LEGACY7_PRODUCTION`, and required `CologneTransitCollector` rather than `sa`. Its final run boundary was captured, then the LaunchAgent was unloaded and disabled; Legacy7 is not a fallback.
 - One explicitly authorized S78 research heartbeat ran at `2026-10-01T11:30:00Z` for Köln Heumarkt (`de:05315:11110`): one HTTP 200, 20 parsed results, one persisted snapshot, one confirmed provider attempt, no retry, and 121 historical parser-gap fields retained with sanitized raw evidence. S80 then migrated the same live SQLite file offline from schema 2 to 4 without rewriting snapshot JSON, inserted 995 timing rows and 20 ServiceSection rows, and passed integrity, backup, and RecordedAtTime reconciliation checks. S81 migrated that file offline from schema 4 to 5 at `2026-10-01T15:15:16.410851Z`, kept all required row counts unchanged, validated the corrected reporting views, and refreshed the current-day backup. This remains lineage-separated research evidence, not production cutover evidence; no production `live` request, recurring scheduling, production target activation, or real Tiered50 cutover timestamp was performed.
 
 ### Stage 15A post-cutover validation readiness — in progress; Stage 15B not started
@@ -567,7 +557,7 @@ Legacy7 runtime collection; Tiered50 cutover remains unresolved.
 - The analyzer derives expected due targets from the approved manifest, pure schedule engine, and logical bucket, then reconciles actual audit evidence. It explicitly classifies success, failure, skip, missing evidence, duplicate invocation prevention, and unexpected execution. It diagnoses dispatcher owners, duplicate/stale claims, target claims, structural retry violations, separated quota accounting, coverage, duration statistics, parser/persistence evidence, and Legacy7/cutover readiness.
 - Policy-pending metrics have no invented thresholds. Measured rates, coverage percentages, parser gaps, zero-result frequency, error categories, and duration statistics remain `POLICY_PENDING`; missing required evidence is `INSUFFICIENT_EVIDENCE`. No PASS is emitted for absent post-cutover evidence.
 - Stage 15A now exposes timing-history measurements without interpretation: normalized timing-observation count, events with estimate revision history, non-NULL `RecordedAtTime` evidence count, events with `LastObservedRecordedAtTime`, and latest-null/history-non-NULL count. These are measurement-only; Stage 15B remains `NOT STARTED — AWAITS TIERED50 CUTOVER`.
-- **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`. `LIVE_RESEARCH_SINGLE_1` is explicitly excluded from post-cutover evidence. No real Tiered50 activation, production target materialization, Tiered50 sampling-era timestamp, Tiered50 scheduler deployment, or Power BI change is claimed; any controlled research request is lineage-separated and cannot satisfy the production transition check.
+- **Stage 15B live post-cutover validation:** `NOT STARTED — AWAITS TIERED50 CUTOVER`. `LIVE_RESEARCH_SINGLE_1` is explicitly excluded from post-cutover evidence. No real Tiered50 activation, sampling-era timestamp, or production scheduler enablement is claimed; the exact production target materialization is applied but remains disabled. Power BI is unchanged, and any controlled research request is lineage-separated and cannot satisfy the production transition check.
 
 ## Post-Stage-02 validation
 

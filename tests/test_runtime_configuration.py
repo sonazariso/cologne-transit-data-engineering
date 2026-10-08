@@ -173,24 +173,34 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[1], "api-secret")
 
     def test_installed_plist_is_secret_free_and_safe_by_default(self) -> None:
-        plist = build_installed_plist(activate=False, runtime_config_path=Path("/tmp/cti-runtime.json"))
+        plist = build_installed_plist(
+            activate=False,
+            runtime_config_path=Path("/tmp/cti-runtime.json"),
+            mode="tiered50",
+        )
         serialized = plistlib.dumps(plist).decode("utf-8")
         self.assertTrue(plist["Disabled"])
-        self.assertEqual(plist["EnvironmentVariables"]["COLLECTOR_MAC_SQL_ENABLED"], "0")
+        self.assertEqual(plist["EnvironmentVariables"]["COLLECTOR_MAC_TIERED50_ENABLED"], "0")
         self.assertNotIn("MDD_API_KEY", serialized)
         self.assertNotIn("MSSQL_PASSWORD", serialized)
         self.assertNotEqual(plist["ProgramArguments"][0], "/usr/bin/env")
-        self.assertTrue(plist["ProgramArguments"][1].endswith("/runtime-bundle/macos_launchd_entry.py"))
+        self.assertIn("/runtime-bundles/tiered50-v1-", plist["ProgramArguments"][1])
+        self.assertTrue(plist["ProgramArguments"][1].endswith("/macos_launchd_entry.py"))
 
     def test_installed_plist_open_values_are_exactly_the_approved_gates(self) -> None:
-        plist = build_installed_plist(activate=True, runtime_config_path=Path("/tmp/cti-runtime.json"))
+        plist = build_installed_plist(
+            activate=True,
+            runtime_config_path=Path("/tmp/cti-runtime.json"),
+            mode="tiered50",
+        )
         environment = plist["EnvironmentVariables"]
         self.assertFalse(plist["Disabled"])
-        self.assertEqual(environment["COLLECTOR_MAC_SQL_ENABLED"], "1")
+        self.assertEqual(environment["COLLECTOR_MAC_SQL_MODE"], "TIERED50")
+        self.assertEqual(environment["COLLECTOR_MAC_TIERED50_ENABLED"], "1")
         self.assertEqual(environment["COLLECTOR_WINDOWS_RUNTIME_STATE"], "CONFIRMED_RETIRED")
-        self.assertEqual(environment["COLLECTOR_CUTOVER_APPROVED"], "1")
-        self.assertEqual(environment["COLLECTOR_MAC_SQL_TARGET_SCOPE"], "LEGACY7_EXPLICIT_APPROVAL")
-        self.assertEqual(environment["COLLECTOR_MAC_SQL_VALIDATION_POLICY"], "OFFLINE_RECONCILIATION_ONLY")
+        self.assertEqual(environment["COLLECTOR_TIERED50_CUTOVER_APPROVED"], "1")
+        self.assertEqual(environment["COLLECTOR_TIERED50_TARGET_SCOPE"], "TIERED50_PANEL_V1")
+        self.assertEqual(environment["COLLECTOR_TIERED50_VALIDATION_POLICY"], "OFFLINE_RECONCILIATION_ONLY")
 
 
 if __name__ == "__main__":

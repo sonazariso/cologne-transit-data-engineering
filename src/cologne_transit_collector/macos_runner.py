@@ -37,7 +37,6 @@ from .domain import (
     MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
     MAC_TIERED50_TARGET_SCOPE_ENV,
     MAC_TIERED50_VALIDATION_POLICY_ENV,
-    SamplingEra,
 )
 from .manifest import load_default_manifest
 from .mssql_persistence import (
@@ -169,8 +168,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         choices=(LEGACY7_MODE, TIERED50_MODE),
-        default=LEGACY7_MODE,
-        help="independent production scope to execute",
+        default=TIERED50_MODE,
+        help="Tiered50 is the only production runtime; legacy7 is accepted only to emit a retirement block",
     )
     parser.add_argument("--at", dest="at_utc", help="UTC ISO-8601 time for deterministic validation")
     return parser
@@ -198,21 +197,18 @@ def main(argv: list[str] | None = None) -> int:
     configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
     root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
     runtime_mode = args.mode
-    collector_mode = "mac-sql" if runtime_mode == LEGACY7_MODE else "mac-tiered50"
-    collection_context = (
-        MAC_SQL_COLLECTION_CONTEXT
-        if runtime_mode == LEGACY7_MODE
-        else MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
-    )
     try:
+        if runtime_mode == LEGACY7_MODE:
+            raise LiveModeBlocked("Legacy7 production runtime is retired; no network request performed")
+        if runtime_mode != TIERED50_MODE:
+            raise LiveModeBlocked(f"unsupported production runtime mode: {runtime_mode}")
+        collector_mode = "mac-tiered50"
+        collection_context = MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
         base_configuration = merge_non_secret_runtime_values()
         _require_nonsecret_cutover_gate(dict(base_configuration.values), mode=runtime_mode)
         configuration = resolve_required_secrets(base_configuration)
         runtime_values = dict(configuration.values)
-        if runtime_mode == LEGACY7_MODE:
-            require_cutover_gate(runtime_values)
-        else:
-            require_tiered50_cutover_gate(runtime_values)
+        require_tiered50_cutover_gate(runtime_values)
         mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
         if mssql_settings.database != EXPECTED_SQL_DATABASE:
             raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
@@ -226,50 +222,25 @@ def main(argv: list[str] | None = None) -> int:
         login_status = persistence.runtime_login_status()
         _validate_runtime_login(login_status, mode=runtime_mode)
 
-        if runtime_mode == LEGACY7_MODE:
-            schema = persistence.validate_runtime_schema()
-            approved_targets = persistence.load_existing_sampling_targets()
-            selected_target = persistence.select_existing_legacy7_target(
-                at_utc=at_utc,
-                targets=approved_targets,
-            )
-            targets = (selected_target,)
-            manifest = replace(
-                base_manifest,
-                panel_version="MDD_MAC_LEGACY7_EXISTING_V1",
-                status="PREPARED_EXISTING_LEGACY7",
-                sampling_era=SamplingEra.LEGACY7,
-                activation_status="EXPLICIT_CUTOVER_APPROVED",
-                targets=targets,
-            )
-            selection_policy_version = selected_target.selection_policy_version
-            selection_details = {
-                "sampling_slot": selected_target.selected_sampling_slot,
-                "sampling_target_id": selected_target.legacy_sampling_target_id,
-                "stop_point_ref": selected_target.source_parent_station_id,
-                "station_name": selected_target.station_name,
-                "number_of_results": selected_target.number_of_results,
-            }
-            schema_details = schema
-        else:
-            schema = persistence.validate_runtime_schema()
-            tiered_schema = persistence.validate_tiered50_runtime_schema()
-            targets = persistence.load_tiered50_production_targets(base_manifest)
-            manifest = replace(
-                base_manifest,
-                status="ACTIVE_TIERED50_PRODUCTION",
-                activation_status="EXPLICIT_CUTOVER_APPROVED",
-                targets=targets,
-            )
-            manifest.validate_production_binding()
-            selection_policy_version = "TIERED50_UTC_PHASE_V1"
-            selection_details = {
-                "production_sampling_target_ids": sorted(
-                    int(target.production_sampling_target_id or 0) for target in targets
-                ),
-                "schedule_reconciliation": schedule_reconciliation(targets),
-            }
-            schema_details = {"base": schema, "tiered50": tiered_schema}
+        schema = persistence.validate_runtime_schema()
+        tiered_schema = persistence.validate_tiered50_runtime_schema()
+        targets = persistence.load_tiered50_production_targets(base_manifest)
+        manifest = replace(
+            base_manifest,
+            status="ACTIVE_TIERED50_PRODUCTION",
+            activation_status="EXPLICIT_CUTOVER_APPROVED",
+            targets=targets,
+        )
+        manifest.validate_production_binding()
+        selection_policy_version = "TIERED50_UTC_PHASE_V1"
+        selection_details = {
+            "production_sampling_target_ids": sorted(
+                int(target.production_sampling_target_id or 0) for target in targets
+            ),
+            "schedule_reconciliation": schedule_reconciliation(targets),
+        }
+        schema_details = {"base": schema, "tiered50": tiered_schema}
+        quota_recovery = persistence.recover_stale_quota_permits(at_utc=at_utc)
 
         settings = CollectorSettings.for_repository(root, environ=runtime_values)
         collector = Collector(
@@ -306,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             "sql_login_status": login_status,
             "schema": schema_details,
             "selection": selection_details,
+            "quota_recovery": quota_recovery,
             "result": result.to_dict(),
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))

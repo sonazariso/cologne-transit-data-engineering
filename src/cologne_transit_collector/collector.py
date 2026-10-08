@@ -20,7 +20,6 @@ from .domain import (
     INTERRUPTED_SHUTDOWN,
     LIVE_RESEARCH_COLLECTION_CONTEXT,
     LIVE_RESEARCH_TARGET_ID,
-    MAC_SQL_COLLECTION_CONTEXT,
     MAC_SQL_CUTOVER_APPROVED_ENV,
     MAC_SQL_ENABLED_ENV,
     MAC_SQL_MODE_ENV,
@@ -329,24 +328,7 @@ class Collector:
                 )
             self._live_research_preflight()
         if mode == "mac-sql":
-            if not allow_live:
-                raise LiveModeBlocked("mac-sql requires explicit cutover approval and allow_live=True")
-            if os.environ.get(MAC_SQL_ENABLED_ENV) != "1":
-                raise LiveModeBlocked("mac-sql is disabled; no network request performed")
-            if os.environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
-                raise LiveModeBlocked("current Windows collector runtime is not confirmed retired; no network request performed")
-            if os.environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
-                raise LiveModeBlocked("mac-sql cutover approval is not present; no network request performed")
-            if os.environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
-                raise LiveModeBlocked("mac-sql requires explicit Legacy7 target-scope approval; no network request performed")
-            if _mdd_credential_status(self.mdd_client) != "VALID":
-                raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
-            if not getattr(self.persistence, "is_production_ready", False):
-                raise LiveModeBlocked("mac-sql requires a production-ready direct persistence adapter")
-            if getattr(self.persistence, "collection_context", None) != MAC_SQL_COLLECTION_CONTEXT:
-                raise LiveModeBlocked("mac-sql requires the direct persistence collection context")
-            if not self.manifest.targets or any(target.sampling_era is not SamplingEra.LEGACY7 for target in self.manifest.targets):
-                raise LiveModeBlocked("mac-sql refuses Tiered50 or mixed target manifests")
+            raise LiveModeBlocked("Legacy7 production runtime is retired; no network request performed")
         if mode == "mac-tiered50":
             if not allow_live:
                 raise LiveModeBlocked("mac-tiered50 requires explicit cutover approval and allow_live=True")
@@ -379,7 +361,7 @@ class Collector:
             ):
                 raise LiveModeBlocked("mac-tiered50 requires all 50 SQL-bound Tiered50 targets")
             self.manifest.validate_production_binding()
-        if mode not in {"live-research", "mac-sql", "mac-tiered50"} and getattr(self.mdd_client, "offline_safe", True) is False:
+        if mode not in {"live-research", "mac-tiered50"} and getattr(self.mdd_client, "offline_safe", True) is False:
             raise LiveModeBlocked("offline modes cannot use a live-network MDD client")
 
         now = (at_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -387,8 +369,6 @@ class Collector:
         collection_context = (
             LIVE_RESEARCH_COLLECTION_CONTEXT
             if mode == "live-research"
-            else MAC_SQL_COLLECTION_CONTEXT
-            if mode == "mac-sql"
             else MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
             if mode == "mac-tiered50"
             else "OFFLINE_DEVELOPMENT"
@@ -766,10 +746,17 @@ class Collector:
                 # deterministic offline runs cannot cross a calendar-month
                 # boundary merely because the test executes later.
                 decision_at = quota_at_utc
+                authorization_key = f"{run_id}:{audit_id}:{attempts + 1}"
                 quota_decision = (
-                    self.quota_guard.allow_retry(at_utc=decision_at)
+                    self.quota_guard.allow_retry(
+                        at_utc=decision_at,
+                        authorization_key=authorization_key,
+                    )
                     if retrying
-                    else self.quota_guard.allow_initial(at_utc=decision_at)
+                    else self.quota_guard.allow_initial(
+                        at_utc=decision_at,
+                        authorization_key=authorization_key,
+                    )
                 )
                 self._record_quota(
                     run_id,

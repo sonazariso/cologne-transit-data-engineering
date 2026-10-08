@@ -1,17 +1,40 @@
 # Tiered50 deployment validation report
 
-Status: **BLOCKED — LEGACY7 PRESERVED**
+Status: **BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED**
 
-The approved `TIERED50_PANEL_V1` configuration is validated offline and remains inactive. The implementation now contains a separately guarded `MAC_TIERED50_PRODUCTION` runtime path, additive materialization SQL, a disabled Tiered50 LaunchAgent template, stable production target identity handling, and read-only preflight checks.
+The approved `TIERED50_PANEL_V1` configuration remains unchanged. The SQL
+Server migration and exact Tiered50 materialization are applied: all 50 panel
+records are represented, historical IDs 1–7 are preserved, and new IDs 8–50
+are prepared but disabled. The Tiered50-only macOS runtime is installed in a
+separate versioned bundle and its LaunchAgent remains disabled until every
+activation gate passes.
 
-Offline validation passed for the 50-target manifest, the exact six-phase schedule `[19, 18, 18, 18, 19, 18]`, 110 nominal requests per 30-minute cycle, 220 per hour, concurrency 2, max attempts 2, UTC bucket selection, no catch-up, fail-closed credential gates, claim uniqueness, and source-faithful parser-to-SQL row construction. No MDD requests or SQL writes were issued by this validation.
+Fresh validation confirms the final Legacy7 run, six consecutive expected
+Legacy7 buckets with accounted and successful SQL persistence, current SQL
+capacity, the latest checksum-verified native full backup, launchd state,
+Mac power/uptime evidence, and an observable VMware guest. Legacy7 was then
+unloaded and disabled. No Windows collector or competing Legacy7 writer is
+active, and no Tiered50 MDD request has been issued.
 
-The repository suite passed five consecutive times at 243 tests per run with `ResourceWarning` treated as an error. Compilation, JSON validation, migration checks, Stage 14/15 readiness checks, and `git diff --check` also passed.
+Activation is blocked because the complete provider-wide October
+shared-credential quota baseline is unavailable. The durable SQL quota
+contract therefore denies both INITIAL and RETRY permits rather than treating
+unknown shared usage as zero. The cutover is recorded as an auditable outage;
+Tiered50 remains inactive and Legacy7 is not a fallback.
 
-The additive SQL is statically reconciled to 43 new target rows with identities 8–50, while historical identities 1–7 remain untouched. It was not applied to the live database, so Tiered50 is not active and zero Tiered50 stations are collecting. The latest available Legacy7 evidence supports seven Legacy7 stations collecting.
+Offline validation passed for the 50-target manifest, exact phase sequence
+`[19, 18, 18, 18, 19, 18]`, 110 nominal requests per 30-minute cycle, 220 per
+hour, concurrency 2, maximum attempts 2, UTC bucket selection, no catch-up,
+durable claims and leases, quota boundary behavior, source-faithful parsing
+and SQL persistence, RecordedAtTime lineage, Situation/Attribute evidence,
+and zero MDD requests. The first real Tiered50 cycle is **NOT RUN** because
+activation is blocked.
 
-The available Legacy7 execution evidence contains three consecutive persisted UTC buckets (15 minutes of bucket span). It does not prove a complete 30-minute stable interval, uninterrupted launchd execution, VMware Fusion availability, Windows VM availability, SQL Server continuity beyond the observed successful writes, database capacity, backup/recovery readiness, or shared-credential quota reconciliation. Missing-bucket causes are not inferred.
+Power BI and analytics permissions were not modified. No manual Heumarkt
+request was issued. Full sanitized machine-readable evidence is in
+[`tiered50-production-evidence.json`](tiered50-production-evidence.json) and
+[`tiered50-deployment-validation-evidence.json`](tiered50-deployment-validation-evidence.json).
 
-The Tiered50 LaunchAgent is disabled, Windows collectors remain retired, Power BI and analytics permissions are unchanged, and no manual Heumarkt request was issued. A controlled cutover and one complete live Tiered50 cycle remain outstanding.
-
-The review artifact is `/Users/admin/Documents/cologne-transit-intelligence-review.zip`; its final SHA-256, byte size, and member count are returned with the handoff.
+The review artifact is `/Users/admin/Documents/cologne-transit-intelligence-review.zip`;
+its final SHA-256, byte size, member count, and forbidden-metadata count are
+returned with the handoff.

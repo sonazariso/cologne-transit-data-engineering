@@ -34,6 +34,7 @@ class UsageProvider(Protocol):
         proposed_attempts: int = 1,
         at_utc: datetime | None = None,
         reservation_scope: str = "LIVE_PROVIDER",
+        authorization_key: str | None = None,
     ) -> Mapping[str, Any]:
         ...
 

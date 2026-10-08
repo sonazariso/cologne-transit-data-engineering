@@ -22,10 +22,13 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .domain import (
+    ABSOLUTE_PROVIDER_CEILING,
     HttpResponse,
     LEGACY7_SELECTION_POLICY_VERSION,
     MAC_SQL_COLLECTION_CONTEXT,
     MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    NORMAL_OPERATIONAL_MAXIMUM,
+    AUTOMATIC_RETRY_PROTECTION_BOUNDARY,
     TIERED50_SELECTION_POLICY_VERSION,
     SamplingEra,
     Target,
@@ -91,6 +94,8 @@ FULL_SCHEMA_TABLES = (
     "ctl.MddRealtimeSamplingTarget",
     "ctl.MddRealtimeSamplingSlot",
     "ctl.MddMacCollectorRun",
+    "ctl.MddMacProductionLease",
+    "ctl.MddMacProductionLeaseEvent",
     "ctl.MddMacDispatcherClaim",
     "ctl.MddMacDispatcherClaimEvent",
     "ctl.MddMacTargetClaim",
@@ -99,7 +104,10 @@ FULL_SCHEMA_TABLES = (
     "ctl.MddMacHttpAttempt",
     "ctl.MddMacQuotaPermit",
     "ctl.MddMacQuotaAudit",
+    "ctl.MddMacSharedQuotaAccounting",
     "ctl.MddMacSamplingEra",
+    "ctl.MddMacCurrentProductionEra",
+    "ctl.MddMacProductionCutover",
     "ctl.MddMacMethodologyEvidence",
     "stg.MddMacSourceSnapshot",
     "stg.MddMacCallObservation",
@@ -127,6 +135,8 @@ RUNTIME_SCHEMA_TABLES = (
     "ctl.MddRealtimeSamplingTarget",
     "ctl.MddRealtimeSamplingSlot",
     "ctl.MddMacCollectorRun",
+    "ctl.MddMacProductionLease",
+    "ctl.MddMacProductionLeaseEvent",
     "ctl.MddMacDispatcherClaim",
     "ctl.MddMacDispatcherClaimEvent",
     "ctl.MddMacTargetClaim",
@@ -135,6 +145,7 @@ RUNTIME_SCHEMA_TABLES = (
     "ctl.MddMacHttpAttempt",
     "ctl.MddMacQuotaPermit",
     "ctl.MddMacQuotaAudit",
+    "ctl.MddMacSharedQuotaAccounting",
 )
 
 RUNTIME_SCHEMA_ROUTINES = (
@@ -144,6 +155,9 @@ RUNTIME_SCHEMA_ROUTINES = (
 
 TIERED50_TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
 TIERED50_RUNTIME_SCHEMA_TABLES = RUNTIME_SCHEMA_TABLES + (TIERED50_TARGET_TABLE,)
+PRODUCTION_LEASE_NAME = "MDD_MAC_PRODUCTION"
+QUOTA_BASELINE_UNAVAILABLE = "SHARED_PROVIDER_BASELINE_UNAVAILABLE"
+QUOTA_BASELINE_INCOMPLETE = "SHARED_PROVIDER_BASELINE_INCOMPLETE"
 
 
 @dataclass(frozen=True)
@@ -1613,24 +1627,118 @@ class MssqlPersistence:
         started_at: datetime,
         collection_context: str | None = None,
     ) -> None:
+        context = str(collection_context or self.collection_context)
+        started = _utc(started_at)
+        lease_required = context in {
+            MAC_SQL_COLLECTION_CONTEXT,
+            MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+        }
         with self._connection() as connection:
             cursor = self._cursor(connection)
-            cursor.execute(
-                """
-                INSERT INTO ctl.MddMacCollectorRun
-                    (RunId, PanelVersion, LogicalDueBucket, Mode, CollectionContext, StartedAtUtc)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    str(run_id),
-                    panel_version,
-                    int(logical_due_bucket),
-                    mode,
-                    str(collection_context or self.collection_context),
-                    _utc(started_at),
-                ),
-            )
-            connection.commit()
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacCollectorRun
+                        (RunId, PanelVersion, LogicalDueBucket, Mode, CollectionContext, StartedAtUtc)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(run_id),
+                        panel_version,
+                        int(logical_due_bucket),
+                        mode,
+                        context,
+                        started,
+                    ),
+                )
+                if lease_required:
+                    lease_token = uuid.uuid4()
+                    expires = started + timedelta(seconds=600)
+                    cursor.execute(
+                        """
+                        SELECT LeaseName, RunId, LeaseToken, ExpiresAtUtc, Status
+                        FROM ctl.MddMacProductionLease WITH (UPDLOCK, HOLDLOCK)
+                        WHERE LeaseName = %s
+                        """,
+                        (PRODUCTION_LEASE_NAME,),
+                    )
+                    existing = cursor.fetchone()
+                    existing_status = str(_row_named(existing, "Status", index=4) or "") if existing else ""
+                    existing_expires = _optional_utc(_row_named(existing, "ExpiresAtUtc", index=3)) if existing else None
+                    existing_run_id = str(_row_named(existing, "RunId", index=1) or "") if existing else None
+                    if existing_status == "ACTIVE" and existing_expires is not None and existing_expires > started:
+                        raise MssqlSafetyError(
+                            "durable production lease is already held"
+                            + (f" by run {existing_run_id}" if existing_run_id else "")
+                        )
+
+                    if existing is None:
+                        cursor.execute(
+                            """
+                            INSERT INTO ctl.MddMacProductionLease
+                                (LeaseName, CollectionContext, RunId, LeaseToken,
+                                 AcquiredAtUtc, ExpiresAtUtc, LastHeartbeatAtUtc, Status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
+                            """,
+                            (
+                                PRODUCTION_LEASE_NAME,
+                                context,
+                                str(run_id),
+                                lease_token,
+                                started,
+                                expires,
+                                started,
+                            ),
+                        )
+                        lease_outcome = "ACQUIRED"
+                    else:
+                        cursor.execute(
+                            """
+                            UPDATE ctl.MddMacProductionLease
+                            SET CollectionContext = %s,
+                                RunId = %s,
+                                LeaseToken = %s,
+                                AcquiredAtUtc = %s,
+                                ExpiresAtUtc = %s,
+                                LastHeartbeatAtUtc = %s,
+                                Status = 'ACTIVE',
+                                ReleasedAtUtc = NULL
+                            WHERE LeaseName = %s
+                            """,
+                            (
+                                context,
+                                str(run_id),
+                                lease_token,
+                                started,
+                                expires,
+                                started,
+                                PRODUCTION_LEASE_NAME,
+                            ),
+                        )
+                        lease_outcome = "RECLAIMED_STALE"
+                    cursor.execute(
+                        """
+                        INSERT INTO ctl.MddMacProductionLeaseEvent
+                            (LeaseName, CollectionContext, RunId, EventAtUtc,
+                             Outcome, PreviousRunId, PreviousStatus)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            PRODUCTION_LEASE_NAME,
+                            context,
+                            str(run_id),
+                            started,
+                            lease_outcome,
+                            existing_run_id,
+                            existing_status or None,
+                        ),
+                    )
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
 
     def claim_dispatcher_bucket(
         self,
@@ -1650,25 +1758,44 @@ class MssqlPersistence:
                 cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
                 cursor.execute(
                     """
-                    SELECT Status
+                    SELECT Status, StaleAfterUtc, RunId
                     FROM ctl.MddMacDispatcherClaim WITH (UPDLOCK, HOLDLOCK)
                     WHERE PanelVersion = %s AND LogicalDueBucket = %s
                     """,
                     key,
                 )
                 existing = cursor.fetchone()
-                won = existing is None
+                existing_stale_after = _optional_utc(_row_named(existing, "StaleAfterUtc", index=1)) if existing else None
                 existing_status = _row_value(existing, "Status", 0) if existing else None
+                existing_run_id = str(_row_named(existing, "RunId", index=2) or "") if existing else None
+                reclaim = bool(
+                    existing
+                    and str(existing_status or "") in {"CLAIMED", "RUNNING"}
+                    and existing_stale_after is not None
+                    and existing_stale_after <= claimed
+                )
+                won = existing is None or reclaim
                 if won:
-                    cursor.execute(
-                        """
-                        INSERT INTO ctl.MddMacDispatcherClaim
-                            (PanelVersion, LogicalDueBucket, RunId, ClaimToken,
-                             ClaimedAtUtc, StaleAfterUtc, Status)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'CLAIMED')
-                        """,
-                        (*key, run_id, token, claimed, stale_after),
-                    )
+                    if existing is None:
+                        cursor.execute(
+                            """
+                            INSERT INTO ctl.MddMacDispatcherClaim
+                                (PanelVersion, LogicalDueBucket, RunId, ClaimToken,
+                                 ClaimedAtUtc, StaleAfterUtc, Status)
+                            VALUES (%s, %s, %s, %s, %s, %s, 'CLAIMED')
+                            """,
+                            (*key, run_id, token, claimed, stale_after),
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            UPDATE ctl.MddMacDispatcherClaim
+                            SET RunId = %s, ClaimToken = %s, ClaimedAtUtc = %s,
+                                StaleAfterUtc = %s, Status = 'CLAIMED', CompletedAtUtc = NULL
+                            WHERE PanelVersion = %s AND LogicalDueBucket = %s
+                            """,
+                            (run_id, token, claimed, stale_after, *key),
+                        )
                 cursor.execute(
                     """
                     INSERT INTO ctl.MddMacDispatcherClaimEvent
@@ -1676,7 +1803,13 @@ class MssqlPersistence:
                     VALUES (%s, %s, %s, %s, %s, %s);
                     SELECT CONVERT(BIGINT, SCOPE_IDENTITY()) AS DispatcherClaimEventId;
                     """,
-                    (*key, run_id, claimed, "CLAIMED" if won else "DUPLICATE_DISPATCHER_CLAIM", existing_status),
+                    (
+                        *key,
+                        run_id,
+                        claimed,
+                        "CLAIMED" if existing is None else ("RECLAIMED_STALE_DISPATCHER_CLAIM" if reclaim else "DUPLICATE_DISPATCHER_CLAIM"),
+                        existing_status,
+                    ),
                 )
                 event_id = int(_row_value(cursor.fetchone(), "DispatcherClaimEventId", 0))
                 cursor.execute("COMMIT TRANSACTION;")
@@ -1713,7 +1846,7 @@ class MssqlPersistence:
                 if tiered50:
                     cursor.execute(
                         """
-                        SELECT Status
+                        SELECT Status, StaleAfterUtc, RunId
                         FROM ctl.MddMacTargetClaim WITH (UPDLOCK, HOLDLOCK)
                         WHERE PanelVersion = %s AND SamplingTargetId = %s AND LogicalDueBucket = %s
                         """,
@@ -1726,53 +1859,101 @@ class MssqlPersistence:
                     # path; Legacy7 remains keyed by its historical identity.
                     cursor.execute(
                         """
-                        SELECT Status
+                        SELECT Status, StaleAfterUtc, RunId
                         FROM ctl.MddMacTargetClaim WITH (UPDLOCK, HOLDLOCK)
                         WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
                         """,
                         (target.panel_version, target.source_parent_station_id, int(logical_due_bucket)),
                     )
                 existing = cursor.fetchone()
-                won = existing is None
+                existing_stale_after = _optional_utc(_row_named(existing, "StaleAfterUtc", index=1)) if existing else None
                 existing_status = _row_value(existing, "Status", 0) if existing else None
+                existing_run_id = str(_row_named(existing, "RunId", index=2) or "") if existing else None
+                reclaim = bool(
+                    existing
+                    and str(existing_status or "") in {"CLAIMED", "RUNNING"}
+                    and existing_stale_after is not None
+                    and existing_stale_after <= claimed
+                )
+                won = existing is None or reclaim
                 if won:
                     if tiered50:
-                        cursor.execute(
-                            """
-                            INSERT INTO ctl.MddMacTargetClaim
-                                (PanelVersion, SamplingTargetId, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
-                                 ClaimedAtUtc, StaleAfterUtc, Status)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
-                            """,
-                            (
-                                target.panel_version,
-                                sampling_target_id,
-                                target.source_parent_station_id,
-                                int(logical_due_bucket),
-                                run_id,
-                                token,
-                                claimed,
-                                stale_after,
-                            ),
-                        )
+                        if existing is None:
+                            cursor.execute(
+                                """
+                                INSERT INTO ctl.MddMacTargetClaim
+                                    (PanelVersion, SamplingTargetId, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
+                                     ClaimedAtUtc, StaleAfterUtc, Status)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
+                                """,
+                                (
+                                    target.panel_version,
+                                    sampling_target_id,
+                                    target.source_parent_station_id,
+                                    int(logical_due_bucket),
+                                    run_id,
+                                    token,
+                                    claimed,
+                                    stale_after,
+                                ),
+                            )
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE ctl.MddMacTargetClaim
+                                SET RunId = %s, ClaimToken = %s, ClaimedAtUtc = %s,
+                                    StaleAfterUtc = %s, Status = 'CLAIMED',
+                                    StartedAtUtc = NULL, CompletedAtUtc = NULL
+                                WHERE PanelVersion = %s AND SamplingTargetId = %s AND LogicalDueBucket = %s
+                                """,
+                                (
+                                    run_id,
+                                    token,
+                                    claimed,
+                                    stale_after,
+                                    target.panel_version,
+                                    sampling_target_id,
+                                    int(logical_due_bucket),
+                                ),
+                            )
                     else:
-                        cursor.execute(
-                            """
-                            INSERT INTO ctl.MddMacTargetClaim
-                                (PanelVersion, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
-                                 ClaimedAtUtc, StaleAfterUtc, Status)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
-                            """,
-                            (
-                                target.panel_version,
-                                target.source_parent_station_id,
-                                int(logical_due_bucket),
-                                run_id,
-                                token,
-                                claimed,
-                                stale_after,
-                            ),
-                        )
+                        if existing is None:
+                            cursor.execute(
+                                """
+                                INSERT INTO ctl.MddMacTargetClaim
+                                    (PanelVersion, TargetIdentity, LogicalDueBucket, RunId, ClaimToken,
+                                     ClaimedAtUtc, StaleAfterUtc, Status)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, 'CLAIMED')
+                                """,
+                                (
+                                    target.panel_version,
+                                    target.source_parent_station_id,
+                                    int(logical_due_bucket),
+                                    run_id,
+                                    token,
+                                    claimed,
+                                    stale_after,
+                                ),
+                            )
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE ctl.MddMacTargetClaim
+                                SET RunId = %s, ClaimToken = %s, ClaimedAtUtc = %s,
+                                    StaleAfterUtc = %s, Status = 'CLAIMED',
+                                    StartedAtUtc = NULL, CompletedAtUtc = NULL
+                                WHERE PanelVersion = %s AND TargetIdentity = %s AND LogicalDueBucket = %s
+                                """,
+                                (
+                                    run_id,
+                                    token,
+                                    claimed,
+                                    stale_after,
+                                    target.panel_version,
+                                    target.source_parent_station_id,
+                                    int(logical_due_bucket),
+                                ),
+                            )
                 if tiered50:
                     cursor.execute(
                         """
@@ -1789,7 +1970,7 @@ class MssqlPersistence:
                             int(logical_due_bucket),
                             run_id,
                             claimed,
-                            "CLAIMED" if won else "DUPLICATE_CLAIM",
+                            "CLAIMED" if existing is None else ("RECLAIMED_STALE_CLAIM" if reclaim else "DUPLICATE_CLAIM"),
                             existing_status,
                         ),
                     )
@@ -1808,7 +1989,7 @@ class MssqlPersistence:
                             int(logical_due_bucket),
                             run_id,
                             claimed,
-                            "CLAIMED" if won else "DUPLICATE_CLAIM",
+                            "CLAIMED" if existing is None else ("RECLAIMED_STALE_CLAIM" if reclaim else "DUPLICATE_CLAIM"),
                             existing_status,
                         ),
                     )
@@ -2269,6 +2450,34 @@ class MssqlPersistence:
                     cursor.fetchall()
                 except Exception:
                     pass
+                if self.collection_context in {
+                    MAC_SQL_COLLECTION_CONTEXT,
+                    MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+                }:
+                    cursor.execute(
+                        """
+                        UPDATE ctl.MddMacProductionLease
+                        SET Status = 'RELEASED',
+                            ReleasedAtUtc = %s,
+                            LastHeartbeatAtUtc = %s
+                        WHERE LeaseName = %s AND RunId = %s AND Status = 'ACTIVE'
+                        """,
+                        (_utc(completed_at), _utc(completed_at), PRODUCTION_LEASE_NAME, str(run_id)),
+                    )
+                    if getattr(cursor, "rowcount", 1):
+                        cursor.execute(
+                            """
+                            INSERT INTO ctl.MddMacProductionLeaseEvent
+                                (LeaseName, CollectionContext, RunId, EventAtUtc, Outcome)
+                            VALUES (%s, %s, %s, %s, 'RELEASED')
+                            """,
+                            (
+                                PRODUCTION_LEASE_NAME,
+                                self.collection_context,
+                                str(run_id),
+                                _utc(completed_at),
+                            ),
+                        )
                 connection.commit()
             except BaseException:
                 connection.rollback()
@@ -2317,32 +2526,203 @@ class MssqlPersistence:
             )
             connection.commit()
 
-    def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
+    def recover_stale_quota_permits(
+        self,
+        *,
+        at_utc: datetime | None = None,
+        stale_after_seconds: int = 300,
+    ) -> Mapping[str, Any]:
+        """Conservatively settle permits left pending by a crashed process.
+
+        A pending permit is never silently returned to the headroom pool after
+        a process boundary.  Once it is older than the bounded request/claim
+        window, the safest durable interpretation is an unknown provider
+        attempt.  The update is idempotent because only pending rows qualify.
+        """
+
         at = _utc(at_utc or datetime.now(timezone.utc))
+        cutoff = at - timedelta(seconds=max(1, int(stale_after_seconds)))
         month = _month_key(at)
         with self._connection() as connection:
             cursor = self._cursor(connection)
-            cursor.execute(
-                """
-                SELECT
-                    COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS confirmed,
-                    COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS conservative,
-                    COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS pending
-                FROM ctl.MddMacQuotaPermit
-                WHERE MonthKey = %s
-                """,
-                (HTTP_PROVIDER_ATTEMPT_CONFIRMED, CONSERVATIVE_LIVE_ATTEMPT, PENDING_AUTHORIZATION, month),
-            )
-            row = cursor.fetchone()
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                cursor.execute(
+                    """
+                    UPDATE ctl.MddMacQuotaPermit
+                    SET Status = %s,
+                        FinalizedAtUtc = %s,
+                        ReleasedAtUtc = NULL,
+                        FinalizationReason = %s,
+                        LiveClientInvocation = 1
+                    WHERE MonthKey = %s
+                      AND Status = %s
+                      AND ReservedAtUtc < %s
+                    """,
+                    (
+                        CONSERVATIVE_LIVE_ATTEMPT,
+                        at,
+                        "CRASH_RECOVERY_CONSERVATIVE",
+                        month,
+                        PENDING_AUTHORIZATION,
+                        cutoff,
+                    ),
+                )
+                recovered = int(getattr(cursor, "rowcount", 0) or 0)
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
         return {
-            "confirmed_provider_attempts": int(_row_value(row, "confirmed", 0) or 0),
-            "reserved_shared_usage": int(_row_value(row, "pending", 2) or 0),
-            "conservative_live_attempts": int(_row_value(row, "conservative", 1) or 0),
-            "live_client_invocations": 0,
-            "http_responses_received": int(_row_value(row, "confirmed", 0) or 0),
-            "provider_quota_unknown_attempts": int(_row_value(row, "conservative", 1) or 0),
-            "state_available": False,
-            "source": WINDOWS_RUNTIME_UNCONFIRMED,
+            "status": "PASS",
+            "month_key": month,
+            "recovered_permits": recovered,
+            "cutoff_utc": _iso(cutoff),
+        }
+
+    def _quota_baseline_row(self, cursor: Any, *, month: str, at: datetime) -> Any:
+        cursor.execute(
+            """
+            SELECT MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+                   RetryProtectionBoundary, ConfirmedProviderAttempts,
+                   ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
+                   AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
+                   LocalUsageIncludedThroughUtc, SourceDescription
+            FROM ctl.MddMacSharedQuotaAccounting WITH (UPDLOCK, HOLDLOCK)
+            WHERE MonthKey = %s
+            """,
+            (month,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        status = str(_row_named(row, "AccountingStatus", index=7) or "")
+        includes_all = bool(_row_named(row, "IncludesAllSharedConsumers", index=8))
+        baseline_as_of = _optional_utc(_row_named(row, "BaselineAsOfUtc", index=9))
+        local_cutoff = _optional_utc(_row_named(row, "LocalUsageIncludedThroughUtc", index=10))
+        if (
+            status != "COMPLETE"
+            or not includes_all
+            or baseline_as_of is None
+            or local_cutoff is None
+            or baseline_as_of > at
+            or local_cutoff > at
+        ):
+            return None
+        return row
+
+    @staticmethod
+    def _quota_usage_totals(cursor: Any, *, month: str, local_cutoff: datetime) -> Mapping[str, int]:
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS confirmed,
+                COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS conservative,
+                COALESCE(SUM(CASE WHEN Status = %s THEN Amount ELSE 0 END), 0) AS pending,
+                COALESCE(SUM(CASE WHEN LiveClientInvocation = 1 THEN Amount ELSE 0 END), 0) AS invocations
+            FROM ctl.MddMacQuotaPermit WITH (READCOMMITTEDLOCK)
+            WHERE MonthKey = %s
+              AND ReservedAtUtc > %s
+            """,
+            (
+                HTTP_PROVIDER_ATTEMPT_CONFIRMED,
+                CONSERVATIVE_LIVE_ATTEMPT,
+                PENDING_AUTHORIZATION,
+                month,
+                local_cutoff,
+            ),
+        )
+        row = cursor.fetchone()
+        return {
+            "confirmed": int(_row_named(row, "confirmed", index=0) or 0),
+            "conservative": int(_row_named(row, "conservative", index=1) or 0),
+            "pending": int(_row_named(row, "pending", index=2) or 0),
+            "invocations": int(_row_named(row, "invocations", index=3) or 0),
+        }
+
+    def current_month_usage(self, *, at_utc: datetime | None = None) -> Mapping[str, Any] | None:
+        """Read the provider-wide baseline plus post-baseline local permits.
+
+        Missing or incomplete shared-consumer evidence is deliberately not
+        converted to zero.  The production quota adapter therefore exposes an
+        unavailable state and the atomic reservation path fails closed.
+        """
+
+        at = _utc(at_utc or datetime.now(timezone.utc))
+        month = _month_key(at)
+        try:
+            with self._connection() as connection:
+                cursor = self._cursor(connection)
+                cursor.execute(
+                    """
+                    SELECT MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum,
+                           RetryProtectionBoundary, ConfirmedProviderAttempts,
+                           ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts,
+                           AccountingStatus, IncludesAllSharedConsumers, BaselineAsOfUtc,
+                           LocalUsageIncludedThroughUtc, SourceDescription
+                    FROM ctl.MddMacSharedQuotaAccounting
+                    WHERE MonthKey = %s
+                    """,
+                    (month,),
+                )
+                baseline = cursor.fetchone()
+                if baseline is None:
+                    return {
+                        "state_available": False,
+                        "source": QUOTA_BASELINE_UNAVAILABLE,
+                        "availability_reason": "no complete provider-wide accounting row exists for the calendar month",
+                        "month_key": month,
+                        "known_total": None,
+                    }
+                status = str(_row_named(baseline, "AccountingStatus", index=7) or "")
+                includes_all = bool(_row_named(baseline, "IncludesAllSharedConsumers", index=8))
+                baseline_as_of = _optional_utc(_row_named(baseline, "BaselineAsOfUtc", index=9))
+                local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
+                if (
+                    status != "COMPLETE"
+                    or not includes_all
+                    or baseline_as_of is None
+                    or local_cutoff is None
+                    or baseline_as_of > at
+                    or local_cutoff > at
+                ):
+                    return {
+                        "state_available": False,
+                        "source": QUOTA_BASELINE_INCOMPLETE,
+                        "availability_reason": "provider-wide accounting row is incomplete or not valid at the requested timestamp",
+                        "month_key": month,
+                        "known_total": None,
+                    }
+                local = self._quota_usage_totals(cursor, month=month, local_cutoff=local_cutoff)
+        except Exception:
+            # A schema/permission/connectivity failure is itself unavailable
+            # provider-wide state; it must not become an implicit zero.
+            return {
+                "state_available": False,
+                "source": QUOTA_BASELINE_UNAVAILABLE,
+                "availability_reason": "provider-wide accounting state could not be read",
+                "month_key": month,
+                "known_total": None,
+            }
+
+        confirmed = int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0) + local["confirmed"]
+        conservative = int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0) + local["conservative"]
+        reserved = int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0) + local["pending"]
+        return {
+            "confirmed_provider_attempts": confirmed,
+            "reserved_shared_usage": reserved,
+            "projected_non_retry_attempts": 0,
+            "conservative_live_attempts": conservative,
+            "live_client_invocations": local["invocations"],
+            "http_responses_received": confirmed,
+            "provider_quota_unknown_attempts": conservative,
+            "state_available": True,
+            "source": str(_row_named(baseline, "SourceDescription", index=11) or "SHARED_PROVIDER_BASELINE"),
+            "month_key": month,
+            "baseline_as_of_utc": _iso(baseline_as_of),
+            "local_usage_included_through_utc": _iso(local_cutoff),
+            "known_total": confirmed + conservative + reserved,
         }
 
     def reserve_quota_attempt(
@@ -2353,41 +2733,189 @@ class MssqlPersistence:
         proposed_attempts: int = 1,
         at_utc: datetime | None = None,
         reservation_scope: str = "LIVE_PROVIDER",
+        authorization_key: str | None = None,
     ) -> Mapping[str, Any]:
         amount = int(proposed_attempts)
         if amount <= 0:
             raise ValueError("proposed_attempts must be positive")
         at = _utc(at_utc or datetime.now(timezone.utc))
-        if decision_kind != "INITIAL":
-            return {
-                "allowed": False,
-                "decision": "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE",
-                "proposed_attempts": amount,
-                "known_total": None,
-                "boundary": int(boundary),
-                "reason": "Windows provider-wide usage is not reconciled",
-                "permit_id": None,
-            }
+        if decision_kind not in {"INITIAL", "RETRY"}:
+            raise ValueError("decision_kind must be INITIAL or RETRY")
+        effective_boundary = min(int(boundary), ABSOLUTE_PROVIDER_CEILING)
+        key = str(authorization_key) if authorization_key else None
+        if key is not None and len(key) > 240:
+            raise ValueError("authorization_key must be at most 240 characters")
         permit_id = str(uuid.uuid4())
         with self._connection() as connection:
             cursor = self._cursor(connection)
-            cursor.execute(
-                """
-                INSERT INTO ctl.MddMacQuotaPermit
-                    (PermitId, MonthKey, DecisionKind, ReservationScope, Amount,
-                     Boundary, ReservedAtUtc, Status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (permit_id, _month_key(at), decision_kind, reservation_scope, amount, int(boundary), at, PENDING_AUTHORIZATION),
-            )
-            connection.commit()
+            month = _month_key(at)
+            try:
+                cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+                # A stale pending permit is conservatively finalized while the
+                # same transaction holds the month/accounting lock.
+                stale_cutoff = at - timedelta(seconds=300)
+                cursor.execute(
+                    """
+                    UPDATE ctl.MddMacQuotaPermit
+                    SET Status = %s,
+                        FinalizedAtUtc = %s,
+                        ReleasedAtUtc = NULL,
+                        FinalizationReason = %s,
+                        LiveClientInvocation = 1
+                    WHERE MonthKey = %s AND Status = %s AND ReservedAtUtc < %s
+                    """,
+                    (
+                        CONSERVATIVE_LIVE_ATTEMPT,
+                        at,
+                        "CRASH_RECOVERY_CONSERVATIVE",
+                        month,
+                        PENDING_AUTHORIZATION,
+                        stale_cutoff,
+                    ),
+                )
+                # Idempotent authorization replay is resolved before reading
+                # the baseline.  Once a permit exists, a repeated client
+                # invocation must not become a second reservation merely
+                # because the external baseline is temporarily unavailable.
+                if key is not None:
+                    cursor.execute(
+                        """
+                        SELECT PermitId, MonthKey, DecisionKind, ReservationScope, Amount,
+                               Status
+                        FROM ctl.MddMacQuotaPermit WITH (UPDLOCK, HOLDLOCK)
+                        WHERE AuthorizationKey = %s
+                        """,
+                        (key,),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is not None:
+                        existing_permit = str(_row_named(existing, "PermitId", index=0))
+                        same_contract = (
+                            str(_row_named(existing, "MonthKey", index=1) or "") == month
+                            and str(_row_named(existing, "DecisionKind", index=2) or "") == decision_kind
+                            and str(_row_named(existing, "ReservationScope", index=3) or "") == str(reservation_scope)
+                            and int(_row_named(existing, "Amount", index=4) or 0) == amount
+                        )
+                        existing_status = str(_row_named(existing, "Status", index=5) or "")
+                        cursor.execute("COMMIT TRANSACTION;")
+                        connection.commit()
+                        if not same_contract:
+                            return {
+                                "allowed": False,
+                                "decision": "DUPLICATE_AUTHORIZATION_CONFLICT",
+                                "proposed_attempts": amount,
+                                "known_total": None,
+                                "boundary": effective_boundary,
+                                "reason": "authorization key was already used with a different permit contract",
+                                "permit_id": None,
+                            }
+                        if existing_status == PENDING_AUTHORIZATION:
+                            return {
+                                "allowed": True,
+                                "decision": "DUPLICATE_AUTHORIZATION_REUSED",
+                                "proposed_attempts": amount,
+                                "known_total": None,
+                                "boundary": effective_boundary,
+                                "reason": "existing pending permit reused idempotently",
+                                "permit_id": existing_permit,
+                            }
+                        return {
+                            "allowed": False,
+                            "decision": "DUPLICATE_AUTHORIZATION_FINALIZED",
+                            "proposed_attempts": amount,
+                            "known_total": None,
+                            "boundary": effective_boundary,
+                            "reason": "authorization key already has a finalized permit",
+                            "permit_id": None,
+                        }
+                baseline = self._quota_baseline_row(cursor, month=month, at=at)
+                if baseline is None:
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    decision = (
+                        "INITIAL_DENIED_QUOTA_STATE_UNAVAILABLE"
+                        if decision_kind == "INITIAL"
+                        else "RETRY_DENIED_QUOTA_STATE_UNAVAILABLE"
+                    )
+                    return {
+                        "allowed": False,
+                        "decision": decision,
+                        "proposed_attempts": amount,
+                        "known_total": None,
+                        "boundary": effective_boundary,
+                        "reason": "complete provider-wide shared-credential quota baseline is unavailable",
+                        "permit_id": None,
+                    }
+                local_cutoff = _optional_utc(_row_named(baseline, "LocalUsageIncludedThroughUtc", index=10))
+                assert local_cutoff is not None
+                local = self._quota_usage_totals(cursor, month=month, local_cutoff=local_cutoff)
+                baseline_total = (
+                    int(_row_named(baseline, "ConfirmedProviderAttempts", index=4) or 0)
+                    + int(_row_named(baseline, "ConservativeUnknownAttempts", index=5) or 0)
+                    + int(_row_named(baseline, "ExplicitSharedConsumerReservedAttempts", index=6) or 0)
+                )
+                known_total = baseline_total + local["confirmed"] + local["conservative"] + local["pending"]
+
+                projected = known_total + amount
+                if projected > ABSOLUTE_PROVIDER_CEILING:
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    return {
+                        "allowed": False,
+                        "decision": f"{decision_kind}_DENIED_PROVIDER_CEILING",
+                        "proposed_attempts": amount,
+                        "known_total": known_total,
+                        "boundary": ABSOLUTE_PROVIDER_CEILING,
+                        "reason": "provider quota ceiling would be exceeded",
+                        "permit_id": None,
+                    }
+                if projected > effective_boundary:
+                    cursor.execute("COMMIT TRANSACTION;")
+                    connection.commit()
+                    return {
+                        "allowed": False,
+                        "decision": (
+                            "INITIAL_DENIED_NORMAL_OPERATIONAL_MAXIMUM"
+                            if decision_kind == "INITIAL"
+                            else "RETRY_DENIED_PROTECTION_BOUNDARY"
+                        ),
+                        "proposed_attempts": amount,
+                        "known_total": known_total,
+                        "boundary": effective_boundary,
+                        "reason": "quota boundary would be exceeded by this atomic reservation",
+                        "permit_id": None,
+                    }
+                cursor.execute(
+                    """
+                    INSERT INTO ctl.MddMacQuotaPermit
+                        (PermitId, MonthKey, DecisionKind, ReservationScope, Amount,
+                         Boundary, ReservedAtUtc, AuthorizationKey, Status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        permit_id,
+                        month,
+                        decision_kind,
+                        reservation_scope,
+                        amount,
+                        effective_boundary,
+                        at,
+                        key,
+                        PENDING_AUTHORIZATION,
+                    ),
+                )
+                cursor.execute("COMMIT TRANSACTION;")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
         return {
             "allowed": True,
-            "decision": "INITIAL_ALLOWED_WITHOUT_RETRY_STATE",
+            "decision": "INITIAL_ALLOWED" if decision_kind == "INITIAL" else "RETRY_ALLOWED",
             "proposed_attempts": amount,
-            "known_total": None,
-            "boundary": int(boundary),
-            "reason": "Windows provider-wide usage is not reconciled",
+            "known_total": known_total,
+            "boundary": effective_boundary,
+            "reason": "within atomic provider-wide quota headroom",
             "permit_id": permit_id,
         }
 
@@ -2407,10 +2935,28 @@ class MssqlPersistence:
         cursor.execute(
             """
             UPDATE ctl.MddMacQuotaPermit
-            SET Status = %s, FinalizedAtUtc = %s, LiveClientInvocation = %s
+            SET Status = %s,
+                FinalizedAtUtc = %s,
+                ReleasedAtUtc = CASE WHEN %s = %s THEN %s ELSE NULL END,
+                FinalizationReason = %s,
+                LiveClientInvocation = %s
             WHERE PermitId = %s AND Status = %s
             """,
-            (finalization, _utc(finalized_at), int(live_client_invocation), str(permit_id), PENDING_AUTHORIZATION),
+            (
+                finalization,
+                _utc(finalized_at),
+                finalization,
+                RELEASED_NO_NETWORK,
+                _utc(finalized_at),
+                {
+                    RELEASED_NO_NETWORK: "NO_NETWORK_CONFIRMED",
+                    CONSERVATIVE_LIVE_ATTEMPT: "LIVE_ATTEMPT_UNCERTAIN",
+                    HTTP_PROVIDER_ATTEMPT_CONFIRMED: "HTTP_RESPONSE_CONFIRMED",
+                }[finalization],
+                int(live_client_invocation),
+                str(permit_id),
+                PENDING_AUTHORIZATION,
+            ),
         )
         if getattr(cursor, "rowcount", 1) == 0:
             cursor.execute("SELECT Status FROM ctl.MddMacQuotaPermit WHERE PermitId = %s", (str(permit_id),))
@@ -2512,8 +3058,10 @@ class MssqlPersistence:
         normalized_panel_version = str(panel_version)
         normalized_timestamp_kind = str(timestamp_kind)
         normalized_effective_at = _utc(effective_at_utc) if effective_at_utc else None
-        if is_active and normalized_era_code.casefold() == "tiered50":
-            raise MssqlSafetyError("Tiered50 activation is not permitted by the prepared collector contract")
+        if is_active and normalized_effective_at is None:
+            raise MssqlSafetyError("active sampling era requires an explicit effective UTC timestamp")
+        if is_active and normalized_effective_at > datetime.now(timezone.utc):
+            raise MssqlSafetyError("active sampling era effective timestamp cannot be in the future")
 
         with self._connection() as connection:
             cursor = self._cursor(connection)
@@ -2554,6 +3102,15 @@ class MssqlPersistence:
                             "conflicting corrected-production sampling era exists for " + normalized_era_code
                         )
                     era_id = int(_row_named(exact[0], "SamplingEraId", index=0))
+                    if is_active and not is_synthetic:
+                        self._upsert_current_production_era(
+                            cursor,
+                            sampling_era_id=era_id,
+                            era_code=normalized_era_code,
+                            panel_version=normalized_panel_version,
+                            effective_at=normalized_effective_at,
+                            recorded_at=datetime.now(timezone.utc),
+                        )
                     connection.commit()
                     return {
                         "sampling_era_id": era_id,
@@ -2595,12 +3152,55 @@ class MssqlPersistence:
                 ),
             )
             era_id = int(_row_value(cursor.fetchone(), "SamplingEraId", 0))
+            if is_active and not is_synthetic:
+                self._upsert_current_production_era(
+                    cursor,
+                    sampling_era_id=era_id,
+                    era_code=normalized_era_code,
+                    panel_version=normalized_panel_version,
+                    effective_at=normalized_effective_at,
+                    recorded_at=datetime.now(timezone.utc),
+                )
             connection.commit()
         return {
             "sampling_era_id": era_id,
             "action": "INSERTED",
             "rows_written": 1,
         }
+
+    @staticmethod
+    def _upsert_current_production_era(
+        cursor: Any,
+        *,
+        sampling_era_id: int,
+        era_code: str,
+        panel_version: str,
+        effective_at: datetime | None,
+        recorded_at: datetime,
+    ) -> None:
+        if effective_at is None:
+            raise MssqlSafetyError("current production era requires an effective UTC timestamp")
+        cursor.execute(
+            """
+            UPDATE ctl.MddMacCurrentProductionEra
+            SET SamplingEraId = %s,
+                EraCode = %s,
+                PanelVersion = %s,
+                EffectiveAtUtc = %s,
+                RecordedAtUtc = %s
+            WHERE CurrentMarkerId = 1
+            """,
+            (int(sampling_era_id), era_code, panel_version, _utc(effective_at), _utc(recorded_at)),
+        )
+        if getattr(cursor, "rowcount", 1) == 0:
+            cursor.execute(
+                """
+                INSERT INTO ctl.MddMacCurrentProductionEra
+                    (CurrentMarkerId, SamplingEraId, EraCode, PanelVersion, EffectiveAtUtc, RecordedAtUtc)
+                VALUES (1, %s, %s, %s, %s, %s)
+                """,
+                (int(sampling_era_id), era_code, panel_version, _utc(effective_at), _utc(recorded_at)),
+            )
 
     def record_methodology_evidence(
         self,

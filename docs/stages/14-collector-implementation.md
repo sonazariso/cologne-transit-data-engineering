@@ -1,29 +1,31 @@
 # Stage 14 — Collector Implementation and Legacy7 SQL Runtime
 
-> **S87 status note (2026-10-05):** The earlier SQLite-first/deferred-runtime
-> position is retained as historical chronology. It is superseded for the
-> current operational path by the additive SQL Server Legacy7 runtime.
+> **Current status (2026-10-08):** The earlier SQLite-first/deferred-runtime
+> position and the corrected Legacy7 SQL runtime are retained as historical
+> chronology. The current production design is Tiered50-only; Legacy7 is
+> retired and the prepared Tiered50 LaunchAgent is disabled pending the
+> provider-wide quota baseline.
 
 ## Authoritative status
 
 Overall Stage 14 status:
 
-`LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED`
+`TIERED50 PREPARED — PRODUCTION INACTIVE; LEGACY7 RETIRED`
 
 Implementation status:
 
 `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`
 
-The corrected production path is the additive macOS-to-SQL Server Legacy7
-runtime. Its user-local LaunchAgent is active after the dedicated-login,
-preflight, Windows-retirement, selector, corrected-era, and three-heartbeat
-gates passed. The historical SQLite research profile remains immutable,
-lineage-separated evidence. The corrected runtime selects one target from the
-authoritative ten-slot SQL rotation per current UTC five-minute bucket; it
-does not replay missed buckets or use an in-memory counter. Tiered50 target
-materialization, Tiered50 activation, and Stage 15B live validation remain
-deferred. Stage 15A readiness remains `IN PROGRESS`; Stage 15 remains
-`NOT STARTED — AWAITS TIERED50 CUTOVER`.
+The prepared production path is the additive macOS-to-SQL Server Tiered50
+runtime. Its exact 43 new SQL target rows use IDs 8–50, preserve Legacy7 IDs
+1–7, and remain disabled. The separate versioned user-local LaunchAgent is
+installed but disabled after the final Legacy7 boundary was captured and the
+Legacy7 job was unloaded. The historical SQLite research profile and Legacy7
+SQL evidence remain immutable, lineage-separated records. The Tiered50
+runtime selects only the current UTC five-minute bucket, does not replay missed
+buckets, and does not fabricate snapshots. Activation and Stage 15B live
+validation are blocked by the absent provider-wide October quota baseline;
+Stage 15A readiness remains `IN PROGRESS`.
 
 ## Current Legacy7 operational correction
 
@@ -52,17 +54,19 @@ cron, a system timer, a container scheduler, a cloud scheduler, or another
 platform without changing collector policy code.
 
 The historical collector package remains scheduler-neutral and offline-safe.
-The corrected Legacy7 production path is a five-minute user-local LaunchAgent
-that writes directly to SQL Server and is active after the live gates above.
+The current production path is a five-minute user-local Tiered50 LaunchAgent
+that writes directly to SQL Server; it is installed in a separate versioned
+bundle but remains disabled while the quota gate is blocked. The corrected
+Legacy7 path is historical evidence and is retired.
 The explicit `live-research` command
 remains a separate historical SQLite mode; it is not production runtime
 evidence. SQLite is disposable only in the `DEVELOPMENT` profile, while the
 `LIVE_RESEARCH` profile is immutable research evidence outside the repository.
 
 The manifest preserves the approved historical Legacy7 lineage IDs 1 through 7
-as `legacy_sampling_target_id`. These are continuity metadata only, not future
-production primary keys. Production IDs remain unresolved for all targets and
-are not invented for the 43 new targets.
+as `legacy_sampling_target_id`. SQL Server preserves those historical IDs and
+materializes the 43 approved new production IDs as 8–50. Their approved panel,
+tier, phase, cadence, result-limit, and source-parent identities remain fixed.
 
 ## Package structure
 
@@ -378,18 +382,18 @@ target failure isolation. None of these scenarios opens a network connection.
 ## Sampling-era and continuity contract
 
 The domain represents `Legacy7` and `Tiered50` as distinct sampling eras.
-The runtime manifest remains the approved Tiered50 design, but the live pilot
+The runtime manifest remains the approved Tiered50 design, while the live pilot
 uses the separate operational context `LIVE_RESEARCH_SINGLE_1`; it does not
-create an active Tiered50 row or a production cutover timestamp. Live research
+create an active Tiered50 era or a production cutover timestamp. Live research
 observations cannot satisfy Stage 15B continuity. Legacy history is not
-deleted or rewritten, and the pilot does not materialize the 43 new production
-target IDs.
+deleted or rewritten, and the 43 new production target IDs are prepared but
+not active.
 
 ## Offline closeout validation
 
 The historical closeout suite passed in five consecutive runs, with 154 tests
 reported in each run. In the current cadence-correction review, the complete
-repository suite passed in five consecutive runs with 243 tests per run and
+repository suite passed in five consecutive runs with 245 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
@@ -409,9 +413,10 @@ transport calls, and zero live-network calls; CLI `live` remained blocked
 before transport.
 
 No Tiered50 production `live` request, PostgreSQL installation/object change,
-Tiered50 target materialization, Tiered50 cutover, or Power BI change was
-performed. The corrected Legacy7 production path is active through ordinary
-scheduled heartbeats; no manual Heumarkt request was made. The one authorized
+Tiered50 cutover, or Power BI change was performed. The exact Tiered50 target
+materialization was applied without MDD requests; all new targets remain
+disabled. The corrected Legacy7 path is retired after its final boundary; no
+manual Heumarkt request was made. The one authorized
 S78 research heartbeat used the
 `LIVE_RESEARCH_SINGLE_1` context at `2026-10-01T11:30:00Z` for
 `de:05315:11110`, received HTTP 200, parsed 20 results, persisted one snapshot,
@@ -420,17 +425,17 @@ parser-gap fields with sanitized raw evidence. The S80 offline migration then
 updated only the additive schema/evidence tables; the stored snapshot JSON was
 not rewritten. It remains excluded from Stage 15B.
 
-## Deferred work after Legacy7 activation
+## Deferred work before Tiered50 activation
 
 The following are intentional deferrals, not implementation defects:
 
-1. materialize the approved 43 additional production targets only after a
-   separate Tiered50 authorization;
-2. perform the approved seven-to-50 target migration without rewriting
-   Legacy7 history;
-3. record a Tiered50 sampling-era cutover timestamp only after Tiered50 is
+1. establish the complete provider-wide calendar-month quota baseline,
+   including confirmed, conservative unknown, outstanding, and shared-consumer
+   reservations;
+2. record a Tiered50 sampling-era cutover timestamp only after Tiered50 is
    actually activated;
-4. activate Tiered50 only after its independent cutover gate passes; and
-5. begin live Stage 15B validation after real Tiered50 evidence exists.
+3. activate the disabled Tiered50 LaunchAgent only after every independent
+   cutover gate passes; and
+4. begin live Stage 15B validation after six normal Tiered50 buckets exist.
 
 No item above is performed by the current implementation.
