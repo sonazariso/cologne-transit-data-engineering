@@ -1,13 +1,13 @@
 {
   "artifact_integrity": {
-    "payload_sha256": "0044b1cb669f9c351ff2415cdfba84d51bffdc2ed63474ccb979ee201861f9ae",
+    "payload_sha256": "16548b17cac4c7b3b615f65d12e69b73e559c63916246e210250b823aed99a61",
     "reason": "operator-controlled signing key was not supplied",
     "status": "UNSIGNED"
   },
   "artifact_version": "TIERED50_ADMIN_EVIDENCE_V3",
   "capture_provenance": {
     "authentication_source": "MSSQL_ADMIN_*_REQUIRED",
-    "captured_at_utc": "2026-10-08T19:30:13.551208Z",
+    "captured_at_utc": "2026-10-08T20:53:47.138503Z",
     "database_name": "",
     "effective_login": "",
     "execution_path": "NOT_PROVEN",
@@ -48,7 +48,7 @@
     "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
     "tiered50_active": false
   },
-  "generated_at_utc": "2026-10-08T19:30:13.551208Z",
+  "generated_at_utc": "2026-10-08T20:53:47.138503Z",
   "host": {
     "legacy7_launchd": {
       "command": "/bin/launchctl",
@@ -70,14 +70,14 @@
       "start_interval_seconds": 300
     },
     "mac_disk": {
-      "free_bytes": 79206772736,
+      "free_bytes": 79141638144,
       "total_bytes": 250685575168
     },
     "power_assertions": {
       "command": "/usr/bin/pmset",
       "returncode": 0,
       "stderr": "",
-      "stdout": "2026-10-08 21:30:13 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:05:06 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:1000043b0 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 11:30:47 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 11:30:47 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 11:30:47 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nNo kernel assertions.\nIdle sleep preventers: IODisplayWrangler\n"
+      "stdout": "2026-10-08 22:53:47 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:05:07 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:1000043b0 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 12:54:21 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 12:54:21 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 12:54:21 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nNo kernel assertions.\nIdle sleep preventers: IODisplayWrangler\n"
     },
     "tiered50_launchd": {
       "command": "/bin/launchctl",
@@ -117,7 +117,7 @@
       "command": "/usr/bin/uptime",
       "returncode": 0,
       "stderr": "",
-      "stdout": "21:30  up 12:43, 2 users, load averages: 3.32 3.64 3.69\n"
+      "stdout": "22:53  up 14:07, 2 users, load averages: 3.76 3.74 4.07\n"
     },
     "vmware": {
       "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
@@ -211,7 +211,7 @@
       "error_type": "RuntimeError",
       "phase": "execute",
       "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
-      "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
+      "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey, AccountingModel, ProviderPeriodTimezone FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
     },
@@ -433,7 +433,7 @@
         "error_type": "RuntimeError",
         "phase": "execute",
         "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
-        "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
+        "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey, AccountingModel, ProviderPeriodTimezone FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
       },
@@ -522,6 +522,7 @@
     },
     "quota_integrity": {
       "accounting_model": "EXCLUSIVE_CREDENTIAL",
+      "active_reset_contract_key": null,
       "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
       "automatic_rollover": {
         "mdd_requests_issued": 0,
@@ -530,8 +531,10 @@
       },
       "baseline_as_of_utc": "2026-10-08T12:19:11Z",
       "baseline_component_total": 806,
+      "bounded_timezone_uncertainty": true,
       "confirmed_provider_attempts": 721,
       "conservative_live_attempts": 87,
+      "contract_verification_status": "NOT_APPLICABLE",
       "evidence_role": "SQL_LEDGER_REFRESH",
       "http_responses_received": 721,
       "known_total": 808,
@@ -546,6 +549,7 @@
       },
       "projected_non_retry_attempts": 0,
       "provider_measurement_cutoff_utc": null,
+      "provider_period_metadata_source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
       "provider_period_metadata_verified": false,
       "provider_period_timezone": null,
       "provider_quota_unknown_attempts": 87,
@@ -555,10 +559,12 @@
       "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59",
       "stale_after_utc": "2026-10-30T23:00:00Z",
       "state_available": true,
-      "status": "PASS"
+      "status": "PASS",
+      "supported_reset_timezones": null
     },
     "quota_usage": {
       "accounting_model": "EXCLUSIVE_CREDENTIAL",
+      "active_reset_contract_key": null,
       "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
       "automatic_rollover": {
         "mdd_requests_issued": 0,
@@ -567,8 +573,10 @@
       },
       "baseline_as_of_utc": "2026-10-08T12:19:11Z",
       "baseline_component_total": 806,
+      "bounded_timezone_uncertainty": true,
       "confirmed_provider_attempts": 721,
       "conservative_live_attempts": 87,
+      "contract_verification_status": "NOT_APPLICABLE",
       "evidence_role": "DEDICATED_RUNTIME_LOGIN",
       "http_responses_received": 721,
       "known_total": 808,
@@ -583,6 +591,7 @@
       },
       "projected_non_retry_attempts": 0,
       "provider_measurement_cutoff_utc": null,
+      "provider_period_metadata_source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
       "provider_period_metadata_verified": false,
       "provider_period_timezone": null,
       "provider_quota_unknown_attempts": 87,
@@ -592,7 +601,8 @@
       "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59",
       "stale_after_utc": "2026-10-30T23:00:00Z",
       "state_available": true,
-      "status": "PASS"
+      "status": "PASS",
+      "supported_reset_timezones": null
     },
     "recent_http_attempts": [],
     "recent_http_attempts_evidence": {

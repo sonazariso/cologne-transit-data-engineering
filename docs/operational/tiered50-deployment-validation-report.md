@@ -20,6 +20,35 @@ Heumarkt request was issued.
 
 ## Latest correction and gate reconciliation — 2026-10-08
 
+The monthly authorization correction now branches validation by accounting
+model. Exact provider-timezone rows still require a strict IANA timezone,
+provider-calendar month mapping, independently derived UTC boundaries, and an
+active provider-verified contract. Bounded rows require the literal
+`BOUNDED_TIMEZONE_ENVELOPE` marker, an active matching operator-approved
+contract, the exact UTC-12 through UTC+14 endpoint envelope, matching evidence
+identity and delay, and independently derived start/end boundaries; the marker
+is never treated as a provider timezone. `current_month_usage()` now reports
+provider verification separately from bounded operator-assumption provenance,
+and period-start permits are included exactly once for both automatic models.
+
+The offline persistence regressions exercise both exact and bounded contracts,
+SQL-procedure handoff, current usage, reservation/finalization, boundary
+permits, conservative pending accounting, and repeated reads. Actual
+SQL-Server validation, the rollback-only skip-audit execution, administrator
+readiness, Tiered50 resume, and six-bucket live coverage remain unproven until
+the documented administrator identity is available. October bootstrap,
+Legacy7 retirement, the stopped Tiered50 state, historical evidence, and Power
+BI remain unchanged.
+
+The separate no-network live preflight, using only the least-privilege runtime
+login, revalidated the runtime schema, 43 active Tiered50 rows (IDs 8–50),
+current October quota state, no competing writers, and the observed Windows VM;
+it issued zero MDD requests. Privileged full-schema, backup, volume/log
+capacity, immutable cutover-history, rollback-only skip-audit, and signed
+administrator-evidence gates remain `NOT_PROVEN` or `NOT_RUN`. The resume-only
+entry point was checked without `--apply`, so no SQL or LaunchAgent action was
+performed.
+
 ## Safe resume and evidence gates
 
 The already committed Tiered50 activation now has a separate, explicit resume

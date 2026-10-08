@@ -870,7 +870,7 @@ BEGIN
       AND ContractStatus = 'ACTIVE';
 
     IF @contract_id IS NULL
-        THROW 51000, 'no active verified MDD quota reset contract exists', 1;
+        THROW 51000, 'no active authorized MDD quota reset contract exists', 1;
     IF @provider_name IS NULL OR @provider_name <> 'MDD NRW'
         THROW 51000, 'MDD quota reset contract provider identity is invalid', 1;
     IF @reset_model IS NULL
@@ -887,6 +887,9 @@ BEGIN
         THROW 51000, 'exact MDD quota reset contract is not verified', 1;
     IF @reset_model = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
        AND (
+           @reset_timezone <> 'BOUNDED_TIMEZONE_ENVELOPE'
+           OR @ProviderPeriodTimezone <> 'BOUNDED_TIMEZONE_ENVELOPE'
+           OR
            @provider_reset_boundary_verified IS NULL OR @provider_reset_boundary_verified <> 0
            OR @operator_assumption_approved IS NULL OR @operator_assumption_approved <> 1
            OR @sql_server_reset_timezone IS NOT NULL

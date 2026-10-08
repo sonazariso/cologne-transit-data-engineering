@@ -1086,7 +1086,8 @@ def collect(
                    ExplicitSharedConsumerReservedAttempts, AccountingStatus,
                    IncludesAllSharedConsumers, ProviderPeriodStartUtc,
                    ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc,
-                   SourceEvidenceHash, ReconciliationKey
+                   SourceEvidenceHash, ReconciliationKey, AccountingModel,
+                   ProviderPeriodTimezone
             FROM ctl.MddMacSharedQuotaAccounting
             WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME()
               AND ProviderPeriodEndUtc > SYSUTCDATETIME()
@@ -1111,6 +1112,24 @@ def collect(
                 "local_usage_included_through_utc": _row_value(row, "LocalUsageIncludedThroughUtc", 11),
                 "source_evidence_hash": str(_row_value(row, "SourceEvidenceHash", 12) or ""),
                 "reconciliation_key": str(_row_value(row, "ReconciliationKey", 13) or ""),
+                "accounting_model": str(_row_value(row, "AccountingModel", 14) or ""),
+                "provider_period_timezone": str(_row_value(row, "ProviderPeriodTimezone", 15) or ""),
+                "provider_period_metadata_verified": str(
+                    _row_value(row, "AccountingModel", 14) or ""
+                ) != "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED",
+                "provider_period_metadata_source": (
+                    "OPERATOR_APPROVED_BOUNDED_ASSUMPTION"
+                    if str(_row_value(row, "AccountingModel", 14) or "")
+                    == "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED"
+                    else "PROVIDER_VERIFIED_EXACT_CONTRACT"
+                    if str(_row_value(row, "AccountingModel", 14) or "")
+                    == "AUTOMATIC_MONTHLY_ROLLOVER"
+                    else "PROVIDER_VERIFIED_EXACT_PERIOD"
+                ),
+                "bounded_timezone_uncertainty": str(
+                    _row_value(row, "AccountingModel", 14) or ""
+                )
+                == "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED",
             }
             for row in quota_rows
         ]

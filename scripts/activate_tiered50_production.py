@@ -1758,6 +1758,11 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
             baseline_valid, baseline_reason = validate_stored_baseline_row(
                 baseline_mapping,
                 at_utc=effective_at,
+                registered_contract=MssqlPersistence._active_reset_contract_for_baseline(
+                    cursor,
+                    baseline=baseline_mapping,
+                    lock=True,
+                ),
             )
             if not baseline_valid:
                 baseline = None

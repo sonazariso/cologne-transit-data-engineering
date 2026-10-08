@@ -537,9 +537,13 @@ def run_preflight(*, live: bool = False) -> dict[str, Any]:
         blockers.append(
             "Future automatic monthly rollover is implemented but remains fail-closed until an exact provider contract or explicitly approved bounded assumption is durably registered."
         )
-    if not live_result or not live_result.get("quota_usage", {}).get("state_available", False):
+    if not live:
         blockers.append(
-            "The current shared-credential quota authorization is not proven by a complete provider baseline or the approved bounded October bootstrap."
+            "Current shared-credential quota state is outside this offline preflight's scope; consult the sanitized runtime evidence or run the read-only live preflight."
+        )
+    elif not live_result or not live_result.get("quota_usage", {}).get("state_available", False):
+        blockers.append(
+            "The current shared-credential quota authorization was not available from the read-only runtime preflight."
         )
     if not isinstance(((operational_evidence or {}).get("sql") or {}).get("first_tiered50_scheduled_cycle"), dict):
         blockers.append(

@@ -27,6 +27,7 @@ AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL = "AUTOMATIC_MONTHLY_ROLLOVER"
 CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL = "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED"
 AUTOMATIC_ROLLOVER_STATUS = "ACTIVE"
 AUTOMATIC_ROLLOVER_DEFAULT_DELAY_SECONDS = 1800
+BOUNDED_TIMEZONE_ENVELOPE_MARKER = "BOUNDED_TIMEZONE_ENVELOPE"
 
 # Evidence provenance is intentionally separate from the durable SQL row's
 # lifecycle.  In particular, an operator-approved conservative assumption is
@@ -116,7 +117,7 @@ def _timezone_names(value: Any, *, field: str = "supported_reset_timezones") -> 
 
 
 def _bounded_timezone_marker(timezone_names: tuple[str, ...]) -> str:
-    marker = "BOUNDED_TIMEZONE_ENVELOPE"
+    marker = BOUNDED_TIMEZONE_ENVELOPE_MARKER
     if len(marker) > 80:
         raise QuotaRolloverError("bounded timezone marker is too long")
     return marker
@@ -251,9 +252,25 @@ def _contract_values(contract: Mapping[str, Any]) -> dict[str, Any]:
         if not bool(contract.get("ProviderResetBoundaryVerified", contract.get("provider_reset_boundary_verified"))):
             raise QuotaRolloverError("provider reset boundary is not verified")
     else:
-        timezone_names = _timezone_names(
-            contract.get("SupportedResetTimezones", contract.get("supported_reset_timezones"))
+        if timezone_name != BOUNDED_TIMEZONE_ENVELOPE_MARKER:
+            raise QuotaRolloverError("bounded timezone policy must use the authorized timezone-envelope marker")
+        supported_timezones = contract.get(
+            "SupportedResetTimezones",
+            contract.get("supported_reset_timezones"),
         )
+        if supported_timezones is None:
+            supported_timezones = contract.get(
+                "SupportedResetTimezonesJson",
+                contract.get("supported_reset_timezones_json"),
+            )
+            if isinstance(supported_timezones, str):
+                try:
+                    supported_timezones = json.loads(supported_timezones)
+                except json.JSONDecodeError as exc:
+                    raise QuotaRolloverError(
+                        "registered bounded reset contract has invalid timezone-envelope JSON"
+                    ) from exc
+        timezone_names = _timezone_names(supported_timezones)
         if bool(contract.get("ProviderResetBoundaryVerified", contract.get("provider_reset_boundary_verified"))):
             raise QuotaRolloverError("bounded timezone policy must not claim an exact provider boundary")
         if not bool(
@@ -710,6 +727,11 @@ def build_automatic_rollover_period(
         "retry_protection_boundary": 207_500,
         "activation_not_before_utc": _iso(period.activation_not_before_utc),
         "provider_metadata_verified": not values["bounded_timezone_policy"],
+        "provider_metadata_source": (
+            "OPERATOR_APPROVED_BOUNDED_ASSUMPTION"
+            if values["bounded_timezone_policy"]
+            else "PROVIDER_VERIFIED_EXACT_CONTRACT"
+        ),
         "contract_verification_status": (
             RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION
             if values["bounded_timezone_policy"]
@@ -739,6 +761,7 @@ __all__ = [
     "AUTOMATIC_ROLLOVER_DEFAULT_DELAY_SECONDS",
     "AUTOMATIC_ROLLOVER_MODE",
     "AUTOMATIC_ROLLOVER_STATUS",
+    "BOUNDED_TIMEZONE_ENVELOPE_MARKER",
     "RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION",
     "RESET_CONTRACT_STATUS_EXPIRED",
     "RESET_CONTRACT_STATUS_NOT_REGISTERED",

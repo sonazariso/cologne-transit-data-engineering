@@ -60,6 +60,9 @@ from .conservative_bootstrap import (
 )
 from .quota_rollover import (
     AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+    BOUNDED_TIMEZONE_ENVELOPE_MARKER,
+    CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL,
+    GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
     QuotaRolloverError,
     RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION,
     RESET_CONTRACT_STATUS_VERIFIED_PROVIDER,
@@ -1092,7 +1095,7 @@ class MssqlPersistence:
         """Serialize durable permit recovery with automatic period creation."""
 
         cursor.execute(
-            """
+            f"""
             DECLARE @LockResult INT;
             EXEC @LockResult = sys.sp_getapplock
                 @Resource = %s,
@@ -3181,6 +3184,85 @@ class MssqlPersistence:
         return list(cursor.fetchall())
 
     @staticmethod
+    def _active_reset_contract_for_baseline(
+        cursor: Any,
+        *,
+        baseline: Mapping[str, Any],
+        lock: bool = False,
+    ) -> Mapping[str, Any] | None:
+        """Read the one active reset contract that can authorize a bounded row.
+
+        Bounded accounting rows intentionally do not contain a real provider
+        timezone.  The active contract is therefore part of their validation
+        input, rather than an optional reporting detail.  The reconciliation
+        key supplies the contract identity; malformed identities simply return
+        no contract and fail closed in ``validate_stored_baseline_row``.
+        """
+
+        if str(baseline.get("AccountingModel") or "") not in {
+            AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+            CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL,
+        }:
+            return None
+        reconciliation_key = str(baseline.get("ReconciliationKey") or "")
+        prefix = "AUTO-ROLLOVER:"
+        month_key = str(baseline.get("MonthKey") or "")
+        suffix = f":{month_key}"
+        if not reconciliation_key.startswith(prefix) or not reconciliation_key.endswith(suffix):
+            return None
+        if (
+            str(baseline.get("AccountingModel") or "") == CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL
+            and str(baseline.get("ProviderPeriodTimezone") or "") != BOUNDED_TIMEZONE_ENVELOPE_MARKER
+        ):
+            return None
+        contract_key = reconciliation_key[len(prefix) : -len(suffix)] if suffix else reconciliation_key[len(prefix) :]
+        if not contract_key:
+            return None
+        lock_hint = " WITH (UPDLOCK, HOLDLOCK)" if lock else ""
+        cursor.execute(
+            f"""
+            SELECT TOP (2) ContractId, ContractKey, ProviderName, ResetModel,
+                   ResetTimezone, {SQL_RESET_TIMEZONE_FIELD}, EffectiveFromUtc,
+                   ActivationDelaySeconds, ProviderQuotaCeiling,
+                   CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
+                   CalendarMonthResetModelEstablished, OperatorAssumptionApproved,
+                   SupportedResetTimezonesJson, SourceEvidenceHash, EvidenceJson,
+                   ContractStatus, RecordedAtUtc, RevokedAtUtc, RevocationReason
+            FROM ctl.MddMacQuotaResetContract"""
+            + lock_hint
+            + """
+            WHERE ContractStatus = 'ACTIVE'
+              AND ContractKey = %s
+            ORDER BY ContractId DESC
+            """,
+            (contract_key,),
+        )
+        rows = list(cursor.fetchall())
+        if len(rows) != 1:
+            return None
+        return _row_mapping(rows[0], RESET_CONTRACT_COLUMNS)
+
+    def _validate_provider_baseline_row(
+        self,
+        cursor: Any,
+        row: Any,
+        *,
+        at: datetime,
+        lock: bool = False,
+    ) -> tuple[bool, str]:
+        mapped = _row_mapping(row, QUOTA_BASELINE_COLUMNS)
+        registered_contract = self._active_reset_contract_for_baseline(
+            cursor,
+            baseline=mapped,
+            lock=lock,
+        )
+        return validate_stored_baseline_row(
+            mapped,
+            at_utc=at,
+            registered_contract=registered_contract,
+        )
+
+    @staticmethod
     def _conservative_bootstrap_candidates(
         cursor: Any,
         *,
@@ -3358,7 +3440,7 @@ class MssqlPersistence:
                 return {
                     "status": "NOT_CONFIGURED",
                     "registration_status": "NOT_REGISTERED",
-                    "reason": "no verified provider reset contract is registered",
+                    "reason": "no active authorized provider reset contract is registered",
                     "mdd_requests_issued": 0,
                 }
             contract = _row_mapping(row, RESET_CONTRACT_COLUMNS)
@@ -3426,6 +3508,13 @@ class MssqlPersistence:
             "provider_period_end_utc": period["provider_period_end_utc"],
             "activation_not_before_utc": period["activation_not_before_utc"],
             "stale_after_seconds": stale_seconds,
+            "accounting_model": period["accounting_model"],
+            "authorization_mode": period["authorization_mode"],
+            "provider_metadata_verified": period["provider_metadata_verified"],
+            "provider_metadata_source": period["provider_metadata_source"],
+            "contract_verification_status": period["contract_verification_status"],
+            "bounded_timezone_uncertainty": period["bounded_timezone_uncertainty"],
+            "supported_reset_timezones": period["supported_reset_timezones"],
             "mdd_requests_issued": 0,
         }
 
@@ -3448,8 +3537,12 @@ class MssqlPersistence:
         row = cursor.fetchone()
         if row is None:
             return None
-        mapped = _row_mapping(row, QUOTA_BASELINE_COLUMNS)
-        usable, _reason = validate_stored_baseline_row(mapped, at_utc=at)
+        usable, _reason = self._validate_provider_baseline_row(
+            cursor,
+            row,
+            at=at,
+            lock=True,
+        )
         if not usable:
             return None
         return row
@@ -3526,7 +3619,12 @@ class MssqlPersistence:
                 if len(complete_candidates) == 1:
                     candidate = complete_candidates[0]
                     candidate_mapping = _row_mapping(candidate, QUOTA_BASELINE_COLUMNS)
-                    usable, complete_reason = validate_stored_baseline_row(candidate_mapping, at_utc=at)
+                    usable, complete_reason = self._validate_provider_baseline_row(
+                        cursor,
+                        candidate,
+                        at=at,
+                        lock=False,
+                    )
                     if usable:
                         baseline = candidate
                         mapped_baseline = candidate_mapping
@@ -3599,6 +3697,11 @@ class MssqlPersistence:
                         "reconciliation_key": str(mapped_bootstrap["AuthorizationKey"] or ""),
                         "provider_period_timezone": None,
                         "provider_period_metadata_verified": False,
+                        "provider_period_metadata_source": BOOTSTRAP_AUTHORIZATION_MODE,
+                        "contract_verification_status": "NOT_APPLICABLE",
+                        "bounded_timezone_uncertainty": True,
+                        "active_reset_contract_key": None,
+                        "supported_reset_timezones": None,
                         "baseline_component_total": baseline_total,
                         "post_cutoff_local_usage": {
                             "confirmed": local["confirmed"],
@@ -3617,10 +3720,11 @@ class MssqlPersistence:
                     month=month,
                     local_cutoff=local_cutoff,
                     observed_through=at,
-                    include_cutoff=(
-                        str(mapped_baseline["AccountingModel"] or "")
-                        == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL
-                    ),
+                    include_cutoff=str(mapped_baseline["AccountingModel"] or "")
+                    in {
+                        AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+                        CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL,
+                    },
                 )
         except Exception:
             # A schema/permission/connectivity failure is itself unavailable
@@ -3641,6 +3745,19 @@ class MssqlPersistence:
         conservative = baseline_conservative + local["conservative"]
         reserved = baseline_reserved + local["pending"]
         post_cutoff_total = local["confirmed"] + local["conservative"] + local["pending"]
+        accounting_model = str(mapped_baseline["AccountingModel"] or "")
+        bounded_assumption = accounting_model == CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL
+        if bounded_assumption:
+            contract_status = RESET_CONTRACT_STATUS_APPROVED_OPERATOR_ASSUMPTION
+            metadata_source = "OPERATOR_APPROVED_BOUNDED_ASSUMPTION"
+        elif accounting_model == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL:
+            contract_status = str(
+                rollover.get("reset_contract_status") or RESET_CONTRACT_STATUS_VERIFIED_PROVIDER
+            )
+            metadata_source = "PROVIDER_VERIFIED_EXACT_CONTRACT"
+        else:
+            contract_status = None
+            metadata_source = "PROVIDER_VERIFIED_EXACT_PERIOD"
         return {
             "confirmed_provider_attempts": confirmed,
             "reserved_shared_usage": reserved,
@@ -3661,7 +3778,14 @@ class MssqlPersistence:
             "source_evidence_hash": str(mapped_baseline["SourceEvidenceHash"] or ""),
             "reconciliation_key": str(mapped_baseline["ReconciliationKey"] or ""),
             "provider_period_timezone": str(mapped_baseline["ProviderPeriodTimezone"] or ""),
-            "provider_period_metadata_verified": True,
+            "provider_period_metadata_verified": not bounded_assumption,
+            "provider_period_metadata_source": metadata_source,
+            "contract_verification_status": contract_status,
+            "bounded_timezone_uncertainty": bounded_assumption,
+            "active_reset_contract_key": rollover.get("contract_key") if accounting_model.startswith("AUTOMATIC_") else None,
+            "supported_reset_timezones": rollover.get("supported_reset_timezones")
+            if bounded_assumption
+            else None,
             "baseline_component_total": baseline_total,
             "post_cutoff_local_usage": {
                 "confirmed": local["confirmed"],
@@ -4299,6 +4423,14 @@ class MssqlPersistence:
             )
         if not exact and sql_server_timezone is not None:
             raise MssqlSafetyError("bounded reset contract must not carry an exact SQL Server timezone")
+        if not exact and timezone_name != BOUNDED_TIMEZONE_ENVELOPE_MARKER:
+            raise MssqlSafetyError("bounded reset contract must use the authorized timezone-envelope marker")
+        if not exact and tuple(sorted(contract.get("supported_reset_timezones") or ())) != tuple(
+            sorted(GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES)
+        ):
+            raise MssqlSafetyError(
+                "bounded reset contract must use the approved UTC-12 through UTC+14 timezone envelope"
+            )
         supported_timezones_json = (
             json.dumps(list(contract.get("supported_reset_timezones") or []), ensure_ascii=False, sort_keys=True)
             if not exact
@@ -4940,7 +5072,10 @@ class MssqlPersistence:
                     include_cutoff=(
                         bootstrap is None
                         and str(_row_named(baseline, "AccountingModel", index=12) or "")
-                        == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL
+                        in {
+                            AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+                            CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL,
+                        }
                     ),
                 )
                 if bootstrap is not None:

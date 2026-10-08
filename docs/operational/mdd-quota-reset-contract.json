@@ -28,6 +28,35 @@
   "credential_exclusivity_confirmed": true,
   "provider_reset_boundary_verified": false,
   "automatic_rollover_implementation": "READY_BUT_FAIL_CLOSED_UNTIL_ADMIN_CONTRACT",
+  "baseline_validation_contract": {
+    "exact_provider_timezone": {
+      "accounting_model": "AUTOMATIC_MONTHLY_ROLLOVER",
+      "provider_period_timezone": "strict IANA timezone from the active provider contract",
+      "boundary_rule": "independently derive the provider calendar-month UTC start and end, then compare both persisted boundaries",
+      "provider_metadata_verified": true,
+      "active_contract_required": true
+    },
+    "bounded_operator_assumption": {
+      "accounting_model": "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED",
+      "provider_period_timezone": "BOUNDED_TIMEZONE_ENVELOPE",
+      "boundary_rule": "independently derive UTC-12 through UTC+14 envelope boundaries and compare both persisted boundaries",
+      "supported_reset_timezones": [
+        "Etc/GMT+12",
+        "Etc/GMT-14"
+      ],
+      "required_activation_delay_seconds": "must match the active registered contract",
+      "provider_metadata_verified": false,
+      "active_contract_required": true,
+      "approval_status": "UNAPPROVED_AND_UNREGISTERED"
+    },
+    "shared_invariants": [
+      "zero-based automatic period",
+      "period-start measurement and local cutoffs",
+      "stale deadline equal to the approved period end",
+      "active contract, matching evidence hash and reconciliation identity",
+      "no overlapping or malformed provider periods"
+    ]
+  },
   "conservative_calendar_month_policy_evaluation": {
     "status": "BLOCKED",
     "provider_monthly_reset_commitment_verified": false,

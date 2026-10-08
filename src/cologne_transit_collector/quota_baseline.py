@@ -433,33 +433,211 @@ def reconcile_provider_evidence(
     }
 
 
-def validate_stored_baseline_row(row: Mapping[str, Any] | None, *, at_utc: datetime) -> tuple[bool, str]:
-    """Return whether a current SQL baseline is safe for authorization."""
+def _contract_value(contract: Mapping[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in contract:
+            return contract[name]
+    return None
+
+
+def _flag_is(value: Any, expected: bool) -> bool:
+    if isinstance(value, bool):
+        return value is expected
+    return isinstance(value, int) and value == (1 if expected else 0)
+
+
+def _contract_timezones(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise QuotaBaselineError("registered reset contract timezone envelope is malformed") from exc
+    if not isinstance(value, (list, tuple)) or not value:
+        raise QuotaBaselineError("registered reset contract timezone envelope is missing")
+    values = tuple(str(item).strip() for item in value)
+    if any(not item for item in values) or len(set(values)) != len(values):
+        raise QuotaBaselineError("registered reset contract timezone envelope is malformed")
+    return tuple(sorted(values))
+
+
+def _validate_registered_exact_contract(
+    row: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    *,
+    month_key: str,
+    provider_period_timezone: str,
+    period_start: datetime,
+) -> None:
+    """Validate optional exact-contract lineage without weakening baseline checks."""
+
+    if str(_contract_value(contract, "ContractStatus", "contract_status") or "") != "ACTIVE":
+        raise QuotaBaselineError("registered exact reset contract is not active")
+    if str(_contract_value(contract, "ProviderName", "provider_name") or "") != "MDD NRW":
+        raise QuotaBaselineError("registered exact reset contract provider identity is invalid")
+    if str(_contract_value(contract, "ResetModel", "reset_model") or "") != "CALENDAR_MONTH_PROVIDER_TIMEZONE":
+        raise QuotaBaselineError("registered exact reset contract model is not exact")
+    if str(_contract_value(contract, "ResetTimezone", "reset_timezone") or "") != provider_period_timezone:
+        raise QuotaBaselineError("baseline timezone does not match the registered exact reset contract")
+    if not _flag_is(_contract_value(contract, "CredentialExclusivityConfirmed", "credential_exclusivity_confirmed"), True):
+        raise QuotaBaselineError("registered exact reset contract lacks exclusive-credential confirmation")
+    if not _flag_is(
+        _contract_value(contract, "CalendarMonthResetModelEstablished", "calendar_month_reset_model_established"),
+        True,
+    ):
+        raise QuotaBaselineError("registered exact reset contract has no established calendar-month model")
+    if not _flag_is(_contract_value(contract, "ProviderResetBoundaryVerified", "provider_reset_boundary_verified"), True):
+        raise QuotaBaselineError("registered exact reset contract is not provider-verified")
+    if not _flag_is(_contract_value(contract, "OperatorAssumptionApproved", "operator_assumption_approved"), False):
+        raise QuotaBaselineError("exact reset contract is marked as an operator assumption")
+    if int(_contract_value(contract, "ProviderQuotaCeiling", "provider_quota_ceiling") or 0) != ABSOLUTE_PROVIDER_CEILING:
+        raise QuotaBaselineError("registered exact reset contract does not preserve the approved quota ceiling")
+    contract_hash = str(_contract_value(contract, "SourceEvidenceHash", "source_evidence_hash") or "")
+    if not _SHA256_PATTERN.fullmatch(contract_hash):
+        raise QuotaBaselineError("registered exact reset contract evidence hash is malformed")
+    if contract_hash != str(row.get("SourceEvidenceHash") or ""):
+        raise QuotaBaselineError("baseline evidence hash does not match the registered exact reset contract")
+    contract_key = _required_text(
+        _contract_value(contract, "ContractKey", "contract_key"),
+        field="registered exact reset contract key",
+        maximum=240,
+    )
+    expected_key = f"AUTO-ROLLOVER:{contract_key}:{month_key}"
+    if str(row.get("ReconciliationKey") or "") != expected_key:
+        raise QuotaBaselineError("baseline reconciliation identity does not match the registered exact reset contract")
+    effective_from = _utc(
+        _contract_value(contract, "EffectiveFromUtc", "effective_from_utc"),
+        field="registered exact reset contract effective_from_utc",
+    )
+    if period_start < effective_from:
+        raise QuotaBaselineError("registered exact reset contract is not effective for the baseline period")
+
+
+def _validate_registered_bounded_contract(
+    row: Mapping[str, Any],
+    contract: Mapping[str, Any] | None,
+    *,
+    at: datetime,
+    month_key: str,
+    period_start: datetime,
+    period_end: datetime,
+) -> None:
+    """Validate the active operator-approved global-envelope contract."""
+
+    if not isinstance(contract, Mapping):
+        raise QuotaBaselineError("registered bounded reset contract is required")
+    from .quota_rollover import (
+        BOUNDED_TIMEZONE_ENVELOPE_MARKER,
+        GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
+        bounded_provider_period_for_month,
+    )
+
+    if str(_contract_value(contract, "ContractStatus", "contract_status") or "") != "ACTIVE":
+        raise QuotaBaselineError("registered bounded reset contract is not active")
+    if str(_contract_value(contract, "ProviderName", "provider_name") or "") != "MDD NRW":
+        raise QuotaBaselineError("registered bounded reset contract provider identity is invalid")
+    if str(_contract_value(contract, "ResetModel", "reset_model") or "") != "CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY":
+        raise QuotaBaselineError("registered bounded reset contract model is not approved")
+    if str(_contract_value(contract, "ResetTimezone", "reset_timezone") or "") != BOUNDED_TIMEZONE_ENVELOPE_MARKER:
+        raise QuotaBaselineError("bounded baseline does not use the authorized timezone-envelope marker")
+    if not _flag_is(_contract_value(contract, "ProviderResetBoundaryVerified", "provider_reset_boundary_verified"), False):
+        raise QuotaBaselineError("bounded reset contract must not claim provider boundary verification")
+    if not _flag_is(_contract_value(contract, "CalendarMonthResetModelEstablished", "calendar_month_reset_model_established"), True):
+        raise QuotaBaselineError("bounded reset contract has no established calendar-month model")
+    if not _flag_is(_contract_value(contract, "OperatorAssumptionApproved", "operator_assumption_approved"), True):
+        raise QuotaBaselineError("bounded reset contract lacks explicit operator approval")
+    if not _flag_is(_contract_value(contract, "CredentialExclusivityConfirmed", "credential_exclusivity_confirmed"), True):
+        raise QuotaBaselineError("bounded reset contract lacks exclusive-credential confirmation")
+    if int(_contract_value(contract, "ProviderQuotaCeiling", "provider_quota_ceiling") or 0) != ABSOLUTE_PROVIDER_CEILING:
+        raise QuotaBaselineError("registered bounded reset contract does not preserve the approved quota ceiling")
+
+    supported = _contract_value(
+        contract,
+        "SupportedResetTimezones",
+        "supported_reset_timezones",
+        "SupportedResetTimezonesJson",
+        "supported_reset_timezones_json",
+    )
+    if _contract_timezones(supported) != tuple(sorted(GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES)):
+        raise QuotaBaselineError("bounded reset contract timezone envelope is not the authorized UTC-12 through UTC+14 set")
+    if _contract_value(contract, "Sql" "ServerResetTimezone", "sql_server_reset_timezone") not in (None, ""):
+        raise QuotaBaselineError("bounded reset contract must not carry an exact provider-server timezone")
+
+    contract_hash = str(_contract_value(contract, "SourceEvidenceHash", "source_evidence_hash") or "")
+    if not _SHA256_PATTERN.fullmatch(contract_hash):
+        raise QuotaBaselineError("registered bounded reset contract evidence hash is malformed")
+    if contract_hash != str(row.get("SourceEvidenceHash") or ""):
+        raise QuotaBaselineError("baseline evidence hash does not match the registered bounded reset contract")
+    contract_key = _required_text(
+        _contract_value(contract, "ContractKey", "contract_key"),
+        field="registered bounded reset contract key",
+        maximum=240,
+    )
+    expected_key = f"AUTO-ROLLOVER:{contract_key}:{month_key}"
+    if str(row.get("ReconciliationKey") or "") != expected_key:
+        raise QuotaBaselineError("baseline reconciliation identity does not match the registered bounded reset contract")
+    effective_from = _utc(
+        _contract_value(contract, "EffectiveFromUtc", "effective_from_utc"),
+        field="registered bounded reset contract effective_from_utc",
+    )
+    if period_start < effective_from:
+        raise QuotaBaselineError("registered bounded reset contract is not effective for the baseline period")
+    expiry = _contract_value(contract, "ExpiresAtUtc", "expires_at_utc", "ExpiredAtUtc", "expired_at_utc")
+    if expiry is not None and _utc(expiry, field="registered bounded reset contract expiry") <= at:
+        raise QuotaBaselineError("registered bounded reset contract is expired")
+    try:
+        delay = int(_contract_value(contract, "ActivationDelaySeconds", "activation_delay_seconds") or 0)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise QuotaBaselineError("registered bounded reset contract activation delay is malformed") from exc
+    if delay < 0 or delay > 86_400:
+        raise QuotaBaselineError("registered bounded reset contract activation delay is outside the approved bound")
+
+    expected = bounded_provider_period_for_month(
+        month_key,
+        timezone_names=GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
+        activation_delay_seconds=delay,
+    )
+    if period_start != expected.start_utc or period_end != expected.end_utc:
+        raise QuotaBaselineError("bounded baseline UTC boundaries do not match the authorized envelope")
+    if at < expected.activation_not_before_utc:
+        raise QuotaBaselineError("bounded baseline is inside the required activation delay")
+
+
+def validate_stored_baseline_row(
+    row: Mapping[str, Any] | None,
+    *,
+    at_utc: datetime,
+    registered_contract: Mapping[str, Any] | None = None,
+    reset_contract: Mapping[str, Any] | None = None,
+    contract: Mapping[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Return whether a current SQL baseline is safe for authorization.
+
+    Exact provider-period rows retain strict IANA and calendar-boundary
+    validation.  Bounded automatic rows carry a synthetic marker rather than a
+    provider timezone, so they are accepted only with the active, explicitly
+    approved global-envelope reset contract that produced their evidence.
+    """
 
     if not isinstance(row, Mapping):
         return False, "baseline row is missing"
+    supplied_contracts = [item for item in (registered_contract, reset_contract, contract) if item is not None]
+    if supplied_contracts and any(item != supplied_contracts[0] for item in supplied_contracts[1:]):
+        return False, "conflicting registered reset contracts were supplied"
+    registered = supplied_contracts[0] if supplied_contracts else None
     try:
         at = _utc(at_utc, field="at_utc")
         month_key = str(row.get("MonthKey") or "").strip()
         if not _MONTH_PATTERN.fullmatch(month_key):
             return False, "baseline month key is missing or malformed"
-        if int(row.get("ProviderQuotaCeiling", 0) or 0) != ABSOLUTE_PROVIDER_CEILING:
+        model = str(row.get("AccountingModel") or "")
+        if model not in ACCOUNTING_MODELS:
+            return False, "accounting model is missing or unknown"
+        if _nonnegative(row.get("ProviderQuotaCeiling", 0), field="ProviderQuotaCeiling") != ABSOLUTE_PROVIDER_CEILING:
             return False, "provider ceiling is not the approved value"
-        if int(row.get("NormalOperationalMaximum", 0) or 0) != NORMAL_OPERATIONAL_MAXIMUM:
+        if _nonnegative(row.get("NormalOperationalMaximum", 0), field="NormalOperationalMaximum") != NORMAL_OPERATIONAL_MAXIMUM:
             return False, "normal operational maximum is not the approved value"
-        if int(row.get("RetryProtectionBoundary", 0) or 0) != AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
+        if _nonnegative(row.get("RetryProtectionBoundary", 0), field="RetryProtectionBoundary") != AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
             return False, "retry protection boundary is not the approved value"
-        for name in (
-            "ConfirmedProviderAttempts",
-            "ConservativeUnknownAttempts",
-            "ExplicitSharedConsumerReservedAttempts",
-        ):
-            if _nonnegative(row.get(name, 0), field=name) < 0:
-                return False, f"{name} is negative"
-        if str(row.get("AccountingStatus") or "") != "COMPLETE":
-            return False, "accounting status is not COMPLETE"
-        if not bool(row.get("IncludesAllSharedConsumers")):
-            return False, "shared consumers are not all accounted for"
         accounted_total = sum(
             _nonnegative(row.get(name, 0), field=name)
             for name in (
@@ -470,6 +648,10 @@ def validate_stored_baseline_row(row: Mapping[str, Any] | None, *, at_utc: datet
         )
         if accounted_total > ABSOLUTE_PROVIDER_CEILING:
             return False, "baseline conservative usage exceeds the absolute provider ceiling"
+        if str(row.get("AccountingStatus") or "") != "COMPLETE":
+            return False, "accounting status is not COMPLETE"
+        if not _flag_is(row.get("IncludesAllSharedConsumers"), True):
+            return False, "shared consumers are not all accounted for"
         baseline_as_of = _utc(row.get("BaselineAsOfUtc"), field="BaselineAsOfUtc")
         local_cutoff = _utc(row.get("LocalUsageIncludedThroughUtc"), field="LocalUsageIncludedThroughUtc")
         measurement_cutoff = _utc(
@@ -482,20 +664,61 @@ def validate_stored_baseline_row(row: Mapping[str, Any] | None, *, at_utc: datet
             field="ProviderPeriodTimezone",
             maximum=80,
         )
-        try:
-            period_zone = ZoneInfo(provider_period_timezone)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise QuotaBaselineError("ProviderPeriodTimezone is not a recognized IANA timezone") from exc
         period_start = _utc(row.get("ProviderPeriodStartUtc"), field="ProviderPeriodStartUtc")
         period_end = _utc(row.get("ProviderPeriodEndUtc"), field="ProviderPeriodEndUtc")
         if period_start >= period_end:
             return False, "provider billing period is invalid"
-        if period_start.astimezone(period_zone).strftime("%Y-%m") != month_key:
-            return False, "provider billing period does not map to the baseline month"
+
+        from .quota_rollover import (
+            BOUNDED_TIMEZONE_ENVELOPE_MARKER,
+            AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+            provider_period_for_month,
+        )
+
+        bounded = model == "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED"
+        if bounded:
+            if provider_period_timezone != BOUNDED_TIMEZONE_ENVELOPE_MARKER:
+                return False, "bounded accounting requires the authorized timezone-envelope marker"
+            _validate_registered_bounded_contract(
+                row,
+                registered,
+                at=at,
+                month_key=month_key,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            expected_start = period_start
+            expected_end = period_end
+        else:
+            try:
+                period_zone = ZoneInfo(provider_period_timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise QuotaBaselineError("ProviderPeriodTimezone is not a recognized IANA timezone") from exc
+            expected_period = provider_period_for_month(
+                month_key,
+                timezone_name=provider_period_timezone,
+                activation_delay_seconds=0,
+            )
+            expected_start = expected_period.start_utc
+            expected_end = expected_period.end_utc
+            if model == AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL and registered is None:
+                return False, "registered exact reset contract is required for automatic rollover"
+            if registered is not None:
+                _validate_registered_exact_contract(
+                    row,
+                    registered,
+                    month_key=month_key,
+                    provider_period_timezone=provider_period_timezone,
+                    period_start=period_start,
+                )
+            if period_start.astimezone(period_zone).strftime("%Y-%m") != month_key:
+                return False, "provider billing period does not map to the baseline month"
+            if at.astimezone(period_zone).strftime("%Y-%m") != month_key:
+                return False, "baseline month key does not match the provider timezone at authorization time"
+        if period_start != expected_start or period_end != expected_end:
+            return False, "provider UTC period boundaries do not match the declared calendar month"
         if not period_start <= at < period_end:
             return False, "baseline does not cover the current provider billing period"
-        if at.astimezone(period_zone).strftime("%Y-%m") != month_key:
-            return False, "baseline month key does not match the provider timezone at authorization time"
         if not period_start <= measurement_cutoff < period_end:
             return False, "provider measurement cutoff is outside the billing period"
         if not period_start <= baseline_as_of < period_end:
@@ -512,21 +735,26 @@ def validate_stored_baseline_row(row: Mapping[str, Any] | None, *, at_utc: datet
             return False, "local usage cutoff does not cover provider measurement cutoff"
         if stale_after <= at:
             return False, "baseline is stale"
-        model = str(row.get("AccountingModel") or "")
-        if model not in ACCOUNTING_MODELS:
-            return False, "accounting model is missing or unknown"
+        if model in {AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL, "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED"}:
+            if accounted_total != 0:
+                return False, "automatic rollover baseline must be zero-based"
+            if local_cutoff != period_start or measurement_cutoff != period_start:
+                return False, "automatic rollover cutoffs must equal the approved period start"
+            if stale_after != period_end:
+                return False, "automatic rollover staleness deadline must equal the approved period end"
         source_hash = str(row.get("SourceEvidenceHash") or "")
         if not _SHA256_PATTERN.fullmatch(source_hash):
             return False, "source evidence hash is missing or malformed"
-        if not str(row.get("ReconciliationKey") or "").strip():
+        reconciliation_key = str(row.get("ReconciliationKey") or "").strip()
+        if not reconciliation_key:
             return False, "reconciliation key is missing"
         if any(
-            marker in str(row.get("ReconciliationKey") or "").casefold()
-            for marker in ("password", "secret", "token", "apikey")
+            marker in reconciliation_key.casefold()
+            for marker in ("password", "secret", "token", "apikey", "credential")
         ):
             return False, "reconciliation key contains a prohibited credential marker"
         _required_text(row.get("SourceDescription"), field="SourceDescription", maximum=_MAX_SOURCE_DESCRIPTION)
-    except QuotaBaselineError as exc:
+    except (QuotaBaselineError, TypeError, ValueError, OverflowError) as exc:
         return False, str(exc)
     return True, "complete current provider-wide baseline"
 
