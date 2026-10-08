@@ -17,6 +17,7 @@ import subprocess
 import sys
 import zipfile
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,11 @@ from cologne_transit_collector.schedule import (  # noqa: E402
     validate_launchd_wall_clock_schedule,
 )
 from cologne_transit_collector.trias import parse_trias_response  # noqa: E402
+from cologne_transit_collector.quota_rollover import (  # noqa: E402
+    GLOBAL_UTC_OFFSET_ENVELOPE_LABEL,
+    GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
+    global_utc_offset_envelope_period_for_instant,
+)
 from package_source_zip import is_forbidden_source_member, source_members  # noqa: E402
 from validate_tiered50_migration import validate_static  # noqa: E402
 
@@ -182,12 +188,37 @@ def validate_quota_rollover_contract() -> dict[str, Any]:
         raise ValueError("approved bounded rollover requires an explicitly established calendar-month model")
     if not document.get("automatic_rollover_implementation"):
         raise ValueError("automatic rollover implementation status is missing")
+    policy = document.get("conservative_calendar_month_policy_evaluation")
+    if not isinstance(policy, dict) or policy.get("status") != "BLOCKED":
+        raise ValueError("conservative calendar-month policy must remain explicitly blocked")
+    candidate = policy.get("operator_approval_candidate")
+    if not isinstance(candidate, dict):
+        raise ValueError("one concrete operator-approval rollover policy is missing")
+    if candidate.get("supported_utc_offset_envelope") != GLOBAL_UTC_OFFSET_ENVELOPE_LABEL:
+        raise ValueError("rollover policy does not cover the full UTC-12..UTC+14 envelope")
+    if candidate.get("supported_reset_timezones") != list(GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES):
+        raise ValueError("rollover policy endpoint timezone evidence is incomplete")
+    if int(candidate.get("post_reset_safety_delay_seconds", -1)) != 1800:
+        raise ValueError("rollover policy safety delay is not the approved 30 minutes")
+    november = global_utc_offset_envelope_period_for_instant(
+        datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc)
+    )
+    expected_example = candidate.get("november_2026_example")
+    if not isinstance(expected_example, dict):
+        raise ValueError("rollover policy is missing its reusable November boundary example")
+    if expected_example.get("authorization_not_before_utc") != november.activation_not_before_utc.isoformat().replace(
+        "+00:00", "Z"
+    ) or expected_example.get("earliest_next_period_risk_boundary_utc") != november.end_utc.isoformat().replace(
+        "+00:00", "Z"
+    ):
+        raise ValueError("rollover policy boundary example does not match the executable envelope calculation")
     return {
         "status": "PASS",
         "contract_status": document["reset_contract_status"],
         "reset_model": document.get("reset_model"),
         "reset_timezone": document.get("reset_timezone"),
         "automatic_rollover_implementation": document["automatic_rollover_implementation"],
+        "operator_approval_candidate": candidate,
         "future_authorization_fail_closed_without_contract": True,
         "unresolved_dependency": document.get("unresolved_dependency"),
     }

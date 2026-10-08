@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import activate_tiered50_production as activation  # noqa: E402
+import resume_tiered50_production as resume_cli  # noqa: E402
 from cologne_transit_collector.admin_evidence import (  # noqa: E402
     AdminEvidenceError,
     EVIDENCE_ARTIFACT_VERSION,
@@ -145,12 +146,20 @@ class Tiered50ResumeTests(unittest.TestCase):
         class Cursor:
             def __init__(self) -> None:
                 self.rows: object = []
+                self.one: object = None
                 self.statements: list[str] = []
 
             def execute(self, statement: str, params=()) -> None:
                 del params
                 self.statements.append(statement)
-                if "MddMacTiered50ProductionTarget" in statement:
+                if "AuthoritativeUtc" in statement:
+                    self.one = {"AuthoritativeUtc": AT}
+                    self.rows = []
+                elif "APPLOCK_MODE" in statement:
+                    self.one = {"ResumeLockMode": "Exclusive"}
+                    self.rows = []
+                elif "MddMacTiered50ProductionTarget" in statement:
+                    self.one = None
                     self.rows = targets
                 elif "MddMacSamplingEra" in statement:
                     self.rows = era
@@ -163,13 +172,16 @@ class Tiered50ResumeTests(unittest.TestCase):
                 elif "MddMacProductionResumeEvent" in statement:
                     self.rows = []
                 else:
+                    self.one = None
                     self.rows = []
 
             def fetchall(self):
                 return list(self.rows)  # type: ignore[arg-type]
 
             def fetchone(self):
-                return None
+                result = self.one
+                self.one = None
+                return result
 
         class Connection:
             def __init__(self) -> None:
@@ -292,6 +304,26 @@ class Tiered50ResumeTests(unittest.TestCase):
                 2,
             )
         resume.assert_not_called()
+
+    def test_resume_cli_does_not_treat_stopped_idempotent_event_as_success(self) -> None:
+        stopped = {
+            "status": "IDEMPOTENT_ALREADY_RECORDED",
+            "result_code": activation.RESUME_STOPPED_EXISTING_EVENT_STATUS,
+            "service_state": "STOPPED",
+            "operational_success": False,
+        }
+        self.assertEqual(resume_cli._resume_exit_code(stopped), 2)
+        self.assertEqual(activation._resume_exit_code(stopped), 2)
+
+    def test_loaded_idempotent_event_is_loaded_but_not_validated(self) -> None:
+        loaded = {
+            "status": "IDEMPOTENT_ALREADY_ACTIVE",
+            "result_code": activation.RESUME_LOADED_EXISTING_EVENT_STATUS,
+            "service_state": "LOADED_NOT_VALIDATED",
+            "production_validation": "NOT_PROVEN",
+        }
+        self.assertEqual(resume_cli._resume_exit_code(loaded), 0)
+        self.assertEqual(activation._resume_exit_code(loaded), 0)
 
 
 class AdminEvidenceEnvelopeTests(unittest.TestCase):

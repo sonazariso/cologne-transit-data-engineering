@@ -45,6 +45,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 from cologne_transit_collector.quota_baseline import validate_stored_baseline_row  # noqa: E402
 from cologne_transit_collector.conservative_bootstrap import (  # noqa: E402
     BOOTSTRAP_AUTHORIZATION_MODE,
+    BOOTSTRAP_LATEST_STOP_UTC,
     validate_stored_bootstrap_row,
 )
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
@@ -77,6 +78,8 @@ EXPECTED_TIERED50_TARGET_IDS = frozenset(range(8, 51))
 DEFAULT_RESUME_KEY = "TIERED50_PANEL_V1:RESUME:CURRENT_SAMPLING_ERA"
 RESUME_APP_LOCK_RESOURCE = "CologneTransitIntelligence:TIERED50:RESUME"
 ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+RESUME_STOPPED_EXISTING_EVENT_STATUS = "IDEMPOTENT_EVENT_RECORDED_SERVICE_STOPPED"
+RESUME_LOADED_EXISTING_EVENT_STATUS = "IDEMPOTENT_ALREADY_LOADED_NOT_VALIDATED"
 
 
 def parse_utc(value: str) -> datetime:
@@ -105,6 +108,27 @@ def _utc_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _authoritative_sql_utc(connection: Any) -> datetime:
+    """Read the authoritative SQL UTC clock for a lifecycle decision.
+
+    Resume authorization must not use the macOS wall clock.  The connection is
+    the already locked administrator session, so the clock read is also bound
+    to the SQL instance that owns the transition lock.
+    """
+
+    cursor = connection.cursor()
+    try:
+        cursor.execute("SELECT SYSUTCDATETIME() AS AuthoritativeUtc")
+        row = cursor.fetchone()
+    except BaseException as exc:
+        raise RuntimeError("authoritative SQL UTC time is unavailable; resume denied") from exc
+    value = _row_value(row, "AuthoritativeUtc", 0)
+    parsed = _utc_datetime(value)
+    if parsed is None:
+        raise RuntimeError("authoritative SQL UTC time is unavailable; resume denied")
+    return parsed
 
 
 def _installed_runtime_connection() -> tuple[MssqlConnectionSettings, str]:
@@ -753,6 +777,141 @@ def _installed_tiered50_resume_readiness(*, runtime_config_path: str) -> dict[st
     }
 
 
+def _read_current_competing_writers(connection: Any) -> list[dict[str, Any]]:
+    """Read the writer fence in a short transaction under the session lock."""
+
+    cursor = connection.cursor()
+    try:
+        cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+        cursor.execute(
+            """
+            SELECT CollectionContext, COUNT_BIG(*) AS RunningCount
+            FROM ctl.MddMacCollectorRun WITH (UPDLOCK, HOLDLOCK)
+            WHERE Status IN ('RUNNING', 'CLAIMED')
+              AND CollectionContext IN (%s, %s)
+            GROUP BY CollectionContext
+            """,
+            ("MAC_LEGACY7_PRODUCTION", MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT),
+        )
+        rows = list(cursor.fetchall())
+        cursor.execute("COMMIT TRANSACTION;")
+        connection.commit()
+    except BaseException:
+        try:
+            connection.rollback()
+        except BaseException:
+            pass
+        raise
+    return validate_no_competing_production_writers(rows)
+
+
+def _refresh_resume_readiness(
+    *,
+    connection: Any,
+    runtime_config_path: str,
+    expected_runtime_sql_identity: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Repeat all time-sensitive gates immediately before LaunchAgent enablement."""
+
+    _assert_resume_operation_lock(connection)
+    first_authoritative_utc = _authoritative_sql_utc(connection)
+    refreshed_runtime = _validate_limited_runtime(now=first_authoritative_utc)
+    refreshed_quota = dict(refreshed_runtime.get("quota") or {})
+    _validate_resume_quota_authorization(
+        refreshed_quota,
+        authoritative_utc=first_authoritative_utc,
+    )
+    refreshed_identity = refreshed_runtime.get("sql_instance_identity")
+    if (
+        isinstance(expected_runtime_sql_identity, Mapping)
+        and expected_runtime_sql_identity.get("server_name")
+        and isinstance(refreshed_identity, Mapping)
+        and not sql_instance_identities_match(refreshed_identity, expected_runtime_sql_identity)
+    ):
+        raise RuntimeError("installed runtime SQL instance identity changed during resume preflight")
+
+    # Validate the signed artifact once at the beginning of the refresh and
+    # again using the SQL time immediately before the transition.  This catches
+    # evidence expiry while a slow SQL/launchd preparation is in progress.
+    refreshed_evidence = _validate_operational_evidence(
+        now=first_authoritative_utc,
+        require_historical_heartbeat=False,
+        expected_runtime_sql_identity=refreshed_identity
+        if isinstance(refreshed_identity, Mapping)
+        else expected_runtime_sql_identity,
+    )
+    refreshed_writers = _read_current_competing_writers(connection)
+    _assert_resume_operation_lock(connection)
+
+    transition_authoritative_utc = _authoritative_sql_utc(connection)
+    transition_runtime = _validate_limited_runtime(now=transition_authoritative_utc)
+    transition_quota = dict(transition_runtime.get("quota") or {})
+    transition_identity = transition_runtime.get("sql_instance_identity")
+    if (
+        isinstance(expected_runtime_sql_identity, Mapping)
+        and expected_runtime_sql_identity.get("server_name")
+        and isinstance(transition_identity, Mapping)
+        and not sql_instance_identities_match(transition_identity, expected_runtime_sql_identity)
+    ):
+        raise RuntimeError("installed runtime SQL instance identity changed during resume transition")
+    _validate_resume_quota_authorization(
+        transition_quota,
+        authoritative_utc=transition_authoritative_utc,
+    )
+    refreshed_runtime = transition_runtime
+    refreshed_quota = transition_quota
+    refreshed_identity = transition_identity or refreshed_identity
+    _validate_resume_quota_authorization(
+        refreshed_quota,
+        authoritative_utc=transition_authoritative_utc,
+    )
+    refreshed_evidence = _validate_operational_evidence(
+        now=transition_authoritative_utc,
+        require_historical_heartbeat=False,
+        expected_runtime_sql_identity=refreshed_identity
+        if isinstance(refreshed_identity, Mapping)
+        else expected_runtime_sql_identity,
+    )
+    refreshed_writers = _read_current_competing_writers(connection)
+    _assert_resume_operation_lock(connection)
+
+    # This is the last launchd observation before the SQL-clock boundary below.
+    # If another actor loaded the service during preflight, do not unload it or
+    # claim that this invocation performed the transition.
+    refreshed_launch_agent = _installed_tiered50_resume_readiness(
+        runtime_config_path=runtime_config_path
+    )
+    if refreshed_launch_agent.get("loaded_before_resume"):
+        raise RuntimeError("Tiered50 LaunchAgent became loaded during resume preflight")
+
+    actual_transition_utc = _authoritative_sql_utc(connection)
+    _validate_resume_quota_authorization(
+        refreshed_quota,
+        authoritative_utc=actual_transition_utc,
+    )
+    refreshed_evidence = _validate_operational_evidence(
+        now=actual_transition_utc,
+        require_historical_heartbeat=False,
+        expected_runtime_sql_identity=refreshed_identity
+        if isinstance(refreshed_identity, Mapping)
+        else expected_runtime_sql_identity,
+    )
+    _assert_resume_operation_lock(connection)
+    return {
+        "authoritative_sql_utc": actual_transition_utc,
+        "limited_runtime": refreshed_runtime,
+        "quota": refreshed_quota,
+        "operational_evidence": refreshed_evidence,
+        "competing_writers": refreshed_writers,
+        "launch_agent": refreshed_launch_agent,
+        "resume_lock": {
+            "resource": RESUME_APP_LOCK_RESOURCE,
+            "lock_owner": "SESSION",
+            "mode": "Exclusive",
+        },
+    }
+
+
 def _launch_agent_loaded() -> bool:
     result = subprocess.run(
         ["/bin/launchctl", "print", f"gui/{os.getuid()}/{TIERED50_LABEL}"],
@@ -785,6 +944,53 @@ def _strict_quota_integer(quota: Mapping[str, Any], field: str) -> int:
     if parsed < 0:
         raise RuntimeError(f"current SQL quota ledger has negative {field}")
     return parsed
+
+
+def _validate_resume_quota_authorization(
+    quota: Mapping[str, Any],
+    *,
+    authoritative_utc: datetime,
+) -> dict[str, Any]:
+    """Validate the current SQL quota state without truthiness fallbacks."""
+
+    now = _utc_datetime(authoritative_utc)
+    if now is None:
+        raise RuntimeError("authoritative SQL UTC time is unavailable; resume denied")
+    bootstrap_authorization = str(quota.get("authorization_mode") or "") == BOOTSTRAP_AUTHORIZATION_MODE
+    october_bootstrap_row = str(quota.get("month_key") or "") == "2026-10" and (
+        quota.get("provider_period_metadata_verified") is not True
+    )
+    if now >= BOOTSTRAP_LATEST_STOP_UTC and (bootstrap_authorization or october_bootstrap_row):
+        raise RuntimeError("the approved October bootstrap hard stop has been reached")
+    if quota.get("state_available") is not True:
+        raise RuntimeError("current SQL quota ledger is not available for resume")
+    reserved = _strict_quota_integer(quota, "reserved_shared_usage")
+    if reserved != 0:
+        raise RuntimeError("pending quota permits must be zero before resume")
+    accounted = _strict_quota_integer(quota, "known_total")
+    if accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
+        raise RuntimeError("current SQL quota ledger does not leave approved retry headroom")
+
+    # ``current_month_usage`` validates the bootstrap or provider period before
+    # returning, but these checks protect the transition if the SQL row becomes
+    # stale while the administrative preflight is still running.
+    stale_after = _utc_datetime(quota.get("stale_after_utc"))
+    if stale_after is not None and now >= stale_after:
+        raise RuntimeError("current SQL quota authorization expired before resume transition")
+    period_start = _utc_datetime(quota.get("provider_period_start_utc"))
+    period_end = _utc_datetime(quota.get("provider_period_end_utc"))
+    if (period_start is None) != (period_end is None):
+        raise RuntimeError("current SQL provider period bounds are incomplete")
+    if period_start is not None and period_end is not None and not period_start <= now < period_end:
+        raise RuntimeError("current SQL provider period no longer covers the resume transition")
+    return {
+        "state_available": True,
+        "reserved_shared_usage": reserved,
+        "known_total": accounted,
+        "stale_after_utc": stale_after,
+        "provider_period_start_utc": period_start,
+        "provider_period_end_utc": period_end,
+    }
 
 
 def _launchctl_state_after_rollback() -> dict[str, Any]:
@@ -1007,6 +1213,26 @@ def _release_resume_operation_lock(connection: Any) -> None:
     connection.commit()
 
 
+def _assert_resume_operation_lock(connection: Any) -> dict[str, str]:
+    """Confirm that the same SQL session still owns the exclusive lock."""
+
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT APPLOCK_MODE(N'public', %s, N'Session') AS ResumeLockMode
+            """,
+            (RESUME_APP_LOCK_RESOURCE,),
+        )
+        row = cursor.fetchone()
+    except BaseException as exc:
+        raise RuntimeError("TIERED50_RESUME_COORDINATION_UNAVAILABLE") from exc
+    mode = str(_row_value(row, "ResumeLockMode", 0) or "").strip().casefold()
+    if mode != "exclusive":
+        raise RuntimeError("TIERED50_RESUME_LOCK_NOT_HELD")
+    return {"resource": RESUME_APP_LOCK_RESOURCE, "lock_owner": "SESSION", "mode": "Exclusive"}
+
+
 def _record_resume_event(
     *,
     settings: MssqlConnectionSettings,
@@ -1097,7 +1323,6 @@ def _record_resume_event(
 def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, Any]:
     """Safely resume the existing Tiered50 installation without recutting over."""
 
-    now = datetime.now(timezone.utc)
     key = str(resume_key or DEFAULT_RESUME_KEY).strip()
     if not key or len(key) > 240 or any(marker in key.casefold() for marker in ("password", "secret", "token")):
         raise RuntimeError("resume key is empty, too long, or contains a prohibited marker")
@@ -1108,16 +1333,10 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
     try:
         _acquire_resume_operation_lock(connection)
         lock_acquired = True
+        now = _authoritative_sql_utc(connection)
         limited_runtime = _validate_limited_runtime(now=now)
         quota = dict(limited_runtime.get("quota") or {})
-        if quota.get("state_available") is not True:
-            raise RuntimeError("current SQL quota ledger is not available for resume")
-        reserved = _strict_quota_integer(quota, "reserved_shared_usage")
-        if reserved != 0:
-            raise RuntimeError("pending quota permits must be zero before resume")
-        accounted = _strict_quota_integer(quota, "known_total")
-        if accounted >= AUTOMATIC_RETRY_PROTECTION_BOUNDARY:
-            raise RuntimeError("current SQL quota ledger does not leave approved retry headroom")
+        _validate_resume_quota_authorization(quota, authoritative_utc=now)
         launch_agent = _installed_tiered50_resume_readiness(
             runtime_config_path=str(limited_runtime["config_path"])
         )
@@ -1282,12 +1501,16 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
                 raise RuntimeError("existing Tiered50 resume event conflicts with immutable activation state")
             return {
                 "status": "IDEMPOTENT_ALREADY_ACTIVE",
+                "result_code": RESUME_LOADED_EXISTING_EVENT_STATUS,
                 "operation": "RESUME",
                 "resume_key": str(_named_value(latest_resume, "ResumeKey", 1) or key),
                 "requested_resume_key": key,
                 "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
                 "sampling_era_id": lifecycle["sampling_era_id"],
                 "launch_agent": launch_agent,
+                "service_state": "LOADED_NOT_VALIDATED",
+                "production_validation": "NOT_PROVEN",
+                "operational_success": True,
                 "historical_state_preserved": True,
                 "mdd_requests_issued": 0,
                 "writes_performed": 0,
@@ -1297,17 +1520,55 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
                 raise RuntimeError("resume key already exists for a conflicting Tiered50 lifecycle")
             return {
                 "status": "IDEMPOTENT_ALREADY_RECORDED",
+                "result_code": RESUME_STOPPED_EXISTING_EVENT_STATUS,
                 "operation": "RESUME",
                 "resume_key": str(_named_value(existing_resume, "ResumeKey", 1) or key),
                 "requested_resume_key": key,
                 "effective_at_utc": lifecycle["effective_at_utc"].isoformat().replace("+00:00", "Z"),
                 "sampling_era_id": lifecycle["sampling_era_id"],
                 "launch_agent": {**launch_agent, "status": "STOPPED"},
+                "service_state": "STOPPED",
+                "production_validation": "NOT_PROVEN",
+                "operational_success": False,
+                "required_action": (
+                    "Review the preserved outage, renew all readiness gates, and supply a new explicit "
+                    "resume transition key before attempting production resume again."
+                ),
                 "historical_state_preserved": True,
                 "mdd_requests_issued": 0,
                 "writes_performed": 0,
                 "resume_transition": "RECORDED_BUT_NOT_ACTIVE",
             }
+
+        # The first preflight above protects the immutable history read.  A
+        # slow SQL/evidence/launchd preparation must not authorize enablement
+        # using that stale snapshot, so repeat the time-sensitive gates while
+        # the same session-owned resume lock is still held.
+        refreshed = _refresh_resume_readiness(
+            connection=connection,
+            runtime_config_path=str(limited_runtime["config_path"]),
+            expected_runtime_sql_identity=(
+                limited_runtime.get("sql_instance_identity")
+                if isinstance(limited_runtime.get("sql_instance_identity"), Mapping)
+                else None
+            ),
+        )
+        now = refreshed["authoritative_sql_utc"]
+        limited_runtime = refreshed["limited_runtime"]
+        quota = refreshed["quota"]
+        operational_evidence = refreshed["operational_evidence"]
+        competing_writers = refreshed["competing_writers"]
+        launch_agent = refreshed["launch_agent"]
+        evidence["requested_at_utc"] = now.isoformat().replace("+00:00", "Z")
+        evidence["limited_runtime"] = {
+            "settings": limited_runtime.get("settings"),
+            "login": limited_runtime.get("login"),
+            "sql_instance_identity": limited_runtime.get("sql_instance_identity"),
+            "quota": quota,
+        }
+        evidence["operational_evidence"] = operational_evidence
+        evidence["competing_writers"] = competing_writers
+        evidence["resume_coordination"]["final_authoritative_sql_utc"] = now
 
         installed: dict[str, Any] = {
             "label": TIERED50_LABEL,
@@ -1360,6 +1621,7 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
         resume_at = recorded.get("resume_at_utc")
         return {
             "status": "PASS" if recorded["status"] == "RECORDED" else recorded["status"],
+            "result_code": "RESUMED_AND_EVENT_RECORDED" if recorded["status"] == "RECORDED" else recorded["status"],
             "operation": "RESUME",
             "resume_key": key,
             "resume_event": recorded,
@@ -1376,6 +1638,9 @@ def resume_tiered50_production(*, resume_key: str | None = None) -> dict[str, An
                 "installed_plist_path": installed.get("installed_plist_path"),
                 "runtime_bundle_path": installed.get("runtime_bundle_path"),
             },
+            "service_state": "LOADED",
+            "production_validation": "NOT_PROVEN",
+            "operational_success": recorded["status"] == "RECORDED",
             "resume_at_utc": resume_at,
             "mdd_requests_issued": 0,
             "writes_performed": 1 if recorded["status"] == "RECORDED" else 0,
@@ -1821,6 +2086,19 @@ def apply_activation(*, effective_at: datetime, legacy7_stopped: bool = False) -
     }
 
 
+def _resume_exit_code(result: Mapping[str, Any]) -> int:
+    """Keep idempotent event detection distinct from operational success."""
+
+    if result.get("status") == "PASS" and result.get("operational_success") is not False:
+        return 0
+    if (
+        result.get("status") == "IDEMPOTENT_ALREADY_ACTIVE"
+        and result.get("service_state") == "LOADED_NOT_VALIDATED"
+    ):
+        return 0
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="activate the prepared target rows")
@@ -1856,7 +2134,7 @@ def main(argv: list[str] | None = None) -> int:
             else read_only_status()
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
-        return 0
+        return _resume_exit_code(result) if args.resume else 0
     except Exception as exc:
         result: dict[str, Any] = {
             "status": "BLOCKED",

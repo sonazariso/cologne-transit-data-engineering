@@ -19,6 +19,21 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from activate_tiered50_production import resume_tiered50_production  # noqa: E402
 
 
+def _resume_exit_code(result: dict[str, object]) -> int:
+    """Return success only when the requested production resume is active."""
+
+    if result.get("status") == "PASS" and result.get("operational_success") is not False:
+        return 0
+    # A repeated request against an already loaded service is idempotent, but
+    # its health is still unvalidated until collection evidence exists.
+    if (
+        result.get("status") == "IDEMPOTENT_ALREADY_ACTIVE"
+        and result.get("service_state") == "LOADED_NOT_VALIDATED"
+    ):
+        return 0
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -61,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                 "reason": getattr(exc, "original_failure_reason", None),
             }
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if result.get("status") in {"PASS", "IDEMPOTENT_ALREADY_ACTIVE", "IDEMPOTENT_ALREADY_RECORDED"} else 2
+    return _resume_exit_code(result)
 
 
 if __name__ == "__main__":

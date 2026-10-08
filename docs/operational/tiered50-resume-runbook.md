@@ -113,11 +113,24 @@ the installed plist and actual launchd state must both verify stopped. An
 unreadable or still-active rollback is reported as a critical operational
 blocker with the original activation failure and separate rollback failures.
 
+Immediately before enablement, the same session lock is re-asserted and the
+workflow rereads SQL UTC, the runtime SQL identity, the current provider-period
+or October bootstrap authorization, quota headroom and pending permits,
+competing writers, signed evidence freshness, and the installed LaunchAgent
+state. The recheck is repeated after the slow SQL/evidence preparation; an
+expired artifact, changed quota, clock crossing of the October hard stop, lost
+lock, or service that became loaded during preparation prevents enablement.
+The macOS wall clock is not used as an authorization clock.
+
 Repeating the same key is idempotent and never creates a second resume event.
 If its event is already recorded while the service is stopped, the command
-reports `IDEMPOTENT_ALREADY_RECORDED` and does not silently reactivate it. A
-new explicit key may be used only after the reason for the stop has been
-reviewed. A historical `OUTAGE` remains
+reports `IDEMPOTENT_ALREADY_RECORDED` with
+`result_code=IDEMPOTENT_EVENT_RECORDED_SERVICE_STOPPED`, exits nonzero, and does
+not silently reactivate it. The result explicitly requests a new resume
+transition key and renewed readiness checks. A new explicit key may be used
+only after the reason for the stop has been reviewed. A loaded LaunchAgent
+from an earlier event is reported as `LOADED_NOT_VALIDATED`; it is not reported
+as an `ACTIVE AND VALIDATED` production cycle. A historical `OUTAGE` remains
 immutable evidence and does not by itself keep a current, successfully resumed
 service in `BLOCKED` status.
 
@@ -128,4 +141,16 @@ request. The current sanitized evidence remains blocked because no fresh,
 authenticated administrative artifact is available. Monthly provider rollover
 also remains fail-closed: the exact provider reset boundary is unverified, and
 the bounded calendar-month policy is implemented but requires explicit
-operator approval of a finite IANA timezone envelope before use.
+operator approval of the global UTC-12 through UTC+14 envelope, a 30-minute
+post-boundary delay, and its documented temporary collection gap before use.
+
+Explicit one-time approval request (not granted): “I approve the
+`CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY` policy for this shared MDD
+credential, bounded by `UTC-12 through UTC+14` using `Etc/GMT+12` and
+`Etc/GMT-14`, with authorization no earlier than 12:30 UTC on the first day
+of each calendar month, a 30-minute post-boundary safety delay, a 2-hour
+30-minute temporary collection gap at the November 2026 example boundary,
+and all documented pending-permit, SQL-outage, quota, locking, and
+idempotency stop conditions.” This approval must be recorded by the
+administrator-only SQL registration workflow; it does not waive the need for
+provider-issued evidence or authorize resume by itself.

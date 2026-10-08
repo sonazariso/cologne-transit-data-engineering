@@ -25,6 +25,7 @@ from cologne_transit_collector.quota_rollover import (  # noqa: E402
     build_automatic_rollover_period,
     build_reset_contract,
     bounded_provider_period_for_instant,
+    global_utc_offset_envelope_period_for_instant,
     provider_period_for_instant,
 )
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
@@ -301,6 +302,15 @@ class AutomaticRolloverTests(unittest.TestCase):
         self.assertFalse(rollover["provider_metadata_verified"])
         self.assertTrue(rollover["bounded_timezone_uncertainty"])
         self.assertEqual(rollover["provider_period_timezone"], "BOUNDED_TIMEZONE_ENVELOPE")
+
+    def test_global_utc_offset_envelope_waits_until_1230_and_stops_before_next_period(self) -> None:
+        period = global_utc_offset_envelope_period_for_instant(
+            datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc)
+        )
+        self.assertEqual(period.month_key, "2026-11")
+        self.assertEqual(period.start_utc, datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc))
+        self.assertEqual(period.activation_not_before_utc, datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc))
+        self.assertEqual(period.end_utc, datetime(2026, 11, 30, 10, 0, tzinfo=timezone.utc))
 
     def test_bounded_policy_requires_explicit_operator_approval(self) -> None:
         evidence = {

@@ -27,6 +27,12 @@ AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL = "AUTOMATIC_MONTHLY_ROLLOVER"
 CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL = "AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED"
 AUTOMATIC_ROLLOVER_STATUS = "ACTIVE"
 AUTOMATIC_ROLLOVER_DEFAULT_DELAY_SECONDS = 1800
+# POSIX ``Etc/GMT`` names reverse their sign: GMT+12 is UTC-12 and GMT-14 is
+# UTC+14.  The endpoints are sufficient for a calendar-month bound because
+# every supported civil offset lies between them; zoneinfo still supplies the
+# month-length/DST-aware conversion used by the general bounded policy.
+GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES = ("Etc/GMT+12", "Etc/GMT-14")
+GLOBAL_UTC_OFFSET_ENVELOPE_LABEL = "UTC-12 through UTC+14"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MONTH_KEY = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _KEY_MARKERS = ("password", "secret", "token", "apikey", "credential")
@@ -283,6 +289,27 @@ def bounded_provider_period_for_instant(
     )
 
 
+def global_utc_offset_envelope_period_for_instant(
+    at_utc: datetime,
+    *,
+    activation_delay_seconds: int = AUTOMATIC_ROLLOVER_DEFAULT_DELAY_SECONDS,
+) -> ProviderQuotaPeriod:
+    """Calculate the conservative period for the full UTC-12..UTC+14 envelope.
+
+    This is a policy candidate, not provider evidence.  It waits until the
+    latest possible month start (UTC-12) plus the safety delay and stops at the
+    earliest possible following-month start (UTC+14).  The policy remains
+    fail-closed until an operator explicitly approves it and SQL registers the
+    resulting contract.
+    """
+
+    return bounded_provider_period_for_instant(
+        at_utc,
+        timezone_names=GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES,
+        activation_delay_seconds=activation_delay_seconds,
+    )
+
+
 def build_reset_contract(
     *,
     evidence: Mapping[str, Any],
@@ -449,10 +476,13 @@ __all__ = [
     "AUTOMATIC_ROLLOVER_STATUS",
     "CONSERVATIVE_ROLLOVER_ACCOUNTING_MODEL",
     "CONSERVATIVE_ROLLOVER_MODE",
+    "GLOBAL_UTC_OFFSET_ENVELOPE_LABEL",
+    "GLOBAL_UTC_OFFSET_ENVELOPE_TIMEZONES",
     "ProviderQuotaPeriod",
     "QuotaRolloverError",
     "bounded_provider_period_for_instant",
     "build_reset_contract",
     "build_automatic_rollover_period",
+    "global_utc_offset_envelope_period_for_instant",
     "provider_period_for_instant",
 ]

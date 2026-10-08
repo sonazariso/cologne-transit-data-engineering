@@ -50,8 +50,19 @@ bootstrap authorization, Legacy7 retirement, or Power BI. It now accounts for
 the absolute UTC bucket deadline from actual post-preflight execution time,
 rejects production `--at` timestamps, fails closed when SQL UTC is unavailable,
 rechecks permit expiry with SQL UTC immediately before transmission, narrows
-the Stage 14 architecture-text exception to the direct SQL adapter, and
-removes the Tiered50 plist's `ThrottleInterval` override.
+the Stage 14 architecture-text exception to the approved SQL adapter and
+signed administrative-evidence identity validator, and removes the Tiered50
+plist's `ThrottleInterval` override.
+
+The resume lifecycle now obtains SQL UTC from the locked administrator session
+and repeats quota, bootstrap/provider-period, pending-permit, competing-writer,
+signed-evidence, runtime-instance, LaunchAgent, and session-lock checks directly
+before enablement. An existing idempotency event with a stopped LaunchAgent is
+reported as `IDEMPOTENT_ALREADY_RECORDED` plus
+`IDEMPOTENT_EVENT_RECORDED_SERVICE_STOPPED` and returns a nonzero operational
+exit; it does not create a duplicate event or silently reactivate the service.
+A loaded service without a validated collection cycle is reported as loaded,
+not as `ACTIVE AND VALIDATED`.
 
 The timing contract now distinguishes the derived UTC calendar boundary from
 observed Python module/process entry, main-function entry, preflight start and
@@ -100,15 +111,15 @@ requests and performed no SQL writes.
 The fresh read-only evidence capture at
 [`tiered50-production-evidence-current-20261008.json`](tiered50-production-evidence-current-20261008.json)
 identified the exact SQL failures instead of aborting at the first exception.
-The current capture at `2026-10-08T16:19:23.717760Z` records separate
+The current capture at `2026-10-08T19:30:13.551208Z` records separate
 connection, identity, permission, DMV, backup, and operational-history states
 without converting denied reads into zeros. It used the installed runtime
 login `CologneTransitCollector` for least-privilege evidence and reports
 `admin_role_source=MSSQL_ADMIN_*_REQUIRED`. No separately configured
-`MSSQL_ADMIN_*` identity was available, so the precise blocker is
-`MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`; no privileged query was falsely
-marked PASS. The artifact is intentionally unsigned until the operator
-captures and signs the separate administrative evidence. `log_space` is
+`MSSQL_ADMIN_*` identity or matching Keychain item was available, so the
+precise blocker is `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`; no privileged
+query was falsely marked PASS. The artifact is intentionally unsigned until
+the operator captures and signs the separate administrative evidence. `log_space` is
 `null`, capacity and backup are `NOT_PROVEN`, and the administrative
 identity/permission gate is `NOT_PROVEN`. The earlier
 capture's sanitized observations of errors 297, 229, and 3013 remain
@@ -149,6 +160,16 @@ future-month rollover is implemented in SQL and the runtime, but it remains
 fail-closed until an exact provider reset contract is verified and registered.
 The October policy stop remains `2026-10-30T23:00:00Z` and is not extended by
 rollover.
+
+One reusable approval candidate is now evaluated explicitly: assume (only with
+one-time operator approval) a calendar-month reset somewhere in the global
+UTC-12 through UTC+14 envelope, wait 30 minutes after the latest possible
+month start, and authorize no earlier than 12:30 UTC on the first day of a new
+month. For November 2026 this means a latest safe start of
+`2026-11-01T12:00:00Z`, authorization at `2026-11-01T12:30:00Z`, and an
+earliest next-period risk boundary of `2026-11-30T10:00:00Z`; the resulting
+temporary gap is 2 hours 30 minutes. The candidate is not provider-confirmed,
+not operator-approved, and has not been registered or activated.
 
 The first scheduled Tiered50 bucket was `5971541`: 18 target audits ran, 2
 succeeded and 16 were skipped by the heartbeat budget, with 2 HTTP responses,

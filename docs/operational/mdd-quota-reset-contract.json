@@ -34,7 +34,7 @@
     "latest_defensible_boundary_policy": "IMPLEMENTED_BUT_NOT_ACTIVATED",
     "implementation": {
       "mode": "CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY",
-      "supported_timezone_envelope": "operator-supplied finite IANA timezone set; no default is assumed",
+      "supported_timezone_envelope": "global civil-time offset envelope UTC-12 through UTC+14; endpoint IANA zones are used for the executable bound",
       "safe_boundary": "latest possible month-start across the approved envelope plus the configured delay",
       "safe_period_end": "earliest possible next-month start across the approved envelope",
       "dst_and_month_length": "calculated with zoneinfo for every candidate timezone",
@@ -47,6 +47,42 @@
         "operational or retry boundary reached"
       ],
       "required_one_time_approval": "operator must explicitly approve the calendar-month model and enumerate the supported timezone envelope"
+    },
+    "operator_approval_candidate": {
+      "status": "OPERATOR_APPROVAL_REQUIRED",
+      "reset_model": "CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY",
+      "calendar_month_reset_is": "operator-accepted assumption, not provider-confirmed metadata",
+      "supported_utc_offset_envelope": "UTC-12 through UTC+14",
+      "supported_reset_timezones": [
+        "Etc/GMT+12",
+        "Etc/GMT-14"
+      ],
+      "endpoint_timezone_interpretation": {
+        "Etc/GMT+12": "UTC-12; latest possible month start",
+        "Etc/GMT-14": "UTC+14; earliest possible next-month start"
+      },
+      "post_reset_safety_delay_seconds": 1800,
+      "authorization_boundary": "12:30 UTC on the first day of a new calendar month, after every supported offset has entered that month",
+      "earliest_next_period_risk_boundary": "10:00 UTC on the last UTC date of the preceding month for a following-month UTC+14 midnight",
+      "expected_temporary_collection_gap": "2 hours 30 minutes between the earliest next-period risk boundary and the 12:30 UTC authorization boundary",
+      "november_2026_example": {
+        "authorization_not_before_utc": "2026-11-01T12:30:00Z",
+        "earliest_next_period_risk_boundary_utc": "2026-11-30T10:00:00Z",
+        "temporary_collection_gap": "2 hours 30 minutes"
+      },
+      "automatic_behavior_after_approval": {
+        "period_creation": "SQL creates the zero-based provider period after the bounded boundary and safety delay",
+        "prior_period_permits": "any pending or uncertain prior-period permit blocks rollover until reconciled",
+        "locking_and_idempotence": "session/transaction locking plus contract key, MonthKey, period bounds and evidence hash",
+        "sql_outage": "fail closed and resume automatically on a later scheduled heartbeat",
+        "quota_exhaustion": "stop requests at the approved retry/operational boundary",
+        "operator_action_after_registration": "none for routine future months"
+      },
+      "limitations": [
+        "The provider has not confirmed a calendar-month reset model or timezone.",
+        "The two endpoint zones prove the mathematical offset envelope, not the provider credential's actual billing rule.",
+        "This assumption must not be registered or activated without explicit one-time operator approval."
+      ]
     },
     "reason": "The reviewed public sources expose a monthly quota and request history but do not establish that this credential resets on a calendar month or identify a supported provider timezone. The bounded policy is implemented fail-closed, but neither its calendar-month model nor its supported timezone envelope has been approved.",
     "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its finite supported timezone envelope and delay."

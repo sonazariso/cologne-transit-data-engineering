@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -82,6 +83,93 @@ class Tiered50ResumeHardeningTests(unittest.TestCase):
         self.assertIn("LockMode = N'Exclusive'", statement)
         activation._release_resume_operation_lock(connection)
         self.assertIn("sp_releaseapplock", connection.cursor_value.calls[-1][0])
+
+    def test_refresh_rechecks_sql_clock_and_quota_at_transition(self) -> None:
+        first = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        second = datetime(2026, 10, 8, 12, 1, tzinfo=timezone.utc)
+        third = datetime(2026, 10, 8, 12, 1, 1, tzinfo=timezone.utc)
+        runtime_values = [
+            {
+                "config_path": "/tmp/runtime.json",
+                "quota": {"state_available": True, "reserved_shared_usage": 0, "known_total": 100},
+            },
+            {
+                "config_path": "/tmp/runtime.json",
+                "quota": {"state_available": True, "reserved_shared_usage": 0, "known_total": 101},
+            },
+        ]
+        evidence = [{}, {}, {}]
+        with patch.object(activation, "_assert_resume_operation_lock"), patch.object(
+            activation, "_authoritative_sql_utc", side_effect=[first, second, third]
+        ), patch.object(
+            activation, "_validate_limited_runtime", side_effect=runtime_values
+        ) as runtime, patch.object(
+            activation, "_validate_operational_evidence", side_effect=evidence
+        ), patch.object(activation, "_read_current_competing_writers", return_value=[]), patch.object(
+            activation,
+            "_installed_tiered50_resume_readiness",
+            return_value={"loaded_before_resume": False},
+        ):
+            result = activation._refresh_resume_readiness(
+                connection=_LockConnection(),
+                runtime_config_path="/tmp/runtime.json",
+                expected_runtime_sql_identity=None,
+            )
+        self.assertEqual(result["authoritative_sql_utc"], third)
+        self.assertEqual(result["quota"]["known_total"], 101)
+        self.assertEqual([call.kwargs["now"] for call in runtime.call_args_list], [first, second])
+
+    def test_refresh_rejects_evidence_that_expires_during_preflight(self) -> None:
+        first = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        second = datetime(2026, 10, 8, 12, 31, tzinfo=timezone.utc)
+        runtime = {
+            "config_path": "/tmp/runtime.json",
+            "quota": {"state_available": True, "reserved_shared_usage": 0, "known_total": 0},
+        }
+        with patch.object(activation, "_assert_resume_operation_lock"), patch.object(
+            activation, "_authoritative_sql_utc", side_effect=[first, second]
+        ), patch.object(activation, "_validate_limited_runtime", return_value=runtime), patch.object(
+            activation,
+            "_validate_operational_evidence",
+            side_effect=[{}, RuntimeError("administrator operational evidence is stale")],
+        ), patch.object(activation, "_read_current_competing_writers", return_value=[]), patch.object(
+            activation, "_installed_tiered50_resume_readiness"
+        ) as readiness:
+            with self.assertRaisesRegex(RuntimeError, "evidence is stale"):
+                activation._refresh_resume_readiness(
+                    connection=_LockConnection(),
+                    runtime_config_path="/tmp/runtime.json",
+                    expected_runtime_sql_identity=None,
+                )
+        readiness.assert_not_called()
+
+    def test_refresh_does_not_extend_the_october_hard_stop(self) -> None:
+        first = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        stop = datetime(2026, 10, 30, 23, 0, tzinfo=timezone.utc)
+        runtime = {
+            "config_path": "/tmp/runtime.json",
+            "quota": {
+                "state_available": True,
+                "reserved_shared_usage": 0,
+                "known_total": 0,
+                "authorization_mode": activation.BOOTSTRAP_AUTHORIZATION_MODE,
+                "month_key": "2026-10",
+            },
+        }
+        with patch.object(activation, "_assert_resume_operation_lock"), patch.object(
+            activation, "_authoritative_sql_utc", side_effect=[first, stop]
+        ), patch.object(activation, "_validate_limited_runtime", return_value=runtime), patch.object(
+            activation, "_validate_operational_evidence", return_value={}
+        ), patch.object(activation, "_read_current_competing_writers", return_value=[]), patch.object(
+            activation, "_installed_tiered50_resume_readiness"
+        ) as readiness:
+            with self.assertRaisesRegex(RuntimeError, "hard stop"):
+                activation._refresh_resume_readiness(
+                    connection=_LockConnection(),
+                    runtime_config_path="/tmp/runtime.json",
+                    expected_runtime_sql_identity=None,
+                )
+        readiness.assert_not_called()
 
     def test_successful_rollback_is_explicitly_verified(self) -> None:
         with patch.object(activation, "install_launch_agent"), patch.object(
@@ -210,10 +298,18 @@ class Tiered50ResumeHardeningTests(unittest.TestCase):
         class Cursor:
             def __init__(self) -> None:
                 self.rows: list[object] = []
+                self.one: object = None
 
             def execute(self, statement: str, params=()) -> None:
                 del params
-                if "MddMacTiered50ProductionTarget" in statement:
+                if "AuthoritativeUtc" in statement:
+                    self.one = {"AuthoritativeUtc": activation._utc_datetime("2026-10-08T12:00:00Z")}
+                    self.rows = []
+                elif "APPLOCK_MODE" in statement:
+                    self.one = {"ResumeLockMode": "Exclusive"}
+                    self.rows = []
+                elif "MddMacTiered50ProductionTarget" in statement:
+                    self.one = None
                     self.rows = targets
                 elif "MddMacSamplingEra" in statement:
                     self.rows = era
@@ -224,13 +320,16 @@ class Tiered50ResumeHardeningTests(unittest.TestCase):
                 elif "MddMacCollectorRun" in statement or "MddMacProductionResumeEvent" in statement:
                     self.rows = []
                 else:
+                    self.one = None
                     self.rows = []
 
             def fetchall(self):
                 return list(self.rows)
 
             def fetchone(self):
-                return None
+                result = self.one
+                self.one = None
+                return result
 
         class Connection(_LockConnection):
             def __init__(self) -> None:

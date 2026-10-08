@@ -1,13 +1,13 @@
 {
   "artifact_integrity": {
-    "payload_sha256": "cec470b674cdaa4498fa1388542ad0ab185b191a002656a65b76975f58b9c1ef",
+    "payload_sha256": "0044b1cb669f9c351ff2415cdfba84d51bffdc2ed63474ccb979ee201861f9ae",
     "reason": "operator-controlled signing key was not supplied",
     "status": "UNSIGNED"
   },
   "artifact_version": "TIERED50_ADMIN_EVIDENCE_V3",
   "capture_provenance": {
     "authentication_source": "MSSQL_ADMIN_*_REQUIRED",
-    "captured_at_utc": "2026-10-08T16:19:23.717760Z",
+    "captured_at_utc": "2026-10-08T19:30:13.551208Z",
     "database_name": "",
     "effective_login": "",
     "execution_path": "NOT_PROVEN",
@@ -21,9 +21,13 @@
       "capacity.database_files",
       "capacity.database_log_space_dm_db_log_space_usage",
       "capacity.volume_capacity_dm_os_volume_stats",
-      "collector_runtime_history_or_materialization"
+      "collector.competing_production_writers",
+      "collector.production_cutover_history",
+      "collector_runtime_history_or_materialization",
+      "quota.current_shared_ledger"
     ],
     "server_name": "",
+    "sql_instance_identity": {},
     "status": "NOT_PROVEN",
     "windows_integrated_auth_supported": true
   },
@@ -44,7 +48,7 @@
     "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
     "tiered50_active": false
   },
-  "generated_at_utc": "2026-10-08T16:19:23.717760Z",
+  "generated_at_utc": "2026-10-08T19:30:13.551208Z",
   "host": {
     "legacy7_launchd": {
       "command": "/bin/launchctl",
@@ -66,14 +70,14 @@
       "start_interval_seconds": 300
     },
     "mac_disk": {
-      "free_bytes": 80304226304,
+      "free_bytes": 79206772736,
       "total_bytes": 250685575168
     },
     "power_assertions": {
       "command": "/usr/bin/pmset",
       "returncode": 0,
       "stderr": "",
-      "stdout": "2026-10-08 18:19:23 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:07:19 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000746 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 08:19:57 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 08:19:57 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 08:19:57 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=08.10.26, 08:59  mod=08.10.26, 17:17 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
+      "stdout": "2026-10-08 21:30:13 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    0\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000013000980bd] 00:05:06 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:1000043b0 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 3083(caffeinate): [0x0000110400018427] 11:30:47 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x0000110400078428] 11:30:47 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 3083(caffeinate): [0x00001104000f8429] 11:30:47 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nNo kernel assertions.\nIdle sleep preventers: IODisplayWrangler\n"
     },
     "tiered50_launchd": {
       "command": "/bin/launchctl",
@@ -113,7 +117,7 @@
       "command": "/usr/bin/uptime",
       "returncode": 0,
       "stderr": "",
-      "stdout": "18:19  up  9:33, 2 users, load averages: 4.00 3.79 3.70\n"
+      "stdout": "21:30  up 12:43, 2 users, load averages: 3.32 3.64 3.69\n"
     },
     "vmware": {
       "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
@@ -127,9 +131,13 @@
     "admin_authorization": {
       "reason": "one or more administrative identity, permission, capacity, backup, or operational-history checks is not proven",
       "required_query_statuses": {
+        "competing_production_writers": "NOT_PROVEN",
+        "current_quota_ledger": "NOT_PROVEN",
+        "database_files": "NOT_PROVEN",
         "latest_full_backup_history": "NOT_PROVEN",
         "log_space": "NOT_PROVEN",
         "operational_history": "NOT_PROVEN",
+        "production_cutover_history": "NOT_PROVEN",
         "runtime_health": "NOT_PROVEN",
         "tiered50_audit_history": "NOT_PROVEN",
         "volume_capacity": "NOT_PROVEN"
@@ -143,7 +151,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "evidence_role": "PRIVILEGED_READ_ONLY_ADMIN",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "status": "NOT_PROVEN"
     },
     "admin_identity_gate": {
@@ -163,18 +171,18 @@
       "status": "NOT_PROVEN"
     },
     "backup_headeronly": {
-      "reason": "no full backup path was returned by msdb history",
+      "reason": "the complete full-backup media set was not returned by msdb history",
       "statement_id": "backup.restore_headeronly",
       "status": "NOT_PROVEN"
     },
     "backup_server_side_access": {
-      "reason": "no full backup path was returned by msdb history",
+      "reason": "the complete full-backup media set was not returned by msdb history",
       "statement_id": "backup.server_side_file_access",
       "status": "NOT_PROVEN"
     },
     "backup_verifyonly": {
       "cause_classification": "UNDETERMINED",
-      "reason": "no full backup path was returned by msdb history",
+      "reason": "the complete full-backup media set was not returned by msdb history",
       "statement": "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM",
       "statement_id": "backup.restore_verifyonly_with_checksum",
       "status": "NOT_PROVEN"
@@ -187,12 +195,32 @@
       ],
       "status": "NOT_PROVEN"
     },
+    "competing_production_writers": [],
+    "competing_production_writers_evidence": {
+      "error_code": null,
+      "error_type": "RuntimeError",
+      "phase": "execute",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+      "statement": "SELECT CollectionContext, COUNT_BIG(*) AS RunningCount FROM ctl.MddMacCollectorRun WHERE Status IN ('RUNNING', 'CLAIMED') AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION') GROUP BY CollectionContext",
+      "statement_id": "collector_runtime_history_or_materialization",
+      "status": "NOT_PROVEN"
+    },
+    "current_quota_ledger": [],
+    "current_quota_ledger_evidence": {
+      "error_code": null,
+      "error_type": "RuntimeError",
+      "phase": "execute",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+      "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
+      "statement_id": "collector_runtime_history_or_materialization",
+      "status": "NOT_PROVEN"
+    },
     "database_files": [],
     "database_files_evidence": {
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages FROM sys.database_files ORDER BY file_id",
       "statement_id": "capacity.database_files",
       "status": "NOT_PROVEN"
@@ -202,7 +230,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (1) RunId, LogicalDueBucket, CompletedAtUtc, Status FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION' AND CompletedAtUtc IS NOT NULL ORDER BY CompletedAtUtc DESC, MacCollectorRunId DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -213,7 +241,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc, Status, SummaryJson FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' ORDER BY MacCollectorRunId ASC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -222,16 +250,20 @@
     },
     "identity": {
       "captured_at_utc": null,
+      "configured_server_name": "",
       "database_name": "",
+      "instance_name": "",
       "login_name": "",
+      "machine_name": "",
       "server_name": "",
+      "sql_instance_identity": {},
       "status": "NOT_PROVEN"
     },
     "latest_cutover_evidence": {
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (1) CutoverKey, Tiered50ActivationStatus, Tiered50ActivationAtUtc, RecordedAtUtc FROM ctl.MddMacProductionCutover ORDER BY CutoverId DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -242,9 +274,13 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
-      "statement": "SELECT TOP (1) bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size, bmf.physical_device_name FROM msdb.dbo.backupset AS bs INNER JOIN msdb.dbo.backupmediafamily AS bmf ON bmf.media_set_id = bs.media_set_id WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+      "statement": "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size, bs.database_name FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC",
       "statement_id": "backup.latest_full_backup_history",
+      "status": "NOT_PROVEN"
+    },
+    "latest_full_backup_media_evidence": {
+      "statement_id": "backup.latest_full_backup_media_set",
       "status": "NOT_PROVEN"
     },
     "latest_tiered50_resume": null,
@@ -262,7 +298,7 @@
           "error_code": null,
           "error_type": "RuntimeError",
           "phase": "execute",
-          "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+          "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
           "statement": "SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc, Status, SummaryJson FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' ORDER BY MacCollectorRunId DESC",
           "statement_id": "collector_runtime_history_or_materialization",
           "status": "NOT_PROVEN"
@@ -279,7 +315,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count, SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_count, SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped_count, MAX(CompletedAtUtc) AS last_completed_at_utc FROM ctl.MddMacTargetAudit WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION' GROUP BY LogicalDueBucket ORDER BY LogicalDueBucket DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -290,7 +326,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID()",
       "statement_id": "capacity.database_log_space_dm_db_log_space_usage",
       "status": "NOT_PROVEN"
@@ -306,8 +342,8 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
-        "statement": "SELECT @@SERVERNAME AS ServerName, DB_NAME() AS DatabaseName, SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+        "statement": "SELECT CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)) AS ServerName, DB_NAME() AS DatabaseName, SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc, CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(128)) AS MachineName, CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128)) AS InstanceName, CAST(@@SERVERNAME AS NVARCHAR(128)) AS ConfiguredServerName",
         "statement_id": "admin.identity",
         "status": "NOT_PROVEN"
       },
@@ -315,7 +351,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS product_major_version, IS_SRVROLEMEMBER(N'sysadmin') AS is_sysadmin, IS_SRVROLEMEMBER(N'serveradmin') AS is_serveradmin, IS_SRVROLEMEMBER(N'securityadmin') AS is_securityadmin, IS_SRVROLEMEMBER(N'dbcreator') AS is_dbcreator, IS_MEMBER(N'db_owner') AS is_db_owner, HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DEFINITION') AS has_view_definition, HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DATABASE STATE') AS has_view_database_state, HAS_PERMS_BY_NAME(NULL, N'SERVER', N'VIEW SERVER STATE') AS has_view_server_state, HAS_PERMS_BY_NAME(NULL, N'SERVER', N'VIEW SERVER PERFORMANCE STATE') AS has_view_server_performance_state, HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'BACKUP DATABASE') AS has_backup_database, HAS_PERMS_BY_NAME(NULL, N'SERVER', N'CREATE ANY DATABASE') AS has_create_any_database, HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'SELECT') AS has_database_select, HAS_PERMS_BY_NAME(N'msdb.dbo.backupset', N'OBJECT', N'SELECT') AS has_msdb_backupset_select, HAS_PERMS_BY_NAME(N'msdb.dbo.backupmediafamily', N'OBJECT', N'SELECT') AS has_msdb_backupmediafamily_select",
         "statement_id": "backup.latest_full_backup_history",
         "status": "NOT_PROVEN"
@@ -324,7 +360,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model",
         "statement_id": "admin.sql_runtime_health",
         "status": "NOT_PROVEN"
@@ -333,7 +369,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages FROM sys.database_files ORDER BY file_id",
         "statement_id": "capacity.database_files",
         "status": "NOT_PROVEN"
@@ -342,7 +378,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point",
         "statement_id": "capacity.volume_capacity_dm_os_volume_stats",
         "status": "NOT_PROVEN"
@@ -351,7 +387,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID()",
         "statement_id": "capacity.database_log_space_dm_db_log_space_usage",
         "status": "NOT_PROVEN"
@@ -360,8 +396,8 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
-        "statement": "SELECT TOP (1) bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size, bmf.physical_device_name FROM msdb.dbo.backupset AS bs INNER JOIN msdb.dbo.backupmediafamily AS bmf ON bmf.media_set_id = bs.media_set_id WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+        "statement": "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size, bs.database_name FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC",
         "statement_id": "backup.latest_full_backup_history",
         "status": "NOT_PROVEN"
       },
@@ -369,7 +405,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT COUNT_BIG(*) AS total_count, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS active_count, COALESCE(SUM(CASE WHEN ActivationStatus = 'PREPARED' THEN 1 ELSE 0 END), 0) AS prepared_count, MIN(SamplingTargetId) AS minimum_id, MAX(SamplingTargetId) AS maximum_id FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = %s AND SamplingEra = %s",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -378,7 +414,34 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+        "statement": "SELECT CutoverKey, PanelVersion, FinalLegacy7RunId, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId",
+        "statement_id": "collector_runtime_history_or_materialization",
+        "status": "NOT_PROVEN"
+      },
+      {
+        "error_code": null,
+        "error_type": "RuntimeError",
+        "phase": "execute",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+        "statement": "SELECT CollectionContext, COUNT_BIG(*) AS RunningCount FROM ctl.MddMacCollectorRun WHERE Status IN ('RUNNING', 'CLAIMED') AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION') GROUP BY CollectionContext",
+        "statement_id": "collector_runtime_history_or_materialization",
+        "status": "NOT_PROVEN"
+      },
+      {
+        "error_code": null,
+        "error_type": "RuntimeError",
+        "phase": "execute",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+        "statement": "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC",
+        "statement_id": "collector_runtime_history_or_materialization",
+        "status": "NOT_PROVEN"
+      },
+      {
+        "error_code": null,
+        "error_type": "RuntimeError",
+        "phase": "execute",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count, SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_count, SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped_count, MAX(CompletedAtUtc) AS last_completed_at_utc FROM ctl.MddMacTargetAudit WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION' GROUP BY LogicalDueBucket ORDER BY LogicalDueBucket DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -387,7 +450,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (1) RunId, LogicalDueBucket, CompletedAtUtc, Status FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_LEGACY7_PRODUCTION' AND CompletedAtUtc IS NOT NULL ORDER BY CompletedAtUtc DESC, MacCollectorRunId DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -396,7 +459,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (20) h.HttpStatus, h.NetworkAttempted, h.HttpResponseReceived, h.ProviderQuotaStatus, h.CompletedAtUtc FROM ctl.MddMacHttpAttempt AS h INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId WHERE a.CollectionContext = 'MAC_LEGACY7_PRODUCTION' ORDER BY h.CompletedAtUtc DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -405,7 +468,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count, SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_count, SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped_count, SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count, SUM(HttpAttempts) AS http_attempts, MAX(CompletedAtUtc) AS last_completed_at_utc FROM ctl.MddMacTargetAudit WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' GROUP BY LogicalDueBucket ORDER BY LogicalDueBucket ASC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -414,7 +477,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc, Status, SummaryJson FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' ORDER BY MacCollectorRunId ASC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -423,7 +486,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (1) CutoverKey, Tiered50ActivationStatus, Tiered50ActivationAtUtc, RecordedAtUtc FROM ctl.MddMacProductionCutover ORDER BY CutoverId DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -432,7 +495,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode, SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc, LaunchAgentLabel, RecordedAtUtc FROM ctl.MddMacProductionResumeEvent WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY ResumeEventId DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
@@ -441,12 +504,22 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc, CompletedAtUtc, Status, SummaryJson FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' ORDER BY MacCollectorRunId DESC",
         "statement_id": "collector_runtime_history_or_materialization",
         "status": "NOT_PROVEN"
       }
     ],
+    "production_cutover_history": [],
+    "production_cutover_history_evidence": {
+      "error_code": null,
+      "error_type": "RuntimeError",
+      "phase": "execute",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
+      "statement": "SELECT CutoverKey, PanelVersion, FinalLegacy7RunId, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId",
+      "statement_id": "collector_runtime_history_or_materialization",
+      "status": "NOT_PROVEN"
+    },
     "quota_integrity": {
       "accounting_model": "EXCLUSIVE_CREDENTIAL",
       "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
@@ -526,7 +599,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (20) h.HttpStatus, h.NetworkAttempted, h.HttpResponseReceived, h.ProviderQuotaStatus, h.CompletedAtUtc FROM ctl.MddMacHttpAttempt AS h INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId WHERE a.CollectionContext = 'MAC_LEGACY7_PRODUCTION' ORDER BY h.CompletedAtUtc DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -547,7 +620,7 @@
         "error_code": null,
         "error_type": "RuntimeError",
         "phase": "execute",
-        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+        "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
         "statement": "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model",
         "statement_id": "admin.sql_runtime_health",
         "status": "NOT_PROVEN"
@@ -556,8 +629,10 @@
       "status": "NOT_PROVEN"
     },
     "runtime_login": {
+      "configured_server_name": "DataAnalyst-VM",
       "database_name": "CologneTransitIntelligence",
       "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+      "instance_name": "",
       "is_db_datareader": false,
       "is_db_datawriter": false,
       "is_db_owner": false,
@@ -565,6 +640,8 @@
       "is_serveradmin": false,
       "is_sysadmin": false,
       "login_name": "CologneTransitCollector",
+      "machine_name": "DataAnalyst-VM",
+      "server_name": "DataAnalyst-VM",
       "status": "PASS"
     },
     "runtime_role_source": "BASE_MSSQL_*_FALLBACK",
@@ -581,6 +658,11 @@
       "unrelated_import_objects_required": false,
       "validation_scope": "PRODUCTION_RUNTIME"
     },
+    "runtime_sql_instance_identity": {
+      "database_name": "colognetransitintelligence",
+      "machine_name": "dataanalyst-vm",
+      "server_name": "dataanalyst-vm"
+    },
     "six_consecutive_expected_heartbeats": {
       "all_accounted": false,
       "all_succeeded": false
@@ -589,7 +671,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (40) LogicalDueBucket, COUNT_BIG(*) AS audit_count, SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded_count, SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped_count, SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count, SUM(HttpAttempts) AS http_attempts, MAX(CompletedAtUtc) AS last_completed_at_utc FROM ctl.MddMacTargetAudit WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION' GROUP BY LogicalDueBucket ORDER BY LogicalDueBucket ASC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -606,7 +688,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT COUNT_BIG(*) AS total_count, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS active_count, COALESCE(SUM(CASE WHEN ActivationStatus = 'PREPARED' THEN 1 ELSE 0 END), 0) AS prepared_count, MIN(SamplingTargetId) AS minimum_id, MAX(SamplingTargetId) AS maximum_id FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = %s AND SamplingEra = %s",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -617,7 +699,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode, SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc, LaunchAgentLabel, RecordedAtUtc FROM ctl.MddMacProductionResumeEvent WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY ResumeEventId DESC",
       "statement_id": "collector_runtime_history_or_materialization",
       "status": "NOT_PROVEN"
@@ -666,7 +748,7 @@
       "error_code": null,
       "error_type": "RuntimeError",
       "phase": "execute",
-      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD",
+      "reason": "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS: explicitly configure MSSQL_ADMIN_HOST,MSSQL_ADMIN_DATABASE,MSSQL_ADMIN_USER,MSSQL_ADMIN_PASSWORD_OR_KEYCHAIN_ITEM",
       "statement": "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point",
       "statement_id": "capacity.volume_capacity_dm_os_volume_stats",
       "status": "NOT_PROVEN"

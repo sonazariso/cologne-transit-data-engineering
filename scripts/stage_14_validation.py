@@ -34,6 +34,8 @@ BANNED_IMPORTS = {
 BANNED_TEXT = ("powershell", "sql server", "windows task scheduler", "windows\\")
 MSSQL_ADAPTER = ROOT / "src" / "cologne_transit_collector" / "mssql_persistence.py"
 SQLITE_IMPORTER = ROOT / "src" / "cologne_transit_collector" / "sqlite_import.py"
+ADMIN_EVIDENCE = ROOT / "src" / "cologne_transit_collector" / "admin_evidence.py"
+APPROVED_SQL_SERVER_TEXT_FILES = frozenset({MSSQL_ADAPTER, ADMIN_EVIDENCE})
 
 
 def architecture_check() -> list[str]:
@@ -44,14 +46,15 @@ def architecture_check() -> list[str]:
         lowered = source.lower()
         if "pymssql" in lowered and path != MSSQL_ADAPTER:
             errors.append(f"{path}: optional database client is confined to the direct adapter")
-        # The direct adapter is the approved SQL Server persistence boundary;
-        # its implementation and explanatory comments may name that
-        # authoritative database.  Keep all other architecture text bans
-        # unchanged, including PostgreSQL/SQLite/runtime-intermediary checks.
-        if path not in {SQLITE_IMPORTER, MSSQL_ADAPTER}:
-            for term in BANNED_TEXT:
-                if term in lowered:
-                    errors.append(f"{path}: banned architecture text {term!r}")
+        # The direct adapter and the signed administrative-evidence validator
+        # are the only approved source boundaries whose explanatory text may
+        # identify the authoritative SQL Server.  Keep every other text ban
+        # active, including prohibited Windows/runtime architecture text.
+        for term in BANNED_TEXT:
+            if term == "sql server" and path in APPROVED_SQL_SERVER_TEXT_FILES:
+                continue
+            if term in lowered and path != SQLITE_IMPORTER:
+                errors.append(f"{path}: banned architecture text {term!r}")
         try:
             tree = ast.parse(source, filename=str(path))
         except SyntaxError as exc:
