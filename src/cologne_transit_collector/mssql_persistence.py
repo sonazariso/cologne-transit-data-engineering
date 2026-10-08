@@ -142,8 +142,10 @@ MAX_SKIPPED_TARGET_AUDITS_PER_STATEMENT = (
 )
 
 
-def _build_skipped_target_audit_merge_statement(
+def build_skipped_target_audit_merge_statement(
     rows: Sequence[Sequence[Any]],
+    *,
+    transaction_control: bool = True,
 ) -> tuple[str, tuple[Any, ...]]:
     """Build the SQL Server skip-audit MERGE and its positional parameters.
 
@@ -171,10 +173,16 @@ def _build_skipped_target_audit_merge_statement(
     source_columns = ", ".join(SKIPPED_TARGET_AUDIT_COLUMNS)
     source_values = ", ".join(placeholders for _ in row_values)
     source_projection = ", ".join(f"source.{column}" for column in SKIPPED_TARGET_AUDIT_COLUMNS)
-    statement = f"""
+    transaction_prefix = """
         SET NOCOUNT ON;
         SET XACT_ABORT ON;
         BEGIN TRANSACTION;
+    """ if transaction_control else """
+        SET NOCOUNT ON;
+    """
+    transaction_suffix = "COMMIT TRANSACTION;" if transaction_control else ""
+    statement = f"""
+        {transaction_prefix}
         MERGE ctl.MddMacTargetAudit WITH (HOLDLOCK) AS target
         USING (VALUES {source_values}) AS source ({source_columns})
           ON target.RunId = source.RunId
@@ -183,13 +191,21 @@ def _build_skipped_target_audit_merge_statement(
         WHEN NOT MATCHED BY TARGET THEN
             INSERT ({source_columns})
             VALUES ({source_projection});
-        COMMIT TRANSACTION;
+        {transaction_suffix}
     """
     parameters = tuple(value for row in row_values for value in row)
     expected_parameters = len(row_values) * SKIPPED_TARGET_AUDIT_PARAMETERS_PER_ROW
     if len(parameters) != expected_parameters or len(parameters) > MSSQL_PARAMETER_LIMIT:
         raise AssertionError("constructed skip-audit statement exceeds its SQL parameter contract")
     return statement, parameters
+
+
+def _build_skipped_target_audit_merge_statement(
+    rows: Sequence[Sequence[Any]],
+) -> tuple[str, tuple[Any, ...]]:
+    """Backward-compatible transaction-wrapped skip-audit builder."""
+
+    return build_skipped_target_audit_merge_statement(rows, transaction_control=True)
 
 
 # These lists are deliberately separate.  The full list belongs to an
@@ -218,6 +234,7 @@ FULL_SCHEMA_TABLES = (
     "ctl.MddMacSamplingEra",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
+    "ctl.MddMacProductionResumeEvent",
     "ctl.MddMacMethodologyEvidence",
     "stg.MddMacSourceSnapshot",
     "stg.MddMacCallObservation",
@@ -338,6 +355,9 @@ RESET_CONTRACT_COLUMNS = (
     "ProviderQuotaCeiling",
     "CredentialExclusivityConfirmed",
     "ProviderResetBoundaryVerified",
+    "CalendarMonthResetModelEstablished",
+    "OperatorAssumptionApproved",
+    "SupportedResetTimezonesJson",
     "SourceEvidenceHash",
     "EvidenceJson",
     "ContractStatus",
@@ -3188,6 +3208,8 @@ class MssqlPersistence:
             ContractId, ContractKey, ProviderName, ResetModel, ResetTimezone,
             EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
             CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
+            CalendarMonthResetModelEstablished, OperatorAssumptionApproved,
+            SupportedResetTimezonesJson,
             SourceEvidenceHash, EvidenceJson, ContractStatus, RecordedAtUtc,
             RevokedAtUtc, RevocationReason
         """
@@ -4098,7 +4120,10 @@ class MssqlPersistence:
         effective_from = _optional_utc(contract.get("effective_from_utc"))
         source_hash = str(contract.get("source_evidence_hash") or "")
         evidence_json = str(contract.get("evidence_json") or "")
-        if not key or provider_name != "MDD NRW" or reset_model != "CALENDAR_MONTH_PROVIDER_TIMEZONE":
+        if not key or provider_name != "MDD NRW" or reset_model not in {
+            "CALENDAR_MONTH_PROVIDER_TIMEZONE",
+            "CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY",
+        }:
             raise MssqlSafetyError("reset contract is missing its immutable provider/reset model")
         if not timezone_name or effective_from is None or len(source_hash) != 64 or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
             raise MssqlSafetyError("reset contract is missing a valid timezone, effective boundary, or evidence hash")
@@ -4106,10 +4131,21 @@ class MssqlPersistence:
             raise MssqlSafetyError("reset contract activation delay is outside the approved range")
         if int(contract.get("provider_quota_ceiling", 0) or 0) != ABSOLUTE_PROVIDER_CEILING:
             raise MssqlSafetyError("reset contract does not preserve the approved provider ceiling")
-        if not bool(contract.get("credential_exclusivity_confirmed")) or not bool(
-            contract.get("provider_reset_boundary_verified")
-        ):
-            raise MssqlSafetyError("reset contract lacks exclusive-credential or reset-boundary verification")
+        exact = reset_model == "CALENDAR_MONTH_PROVIDER_TIMEZONE"
+        provider_verified = bool(contract.get("provider_reset_boundary_verified"))
+        model_established = bool(contract.get("calendar_month_reset_model_established"))
+        assumption_approved = bool(contract.get("operator_assumption_approved"))
+        if not bool(contract.get("credential_exclusivity_confirmed")) or not model_established:
+            raise MssqlSafetyError("reset contract lacks exclusive-credential or calendar-model approval")
+        if exact and (not provider_verified or assumption_approved):
+            raise MssqlSafetyError("exact reset contract lacks verified boundary evidence")
+        if not exact and (provider_verified or not assumption_approved):
+            raise MssqlSafetyError("bounded reset contract lacks explicit operator assumption approval")
+        supported_timezones_json = (
+            json.dumps(list(contract.get("supported_reset_timezones") or []), ensure_ascii=False, sort_keys=True)
+            if not exact
+            else None
+        )
         with self._connection() as connection:
             cursor = self._cursor(connection)
             try:
@@ -4119,7 +4155,9 @@ class MssqlPersistence:
                     SELECT TOP (1) ContractKey, ResetModel, ResetTimezone,
                            EffectiveFromUtc, ActivationDelaySeconds,
                            ProviderQuotaCeiling, CredentialExclusivityConfirmed,
-                           ProviderResetBoundaryVerified, SourceEvidenceHash,
+                           ProviderResetBoundaryVerified, CalendarMonthResetModelEstablished,
+                           OperatorAssumptionApproved, SupportedResetTimezonesJson,
+                           SourceEvidenceHash,
                            ContractStatus
                     FROM ctl.MddMacQuotaResetContract WITH (UPDLOCK, HOLDLOCK)
                     WHERE ContractKey = %s
@@ -4137,10 +4175,14 @@ class MssqlPersistence:
                         and int(_row_named(existing, "ProviderQuotaCeiling", index=5) or 0)
                         == ABSOLUTE_PROVIDER_CEILING
                         and bool(_row_named(existing, "CredentialExclusivityConfirmed", index=6))
-                        and bool(_row_named(existing, "ProviderResetBoundaryVerified", index=7))
-                        and str(_row_named(existing, "SourceEvidenceHash", index=8) or "") == source_hash
+                        and bool(_row_named(existing, "ProviderResetBoundaryVerified", index=7)) == provider_verified
+                        and bool(_row_named(existing, "CalendarMonthResetModelEstablished", index=8)) == model_established
+                        and bool(_row_named(existing, "OperatorAssumptionApproved", index=9)) == assumption_approved
+                        and str(_row_named(existing, "SupportedResetTimezonesJson", index=10) or "")
+                        == str(supported_timezones_json or "")
+                        and str(_row_named(existing, "SourceEvidenceHash", index=11) or "") == source_hash
                     )
-                    if same and str(_row_named(existing, "ContractStatus", index=9) or "") == "ACTIVE":
+                    if same and str(_row_named(existing, "ContractStatus", index=12) or "") == "ACTIVE":
                         cursor.execute("COMMIT TRANSACTION;")
                         connection.commit()
                         return {
@@ -4166,9 +4208,11 @@ class MssqlPersistence:
                         ContractKey, ProviderName, ResetModel, ResetTimezone,
                         EffectiveFromUtc, ActivationDelaySeconds, ProviderQuotaCeiling,
                         CredentialExclusivityConfirmed, ProviderResetBoundaryVerified,
-                        SourceEvidenceHash, EvidenceJson, ContractStatus
+                        CalendarMonthResetModelEstablished, OperatorAssumptionApproved,
+                        SupportedResetTimezonesJson, SourceEvidenceHash, EvidenceJson,
+                        ContractStatus
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
                     """,
                     (
                         key,
@@ -4179,7 +4223,10 @@ class MssqlPersistence:
                         int(contract["activation_delay_seconds"]),
                         ABSOLUTE_PROVIDER_CEILING,
                         1,
-                        1,
+                        int(provider_verified),
+                        int(model_established),
+                        int(assumption_approved),
+                        supported_timezones_json,
                         source_hash,
                         evidence_json,
                     ),
@@ -5294,6 +5341,7 @@ __all__ = [
     "TIERED50_RUNTIME_SCHEMA_TABLES",
     "TIERED50_TARGET_TABLE",
     "WINDOWS_RUNTIME_UNCONFIRMED",
+    "build_skipped_target_audit_merge_statement",
     "build_mssql_snapshot_rows",
     "connect_mssql",
 ]

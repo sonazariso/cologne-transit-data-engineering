@@ -50,6 +50,8 @@ def run(
     effective_from: datetime | None = None,
     approved_at: datetime | None = None,
     activation_delay_seconds: int = 1800,
+    supported_reset_timezones: list[str] | None = None,
+    approve_bounded_assumption: bool = False,
     apply: bool = False,
     approve: bool = False,
 ) -> dict[str, object]:
@@ -68,19 +70,21 @@ def run(
             "unresolved_dependency": evidence.get("unresolved_dependency"),
             "sql_writes_performed": 0,
         }
-    if not contract_key or not reset_timezone or effective_from is None or approved_at is None:
+    if not contract_key or effective_from is None or approved_at is None:
         return {
             "status": "BLOCKED",
-            "reason": "--contract-key, --timezone, --effective-from, and --approved-at are required for apply",
+            "reason": "--contract-key, --effective-from, and --approved-at are required for apply",
             "sql_writes_performed": 0,
         }
     contract = build_reset_contract(
         evidence=evidence,
         contract_key=contract_key,
-        reset_timezone=reset_timezone,
+        reset_timezone=reset_timezone or "",
         effective_from_utc=effective_from,
         approved_at_utc=approved_at,
         activation_delay_seconds=activation_delay_seconds,
+        supported_reset_timezones=supported_reset_timezones,
+        approve_bounded_assumption=approve_bounded_assumption,
     )
     persistence = MssqlPersistence(settings=MssqlConnectionSettings.from_environment())
     result = dict(persistence.register_quota_reset_contract(contract=contract))
@@ -89,6 +93,7 @@ def run(
         "reset_contract_status": "VERIFIED",
         "contract_key": contract_key,
         "reset_timezone": reset_timezone,
+        "supported_reset_timezones": supported_reset_timezones,
         "effective_from_utc": contract["effective_from_utc"],
         "activation_delay_seconds": activation_delay_seconds,
         "application": result,
@@ -102,11 +107,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence", type=Path, default=EVIDENCE)
     parser.add_argument("--contract-key")
     parser.add_argument("--timezone", dest="reset_timezone")
+    parser.add_argument(
+        "--supported-timezone",
+        dest="supported_reset_timezones",
+        action="append",
+        help="one explicitly bounded IANA timezone for the approved conservative policy",
+    )
     parser.add_argument("--effective-from")
     parser.add_argument("--approved-at")
     parser.add_argument("--activation-delay-seconds", type=int, default=1800)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--approve", action="store_true")
+    parser.add_argument("--approve-bounded-assumption", action="store_true")
     args = parser.parse_args(argv)
     try:
         result = run(
@@ -116,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             effective_from=_utc(args.effective_from, field="--effective-from") if args.effective_from else None,
             approved_at=_utc(args.approved_at, field="--approved-at") if args.approved_at else None,
             activation_delay_seconds=args.activation_delay_seconds,
+            supported_reset_timezones=args.supported_reset_timezones,
+            approve_bounded_assumption=args.approve_bounded_assumption,
             apply=args.apply,
             approve=args.approve,
         )

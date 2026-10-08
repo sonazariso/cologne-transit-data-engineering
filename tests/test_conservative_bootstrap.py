@@ -20,9 +20,11 @@ from cologne_transit_collector.conservative_bootstrap import (  # noqa: E402
 )
 from cologne_transit_collector.quota_rollover import (  # noqa: E402
     AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
+    CONSERVATIVE_ROLLOVER_MODE,
     QuotaRolloverError,
     build_automatic_rollover_period,
     build_reset_contract,
+    bounded_provider_period_for_instant,
     provider_period_for_instant,
 )
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
@@ -269,6 +271,64 @@ class AutomaticRolloverTests(unittest.TestCase):
         procedure = migration[migration.index("CREATE OR ALTER PROCEDURE ctl.uspEnsureMddMacQuotaPeriod") :]
         self.assertIn("UPDLOCK", procedure)
         self.assertIn("HOLDLOCK", procedure)
+
+    def test_bounded_calendar_month_policy_waits_for_latest_supported_timezone(self) -> None:
+        period = bounded_provider_period_for_instant(
+            datetime(2026, 11, 1, 9, 30, tzinfo=timezone.utc),
+            timezone_names=("America/Adak", "Europe/Berlin"),
+        )
+        self.assertEqual(period.month_key, "2026-11")
+        self.assertEqual(period.activation_not_before_utc, datetime(2026, 11, 1, 9, 30, tzinfo=timezone.utc))
+        contract = {
+            "ContractKey": "MDD-RESET-BOUNDED-1",
+            "ContractStatus": "ACTIVE",
+            "ResetModel": CONSERVATIVE_ROLLOVER_MODE,
+            "ResetTimezone": "BOUNDED_TIMEZONE_ENVELOPE",
+            "SupportedResetTimezones": ["America/Adak", "Europe/Berlin"],
+            "EffectiveFromUtc": datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+            "ActivationDelaySeconds": 1800,
+            "ProviderQuotaCeiling": 250000,
+            "CredentialExclusivityConfirmed": True,
+            "ProviderResetBoundaryVerified": False,
+            "CalendarMonthResetModelEstablished": True,
+            "OperatorAssumptionApproved": True,
+            "SourceEvidenceHash": "b" * 64,
+        }
+        rollover = build_automatic_rollover_period(
+            contract=contract,
+            at_utc=datetime(2026, 11, 1, 9, 30, tzinfo=timezone.utc),
+        )
+        self.assertFalse(rollover["provider_metadata_verified"])
+        self.assertTrue(rollover["bounded_timezone_uncertainty"])
+        self.assertEqual(rollover["provider_period_timezone"], "BOUNDED_TIMEZONE_ENVELOPE")
+
+    def test_bounded_policy_requires_explicit_operator_approval(self) -> None:
+        evidence = {
+            "reset_contract_status": "APPROVED_ASSUMPTION",
+            "provider_monthly_reset_model_established": True,
+            "credential_exclusivity_confirmed": True,
+            "source_evidence_hash": "c" * 64,
+        }
+        with self.assertRaises(QuotaRolloverError):
+            build_reset_contract(
+                evidence=evidence,
+                contract_key="MDD-RESET-BOUNDED-NOT-APPROVED",
+                reset_timezone="",
+                supported_reset_timezones=["America/Adak", "Europe/Berlin"],
+                effective_from_utc=datetime(2026, 10, 31, 10, 0, tzinfo=timezone.utc),
+                approved_at_utc=datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+            )
+        contract = build_reset_contract(
+            evidence=evidence,
+            contract_key="MDD-RESET-BOUNDED-APPROVED",
+            reset_timezone="",
+            supported_reset_timezones=["America/Adak", "Europe/Berlin"],
+            effective_from_utc=datetime(2026, 10, 31, 10, 0, tzinfo=timezone.utc),
+            approved_at_utc=datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc),
+            approve_bounded_assumption=True,
+        )
+        self.assertEqual(contract["reset_model"], CONSERVATIVE_ROLLOVER_MODE)
+        self.assertFalse(contract["provider_reset_boundary_verified"])
 
 
 if __name__ == "__main__":

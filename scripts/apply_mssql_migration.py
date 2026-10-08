@@ -34,6 +34,7 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddMacQuotaResetContract",
     "ctl.MddMacCurrentProductionEra",
     "ctl.MddMacProductionCutover",
+    "ctl.MddMacProductionResumeEvent",
     "stg.MddMacSourceSnapshot",
     "stg.MddMacTimingObservation",
     "stg.MddMacSituationEvidence",

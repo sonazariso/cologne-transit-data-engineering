@@ -31,13 +31,29 @@
     "status": "BLOCKED",
     "provider_monthly_reset_commitment_verified": false,
     "operator_approval_present": false,
-    "latest_defensible_boundary_policy": "NOT_ACTIVATED",
-    "reason": "The reviewed public sources expose a monthly quota and request history but do not establish that this credential resets on a calendar month or identify a supported provider timezone. A UTC-midnight rule or a synthetic timezone would therefore assume an unsupported billing contract.",
-    "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its supported timezone envelope and delay."
+    "latest_defensible_boundary_policy": "IMPLEMENTED_BUT_NOT_ACTIVATED",
+    "implementation": {
+      "mode": "CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY",
+      "supported_timezone_envelope": "operator-supplied finite IANA timezone set; no default is assumed",
+      "safe_boundary": "latest possible month-start across the approved envelope plus the configured delay",
+      "safe_period_end": "earliest possible next-month start across the approved envelope",
+      "dst_and_month_length": "calculated with zoneinfo for every candidate timezone",
+      "concurrency": "SQL contract lock plus MonthKey/reconciliation-key idempotency",
+      "automatic_stop_conditions": [
+        "prior-period pending permit",
+        "network attempt without durable permit",
+        "SQL unavailability",
+        "ambiguous or overlapping period bounds",
+        "operational or retry boundary reached"
+      ],
+      "required_one_time_approval": "operator must explicitly approve the calendar-month model and enumerate the supported timezone envelope"
+    },
+    "reason": "The reviewed public sources expose a monthly quota and request history but do not establish that this credential resets on a calendar month or identify a supported provider timezone. The bounded policy is implemented fail-closed, but neither its calendar-month model nor its supported timezone envelope has been approved.",
+    "required_one_time_evidence": "Provider-issued confirmation of the monthly-reset model, or explicit operator approval of a mathematically conservative latest-plausible-timezone policy with its finite supported timezone envelope and delay."
   },
   "runtime_behavior": {
     "october_bootstrap_hard_stop_utc": "2026-10-30T23:00:00Z",
-    "future_period_creation": "SQL procedure is called only after a verified administrator reset contract, its provider-timezone calendar boundary, and the conservative post-boundary delay are all satisfied.",
+    "future_period_creation": "SQL procedure is called only after a verified exact contract or an explicitly approved bounded calendar-month contract, its immutable evidence hash, conservative post-boundary delay, and all ledger stop conditions are satisfied.",
     "without_contract": "No zero-based future period is created and quota authorization remains unavailable after the applicable existing authorization expires.",
     "outstanding_permits": "Prior-period pending permits or untracked Tiered50 network attempts block rollover.",
     "idempotence": "The contract, MonthKey, period bounds, and evidence hash are locked and compared before any insert."

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -29,6 +29,12 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 )
 from cologne_transit_collector.domain import APPROVED_SUPER_CYCLE_COUNTS  # noqa: E402
 from cologne_transit_collector.runtime_configuration import EXPECTED_SQL_DATABASE  # noqa: E402
+from cologne_transit_collector.admin_evidence import (  # noqa: E402
+    EVIDENCE_ARTIFACT_VERSION,
+    REQUIRED_CHECK_IDS,
+    payload_sha256,
+    sign_payload,
+)
 
 
 LEGACY_LABEL = "com.cologne-transit-intelligence.mdd-collector"
@@ -125,6 +131,8 @@ def _statement_id(statement: str) -> str:
         return "collector_runtime_history_or_materialization"
     if "@@servername" in normalized or "suser_sname" in normalized:
         return "admin.identity"
+    if "databasepropertyex" in normalized:
+        return "admin.sql_runtime_health"
     return "admin.read_only_query"
 
 
@@ -244,6 +252,66 @@ def _query_evidence(cursor: _SafeAdminCursor, *, statement_id: str) -> dict[str,
     return {"status": "PASS", "statement_id": statement_id}
 
 
+def derive_current_status(
+    *,
+    scheduler: Mapping[str, Any],
+    plist: Mapping[str, Any],
+    materialization: Mapping[str, Any],
+    latest_cutover: Mapping[str, Any] | None,
+    latest_resume: Mapping[str, Any] | None,
+    latest_tiered_run: Mapping[str, Any] | None,
+    six_cycle: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Use current scheduler/SQL/activity state without erasing outage history."""
+
+    scheduler_active = (
+        scheduler.get("returncode") == 0
+        and bool(plist.get("exists"))
+        and not bool(plist.get("disabled"))
+        and not bool(plist.get("contains_secret_marker"))
+    )
+    sql_active = (
+        int(materialization.get("target_count", 0) or 0) == 43
+        and int(materialization.get("active_count", 0) or 0) == 43
+    )
+    historical_outage = (
+        None
+        if latest_cutover is None
+        else str(latest_cutover.get("status") or "") == "OUTAGE"
+    )
+    if not sql_active or not scheduler_active:
+        status = "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED"
+        stations = 0
+    elif isinstance(six_cycle, Mapping) and six_cycle.get("status") == "PASS":
+        status = "ACTIVE — SIX-BUCKET CYCLE VALIDATED"
+        stations = 50
+    else:
+        status = "ACTIVE — VALIDATION INCOMPLETE"
+        stations = int((latest_tiered_run or {}).get("successful_target_audits", 0) or 0)
+    return {
+        "status": status,
+        "tiered50_active": scheduler_active and sql_active,
+        "stations_actually_collecting": stations,
+        "scheduler_active": scheduler_active,
+        "sql_activation_valid": sql_active,
+        "resume_event_present": latest_resume is not None,
+        "historical_outage_preserved": historical_outage,
+        "historical_outage_evidence": (
+            "OUTAGE_RECORD_PRESENT"
+            if historical_outage is True
+            else "NO_OUTAGE_RECORD_FOUND"
+            if historical_outage is False
+            else "NOT_PROVEN_ADMIN_QUERY_UNAVAILABLE"
+        ),
+        "latest_run_status": (latest_tiered_run or {}).get("run_status"),
+        "current_evidence_basis": [
+            "fresh_launchd_state",
+            "immutable_sql_activation_state",
+            "latest_tiered50_collection_evidence",
+        ],
+    }
+
+
 class _UnavailableConnection:
     """Cursor-compatible placeholder used when the admin connection itself fails."""
 
@@ -339,6 +407,33 @@ def _plist_state(path: Path) -> dict[str, Any]:
         }
     except Exception as exc:
         return {"exists": True, "status": "UNREADABLE", "error_type": type(exc).__name__}
+
+
+def _load_external_admin_evidence(path: str | Path, *, now_utc: datetime) -> dict[str, Any]:
+    """Load and authenticate a Windows-side SQL evidence envelope."""
+
+    source = Path(path).expanduser().resolve()
+    try:
+        artifact = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("external administrative evidence is not readable JSON") from exc
+    if not isinstance(artifact, dict):
+        raise RuntimeError("external administrative evidence must be a JSON object")
+    try:
+        validation = validate_admin_evidence_artifact(
+            artifact,
+            now_utc=now_utc,
+            expected_database=EXPECTED_SQL_DATABASE,
+            public_key_path=os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"),
+        )
+    except AdminEvidenceError as exc:
+        raise RuntimeError(f"external administrative evidence is not authenticated: {exc}") from exc
+    if not isinstance(artifact.get("sql"), Mapping):
+        raise RuntimeError("external administrative evidence has no SQL payload")
+    return {
+        "artifact": artifact,
+        "validation": validation,
+    }
 
 
 def _safe_backup_verify(connection: Any, path: str) -> dict[str, Any]:
@@ -465,13 +560,22 @@ def _safe_backup_header(connection: Any, path: str) -> dict[str, Any]:
     return result
 
 
-def collect() -> dict[str, Any]:
+def collect(
+    *,
+    signing_key_path: str | Path | None = None,
+    admin_evidence_path: str | Path | None = None,
+) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc)
+    external_admin = (
+        _load_external_admin_evidence(admin_evidence_path, now_utc=generated_at)
+        if admin_evidence_path is not None
+        else None
+    )
     user_agent_dir = Path.home() / "Library" / "LaunchAgents"
     legacy_plist = user_agent_dir / f"{LEGACY_LABEL}.plist"
     tiered_plist = user_agent_dir / f"{TIERED_LABEL}.plist"
     evidence: dict[str, Any] = {
-        "artifact_version": "TIERED50_PRODUCTION_EVIDENCE_V2",
+        "artifact_version": EVIDENCE_ARTIFACT_VERSION,
         "capture_role": "CURRENT_READ_ONLY_ROLE_SEPARATED_CAPTURE",
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
         "mdd_requests_issued": 0,
@@ -653,6 +757,31 @@ def collect() -> dict[str, Any]:
                 "status": "NOT_PROVEN",
                 "reason": "effective SQL permission inspection failed",
             }
+        cursor.execute(
+            """
+            SELECT DB_NAME() AS database_name,
+                   DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status,
+                   DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model
+            """
+        )
+        runtime_health_evidence = _query_evidence(cursor, statement_id="admin.sql_runtime_health")
+        runtime_health_row = cursor.fetchone()
+        database_status = str(_row_value(runtime_health_row, "database_status", 1) or "")
+        recovery_model = str(_row_value(runtime_health_row, "recovery_model", 2) or "")
+        evidence["sql"]["runtime_health"] = {
+            "status": (
+                "PASS"
+                if runtime_health_evidence.get("status") == "PASS"
+                and runtime_health_row is not None
+                and database_status.casefold() == "online"
+                and bool(recovery_model)
+                else "NOT_PROVEN"
+            ),
+            "database_name": str(_row_value(runtime_health_row, "database_name", 0) or ""),
+            "database_status": database_status,
+            "recovery_model": recovery_model,
+            "evidence": runtime_health_evidence,
+        }
         same_as_runtime = bool(effective_login and runtime_login and effective_login.casefold() == runtime_login.casefold())
         evidence["sql"]["admin_identity_gate"] = {
             "status": "NOT_PROVEN" if identity_failure is not None or not effective_login else (
@@ -1174,8 +1303,119 @@ def collect() -> dict[str, Any]:
             else None
         )
         evidence["sql"]["latest_cutover_evidence"] = cutover_evidence
+        cursor.execute(
+            """
+            SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode,
+                   SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc,
+                   LaunchAgentLabel, RecordedAtUtc
+            FROM ctl.MddMacProductionResumeEvent
+            WHERE PanelVersion = 'TIERED50_PANEL_V1'
+            ORDER BY ResumeEventId DESC
+            """
+        )
+        resume_evidence = _query_evidence(cursor, statement_id="collector.tiered50_resume_history")
+        resume_rows = list(cursor.fetchall())
+        evidence["sql"]["tiered50_resume_history"] = [
+            {
+                "resume_event_id": int(_row_value(row, "ResumeEventId", 0) or 0),
+                "resume_key": str(_row_value(row, "ResumeKey", 1) or ""),
+                "panel_version": str(_row_value(row, "PanelVersion", 2) or ""),
+                "era_code": str(_row_value(row, "EraCode", 3) or ""),
+                "sampling_era_id": int(_row_value(row, "SamplingEraId", 4) or 0),
+                "original_activation_at_utc": _row_value(row, "OriginalActivationAtUtc", 5),
+                "resume_at_utc": _row_value(row, "ResumeAtUtc", 6),
+                "launchagent_label": str(_row_value(row, "LaunchAgentLabel", 7) or ""),
+                "recorded_at_utc": _row_value(row, "RecordedAtUtc", 8),
+            }
+            for row in resume_rows
+        ]
+        evidence["sql"]["tiered50_resume_history_evidence"] = resume_evidence
+        evidence["sql"]["latest_tiered50_resume"] = (
+            evidence["sql"]["tiered50_resume_history"][0]
+            if evidence["sql"]["tiered50_resume_history"]
+            else None
+        )
+        cursor.execute(
+            """
+            SELECT TOP (1) RunId, LogicalDueBucket, StartedAtUtc,
+                   CompletedAtUtc, Status, SummaryJson
+            FROM ctl.MddMacCollectorRun
+            WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+            ORDER BY MacCollectorRunId DESC
+            """
+        )
+        latest_run_evidence = _query_evidence(cursor, statement_id="collector.tiered50_latest_run")
+        latest_run = cursor.fetchone()
+        latest_summary: dict[str, Any] = {}
+        if latest_run:
+            try:
+                decoded = json.loads(str(_row_value(latest_run, "SummaryJson", 5) or "{}"))
+                if isinstance(decoded, dict):
+                    latest_summary = decoded
+            except (TypeError, ValueError, json.JSONDecodeError):
+                latest_summary = {}
+            cursor.execute(
+                """
+                SELECT COUNT_BIG(*) AS target_audits,
+                       SUM(CASE WHEN Status = 'SUCCEEDED' THEN 1 ELSE 0 END) AS succeeded,
+                       SUM(CASE WHEN Status = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped,
+                       SUM(CASE WHEN Status = 'FAILED' THEN 1 ELSE 0 END) AS failed
+                FROM ctl.MddMacTargetAudit
+                WHERE RunId = %s
+                """,
+                (_row_value(latest_run, "RunId", 0),),
+            )
+            latest_audit_evidence = _query_evidence(cursor, statement_id="collector.tiered50_latest_run_audits")
+            latest_audit = cursor.fetchone()
+        else:
+            latest_audit_evidence = {"status": "NOT_PROVEN", "reason": "no Tiered50 run exists"}
+            latest_audit = None
+        evidence["sql"]["latest_tiered50_run"] = {
+            "run_id": str(_row_value(latest_run, "RunId", 0) or "") if latest_run else None,
+            "logical_due_bucket": int(_row_value(latest_run, "LogicalDueBucket", 1) or 0) if latest_run else None,
+            "started_at_utc": _row_value(latest_run, "StartedAtUtc", 2) if latest_run else None,
+            "completed_at_utc": _row_value(latest_run, "CompletedAtUtc", 3) if latest_run else None,
+            "run_status": str(_row_value(latest_run, "Status", 4) or "") if latest_run else None,
+            "target_audits": int(_row_value(latest_audit, "target_audits", 0) or 0) if latest_audit else None,
+            "successful_target_audits": int(_row_value(latest_audit, "succeeded", 1) or 0) if latest_audit else None,
+            "skipped_target_audits": int(_row_value(latest_audit, "skipped", 2) or 0) if latest_audit else None,
+            "failed_target_audits": int(_row_value(latest_audit, "failed", 3) or 0) if latest_audit else None,
+            "query_evidence": {
+                "run": latest_run_evidence,
+                "audits": latest_audit_evidence,
+            },
+            "coverage": latest_summary.get("coverage"),
+        }
     finally:
         connection.close()
+    external_provenance: Mapping[str, Any] | None = None
+    if external_admin is not None:
+        local_sql = evidence["sql"]
+        external_artifact = external_admin["artifact"]
+        external_sql = dict(external_artifact.get("sql") or {})
+        runtime_fields = {
+            "runtime_role_source",
+            "runtime_connection",
+            "runtime_login",
+            "runtime_schema",
+            "tiered50_schema",
+            "quota_usage",
+        }
+        merged_sql = dict(external_sql)
+        for field in runtime_fields:
+            if field in local_sql:
+                merged_sql[field] = local_sql[field]
+        merged_sql["admin_role_source"] = "SIGNED_EXTERNAL_ADMIN_EVIDENCE"
+        merged_sql["privileged_query_failures"] = []
+        merged_sql["permission_error_297"] = []
+        evidence["sql"] = merged_sql
+        external_provenance = external_artifact.get("capture_provenance")
+        evidence["external_admin_evidence"] = {
+            "artifact_version": external_artifact.get("artifact_version"),
+            "payload_sha256": (external_artifact.get("artifact_integrity") or {}).get("payload_sha256"),
+            "signature_verified": bool(external_admin["validation"].get("signature_verified")),
+            "source_path": str(Path(admin_evidence_path).expanduser().resolve()),
+        }
     privileged_failures = evidence["sql"]["privileged_query_failures"]
     evidence["sql"]["permission_error_297"] = [
         failure for failure in privileged_failures if failure.get("error_code") == 297
@@ -1242,6 +1482,7 @@ def collect() -> dict[str, Any]:
     identity_gate = evidence["sql"].get("admin_identity_gate") or {}
     permissions = evidence["sql"].get("admin_permissions") or {}
     required_query_statuses = (
+        evidence["sql"].get("runtime_health", {}).get("status"),
         evidence["sql"].get("volume_capacity_evidence", {}).get("status"),
         evidence["sql"].get("log_space_evidence", {}).get("status"),
         evidence["sql"].get("latest_full_backup_evidence", {}).get("status"),
@@ -1259,11 +1500,12 @@ def collect() -> dict[str, Any]:
     evidence["sql"]["admin_authorization"] = {
         "status": "PASS" if admin_authorized else "NOT_PROVEN",
         "required_query_statuses": {
-            "volume_capacity": required_query_statuses[0],
-            "log_space": required_query_statuses[1],
-            "latest_full_backup_history": required_query_statuses[2],
-            "operational_history": required_query_statuses[3],
-            "tiered50_audit_history": required_query_statuses[4],
+            "runtime_health": required_query_statuses[0],
+            "volume_capacity": required_query_statuses[1],
+            "log_space": required_query_statuses[2],
+            "latest_full_backup_history": required_query_statuses[3],
+            "operational_history": required_query_statuses[4],
+            "tiered50_audit_history": required_query_statuses[5],
         },
         "reason": None
         if admin_authorized
@@ -1275,24 +1517,123 @@ def collect() -> dict[str, Any]:
         admin_connection["status"] = "PASS" if admin_authorized else "NOT_PROVEN"
         if not admin_authorized:
             admin_connection.setdefault("blocker_code", MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS)
-    latest_cutover = evidence["sql"].get("latest_cutover_record") or {}
-    latest_cutover_status = str(latest_cutover.get("status") or "") if isinstance(latest_cutover, dict) else ""
-    tiered_plist = evidence["host"].get("tiered50_plist", {})
-    evidence["status"] = (
-        "BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED"
-        if latest_cutover_status == "OUTAGE"
-        or evidence["sql"].get("admin_authorization", {}).get("status") != "PASS"
-        or evidence["sql"]["tiered50_materialization"].get("active_count") in {None, 0}
-        or bool(isinstance(tiered_plist, dict) and tiered_plist.get("disabled"))
-        else "ACTIVE — VALIDATION INCOMPLETE"
+
+    identity = evidence["sql"].get("identity") or {}
+    identity_database = str(identity.get("database_name") or "") if isinstance(identity, dict) else ""
+    identity_login = str(identity.get("login_name") or "") if isinstance(identity, dict) else ""
+    identity_server = str(identity.get("server_name") or "") if isinstance(identity, dict) else ""
+    identity_captured_at = identity.get("captured_at_utc") if isinstance(identity, dict) else None
+    provenance_ok = bool(
+        evidence["sql"].get("admin_authorization", {}).get("status") == "PASS"
+        and identity.get("status") == "PASS"
+        and identity_database == EXPECTED_SQL_DATABASE
+        and identity_login
+        and identity_server
+        and identity_captured_at
     )
+    existing_quota_integrity = evidence["sql"].get("quota_integrity")
+    if isinstance(existing_quota_integrity, Mapping) and existing_quota_integrity.get("status") == "PASS":
+        evidence["sql"]["quota_integrity"] = {
+            **dict(existing_quota_integrity),
+            "evidence_role": "SIGNED_ADMIN_EVIDENCE",
+        }
+    else:
+        evidence["sql"]["quota_integrity"] = {
+            **(
+                dict(evidence["sql"].get("quota_usage") or {})
+                if isinstance(evidence["sql"].get("quota_usage"), dict)
+                else {}
+            ),
+            "status": "PASS"
+            if isinstance(evidence["sql"].get("quota_usage"), dict)
+            and bool(evidence["sql"]["quota_usage"].get("state_available"))
+            and int(evidence["sql"]["quota_usage"].get("reserved_shared_usage", 0) or 0) == 0
+            else "NOT_PROVEN",
+            "evidence_role": "SQL_LEDGER_REFRESH",
+        }
+    evidence["capture_provenance"] = {
+        "status": "PASS" if provenance_ok else "NOT_PROVEN",
+        "read_only": True,
+        "execution_path": (
+            str(external_provenance.get("execution_path"))
+            if provenance_ok and isinstance(external_provenance, Mapping)
+            else "SEPARATE_SQL_LOGIN"
+            if provenance_ok
+            else "NOT_PROVEN"
+        ),
+        "server_name": identity_server,
+        "database_name": identity_database,
+        "effective_login": identity_login,
+        "captured_at_utc": identity_captured_at or evidence["generated_at_utc"],
+        "required_check_ids": sorted(REQUIRED_CHECK_IDS),
+        "authentication_source": (
+            external_provenance.get("authentication_source")
+            if isinstance(external_provenance, Mapping)
+            else sql_evidence.get("admin_role_source")
+        ),
+        "windows_integrated_auth_supported": True,
+    }
+    if signing_key_path is not None:
+        evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=signing_key_path)
+    else:
+        evidence["artifact_integrity"] = {
+            "status": "UNSIGNED",
+            "payload_sha256": payload_sha256(evidence),
+            "reason": "operator-controlled signing key was not supplied",
+        }
+    latest_cutover_evidence = evidence["sql"].get("latest_cutover_evidence") or {}
+    latest_cutover = evidence["sql"].get("latest_cutover_record")
+    if not isinstance(latest_cutover_evidence, Mapping) or latest_cutover_evidence.get("status") != "PASS":
+        latest_cutover = None
+    elif not isinstance(latest_cutover, Mapping):
+        latest_cutover = {}
+    tiered_plist = evidence["host"].get("tiered50_plist", {})
+    current_status = derive_current_status(
+        scheduler=evidence["host"].get("tiered50_launchd", {}),
+        plist=tiered_plist if isinstance(tiered_plist, dict) else {},
+        materialization=evidence["sql"].get("tiered50_materialization", {}),
+        latest_cutover=latest_cutover if isinstance(latest_cutover, dict) else None,
+        latest_resume=evidence["sql"].get("latest_tiered50_resume"),
+        latest_tiered_run=evidence["sql"].get("latest_tiered50_run"),
+        six_cycle=evidence["sql"].get("tiered50_six_bucket_cycle"),
+    )
+    evidence["current_status"] = current_status
+    evidence["status"] = current_status["status"]
     return evidence
 
 
 def main(argv: list[str] | None = None) -> int:
-    output = Path(argv[0]).expanduser() if argv else ROOT / "docs" / "operational" / "tiered50-production-evidence.json"
+    output = (
+        Path(argv[0]).expanduser()
+        if argv
+        else ROOT / "docs" / "operational" / "tiered50-production-evidence-current-20261008.json"
+    )
+    signing_key: Path | None = None
+    admin_evidence: Path | None = None
+    if argv:
+        # Keep the historical positional output contract while allowing a
+        # secure, operator-supplied signing key path for the V3 envelope.
+        remaining: list[str] = []
+        index = 0
+        while index < len(argv):
+            item = argv[index]
+            if item == "--signing-key" and index + 1 < len(argv):
+                signing_key = Path(argv[index + 1]).expanduser().resolve()
+                index += 2
+                continue
+            if item == "--admin-evidence" and index + 1 < len(argv):
+                admin_evidence = Path(argv[index + 1]).expanduser().resolve()
+                index += 2
+                continue
+            remaining.append(item)
+            index += 1
+        output = (
+            Path(remaining[0]).expanduser()
+            if remaining
+            else ROOT / "docs" / "operational" / "tiered50-production-evidence-current-20261008.json"
+        )
     try:
-        evidence = collect()
+        evidence = collect(signing_key_path=signing_key, admin_evidence_path=admin_evidence)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         print(json.dumps({"status": "PASS", "output": str(output), "mdd_requests_issued": 0}, sort_keys=True))

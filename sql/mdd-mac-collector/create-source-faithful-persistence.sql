@@ -620,6 +620,11 @@ BEGIN
         ProviderQuotaCeiling INT NOT NULL,
         CredentialExclusivityConfirmed BIT NOT NULL,
         ProviderResetBoundaryVerified BIT NOT NULL,
+        CalendarMonthResetModelEstablished BIT NOT NULL
+            CONSTRAINT DF_ctl_MddMacQuotaResetContract_CalendarMonthResetModelEstablished DEFAULT (0),
+        OperatorAssumptionApproved BIT NOT NULL
+            CONSTRAINT DF_ctl_MddMacQuotaResetContract_OperatorAssumptionApproved DEFAULT (0),
+        SupportedResetTimezonesJson NVARCHAR(2000) NULL,
         SourceEvidenceHash CHAR(64) NOT NULL,
         EvidenceJson NVARCHAR(MAX) NOT NULL,
         ContractStatus VARCHAR(20) NOT NULL,
@@ -631,13 +636,29 @@ BEGIN
         CONSTRAINT CK_ctl_MddMacQuotaResetContract_Contract CHECK
         (
             ProviderName = 'MDD NRW'
-            AND ResetModel = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+            AND ResetModel IN ('CALENDAR_MONTH_PROVIDER_TIMEZONE', 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY')
             AND LEN(ResetTimezone) > 0
             AND EffectiveFromUtc IS NOT NULL
             AND ActivationDelaySeconds BETWEEN 0 AND 86400
             AND ProviderQuotaCeiling = 250000
             AND CredentialExclusivityConfirmed = 1
-            AND ProviderResetBoundaryVerified = 1
+            AND
+            (
+                (
+                    ResetModel = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+                    AND ProviderResetBoundaryVerified = 1
+                    AND CalendarMonthResetModelEstablished = 1
+                    AND OperatorAssumptionApproved = 0
+                )
+                OR
+                (
+                    ResetModel = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
+                    AND ProviderResetBoundaryVerified = 0
+                    AND CalendarMonthResetModelEstablished = 1
+                    AND OperatorAssumptionApproved = 1
+                    AND SupportedResetTimezonesJson IS NOT NULL
+                )
+            )
             AND LEN(SourceEvidenceHash) = 64
         ),
         CONSTRAINT CK_ctl_MddMacQuotaResetContract_Status CHECK
@@ -696,6 +717,63 @@ IF COL_LENGTH(N'ctl.MddMacSharedQuotaAccounting', N'ProviderPeriodEndUtc') IS NU
     ALTER TABLE ctl.MddMacSharedQuotaAccounting ADD ProviderPeriodEndUtc DATETIME2(7) NULL;
 GO
 
+IF COL_LENGTH(N'ctl.MddMacQuotaResetContract', N'CalendarMonthResetModelEstablished') IS NULL
+    ALTER TABLE ctl.MddMacQuotaResetContract
+        ADD CalendarMonthResetModelEstablished BIT NOT NULL
+            CONSTRAINT DF_ctl_MddMacQuotaResetContract_CalendarMonthResetModelEstablished_Legacy DEFAULT (0);
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaResetContract', N'OperatorAssumptionApproved') IS NULL
+    ALTER TABLE ctl.MddMacQuotaResetContract
+        ADD OperatorAssumptionApproved BIT NOT NULL
+            CONSTRAINT DF_ctl_MddMacQuotaResetContract_OperatorAssumptionApproved_Legacy DEFAULT (0);
+GO
+
+IF COL_LENGTH(N'ctl.MddMacQuotaResetContract', N'SupportedResetTimezonesJson') IS NULL
+    ALTER TABLE ctl.MddMacQuotaResetContract ADD SupportedResetTimezonesJson NVARCHAR(2000) NULL;
+GO
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacQuotaResetContract')
+      AND name = N'CK_ctl_MddMacQuotaResetContract_Contract'
+)
+    ALTER TABLE ctl.MddMacQuotaResetContract
+        DROP CONSTRAINT CK_ctl_MddMacQuotaResetContract_Contract;
+GO
+
+ALTER TABLE ctl.MddMacQuotaResetContract
+    ADD CONSTRAINT CK_ctl_MddMacQuotaResetContract_Contract
+        CHECK
+        (
+            ProviderName = 'MDD NRW'
+            AND ResetModel IN ('CALENDAR_MONTH_PROVIDER_TIMEZONE', 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY')
+            AND LEN(ResetTimezone) > 0
+            AND EffectiveFromUtc IS NOT NULL
+            AND ActivationDelaySeconds BETWEEN 0 AND 86400
+            AND ProviderQuotaCeiling = 250000
+            AND CredentialExclusivityConfirmed = 1
+            AND CalendarMonthResetModelEstablished = 1
+            AND LEN(SourceEvidenceHash) = 64
+            AND
+            (
+                (
+                    ResetModel = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+                    AND ProviderResetBoundaryVerified = 1
+                    AND OperatorAssumptionApproved = 0
+                )
+                OR
+                (
+                    ResetModel = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
+                    AND ProviderResetBoundaryVerified = 0
+                    AND OperatorAssumptionApproved = 1
+                    AND SupportedResetTimezonesJson IS NOT NULL
+                )
+            )
+        );
+GO
+
 /*
     The procedure is the only runtime write path for automatic rollover.  It
     locks the administrator contract, the period/accounting key, and all
@@ -728,7 +806,10 @@ BEGIN
     DECLARE @provider_quota_ceiling INT;
     DECLARE @credential_exclusivity_confirmed BIT;
     DECLARE @provider_reset_boundary_verified BIT;
+    DECLARE @calendar_month_reset_model_established BIT;
+    DECLARE @operator_assumption_approved BIT;
     DECLARE @contract_source_hash CHAR(64);
+    DECLARE @accounting_model VARCHAR(40);
 
     SELECT TOP (1)
         @contract_id = ContractId,
@@ -739,6 +820,8 @@ BEGIN
         @provider_quota_ceiling = ProviderQuotaCeiling,
         @credential_exclusivity_confirmed = CredentialExclusivityConfirmed,
         @provider_reset_boundary_verified = ProviderResetBoundaryVerified,
+        @calendar_month_reset_model_established = CalendarMonthResetModelEstablished,
+        @operator_assumption_approved = OperatorAssumptionApproved,
         @contract_source_hash = SourceEvidenceHash
     FROM ctl.MddMacQuotaResetContract WITH (UPDLOCK, HOLDLOCK)
     WHERE ContractKey = @ContractKey
@@ -746,14 +829,25 @@ BEGIN
 
     IF @contract_id IS NULL
         THROW 51000, 'no active verified MDD quota reset contract exists', 1;
-    IF @reset_model <> 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
-        THROW 51000, 'MDD quota reset contract model is not calendar-month/provider-timezone', 1;
-    IF @credential_exclusivity_confirmed <> 1 OR @provider_reset_boundary_verified <> 1
-        THROW 51000, 'MDD quota reset contract is not verified for exclusive provider scope', 1;
+    IF @reset_model NOT IN ('CALENDAR_MONTH_PROVIDER_TIMEZONE', 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY')
+        THROW 51000, 'MDD quota reset contract model is not an approved calendar-month policy', 1;
+    IF @credential_exclusivity_confirmed <> 1 OR @calendar_month_reset_model_established <> 1
+        THROW 51000, 'MDD quota reset contract is not approved for exclusive calendar-month operation', 1;
+    IF @reset_model = 'CALENDAR_MONTH_PROVIDER_TIMEZONE'
+       AND (@provider_reset_boundary_verified <> 1 OR @operator_assumption_approved <> 0)
+        THROW 51000, 'exact MDD quota reset contract is not verified', 1;
+    IF @reset_model = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
+       AND (@provider_reset_boundary_verified <> 0 OR @operator_assumption_approved <> 1)
+        THROW 51000, 'bounded MDD quota reset policy lacks explicit operator approval', 1;
     IF @provider_quota_ceiling <> 250000 OR @SourceEvidenceHash <> @contract_source_hash
         THROW 51000, 'MDD quota reset contract evidence hash or ceiling does not match', 1;
     IF @ProviderPeriodTimezone <> @reset_timezone
         THROW 51000, 'MDD quota reset timezone does not match the registered contract', 1;
+    SET @accounting_model = CASE
+        WHEN @reset_model = 'CALENDAR_MONTH_BOUNDED_TIMEZONE_UNCERTAINTY'
+            THEN 'AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED'
+        ELSE 'AUTOMATIC_MONTHLY_ROLLOVER'
+    END;
     IF @ProviderPeriodStartUtc >= @ProviderPeriodEndUtc
         THROW 51000, 'MDD quota period interval is invalid', 1;
     IF @ProviderPeriodStartUtc < @effective_from_utc
@@ -782,7 +876,8 @@ BEGIN
     IF @existing_status IS NOT NULL
     BEGIN
         IF @existing_status = 'COMPLETE'
-           AND @existing_model = 'AUTOMATIC_MONTHLY_ROLLOVER'
+           AND @existing_model IN
+               ('AUTOMATIC_MONTHLY_ROLLOVER', 'AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED')
            AND @existing_reconciliation_key = @ReconciliationKey
            AND @existing_start = @ProviderPeriodStartUtc
            AND @existing_end = @ProviderPeriodEndUtc
@@ -830,8 +925,8 @@ BEGIN
     (
         @MonthKey, 250000, 210000, 207500, 0, 0, 0, 'COMPLETE', 1,
         @ProviderPeriodStartUtc, @LocalUsageIncludedThroughUtc,
-        N'Automatic verified MDD provider-reset rollover; no provider requests are inferred before this period',
-        'AUTOMATIC_MONTHLY_ROLLOVER', @ProviderPeriodStartUtc,
+        N'Automatic approved MDD calendar-month rollover; no provider requests are inferred before this period',
+        @accounting_model, @ProviderPeriodStartUtc,
         @ProviderPeriodEndUtc, @SourceEvidenceHash, @ReconciliationKey,
         @ProviderPeriodTimezone, @ProviderPeriodStartUtc, @ProviderPeriodEndUtc
     );
@@ -907,7 +1002,11 @@ IF EXISTS
     SELECT 1 FROM sys.check_constraints
     WHERE parent_object_id = OBJECT_ID(N'ctl.MddMacSharedQuotaAccounting')
       AND name = N'CK_ctl_MddMacSharedQuotaAccounting_CompleteEvidence'
-      AND definition NOT LIKE '%AUTOMATIC_MONTHLY_ROLLOVER%'
+      AND
+      (
+          definition NOT LIKE '%AUTOMATIC_MONTHLY_ROLLOVER%'
+          OR definition NOT LIKE '%AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED%'
+      )
 )
     ALTER TABLE ctl.MddMacSharedQuotaAccounting
         DROP CONSTRAINT CK_ctl_MddMacSharedQuotaAccounting_CompleteEvidence;
@@ -932,7 +1031,8 @@ IF NOT EXISTS
                         'EXCLUSIVE_CREDENTIAL',
                         'CENTRAL_AUTHORIZATION',
                         'REFRESHED_PROVIDER_ACCOUNTING',
-                        'AUTOMATIC_MONTHLY_ROLLOVER'
+                        'AUTOMATIC_MONTHLY_ROLLOVER',
+                        'AUTOMATIC_MONTHLY_ROLLOVER_BOUNDED'
                     )
                     AND ProviderMeasurementCutoffUtc IS NOT NULL
                     AND StaleAfterUtc IS NOT NULL
@@ -1086,6 +1186,38 @@ BEGIN
         EvidenceJson NVARCHAR(MAX) NULL,
         CONSTRAINT CK_ctl_MddMacProductionCutover_Status
             CHECK (Tiered50ActivationStatus IN ('BLOCKED', 'ACTIVATED', 'OUTAGE'))
+    );
+END;
+GO
+
+/*
+    A resume is a lifecycle event, not a second cutover.  This append-only
+    table records the actual successful enablement of the already activated
+    Tiered50 panel without rewriting the original activation, outage, target,
+    or sampling-era rows.  ResumeKey is the operator/request idempotency key;
+    repeated attempts with the same key return the existing event.
+*/
+
+IF OBJECT_ID(N'ctl.MddMacProductionResumeEvent', N'U') IS NULL
+BEGIN
+    CREATE TABLE ctl.MddMacProductionResumeEvent
+    (
+        ResumeEventId BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ctl_MddMacProductionResumeEvent PRIMARY KEY CLUSTERED,
+        ResumeKey NVARCHAR(240) NOT NULL
+            CONSTRAINT UQ_ctl_MddMacProductionResumeEvent_Key UNIQUE,
+        PanelVersion NVARCHAR(100) NOT NULL,
+        EraCode VARCHAR(40) NOT NULL,
+        SamplingEraId BIGINT NOT NULL,
+        OriginalActivationAtUtc DATETIME2(7) NOT NULL,
+        ResumeAtUtc DATETIME2(7) NOT NULL,
+        LaunchAgentLabel VARCHAR(160) NOT NULL,
+        EvidenceJson NVARCHAR(MAX) NOT NULL,
+        RecordedAtUtc DATETIME2(7) NOT NULL
+            CONSTRAINT DF_ctl_MddMacProductionResumeEvent_RecordedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT CK_ctl_MddMacProductionResumeEvent_Status CHECK (LEN(ResumeKey) > 0),
+        CONSTRAINT FK_ctl_MddMacProductionResumeEvent_Era
+            FOREIGN KEY (SamplingEraId) REFERENCES ctl.MddMacSamplingEra (SamplingEraId)
     );
 END;
 GO

@@ -20,6 +20,30 @@ Heumarkt request was issued.
 
 ## Latest correction and gate reconciliation — 2026-10-08
 
+## Safe resume and evidence gates
+
+The already committed Tiered50 activation now has a separate, explicit resume
+path. `scripts/resume_tiered50_production.py --apply` validates the immutable
+43-row target set, original activation boundary, real sampling era, current-era
+pointer, activation and outage history, competing writers, current quota
+headroom, fresh signed administrative evidence, and the installed versioned
+bundle before enabling the stopped LaunchAgent. It never accepts a new
+effective timestamp, creates a second sampling era, rewrites targets or
+cutover history, replays requests, or mutates Legacy7. The append-only
+`ctl.MddMacProductionResumeEvent` row records the actual SQL UTC resume time
+and the explicit idempotency key; a repeated key is idempotent, while a
+partial enablement is disabled and unloaded again.
+
+The current review did not execute resume. The fresh artifact below is a V3
+sanitized capture, but it is unsigned and its administrative identity,
+permissions, backup, capacity, quota, and SQL-history checks are
+`NOT_PROVEN` because no separately configured `MSSQL_ADMIN_*` identity was
+available. The controlled Windows Authentication capture and detached signer
+are available for the one-time operator evidence setup. The exact live SQL
+skip-audit transaction is also not claimed: its validator returns `NOT_RUN`
+until an administrator runs the rollback-only `--live` path. The detailed
+operator sequence is in the [Tiered50 resume runbook](tiered50-resume-runbook.md).
+
 The source correction pass preserves the historical first-heartbeat record and
 does not change `TIERED50_PANEL_V1`, target identities, quota permits, October
 bootstrap authorization, Legacy7 retirement, or Power BI. It now accounts for
@@ -76,15 +100,17 @@ requests and performed no SQL writes.
 The fresh read-only evidence capture at
 [`tiered50-production-evidence-current-20261008.json`](tiered50-production-evidence-current-20261008.json)
 identified the exact SQL failures instead of aborting at the first exception.
-The current capture at `2026-10-08T15:22:22.531041Z` records separate
+The current capture at `2026-10-08T16:19:23.717760Z` records separate
 connection, identity, permission, DMV, backup, and operational-history states
 without converting denied reads into zeros. It used the installed runtime
 login `CologneTransitCollector` for least-privilege evidence and reports
 `admin_role_source=MSSQL_ADMIN_*_REQUIRED`. No separately configured
 `MSSQL_ADMIN_*` identity was available, so the precise blocker is
 `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`; no privileged query was falsely
-marked PASS. `log_space` is `null`, capacity and backup are `NOT_PROVEN`, and
-the administrative identity/permission gate is `NOT_PROVEN`. The earlier
+marked PASS. The artifact is intentionally unsigned until the operator
+captures and signs the separate administrative evidence. `log_space` is
+`null`, capacity and backup are `NOT_PROVEN`, and the administrative
+identity/permission gate is `NOT_PROVEN`. The earlier
 capture's sanitized observations of errors 297, 229, and 3013 remain
 historical unresolved findings; they were not reclassified as corruption or
 missing permission without a correctly authorized rerun. No SQL writes or MDD

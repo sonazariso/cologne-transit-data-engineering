@@ -172,12 +172,14 @@ def validate_quota_rollover_contract() -> dict[str, Any]:
     document = json.loads(QUOTA_RESET_CONTRACT.read_text(encoding="utf-8"))
     if document.get("provider") != "MDD NRW" or document.get("monthly_quota_ceiling") != ABSOLUTE_PROVIDER_CEILING:
         raise ValueError("quota reset contract artifact has the wrong provider or ceiling")
-    if document.get("reset_contract_status") not in {"UNVERIFIED", "VERIFIED"}:
+    if document.get("reset_contract_status") not in {"UNVERIFIED", "VERIFIED", "APPROVED_ASSUMPTION"}:
         raise ValueError("quota reset contract status is not explicit")
-    if document.get("provider_reset_boundary_verified") is not (
-        document.get("reset_contract_status") == "VERIFIED"
-    ):
+    if document.get("provider_reset_boundary_verified") is not (document.get("reset_contract_status") == "VERIFIED"):
         raise ValueError("quota reset contract verification flags are inconsistent")
+    if document.get("reset_contract_status") == "APPROVED_ASSUMPTION" and document.get(
+        "provider_monthly_reset_model_established"
+    ) is not True:
+        raise ValueError("approved bounded rollover requires an explicitly established calendar-month model")
     if not document.get("automatic_rollover_implementation"):
         raise ValueError("automatic rollover implementation status is missing")
     return {
