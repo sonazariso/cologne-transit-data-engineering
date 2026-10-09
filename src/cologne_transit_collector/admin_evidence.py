@@ -30,6 +30,12 @@ ADMIN_EVIDENCE_MAX_AGE = timedelta(minutes=30)
 ADMIN_EVIDENCE_CLOCK_SKEW = timedelta(seconds=5)
 CURRENT_EVIDENCE_FILENAME = "tiered50-production-evidence-current.json"
 CURRENT_EVIDENCE_PATH_ENV = "MSSQL_ADMIN_EVIDENCE_PATH"
+WINDOWS_ENCRYPTION_MODES = frozenset({"Mandatory", "Optional", "Strict"})
+WINDOWS_TLS_VALIDATION_METHOD = (
+    "INVOKE_SQLCMD_TRUST_SERVER_CERTIFICATE_FALSE_AND_DM_EXEC_CONNECTIONS_ENCRYPT_OPTION_TRUE"
+)
+WINDOWS_MIN_FREE_PERCENT = 5.0
+WINDOWS_MIN_FREE_RESERVE_BYTES = 1024 * 1024 * 1024
 _APPROVED_EXTERNAL_EVIDENCE_ROOT = Path.home() / "Library" / "Application Support" / "CologneTransitIntelligence"
 _APPROVED_OPERATOR_EVIDENCE_ROOT = Path("/operator-secure")
 REQUIRED_CHECK_IDS = frozenset(
@@ -372,6 +378,101 @@ def _parse_utc(value: Any, *, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def validate_windows_tls_evidence(tls: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Require live encrypted transport and a non-bypassed certificate check.
+
+    ``-Encrypt`` and ``-TrustServerCertificate`` are client requests, not
+    observations.  The Windows capture therefore also records the SQL Server
+    session's ``sys.dm_exec_connections.encrypt_option`` result.  The
+    certificate-validation method is intentionally a fixed contract so a
+    configured flag cannot be relabeled as authenticated TLS on its own.
+    """
+
+    if not isinstance(tls, Mapping):
+        raise AdminEvidenceError("Windows administrative evidence is missing TLS transport evidence")
+    mode = str(tls.get("encryption_mode") or "")
+    if mode not in WINDOWS_ENCRYPTION_MODES:
+        raise AdminEvidenceError("Windows administrative evidence uses an unsupported encryption mode")
+    if tls.get("trust_server_certificate") is not False:
+        raise AdminEvidenceError("Windows administrative evidence must disable Trust Server Certificate")
+    if tls.get("certificate_validation_required") is not True:
+        raise AdminEvidenceError("Windows administrative evidence does not require certificate validation")
+    actual_encryption = str(tls.get("actual_encryption") or "").strip().upper()
+    if actual_encryption not in {"TRUE", "YES", "1"}:
+        raise AdminEvidenceError("Windows administrative evidence does not prove encrypted SQL transport")
+    if str(tls.get("actual_transport") or "").strip().upper() != "ENCRYPTED":
+        raise AdminEvidenceError("Windows administrative evidence has no encrypted transport classification")
+    if str(tls.get("certificate_validation_status") or "").strip().upper() != "VALIDATED":
+        raise AdminEvidenceError("Windows administrative evidence does not prove certificate validation")
+    if tls.get("certificate_validation_method") != WINDOWS_TLS_VALIDATION_METHOD:
+        raise AdminEvidenceError("Windows administrative evidence has an unsupported certificate-validation claim")
+    return dict(tls)
+
+
+def validate_windows_vm_disk_evidence(sql: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Require measured fixed volumes and meaningful SQL data/log headroom."""
+
+    if not isinstance(sql, Mapping):
+        raise AdminEvidenceError("Windows VM disk evidence is missing SQL evidence")
+    disk = sql.get("windows_vm_disk")
+    if not isinstance(disk, Mapping) or disk.get("status") != "PASS":
+        raise AdminEvidenceError("Windows VM disk capacity is not proven")
+    volumes = disk.get("volumes")
+    if not isinstance(volumes, list) or not volumes:
+        raise AdminEvidenceError("Windows VM fixed-disk measurements are missing")
+    for volume in volumes:
+        if not isinstance(volume, Mapping):
+            raise AdminEvidenceError("Windows VM fixed-disk measurements are malformed")
+        try:
+            total_bytes = int(volume.get("total_bytes", 0))
+            free_bytes = int(volume.get("free_bytes", -1))
+        except (TypeError, ValueError) as exc:
+            raise AdminEvidenceError("Windows VM fixed-disk measurements are not numeric") from exc
+        if total_bytes <= 0 or free_bytes <= 0 or free_bytes > total_bytes:
+            raise AdminEvidenceError("Windows VM fixed-disk measurements are invalid")
+
+    sql_headroom = disk.get("sql_volume_headroom")
+    if not isinstance(sql_headroom, list) or not sql_headroom:
+        raise AdminEvidenceError("SQL data/log volume headroom is not proven")
+    observed_file_types: set[str] = set()
+    for volume in sql_headroom:
+        if not isinstance(volume, Mapping) or volume.get("headroom_status") != "PASS":
+            raise AdminEvidenceError("SQL data/log volume headroom is inadequate or unproven")
+        file_types = volume.get("database_file_types")
+        if not isinstance(file_types, list):
+            raise AdminEvidenceError("SQL data/log volume file bindings are missing")
+        observed_file_types.update(str(value).upper() for value in file_types)
+        try:
+            total_bytes = int(volume.get("total_bytes", 0))
+            free_bytes = int(volume.get("available_bytes", -1))
+            required_bytes = int(volume.get("minimum_required_free_bytes", 0))
+            headroom_bytes = int(volume.get("headroom_bytes", -1))
+        except (TypeError, ValueError) as exc:
+            raise AdminEvidenceError("SQL data/log volume headroom is not numeric") from exc
+        if (
+            total_bytes <= 0
+            or free_bytes <= 0
+            or required_bytes < WINDOWS_MIN_FREE_RESERVE_BYTES
+            or headroom_bytes <= 0
+            or free_bytes < required_bytes
+        ):
+            raise AdminEvidenceError("SQL data/log volume does not have meaningful usable headroom")
+        try:
+            free_percent = float(volume.get("available_percent", -1))
+        except (TypeError, ValueError) as exc:
+            raise AdminEvidenceError("SQL data/log volume free percentage is not numeric") from exc
+        if free_percent < WINDOWS_MIN_FREE_PERCENT:
+            raise AdminEvidenceError("SQL data/log volume free percentage is below the approved reserve")
+    if "ROWS" not in observed_file_types or "LOG" not in observed_file_types:
+        raise AdminEvidenceError("SQL data and log volumes were not both bound to measured headroom")
+    return {
+        "status": "PASS",
+        "fixed_volume_count": len(volumes),
+        "sql_volume_count": len(sql_headroom),
+        "database_file_types": sorted(observed_file_types),
+    }
+
+
 def validate_admin_evidence_artifact(
     evidence: Mapping[str, Any],
     *,
@@ -427,14 +528,7 @@ def validate_admin_evidence_artifact(
     if provenance.get("execution_path") not in {"SEPARATE_SQL_LOGIN", "WINDOWS_INTEGRATED_AUTH"}:
         raise AdminEvidenceError("administrative evidence has no authorized execution path")
     if provenance.get("execution_path") == "WINDOWS_INTEGRATED_AUTH":
-        tls = provenance.get("tls")
-        if (
-            not isinstance(tls, Mapping)
-            or str(tls.get("encryption_mode") or "") not in {"Mandatory", "Optional", "Strict"}
-            or tls.get("trust_server_certificate") is not False
-            or tls.get("certificate_validation_required") is not True
-        ):
-            raise AdminEvidenceError("Windows administrative evidence does not prove TLS certificate validation")
+        validate_windows_tls_evidence(provenance.get("tls"))
     try:
         captured_at = _parse_utc(provenance.get("captured_at_utc"), field="capture_provenance.captured_at_utc")
     except AdminEvidenceError:
@@ -476,6 +570,8 @@ def validate_admin_evidence_artifact(
     quota = sql.get("quota_integrity") or sql.get("quota_usage")
     if not isinstance(quota, Mapping) or quota.get("status") != "PASS" or not quota.get("state_available", True):
         raise AdminEvidenceError("current SQL quota ledger is not proven")
+    if provenance.get("execution_path") == "WINDOWS_INTEGRATED_AUTH":
+        validate_windows_vm_disk_evidence(sql)
     return {
         "status": "PASS",
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
@@ -502,7 +598,10 @@ def load_current_evidence_artifact(
 
     current_path = require_current_evidence_path(path, repository_root=repository_root)
     try:
-        loaded = json.loads(current_path.read_text(encoding="utf-8"))
+        # The legacy Windows UTF8 writer emits a BOM.  The utf-8-sig codec
+        # accepts both that valid transport and BOM-free output without
+        # relaxing JSON/schema validation.
+        loaded = json.loads(current_path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise AdminEvidenceError("current administrative evidence is missing or unreadable") from exc
     if not isinstance(loaded, dict):
@@ -525,6 +624,10 @@ __all__ = [
     "CURRENT_EVIDENCE_PATH_ENV",
     "EVIDENCE_ARTIFACT_VERSION",
     "REQUIRED_CHECK_IDS",
+    "WINDOWS_ENCRYPTION_MODES",
+    "WINDOWS_MIN_FREE_PERCENT",
+    "WINDOWS_MIN_FREE_RESERVE_BYTES",
+    "WINDOWS_TLS_VALIDATION_METHOD",
     "canonical_payload",
     "load_current_evidence_artifact",
     "payload_sha256",
@@ -535,5 +638,7 @@ __all__ = [
     "normalize_sql_instance_identity",
     "sql_instance_identities_match",
     "validate_admin_evidence_artifact",
+    "validate_windows_tls_evidence",
+    "validate_windows_vm_disk_evidence",
     "verify_signature",
 ]

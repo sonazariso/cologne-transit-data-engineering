@@ -43,6 +43,7 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     resolve_current_evidence_path,
     sign_payload,
     validate_admin_evidence_artifact,
+    verify_signature,
 )
 from provision_macos_runtime_login import inspect_runtime_permissions  # noqa: E402
 
@@ -576,7 +577,7 @@ def _load_external_admin_evidence(path: str | Path, *, now_utc: datetime) -> dic
 
     source = Path(path).expanduser().resolve()
     try:
-        artifact = json.loads(source.read_text(encoding="utf-8"))
+        artifact = json.loads(source.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("external administrative evidence is not readable JSON") from exc
     if not isinstance(artifact, dict):
@@ -1987,7 +1988,18 @@ def collect(
     # Sign only after every signed field, including current_status and status,
     # has been finalized.  Resume authenticates this exact stable artifact.
     if signing_key_path is not None:
+        public_key_path = os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY")
+        if not public_key_path:
+            raise AdminEvidenceError(
+                "MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY must be explicitly configured when signing final evidence"
+            )
         evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=signing_key_path)
+        if not verify_signature(
+            evidence,
+            public_key_path=public_key_path,
+            integrity=evidence["artifact_integrity"],
+        ):
+            raise AdminEvidenceError("newly signed administrative evidence could not be independently verified")
     else:
         evidence["artifact_integrity"] = {
             "status": "UNSIGNED",

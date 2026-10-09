@@ -23,6 +23,9 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     require_current_evidence_path,
     resolve_current_evidence_path,
     sign_payload,
+    validate_admin_evidence_artifact,
+    verify_signature,
+    WINDOWS_TLS_VALIDATION_METHOD,
 )
 from cologne_transit_collector.mssql_persistence import MssqlConnectionSettings  # noqa: E402
 from provision_macos_runtime_login import (  # noqa: E402
@@ -82,8 +85,12 @@ class CurrentEvidencePathTests(unittest.TestCase):
                 "required_check_ids": sorted(REQUIRED_CHECK_IDS),
                 "tls": {
                     "encryption_mode": "Mandatory",
+                    "actual_encryption": "TRUE",
+                    "actual_transport": "ENCRYPTED",
                     "trust_server_certificate": False,
                     "certificate_validation_required": True,
+                    "certificate_validation_status": "VALIDATED",
+                    "certificate_validation_method": WINDOWS_TLS_VALIDATION_METHOD,
                 },
             },
             "sql": {
@@ -93,6 +100,30 @@ class CurrentEvidencePathTests(unittest.TestCase):
                 "capacity_gate": {"status": "PASS"},
                 "log_space_gate": {"status": "PASS"},
                 "quota_integrity": {"status": "PASS", "state_available": True},
+                "windows_vm_disk": {
+                    "status": "PASS",
+                    "volumes": [
+                        {
+                            "drive": "C:",
+                            "mount_point": "C:\\",
+                            "total_bytes": 100 * 1024 * 1024 * 1024,
+                            "free_bytes": 20 * 1024 * 1024 * 1024,
+                            "free_percent": 20.0,
+                        }
+                    ],
+                    "sql_volume_headroom": [
+                        {
+                            "volume": "C:\\",
+                            "total_bytes": 100 * 1024 * 1024 * 1024,
+                            "available_bytes": 20 * 1024 * 1024 * 1024,
+                            "available_percent": 20.0,
+                            "minimum_required_free_bytes": 1024 * 1024 * 1024,
+                            "headroom_bytes": 19 * 1024 * 1024 * 1024,
+                            "headroom_status": "PASS",
+                            "database_file_types": ["LOG", "ROWS"],
+                        }
+                    ],
+                },
             },
         }
 
@@ -182,6 +213,103 @@ class CurrentEvidencePathTests(unittest.TestCase):
                             "database_name": "CologneTransitIntelligence",
                         },
                     )
+
+    def test_bom_free_and_windows_powershell_bom_json_are_both_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as repository_directory, tempfile.TemporaryDirectory() as key_directory:
+            repository = self._repository(repository_directory)
+            stable = resolve_current_evidence_path(repository_root=repository)
+            private, public = self._keypair(key_directory)
+            evidence = self._evidence()
+            evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
+            serialized = json.dumps(evidence).encode("utf-8")
+            for label, raw in (("powershell-7", serialized), ("windows-powershell-5.1", b"\xef\xbb\xbf" + serialized)):
+                with self.subTest(output=label):
+                    stable.write_bytes(raw)
+                    stable.chmod(0o600)
+                    loaded, authenticated, _ = load_current_evidence_artifact(
+                        stable,
+                        repository_root=repository,
+                        now_utc=NOW,
+                        expected_database="CologneTransitIntelligence",
+                        public_key_path=public,
+                    )
+                    self.assertEqual(loaded["artifact_integrity"]["status"], "SIGNED")  # type: ignore[index]
+                    self.assertEqual(authenticated["status"], "PASS")
+
+    def test_invalid_json_is_rejected_without_relaxing_schema_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as repository_directory, tempfile.TemporaryDirectory() as key_directory:
+            repository = self._repository(repository_directory)
+            stable = resolve_current_evidence_path(repository_root=repository)
+            _, public = self._keypair(key_directory)
+            stable.write_bytes(b"\xef\xbb\xbf{not-json")
+            stable.chmod(0o600)
+            with self.assertRaisesRegex(AdminEvidenceError, "missing or unreadable"):
+                load_current_evidence_artifact(
+                    stable,
+                    repository_root=repository,
+                    now_utc=NOW,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                )
+
+    def test_windows_tls_claims_require_live_encryption_and_validation_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as key_directory:
+            private, public = self._keypair(key_directory)
+            for mutation, message in (
+                ({"encryption_mode": "Disabled"}, "unsupported encryption mode"),
+                ({"actual_encryption": "FALSE"}, "encrypted SQL transport"),
+                ({"certificate_validation_status": "NOT_PROVEN"}, "certificate validation"),
+                ({"trust_server_certificate": True}, "Trust Server Certificate"),
+            ):
+                with self.subTest(mutation=mutation):
+                    evidence = self._evidence()
+                    evidence["capture_provenance"]["tls"].update(mutation)  # type: ignore[index]
+                    evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
+                    with self.assertRaisesRegex(AdminEvidenceError, message):
+                        validate_admin_evidence_artifact(
+                            evidence,
+                            now_utc=NOW,
+                            expected_database="CologneTransitIntelligence",
+                            public_key_path=public,
+                        )
+
+    def test_successful_signature_is_independently_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as key_directory:
+            private, public = self._keypair(key_directory)
+            evidence = self._evidence()
+            integrity = sign_payload(evidence, signing_key_path=private)
+            evidence["artifact_integrity"] = integrity
+            self.assertTrue(verify_signature(evidence, public_key_path=public, integrity=integrity))
+            evidence["sql"]["windows_vm_disk"]["sql_volume_headroom"][0]["headroom_bytes"] = 0  # type: ignore[index]
+            self.assertFalse(verify_signature(evidence, public_key_path=public, integrity=integrity))
+
+    def test_windows_disk_headroom_is_not_satisfied_by_nonzero_free_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as key_directory:
+            private, public = self._keypair(key_directory)
+            evidence = self._evidence()
+            headroom = evidence["sql"]["windows_vm_disk"]["sql_volume_headroom"][0]  # type: ignore[index]
+            headroom["available_bytes"] = 512 * 1024 * 1024
+            headroom["available_percent"] = 0.5
+            headroom["headroom_bytes"] = -512 * 1024 * 1024
+            headroom["headroom_status"] = "FAIL"
+            evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
+            with self.assertRaisesRegex(AdminEvidenceError, "headroom"):
+                validate_admin_evidence_artifact(
+                    evidence,
+                    now_utc=NOW,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                )
+
+    def test_windows_capture_script_uses_bom_safe_output_and_live_tls_checks(self) -> None:
+        script = (ROOT / "scripts" / "capture_windows_sql_admin_evidence.ps1").read_text(encoding="utf-8")
+        self.assertIn("System.Text.UTF8Encoding", script)
+        self.assertIn("ArgumentList $false", script)
+        self.assertNotIn("Set-Content -Encoding UTF8", script)
+        self.assertIn("EncryptOption", script)
+        self.assertIn("TrustServerCertificate", script)
+        self.assertIn("Win32_Volume", script)
+        self.assertIn("sql_volume_headroom", script)
 
 
 class _PermissionCursor:

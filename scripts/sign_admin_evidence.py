@@ -43,11 +43,19 @@ def main(argv: list[str] | None = None) -> int:
         help="public key used to verify the signature; defaults to MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY",
     )
     args = parser.parse_args(argv)
+    if args.public_key is None:
+        raise SystemExit(
+            "MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY must point to the operator-controlled public key "
+            "so the detached signature is independently verified"
+        )
     if args.intermediate:
         output = require_operator_staging_path(args.output, repository_root=ROOT)
     else:
         output = require_current_evidence_path(args.output, repository_root=ROOT)
-    payload = json.loads(args.input.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(args.input.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("administrative evidence input is not valid UTF-8 JSON") from exc
     if not isinstance(payload, dict):
         raise SystemExit("administrative evidence payload must be a JSON object")
     payload["artifact_integrity"] = sign_payload(payload, signing_key_path=args.signing_key)

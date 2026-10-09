@@ -20,15 +20,82 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$MinimumFreePercent = 5.0
+$MinimumFreeReserveBytes = [int64]1GB
+
+function Initialize-SqlCmdCommand {
+    $availableModule = @(
+        Get-Module -ListAvailable -Name SqlServer |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+    )
+    if ($availableModule.Count -eq 0) {
+        throw "The SqlServer PowerShell module is unavailable. Install only the approved local prerequisite with: Install-Module -Name SqlServer -Scope CurrentUser -Repository PSGallery"
+    }
+    try {
+        Import-Module -Name SqlServer -ErrorAction Stop
+    } catch {
+        throw "The SqlServer PowerShell module could not be imported; no SQL evidence was written"
+    }
+    $command = Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "Invoke-Sqlcmd is unavailable from the installed SqlServer PowerShell module; no SQL evidence was written"
+    }
+    $requiredParameters = @("ServerInstance", "Database", "Query", "Encrypt", "TrustServerCertificate")
+    $missingParameters = @(
+        $requiredParameters | Where-Object { -not $command.Parameters.ContainsKey($_) }
+    )
+    if ($missingParameters.Count -gt 0) {
+        throw (
+            "Invoke-Sqlcmd is incompatible with the controlled encrypted evidence path; missing parameter(s): " +
+            ($missingParameters -join ", ") +
+            ". Update only the SqlServer module for the current Windows identity with: Install-Module -Name SqlServer -Scope CurrentUser -Repository PSGallery"
+        )
+    }
+    return $command
+}
+
+$SqlCmdCommand = Initialize-SqlCmdCommand
 
 function Invoke-ReadOnlySql([string] $Query) {
-    if (-not (Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue)) {
-        throw "Invoke-Sqlcmd is required for the controlled Windows Authentication evidence path"
+    $parameters = @{
+        ServerInstance = $SqlInstance
+        Database = $Database
+        Query = $Query
+        Encrypt = $EncryptMode
+        TrustServerCertificate = $false
+        ErrorAction = "Stop"
     }
-    return @(
-        Invoke-Sqlcmd -ServerInstance $SqlInstance -Database $Database -Query $Query `
-            -Encrypt $EncryptMode -TrustServerCertificate:$false -AbortOnError
-    )
+    if ($SqlCmdCommand.Parameters.ContainsKey("AbortOnError")) {
+        $parameters.AbortOnError = $true
+    }
+    return @(& $SqlCmdCommand @parameters)
+}
+
+function Normalize-VolumePath([string] $Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+    $normalized = $Value.Trim().Replace("/", "\")
+    while ($normalized.EndsWith("\")) {
+        $normalized = $normalized.Substring(0, $normalized.Length - 1)
+    }
+    return $normalized + "\"
+}
+
+function Test-PathOnVolume([string] $Path, [string] $VolumeMountPoint) {
+    $normalizedPath = Normalize-VolumePath $Path
+    $normalizedVolume = Normalize-VolumePath $VolumeMountPoint
+    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or [string]::IsNullOrWhiteSpace($normalizedVolume)) {
+        return $false
+    }
+    return $normalizedPath.StartsWith($normalizedVolume, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-SameVolume([string] $Left, [string] $Right) {
+    $normalizedLeft = Normalize-VolumePath $Left
+    $normalizedRight = Normalize-VolumePath $Right
+    return $normalizedLeft.Equals($normalizedRight, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-PermissionState($Value) {
@@ -59,6 +126,36 @@ if ($identity.Count -ne 1 -or [string]$identity[0].DatabaseName -ne $Database) {
 }
 if ([string]$identity[0].LoginName -eq $RuntimeLoginName) {
     throw "Windows evidence identity must be separate from the limited runtime login"
+}
+
+$transport = Invoke-ReadOnlySql @"
+SELECT CAST(encrypt_option AS nvarchar(10)) AS EncryptOption,
+       CAST(auth_scheme AS nvarchar(128)) AS AuthScheme,
+       CAST(net_transport AS nvarchar(128)) AS NetTransport
+FROM sys.dm_exec_connections
+WHERE session_id = @@SPID;
+"@
+if ($transport.Count -ne 1) {
+    throw "SQL connection transport security was not returned for the evidence session"
+}
+$actualEncryptOption = ([string]$transport[0].EncryptOption).Trim().ToUpperInvariant()
+if ($actualEncryptOption -notin @("TRUE", "YES", "1")) {
+    throw "SQL connection did not prove encrypted transport; no administrative evidence was written"
+}
+$authScheme = ([string]$transport[0].AuthScheme).Trim().ToUpperInvariant()
+if ($authScheme -notin @("KERBEROS", "NTLM")) {
+    throw "SQL connection did not prove Windows Authentication; no administrative evidence was written"
+}
+$tlsEvidence = [ordered]@{
+    encryption_mode = $EncryptMode
+    actual_encryption = ([string]$transport[0].EncryptOption).Trim()
+    actual_transport = "ENCRYPTED"
+    trust_server_certificate = $false
+    certificate_validation_required = $true
+    certificate_validation_status = "VALIDATED"
+    certificate_validation_method = "INVOKE_SQLCMD_TRUST_SERVER_CERTIFICATE_FALSE_AND_DM_EXEC_CONNECTIONS_ENCRYPT_OPTION_TRUE"
+    auth_scheme = ([string]$transport[0].AuthScheme).Trim()
+    net_transport = ([string]$transport[0].NetTransport).Trim()
 }
 
 $permissions = Invoke-ReadOnlySql @"
@@ -106,7 +203,23 @@ $permissionChecks = [ordered]@{
     backup_verifyonly_authorization = $backupVerifyPermissionState
 }
 
-$databaseFiles = Invoke-ReadOnlySql "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages FROM sys.database_files ORDER BY file_id;"
+$databaseFiles = Invoke-ReadOnlySql "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages, physical_name FROM sys.database_files ORDER BY file_id;"
+$databaseFileDetails = @($databaseFiles | ForEach-Object {
+    $sizePages = [int64]$_.size
+    $spaceUsedPages = if ($null -eq $_.space_used_pages) { [int64]0 } else { [int64]$_.space_used_pages }
+    @{
+        name = [string]$_.name
+        type = [string]$_.type_desc
+        size_pages = $sizePages
+        growth = [int]$_.growth
+        is_percent_growth = [bool]$_.is_percent_growth
+        max_size_pages = [int64]$_.max_size
+        space_used_pages = $spaceUsedPages
+        size_bytes = $sizePages * 8192
+        space_used_bytes = $spaceUsedPages * 8192
+        physical_name = [string]$_.physical_name
+    }
+})
 $runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model;"
 $volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;"
 $logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();"
@@ -206,11 +319,75 @@ if ($missingPermissions.Count -gt 0) {
 }
 
 $captured = [DateTime]::Parse([string]$identity[0].CapturedAtUtc).ToUniversalTime().ToString("o")
-$windowsDisk = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | ForEach-Object {
-    @{ drive = [string]$_.DeviceID; total_bytes = [int64]$_.Size; free_bytes = [int64]$_.FreeSpace }
+$windowsDiskRaw = @(Get-CimInstance Win32_Volume -Filter "DriveType = 3")
+if ($windowsDiskRaw.Count -eq 0) {
+    # Win32_LogicalDisk is retained only as a local compatibility fallback;
+    # SQL volume binding below still has to match a measured fixed volume.
+    $windowsDiskRaw = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3")
+}
+$windowsDisk = @($windowsDiskRaw | ForEach-Object {
+    $mountPoint = if (-not [string]::IsNullOrWhiteSpace([string]$_.Caption)) {
+        [string]$_.Caption
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$_.DeviceID)) {
+        ([string]$_.DeviceID).TrimEnd("\") + "\"
+    } else {
+        ""
+    }
+    $totalBytes = if ($null -ne $_.Capacity) { [int64]$_.Capacity } else { [int64]$_.Size }
+    $freeBytes = [int64]$_.FreeSpace
+    @{ drive = [string]$_.DriveLetter; mount_point = $mountPoint; total_bytes = $totalBytes; free_bytes = $freeBytes; free_percent = if ($totalBytes -gt 0) { [double]($freeBytes * 100.0 / $totalBytes) } else { 0.0 } }
 })
-if ($windowsDisk.Count -eq 0 -or ($windowsDisk | Where-Object { $_.total_bytes -le 0 -or $_.free_bytes -le 0 }).Count -gt 0) {
+if ($windowsDisk.Count -eq 0 -or ($windowsDisk | Where-Object { $_.total_bytes -le 0 -or $_.free_bytes -le 0 -or $_.free_bytes -gt $_.total_bytes }).Count -gt 0) {
     throw "Windows VM fixed-disk capacity was not proven"
+}
+
+$sqlVolumeHeadroom = @($volumes | ForEach-Object {
+    $sqlVolume = [string]$_.volume_mount_point
+    $filesOnVolume = @($databaseFileDetails | Where-Object {
+        Test-PathOnVolume ([string]$_.physical_name) $sqlVolume
+    })
+    if ($filesOnVolume.Count -eq 0) {
+        throw ("SQL database files could not be bound to volume " + $sqlVolume)
+    }
+    $fixedVolume = @($windowsDisk | Where-Object {
+        Test-SameVolume ([string]$_.mount_point) $sqlVolume
+    })
+    if ($fixedVolume.Count -ne 1) {
+        throw ("SQL volume " + $sqlVolume + " was not matched to exactly one measured Windows fixed volume")
+    }
+    $sqlTotalBytes = [int64]$_.total_bytes
+    $sqlAvailableBytes = [int64]$_.available_bytes
+    $windowsTotalBytes = [int64]$fixedVolume[0].total_bytes
+    $windowsAvailableBytes = [int64]$fixedVolume[0].free_bytes
+    $totalBytes = [Math]::Min($sqlTotalBytes, $windowsTotalBytes)
+    $availableBytes = [Math]::Min($sqlAvailableBytes, $windowsAvailableBytes)
+    $requiredBytes = [Math]::Max($MinimumFreeReserveBytes, [int64]($totalBytes * ($MinimumFreePercent / 100.0)))
+    $headroomBytes = $availableBytes - $requiredBytes
+    $availablePercent = if ($totalBytes -gt 0) { [double]($availableBytes * 100.0 / $totalBytes) } else { 0.0 }
+    $fileTypes = @($filesOnVolume | ForEach-Object { [string]$_.type } | Sort-Object -Unique)
+    $headroomStatus = if ($headroomBytes -gt 0 -and $availablePercent -ge $MinimumFreePercent) { "PASS" } else { "FAIL" }
+    @{
+        volume = $sqlVolume
+        total_bytes = $totalBytes
+        available_bytes = $availableBytes
+        available_percent = $availablePercent
+        minimum_required_free_bytes = $requiredBytes
+        headroom_bytes = $headroomBytes
+        headroom_status = $headroomStatus
+        database_file_types = $fileTypes
+        database_file_count = [int]$filesOnVolume.Count
+        database_file_size_bytes = [int64](($filesOnVolume | Measure-Object -Property size_bytes -Sum).Sum)
+        database_file_space_used_bytes = [int64](($filesOnVolume | Measure-Object -Property space_used_bytes -Sum).Sum)
+    }
+})
+if (-not ($sqlVolumeHeadroom | Where-Object { $_.database_file_types -contains "ROWS" })) {
+    throw "Measured SQL data-file volume headroom was not proven"
+}
+if (-not ($sqlVolumeHeadroom | Where-Object { $_.database_file_types -contains "LOG" })) {
+    throw "Measured SQL log-file volume headroom was not proven"
+}
+if (($sqlVolumeHeadroom | Where-Object { $_.headroom_status -ne "PASS" }).Count -gt 0) {
+    throw "SQL data/log volume headroom is below the approved reserve"
 }
 $payload = [ordered]@{
     artifact_version = "TIERED50_ADMIN_EVIDENCE_V3"
@@ -236,16 +413,16 @@ $payload = [ordered]@{
             "quota.current_shared_ledger"
         )
         authentication_source = "WINDOWS_AUTHENTICATION_SQL_SERVER_VM"
-        tls = @{ encryption_mode = $EncryptMode; trust_server_certificate = $false; certificate_validation_required = $true }
+        tls = $tlsEvidence
     }
     sql = [ordered]@{
         admin_authorization = @{ status = "PASS"; permission_checks = $permissionChecks }
-        admin_connection = @{ status = "PASS"; authorization_status = "PASS" }
+        admin_connection = @{ status = "PASS"; authorization_status = "PASS"; tls = $tlsEvidence }
         identity = @{ status = "PASS"; server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; configured_server_name = [string]$identity[0].ConfiguredServerName; database_name = [string]$identity[0].DatabaseName; login_name = [string]$identity[0].LoginName; captured_at_utc = $captured; sql_instance_identity = @{ server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; database_name = [string]$identity[0].DatabaseName } }
         admin_identity_gate = @{ status = "PASS"; effective_login = [string]$identity[0].LoginName; runtime_login_match = $false }
-        admin_permissions = @{ status = "PASS"; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = @(); tls = @{ encryption_mode = $EncryptMode; trust_server_certificate = $false; certificate_validation_required = $true } }
+        admin_permissions = @{ status = "PASS"; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = @(); tls = $tlsEvidence }
         runtime_health = @{ status = "PASS"; database_name = [string]$runtimeHealth[0].database_name; database_status = [string]$runtimeHealth[0].database_status; recovery_model = [string]$runtimeHealth[0].recovery_model; evidence = @{ status = "PASS" } }
-        database_files = @($databaseFiles | ForEach-Object { @{ name = [string]$_.name; type = [string]$_.type_desc; size_pages = [int64]$_.size; growth = [int]$_.growth; is_percent_growth = [bool]$_.is_percent_growth; max_size_pages = [int]$_.max_size; space_used_pages = [int64]$_.space_used_pages } })
+        database_files = @($databaseFileDetails | ForEach-Object { @{ name = [string]$_.name; type = [string]$_.type; size_pages = [int64]$_.size_pages; growth = [int]$_.growth; is_percent_growth = [bool]$_.is_percent_growth; max_size_pages = [int64]$_.max_size_pages; space_used_pages = [int64]$_.space_used_pages; size_bytes = [int64]$_.size_bytes; space_used_bytes = [int64]$_.space_used_bytes } })
         database_files_evidence = @{ status = "PASS" }
         volume_capacity = @($volumes | ForEach-Object { @{ volume = [string]$_.volume_mount_point; total_bytes = [int64]$_.total_bytes; available_bytes = [int64]$_.available_bytes } })
         volume_capacity_evidence = @{ status = "PASS" }
@@ -268,11 +445,13 @@ $payload = [ordered]@{
         competing_production_writers_evidence = @{ status = "PASS" }
         current_quota_ledger = @($currentQuotaLedger | ForEach-Object { @{ month_key = [string]$_.MonthKey; provider_quota_ceiling = [int64]$_.ProviderQuotaCeiling; normal_operational_maximum = [int64]$_.NormalOperationalMaximum; retry_protection_boundary = [int64]$_.RetryProtectionBoundary; confirmed_provider_attempts = [int64]$_.ConfirmedProviderAttempts; conservative_unknown_attempts = [int64]$_.ConservativeUnknownAttempts; reserved_shared_usage = [int64]$_.ExplicitSharedConsumerReservedAttempts; accounting_status = [string]$_.AccountingStatus; includes_all_shared_consumers = [bool]$_.IncludesAllSharedConsumers; provider_period_start_utc = [string]$_.ProviderPeriodStartUtc; provider_period_end_utc = [string]$_.ProviderPeriodEndUtc; local_usage_included_through_utc = [string]$_.LocalUsageIncludedThroughUtc; source_evidence_hash = [string]$_.SourceEvidenceHash; reconciliation_key = [string]$_.ReconciliationKey } })
         current_quota_ledger_evidence = @{ status = "PASS" }
-        windows_vm_disk = @{ status = "PASS"; volumes = $windowsDisk }
+        windows_vm_disk = @{ status = "PASS"; minimum_free_percent = $MinimumFreePercent; minimum_free_reserve_bytes = $MinimumFreeReserveBytes; volumes = $windowsDisk; sql_volume_headroom = $sqlVolumeHeadroom }
     }
 }
 
 $parent = Split-Path -Parent $UnsignedPayloadPath
 New-Item -ItemType Directory -Force -Path $parent | Out-Null
-$payload | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 -Path $UnsignedPayloadPath
+$json = $payload | ConvertTo-Json -Depth 20
+$utf8NoBom = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($UnsignedPayloadPath, $json, $utf8NoBom)
 Write-Output $UnsignedPayloadPath

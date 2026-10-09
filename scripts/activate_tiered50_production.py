@@ -36,6 +36,7 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     normalize_sql_instance_identity,
     resolve_current_evidence_path,
     sql_instance_identities_match,
+    validate_windows_vm_disk_evidence,
 )
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
@@ -376,21 +377,10 @@ def _validate_operational_evidence(
     )
     if not complete_ledger_proven and not bounded_bootstrap_proven:
         raise RuntimeError("current SQL quota ledger is missing, ambiguous, or not COMPLETE")
-    vmware = host.get("vmware")
-    vmware_returncode = vmware.get("returncode") if isinstance(vmware, dict) else None
-    if not isinstance(vmware, dict) or vmware_returncode is None or int(vmware_returncode) != 0:
-        raise RuntimeError("running Windows VM evidence is not proven")
-    windows_disk = sql.get("windows_vm_disk")
-    if (
-        not isinstance(windows_disk, dict)
-        or windows_disk.get("status") != "PASS"
-        or not isinstance(windows_disk.get("volumes"), list)
-        or not any(
-            isinstance(volume, dict) and int(volume.get("free_bytes", 0) or 0) > 0
-            for volume in windows_disk["volumes"]
-        )
-    ):
-        raise RuntimeError("Windows VM disk capacity is not proven")
+    try:
+        validate_windows_vm_disk_evidence(sql)
+    except AdminEvidenceError as exc:
+        raise RuntimeError(str(exc)) from exc
     plist = host.get("tiered50_plist")
     if (
         not isinstance(plist, dict)
@@ -423,7 +413,7 @@ def _validate_operational_evidence(
         "authenticated_artifact": authenticated,
         "backup_verifyonly": "PASS",
         "sql_volume_capacity": "PASS",
-        "running_windows_vm": "PASS",
+        "running_windows_vm": "AUTHENTICATED_WINDOWS_CAPTURE; VMWARE_GUEST_OPERATIONS_NOT_REQUIRED",
         "windows_vm_disk_capacity": "PASS",
         "installed_tiered50_launchagent": "PRESENT_SECRET_FREE",
         "prior_scheduled_heartbeat_evidence": (

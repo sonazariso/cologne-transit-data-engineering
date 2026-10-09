@@ -60,6 +60,40 @@ payload with `scripts/sign_admin_evidence.py`, copy only the signed artifact
 to the operator-secure storage, and configure its matching public key as
 `MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY`:
 
+Run this exact command from the repository root in the existing interactive
+Windows PowerShell session under the separately authorized Windows identity.
+It uses the approved `DataAnalyst-VM` SQL instance and
+`CologneTransitIntelligence` database; Windows Authentication supplies the
+identity, so the command contains no password or secret:
+
+```powershell
+$ErrorActionPreference = "Stop"
+$payload = Join-Path $env:LOCALAPPDATA "CologneTransitIntelligence\windows-admin-evidence-unsigned.json"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $payload) | Out-Null
+& .\scripts\capture_windows_sql_admin_evidence.ps1 `
+  -SqlInstance "DataAnalyst-VM" `
+  -Database "CologneTransitIntelligence" `
+  -UnsignedPayloadPath $payload `
+  -EncryptMode "Mandatory"
+```
+
+The script first confirms that the `SqlServer` module and compatible
+`Invoke-Sqlcmd` parameters (`-Encrypt` and `-TrustServerCertificate`) are
+available. If that local prerequisite is absent, stop and obtain operator
+authorization before installing only the current-user module with
+`Install-Module -Name SqlServer -Scope CurrentUser -Repository PSGallery`.
+The script does not fall back to plaintext or unverified certificate
+transport. It records the live SQL session encryption result, Windows
+authentication scheme, and certificate-validation method, and rejects a
+connection whose actual transport is not encrypted.
+
+The Windows payload is written with explicit UTF-8 without a BOM. The Mac
+parser also accepts a valid UTF-8 BOM for compatibility with older Windows
+PowerShell 5.1 output while retaining normal JSON and evidence-schema
+validation. The disk section measures every fixed Windows volume and binds
+the SQL data and log files to measured volumes; it requires the established
+5% and 1 GiB minimum usable reserve.
+
 ```text
 MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY=/operator-secure/admin-evidence-public-key.pem \
 python3 scripts/sign_admin_evidence.py \
@@ -91,6 +125,8 @@ Keychain item or one-process authorized credential is available, stop here and
 leave Tiered50 stopped with `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`.
 The final artifact must also contain a fresh Windows VM disk-capacity check;
 the SQL and Mac captures do not infer that capacity from the host filesystem.
+VMware guest operations are not a prerequisite for this path; the interactive
+Windows capture is the authoritative source for Windows disk evidence.
 
 ## Separate schema-repair gate
 
