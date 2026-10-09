@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from collections.abc import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -49,6 +50,34 @@ REQUIRED_MIGRATION_OBJECTS = (
     "ctl.MddMacMethodologyEvidence",
     "ctl.uspEnsureMddMacQuotaPeriod",
 )
+
+
+def compare_sampling_target_identities(
+    before_ids: Sequence[int | str], after_ids: Sequence[int | str]
+) -> dict[str, object]:
+    """Compare the actual target identities before and after migration.
+
+    The additive migration is not allowed to rematerialize targets, so the
+    ordered identity list must remain exactly the same.  This deliberately
+    validates the observed database state instead of encoding a historical
+    seven-row expectation; the same check therefore covers both the old
+    Legacy7 snapshot and the current materialized panel snapshot.
+    """
+
+    before = tuple(int(value) for value in before_ids)
+    after = tuple(int(value) for value in after_ids)
+    before_set = set(before)
+    after_set = set(after)
+    return {
+        "status": "PASS" if before == after else "FAIL",
+        "preserved": before == after,
+        "before": list(before),
+        "after": list(after),
+        "missing_after_migration": sorted(before_set - after_set),
+        "unexpected_after_migration": sorted(after_set - before_set),
+        "duplicate_before": sorted({value for value in before if before.count(value) > 1}),
+        "duplicate_after": sorted({value for value in after if after.count(value) > 1}),
+    }
 
 
 def _drain(cursor: object) -> None:
@@ -140,7 +169,10 @@ def apply_migration() -> dict[str, object]:
             "stop_situation_links",
         )
     }
-    preserved["sampling_target_ids"] = after["sampling_target_ids"] == before["sampling_target_ids"] == [1, 2, 3, 4, 5, 6, 7]
+    identity_preservation = compare_sampling_target_identities(
+        before["sampling_target_ids"], after["sampling_target_ids"]
+    )
+    preserved["sampling_target_ids"] = bool(identity_preservation["preserved"])
     return {
         "status": "PASS" if all(preserved.values()) else "FAIL",
         "executed_batches": executed,
@@ -148,6 +180,7 @@ def apply_migration() -> dict[str, object]:
         "before": before,
         "after": after,
         "historical_preservation": preserved,
+        "sampling_target_identity_comparison": identity_preservation,
     }
 
 

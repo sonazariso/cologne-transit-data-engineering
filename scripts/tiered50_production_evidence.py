@@ -54,8 +54,107 @@ ADMIN_KEYCHAIN_SERVICE = RUNTIME_ADMIN_KEYCHAIN_SERVICE
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
     if isinstance(row, dict):
-        return row.get(name)
-    return row[index] if row is not None else None
+        if name in row:
+            return row.get(name)
+        folded_name = str(name).casefold()
+        for key, value in row.items():
+            if str(key).casefold() == folded_name:
+                return value
+        return None
+    if row is None:
+        return None
+    try:
+        return row[index]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _normalize_sql_text(value: Any) -> str | None:
+    """Normalize SQL driver text without turning malformed values into PASS."""
+
+    if value is None:
+        return None
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized if normalized else None
+
+
+def _permission_state(value: Any) -> str:
+    """Classify SQL permission metadata without treating NULL as denial."""
+
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value).decode("ascii")
+        except UnicodeDecodeError:
+            return "UNKNOWN"
+    if value is True or value == 1 or str(value).strip().casefold() in {"1", "true", "yes"}:
+        return "GRANTED"
+    if value is False or value == 0 or str(value).strip().casefold() in {"0", "false", "no"}:
+        return "DENIED"
+    return "UNKNOWN"
+
+
+def _query_status(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("status") or "").upper()
+    return str(value or "").upper()
+
+
+def _successful_dmv_access(query_statuses: Mapping[str, Any] | None) -> tuple[bool, bool]:
+    """Return (proven, denied) for the relevant server DMV reads."""
+
+    if not query_statuses:
+        return False, False
+    relevant = (
+        "capacity.volume_capacity_dm_os_volume_stats",
+        "capacity.database_log_space_dm_db_log_space_usage",
+    )
+    observed = [_query_status(query_statuses.get(name)) for name in relevant if name in query_statuses]
+    if not observed:
+        return False, False
+    if any(status != "PASS" for status in observed):
+        return False, True
+    return True, False
+
+
+VALID_SQL_RECOVERY_MODELS = frozenset({"FULL", "SIMPLE", "BULK_LOGGED"})
+
+
+def _evaluate_runtime_health(
+    runtime_health_evidence: Mapping[str, Any],
+    runtime_health_row: Any,
+) -> dict[str, Any]:
+    """Evaluate one SQL runtime-health row after safe driver decoding."""
+
+    database_name = _normalize_sql_text(_row_value(runtime_health_row, "database_name", 0)) or ""
+    database_status = _normalize_sql_text(_row_value(runtime_health_row, "database_status", 1)) or ""
+    recovery_model = _normalize_sql_text(_row_value(runtime_health_row, "recovery_model", 2)) or ""
+    runtime_values_valid = (
+        runtime_health_row is not None
+        and database_name == EXPECTED_SQL_DATABASE
+        and database_status.casefold() == "online"
+        and recovery_model.casefold() in {value.casefold() for value in VALID_SQL_RECOVERY_MODELS}
+    )
+    return {
+        "status": "PASS"
+        if runtime_health_evidence.get("status") == "PASS" and runtime_values_valid
+        else "NOT_PROVEN",
+        "database_name": database_name,
+        "database_status": database_status,
+        "recovery_model": recovery_model,
+        "valid_recovery_models": sorted(VALID_SQL_RECOVERY_MODELS),
+        "evidence": dict(runtime_health_evidence),
+    }
 
 
 def _role_environment(role: str) -> tuple[dict[str, str], str]:
@@ -131,50 +230,114 @@ def _statement_id(statement: str) -> str:
     return "admin.read_only_query"
 
 
-def _evaluate_admin_permissions(permission_values: dict[str, Any]) -> dict[str, Any]:
-    """Evaluate the minimum read-only evidence permissions returned by SQL Server."""
+def _evaluate_admin_permissions(
+    permission_values: dict[str, Any],
+    *,
+    query_statuses: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate permissions while separating unknown metadata from denial.
 
-    def granted(name: str) -> bool:
-        return permission_values.get(name) in (1, True, "1", "TRUE", "true")
+    SQL Server 2025 can return NULL for the newer server DMV permission
+    metadata even when an effective sysadmin can successfully execute the
+    relevant DMVs.  The executed DMV evidence is therefore authoritative for
+    that capability.  A failed or permission-denied DMV query never becomes a
+    PASS merely because the login claims to be sysadmin.
+    """
 
     try:
         product_major_version = int(permission_values.get("product_major_version") or 0)
     except (TypeError, ValueError):
         product_major_version = 0
+    sysadmin_state = _permission_state(permission_values.get("is_sysadmin"))
+    is_sysadmin = sysadmin_state == "GRANTED"
+    dmv_access_proven, dmv_access_denied = _successful_dmv_access(query_statuses)
+
     if product_major_version >= 16:
         server_dmv_permission = "VIEW SERVER PERFORMANCE STATE"
-        server_dmv_granted = granted("has_view_server_performance_state")
+        server_dmv_metadata = _permission_state(permission_values.get("has_view_server_performance_state"))
     elif product_major_version > 0:
         server_dmv_permission = "VIEW SERVER STATE"
-        server_dmv_granted = granted("has_view_server_state")
+        server_dmv_metadata = _permission_state(permission_values.get("has_view_server_state"))
     else:
         server_dmv_permission = "VIEW SERVER STATE or VIEW SERVER PERFORMANCE STATE"
-        server_dmv_granted = granted("has_view_server_state") or granted("has_view_server_performance_state")
+        server_dmv_metadata = (
+            "GRANTED"
+            if _permission_state(permission_values.get("has_view_server_state")) == "GRANTED"
+            or _permission_state(permission_values.get("has_view_server_performance_state")) == "GRANTED"
+            else "DENIED"
+            if _permission_state(permission_values.get("has_view_server_state")) == "DENIED"
+            and _permission_state(permission_values.get("has_view_server_performance_state")) == "DENIED"
+            else "UNKNOWN"
+        )
 
-    checks = {
-        "database_view_definition": granted("has_view_definition"),
-        "database_view_state": granted("has_view_database_state"),
-        "server_dmv_state": server_dmv_granted,
-        "backup_history_backupset_select": granted("has_msdb_backupset_select"),
-        "backup_history_backupmediafamily_select": granted("has_msdb_backupmediafamily_select"),
-        "operational_history_database_select": granted("has_database_select"),
+    if server_dmv_metadata == "GRANTED":
+        server_dmv_state = True
+        server_dmv_effective_state = "GRANTED_BY_METADATA"
+    elif dmv_access_denied:
+        server_dmv_state = False
+        server_dmv_effective_state = "DENIED_BY_EXECUTION"
+    elif dmv_access_proven:
+        server_dmv_state = True
+        server_dmv_effective_state = "GRANTED_BY_SUCCESSFUL_DMV_ACCESS"
+    elif server_dmv_metadata == "DENIED":
+        server_dmv_state = False
+        server_dmv_effective_state = "DENIED_BY_METADATA"
+    elif is_sysadmin and query_statuses:
+        server_dmv_state = False
+        server_dmv_effective_state = "NOT_PROVEN_BY_EXECUTION"
+    else:
+        server_dmv_state = False
+        server_dmv_effective_state = "UNKNOWN"
+
+    def check(name: str, *, effective_access: bool = False) -> tuple[bool, str]:
+        state = _permission_state(permission_values.get(name))
+        if state == "GRANTED":
+            return True, "GRANTED_BY_METADATA"
+        if state == "DENIED":
+            return False, "DENIED_BY_METADATA"
+        if effective_access:
+            return True, "GRANTED_BY_SUCCESSFUL_QUERY"
+        if is_sysadmin:
+            return True, "GRANTED_BY_SYSADMIN"
+        return False, "UNKNOWN_METADATA"
+
+    check_results = {
+        "database_view_definition": check("has_view_definition"),
+        "database_view_state": check("has_view_database_state"),
+        "server_dmv_state": (server_dmv_state, server_dmv_effective_state),
+        "backup_history_backupset_select": check("has_msdb_backupset_select"),
+        "backup_history_backupmediafamily_select": check("has_msdb_backupmediafamily_select"),
+        "operational_history_database_select": check("has_database_select"),
         # RESTORE VERIFYONLY is an administrative operation. SQL Server
         # versions expose its authorization through database-creation or
         # equivalent administrative role membership rather than a distinct
         # VERIFYONLY permission name.
-        "backup_verifyonly_authorization": (
-            granted("has_create_any_database")
-            or granted("is_sysadmin")
-            or granted("is_dbcreator")
-        ),
+        "backup_verifyonly_authorization": check("has_create_any_database")
+        if _permission_state(permission_values.get("has_create_any_database")) != "UNKNOWN"
+        else (
+            True,
+            "GRANTED_BY_SYSADMIN_OR_DBCREATOR",
+        )
+        if is_sysadmin or _permission_state(permission_values.get("is_dbcreator")) == "GRANTED"
+        else (False, "UNKNOWN_METADATA"),
     }
+    checks = {name: result[0] for name, result in check_results.items()}
+    permission_states = {name: result[1] for name, result in check_results.items()}
     missing = [name for name, present in checks.items() if not present]
+    denied = [name for name, state in permission_states.items() if state.startswith("DENIED")]
+    unknown = [name for name, state in permission_states.items() if state.startswith("UNKNOWN") or state == "NOT_PROVEN_BY_EXECUTION"]
     return {
         "status": "PASS" if not missing else "NOT_PROVEN",
         "product_major_version": product_major_version or None,
+        "is_sysadmin": is_sysadmin,
+        "sysadmin_membership_state": sysadmin_state,
         "server_dmv_required_permission": server_dmv_permission,
         "permission_checks": checks,
+        "permission_states": permission_states,
         "missing_permissions": missing,
+        "denied_permissions": denied,
+        "unknown_permissions": unknown,
+        "verified_dmv_access": dmv_access_proven,
     }
 
 
@@ -717,6 +880,7 @@ def collect(
         }
         connection = _UnavailableConnection(exc)
     evidence["sql"] = sql_evidence
+    permission_values: dict[str, Any] | None = None
     try:
         cursor = _SafeAdminCursor(connection, evidence["sql"]["privileged_query_failures"])
         cursor.execute(
@@ -812,22 +976,10 @@ def collect(
         )
         runtime_health_evidence = _query_evidence(cursor, statement_id="admin.sql_runtime_health")
         runtime_health_row = cursor.fetchone()
-        database_status = str(_row_value(runtime_health_row, "database_status", 1) or "")
-        recovery_model = str(_row_value(runtime_health_row, "recovery_model", 2) or "")
-        evidence["sql"]["runtime_health"] = {
-            "status": (
-                "PASS"
-                if runtime_health_evidence.get("status") == "PASS"
-                and runtime_health_row is not None
-                and database_status.casefold() == "online"
-                and bool(recovery_model)
-                else "NOT_PROVEN"
-            ),
-            "database_name": str(_row_value(runtime_health_row, "database_name", 0) or ""),
-            "database_status": database_status,
-            "recovery_model": recovery_model,
-            "evidence": runtime_health_evidence,
-        }
+        evidence["sql"]["runtime_health"] = _evaluate_runtime_health(
+            runtime_health_evidence,
+            runtime_health_row,
+        )
         same_as_runtime = bool(effective_login and runtime_login and effective_login.casefold() == runtime_login.casefold())
         evidence["sql"]["admin_identity_gate"] = {
             "status": "NOT_PROVEN"
@@ -907,6 +1059,17 @@ def collect(
             else None
         )
         evidence["sql"]["log_space_evidence"] = log_space_evidence
+        if permission_values is not None:
+            evidence["sql"]["admin_permissions"] = {
+                **permission_values,
+                **_evaluate_admin_permissions(
+                    permission_values,
+                    query_statuses={
+                        "capacity.volume_capacity_dm_os_volume_stats": volume_evidence,
+                        "capacity.database_log_space_dm_db_log_space_usage": log_space_evidence,
+                    },
+                ),
+            }
         cursor.execute(
             """
             SELECT TOP (1) bs.backup_set_id, bs.media_set_id,

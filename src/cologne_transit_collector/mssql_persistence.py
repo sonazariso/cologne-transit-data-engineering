@@ -1447,7 +1447,24 @@ class MssqlPersistence:
             )
             counts = cursor.fetchone()
             cursor.execute(
-                "SELECT SamplingTargetId FROM ctl.MddRealtimeSamplingTarget ORDER BY SamplingTargetId"
+                """
+                IF OBJECT_ID(N'ctl.MddMacTiered50ProductionTarget', N'U') IS NULL
+                BEGIN
+                    SELECT SamplingTargetId, N'LEGACY7' AS identity_source
+                    FROM ctl.MddRealtimeSamplingTarget
+                    ORDER BY SamplingTargetId;
+                END
+                ELSE
+                BEGIN
+                    EXEC sys.sp_executesql N'
+                        SELECT SamplingTargetId, N''LEGACY7'' AS identity_source
+                        FROM ctl.MddRealtimeSamplingTarget
+                        UNION ALL
+                        SELECT SamplingTargetId, N''TIERED50'' AS identity_source
+                        FROM ctl.MddMacTiered50ProductionTarget
+                        ORDER BY SamplingTargetId;';
+                END
+                """
             )
             target_rows = cursor.fetchall()
             cursor.execute(
@@ -1461,6 +1478,12 @@ class MssqlPersistence:
             )
             latest_run = cursor.fetchone()
         target_ids = [int(_row_value(row, "SamplingTargetId", 0)) for row in target_rows]
+        target_id_sources = {
+            str(_row_value(row, "identity_source", 1) or "UNKNOWN"): sum(
+                1 for candidate in target_rows if _row_value(candidate, "identity_source", 1) == _row_value(row, "identity_source", 1)
+            )
+            for row in target_rows
+        }
         return {
             "collector_runs": int(_row_value(counts, "collector_runs", 0) or 0),
             "sampling_targets": int(_row_value(counts, "sampling_targets", 1) or 0),
@@ -1470,6 +1493,7 @@ class MssqlPersistence:
             "latest_stop_observation_utc": _row_value(counts, "latest_stop_observation_utc", 5),
             "latest_situation_observation_utc": _row_value(counts, "latest_situation_observation_utc", 6),
             "sampling_target_ids": target_ids,
+            "sampling_target_id_sources": target_id_sources,
             "latest_collector_run": dict(latest_run) if isinstance(latest_run, Mapping) else latest_run,
         }
 
