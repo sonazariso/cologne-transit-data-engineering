@@ -12,9 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import repair_mdd_mac_schema as repair_module  # noqa: E402
 from apply_mssql_migration import compare_sampling_target_identities  # noqa: E402
 from repair_mdd_mac_schema import (  # noqa: E402
     RESUME_EVENT_OBJECT,
+    apply_resume_event_repair,
     inventory_schema,
     main as repair_main,
     resume_event_contract,
@@ -109,6 +111,40 @@ class _BaselineConnection:
         return None
 
 
+class _RepairConnection:
+    def __init__(self, *, commit_error: BaseException | None = None, rollback_error: BaseException | None = None) -> None:
+        self.commit_error = commit_error
+        self.rollback_error = rollback_error
+        self.commit_calls = 0
+        self.rollback_calls = 0
+        self.closed = False
+        self.cursor_value = _RepairCursor()
+
+    def cursor(self) -> object:
+        return self.cursor_value
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+        if self.commit_error is not None:
+            raise self.commit_error
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+        if self.rollback_error is not None:
+            raise self.rollback_error
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _RepairCursor:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, statement: str, *_args: object) -> None:
+        self.statements.append(statement)
+
+
 class ProductionRepairTests(unittest.TestCase):
     def test_migration_preserves_historical_seven_target_identities(self) -> None:
         result = compare_sampling_target_identities(range(1, 8), range(1, 8))
@@ -183,6 +219,136 @@ class ProductionRepairTests(unittest.TestCase):
                 "FK_ctl_MddMacProductionResumeEvent_Era",
             },
         )
+        self.assertEqual(contract["column_definitions"][1]["data_type"], "NVARCHAR")
+        self.assertEqual(contract["column_definitions"][1]["type_args"], 240)
+        self.assertEqual(contract["foreign_keys"][0]["referenced_columns"], ["SamplingEraId"])
+        self.assertEqual(
+            {index["name"] for index in contract["indexes"]},
+            {
+                "PK_ctl_MddMacProductionResumeEvent",
+                "UQ_ctl_MddMacProductionResumeEvent_Key",
+            },
+        )
+
+    @staticmethod
+    def _missing_resume_inventory() -> dict[str, object]:
+        return {"source_defined_objects": {"missing": [RESUME_EVENT_OBJECT]}}
+
+    @staticmethod
+    def _verification(status: str, object_present: bool) -> dict[str, object]:
+        return {"status": status, "checks": {"object_present": object_present}}
+
+    def _apply_with_verifications(
+        self,
+        verifications: list[dict[str, object]],
+        *,
+        connection: _RepairConnection | None = None,
+        reconciliation: dict[str, object] | None = None,
+    ) -> tuple[dict[str, object], _RepairConnection]:
+        active_connection = connection or _RepairConnection()
+        settings = MssqlConnectionSettings(host="sql.example", user="admin", password="unused")
+        with patch.object(repair_module, "connect_mssql", return_value=active_connection), patch.object(
+            repair_module, "_acquire_schema_repair_lock"
+        ), patch.object(repair_module, "_release_schema_repair_lock"), patch.object(
+            repair_module, "_schema_verification", side_effect=verifications
+        ), patch.object(
+            repair_module,
+            "_reconcile_schema_state",
+            return_value=reconciliation
+            or {
+                "status": "NOT_PROVEN",
+                "object_exists": False,
+                "schema_verification": self._verification("NOT_PROVEN", False),
+            },
+        ):
+            result = apply_resume_event_repair(
+                settings,
+                inventory=self._missing_resume_inventory(),
+                backup={"status": "PASS"},
+                competing={"status": "PASS"},
+            )
+        return result, active_connection
+
+    def test_repair_reports_successful_rollback_explicitly(self) -> None:
+        result, connection = self._apply_with_verifications(
+            [
+                self._verification("NOT_PROVEN", False),
+                self._verification("NOT_PROVEN", False),
+            ]
+        )
+        self.assertEqual(result["creation_status"], "CREATION_FAILED")
+        self.assertTrue(result["transaction_execution_started"])
+        self.assertFalse(result["commit_attempted"])
+        self.assertTrue(result["rollback_attempted"])
+        self.assertTrue(result["rollback_confirmed"])
+        self.assertTrue(result["transaction_rolled_back"])
+        self.assertFalse(result["transaction_final_state_unknown"])
+        self.assertEqual(connection.rollback_calls, 1)
+
+    def test_repair_does_not_claim_rollback_when_rollback_fails(self) -> None:
+        result, connection = self._apply_with_verifications(
+            [
+                self._verification("NOT_PROVEN", False),
+                self._verification("NOT_PROVEN", False),
+            ],
+            connection=_RepairConnection(rollback_error=RuntimeError("rollback connection lost")),
+        )
+        self.assertEqual(result["creation_status"], "CREATION_FAILED")
+        self.assertTrue(result["rollback_attempted"])
+        self.assertFalse(result["rollback_confirmed"])
+        self.assertFalse(result["transaction_rolled_back"])
+        self.assertTrue(result["transaction_final_state_unknown"])
+        self.assertEqual(result["rollback_error"]["reason"], "rollback connection lost")
+        self.assertEqual(connection.rollback_calls, 1)
+
+    def test_repair_preserves_verification_failure_and_rollback_state(self) -> None:
+        result, _connection = self._apply_with_verifications(
+            [
+                self._verification("NOT_PROVEN", False),
+                self._verification("NOT_PROVEN", False),
+            ],
+            reconciliation={
+                "status": "NOT_PROVEN",
+                "object_exists": False,
+                "schema_verification": self._verification("NOT_PROVEN", False),
+            },
+        )
+        self.assertIn("schema_verification_before_commit", result)
+        self.assertEqual(result["schema_verification_before_commit"]["status"], "NOT_PROVEN")
+        self.assertTrue(result["rollback_confirmed"])
+        self.assertFalse(result["commit_confirmed"])
+
+    def test_repair_treats_commit_exception_as_unknown_and_reconciles(self) -> None:
+        result, connection = self._apply_with_verifications(
+            [
+                self._verification("NOT_PROVEN", False),
+                self._verification("PASS", True),
+            ],
+            connection=_RepairConnection(commit_error=RuntimeError("commit acknowledgement lost")),
+            reconciliation={
+                "status": "PASS",
+                "object_exists": True,
+                "schema_verification": self._verification("PASS", True),
+            },
+        )
+        self.assertEqual(result["creation_status"], "COMMIT_OUTCOME_UNKNOWN")
+        self.assertTrue(result["commit_attempted"])
+        self.assertFalse(result["commit_confirmed"])
+        self.assertFalse(result["rollback_attempted"])
+        self.assertTrue(result["transaction_final_state_unknown"])
+        self.assertTrue(result["object_exists_after_operation"])
+        self.assertIn("original_error", result)
+        self.assertEqual(connection.rollback_calls, 0)
+
+    def test_repair_does_not_call_idempotent_batch_when_another_operation_created_valid_table(self) -> None:
+        result, connection = self._apply_with_verifications(
+            [self._verification("PASS", True)]
+        )
+        self.assertEqual(result["creation_status"], "CREATED_OR_CHANGED_BY_ANOTHER_OPERATION")
+        self.assertFalse(result["transaction_execution_started"])
+        self.assertFalse(result["commit_attempted"])
+        self.assertFalse(result["created_objects"])
+        self.assertFalse(any("CREATE TABLE" in statement.upper() for statement in connection.cursor_value.statements))
 
     def test_repair_cli_requires_explicit_production_ddl_authorization(self) -> None:
         output = io.StringIO()

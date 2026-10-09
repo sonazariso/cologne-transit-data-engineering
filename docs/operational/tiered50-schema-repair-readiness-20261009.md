@@ -37,14 +37,57 @@ created object, and is safe to repeat.
 Actual production repair: **NOT APPLIED — explicit operator DDL authorization
 was not supplied.**
 
+## Explicit production DDL authorization request
+
+The exact proposed change is additive and limited to one object:
+
+```text
+ctl.MddMacProductionResumeEvent
+```
+
+If approved, the repair command will first confirm the SQL Server instance and
+database, the latest successful checksum-bearing backup verification, absence
+of a competing production collector or lease, and a fresh read-only inventory.
+It will then acquire the scoped
+`CologneTransitIntelligence:SCHEMA:ctl.MddMacProductionResumeEvent` SQL
+application lock and execute only the idempotent `IF OBJECT_ID ... IS NULL`
+CREATE batch extracted from
+`sql/mdd-mac-collector/create-source-faithful-persistence.sql`. The operation
+will not run the general migration, create a SamplingEra, repeat cutover,
+rewrite quota rows, or write a ResumeEvent.
+
+The result will independently verify the table through a new administrator
+connection, including ordered columns and SQL types/lengths, nullability and
+identity, primary/unique key structure, foreign-key target and column, check
+and default constraints, indexes, `ctl` schema ownership, and administrator
+access. The result distinguishes `CREATED_BY_THIS_OPERATION`,
+`ALREADY_EXISTS_AND_VALID`, `CREATED_OR_CHANGED_BY_ANOTHER_OPERATION`,
+`CREATION_FAILED`, and `COMMIT_OUTCOME_UNKNOWN`; an ambiguous COMMIT is never
+reported as a successful rollback.
+
+Explicit approval requested (not granted):
+
+> I approve creating only `ctl.MddMacProductionResumeEvent` and its
+> source-defined constraints from the authoritative migration, after the
+> stated identity, backup, collector, and read-only inventory checks pass. I
+> do not approve the general migration, SamplingEra creation, cutover repeat,
+> quota rewrite, ResumeEvent insertion, collector activation, or Tiered50
+> Resume.
+
 Fresh sanitized evidence is in
 [`tiered50-production-evidence-current-20261009.json`](tiered50-production-evidence-current-20261009.json).
 It is read-only and unsigned because an operator-controlled private signing key
 was not supplied; no signature was fabricated.
 
-The rollback-only real SQL Skip Audit validation completed **PASS** as
+The rollback-only real SQL Skip Audit validation is preserved as a reported
+real-SQL result: **PASS** as
 `REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK` for row counts 1, 16, 18, and 19;
-zero rows remained after rollback, and zero MDD requests were issued.
+zero rows remained after rollback, and zero MDD requests were issued. No
+sanitized machine-readable output from that execution was found in this
+checkout, so this is not presented as a newly independently replayed result.
+The tracked `tiered50-skip-audit-benchmark-20261008.json` is a separate
+disposable-SQLite overhead comparison and must not be substituted for the
+reported SQL Server evidence.
 
 ## Current operational blockers
 

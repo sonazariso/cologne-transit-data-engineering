@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -156,6 +157,11 @@ def sign_payload(evidence: Mapping[str, Any], *, signing_key_path: str | Path) -
     key = Path(signing_key_path).expanduser().resolve()
     if not key.is_file():
         raise AdminEvidenceError("administrative-evidence signing key is unavailable")
+    project_root = Path(__file__).resolve().parents[2]
+    if key == project_root or project_root in key.parents:
+        raise AdminEvidenceError("administrative-evidence signing key must remain outside the repository")
+    if stat.S_IMODE(key.stat().st_mode) & 0o077:
+        raise AdminEvidenceError("administrative-evidence signing key must be owner-readable only")
     signature = _run_openssl(["dgst", "-sha256", "-sign", str(key)], input_bytes=canonical_payload(evidence))
     return {
         "status": "SIGNED",

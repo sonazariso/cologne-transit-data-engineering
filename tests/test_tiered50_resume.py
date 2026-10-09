@@ -357,6 +357,7 @@ class AdminEvidenceEnvelopeTests(unittest.TestCase):
             private = directory_path / "private.pem"
             public = directory_path / "public.pem"
             os.system(f"/usr/bin/openssl genrsa -out {private} 2048 >/dev/null 2>&1")
+            private.chmod(0o600)
             os.system(f"/usr/bin/openssl rsa -in {private} -pubout -out {public} >/dev/null 2>&1")
             evidence = self._evidence()
             evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
@@ -375,6 +376,7 @@ class AdminEvidenceEnvelopeTests(unittest.TestCase):
             private = directory_path / "private.pem"
             public = directory_path / "public.pem"
             os.system(f"/usr/bin/openssl genrsa -out {private} 2048 >/dev/null 2>&1")
+            private.chmod(0o600)
             os.system(f"/usr/bin/openssl rsa -in {private} -pubout -out {public} >/dev/null 2>&1")
             evidence = self._evidence()
             identity = {
@@ -412,6 +414,7 @@ class AdminEvidenceEnvelopeTests(unittest.TestCase):
             private = directory_path / "private.pem"
             public = directory_path / "public.pem"
             os.system(f"/usr/bin/openssl genrsa -out {private} 2048 >/dev/null 2>&1")
+            private.chmod(0o600)
             os.system(f"/usr/bin/openssl rsa -in {private} -pubout -out {public} >/dev/null 2>&1")
             evidence = self._evidence()
             evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
@@ -430,6 +433,7 @@ class AdminEvidenceEnvelopeTests(unittest.TestCase):
             private = directory_path / "private.pem"
             public = directory_path / "public.pem"
             os.system(f"/usr/bin/openssl genrsa -out {private} 2048 >/dev/null 2>&1")
+            private.chmod(0o600)
             os.system(f"/usr/bin/openssl rsa -in {private} -pubout -out {public} >/dev/null 2>&1")
             evidence = self._evidence()
             evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)

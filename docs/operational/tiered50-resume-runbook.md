@@ -50,10 +50,21 @@ matching database names or aliases alone are insufficient.
 The controlled Windows Authentication alternative is
 `scripts/capture_windows_sql_admin_evidence.ps1`. It writes an unsigned,
 sanitized payload only after the SQL-side permission, capacity, backup,
-materialization, and quota gates pass. Sign that payload with
-`scripts/sign_admin_evidence.py`, copy only the signed artifact to the
-operator-secure storage, and configure its matching public key as
-`MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY`. On the Mac, merge that verified SQL
+materialization, and quota gates pass. Sign and immediately verify that
+payload with `scripts/sign_admin_evidence.py`, copy only the signed artifact
+to the operator-secure storage, and configure its matching public key as
+`MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY`:
+
+```text
+MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY=/operator-secure/admin-evidence-public-key.pem \
+python3 scripts/sign_admin_evidence.py \
+  --input /operator-secure/windows-admin-evidence-unsigned.json \
+  --output /operator-secure/windows-admin-evidence.json \
+  --signing-key /operator-secure/admin-evidence-signing-key.pem \
+  --public-key /operator-secure/admin-evidence-public-key.pem
+```
+
+On the Mac, merge that verified SQL
 envelope with a fresh local host/runtime capture and sign the resulting full
 operational artifact:
 
@@ -71,6 +82,35 @@ Keychain item or one-process authorized credential is available, stop here and
 leave Tiered50 stopped with `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`.
 The final artifact must also contain a fresh Windows VM disk-capacity check;
 the SQL and Mac captures do not infer that capacity from the host filesystem.
+
+## Separate schema-repair gate
+
+The missing object repair is a separate operator decision. Production DDL
+approval does not authorize Tiered50 Resume. Before any authorized repair,
+present and record approval for creating only
+`ctl.MddMacProductionResumeEvent` and its source-defined constraints from the
+single idempotent batch in
+`sql/mdd-mac-collector/create-source-faithful-persistence.sql`:
+
+```text
+python3 scripts/repair_mdd_mac_schema.py \
+  --apply \
+  --authorize-production-ddl
+```
+
+The command rechecks the actual SQL instance/database, backup verification,
+competing collectors, and schema inventory; takes the scoped SQL application
+lock; performs no general migration, SamplingEra creation, cutover repeat,
+quota rewrite, ResumeEvent insert, or collector activation; and independently
+verifies the installed contract through a fresh administrator connection.
+Its creation result must be read from `creation_status`, not inferred from a
+successful idempotent batch. An ambiguous COMMIT is recorded as
+`COMMIT_OUTCOME_UNKNOWN` until reconciled and is never described as a
+successful rollback.
+
+After repair, generate fresh administrative evidence and sign it with the
+operator-controlled key. The DDL approval remains distinct from the later
+explicit operational authorization required by the Resume command.
 
 ## Read-only and rollback validation
 

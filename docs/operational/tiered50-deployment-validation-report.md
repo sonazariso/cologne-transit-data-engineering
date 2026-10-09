@@ -2,6 +2,13 @@
 
 Status: **BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST SCHEDULED HEARTBEAT; LEGACY7 RETIRED**
 
+This report preserves the pre-repair deployment-validation snapshot. The
+authoritative 2026-10-09 administrator refresh and schema-repair decision
+record are in
+[`tiered50-schema-repair-readiness-20261009.md`](tiered50-schema-repair-readiness-20261009.md);
+its reported SQL Skip Audit result and explicit DDL/signing gates supersede
+the older `NOT_PROVEN` wording below without changing this historical report.
+
 The approved `TIERED50_PANEL_V1` configuration remains unchanged. The SQL
 Server migration and exact Tiered50 materialization are applied: all 50 panel
 records are represented, historical IDs 1–7 are preserved, and new IDs 8–50
