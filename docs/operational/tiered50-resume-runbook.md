@@ -36,9 +36,14 @@ Keychain item available, run:
 
 ```text
 python3 scripts/tiered50_production_evidence.py \
-  docs/operational/tiered50-production-evidence-current-20261009.json \
   --signing-key /operator-secure/admin-evidence-signing-key.pem
 ```
+
+With no positional output argument, capture writes the stable current artifact
+at `docs/operational/tiered50-production-evidence-current.json`. An optional
+`MSSQL_ADMIN_EVIDENCE_PATH` override must be an absolute owner-controlled path
+with that exact filename; daily filenames and arbitrary temporary locations
+are rejected. Resume consumes this same path.
 
 The administrative variables never inherit `MSSQL_*` runtime credentials. The
 runtime account must remain `CologneTransitCollector` and the administrator
@@ -60,6 +65,7 @@ MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY=/operator-secure/admin-evidence-public-key.pem \
 python3 scripts/sign_admin_evidence.py \
   --input /operator-secure/windows-admin-evidence-unsigned.json \
   --output /operator-secure/windows-admin-evidence.json \
+  --intermediate \
   --signing-key /operator-secure/admin-evidence-signing-key.pem \
   --public-key /operator-secure/admin-evidence-public-key.pem
 ```
@@ -70,10 +76,13 @@ operational artifact:
 
 ```text
 python3 scripts/tiered50_production_evidence.py \
-  docs/operational/tiered50-production-evidence-current-20261009.json \
   --admin-evidence /operator-secure/windows-admin-evidence.json \
   --signing-key /operator-secure/admin-evidence-signing-key.pem
 ```
+
+The Mac merge command overwrites the same stable current artifact. The final
+signature is applied after the merged payload and current status are complete;
+the Windows envelope is only an authenticated intermediate input.
 
 The public-key verification happens before the merge; the final signature
 binds the SQL and Mac evidence together. This Windows workflow does not and

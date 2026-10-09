@@ -146,6 +146,35 @@ REQUIRED_POSITIVE_OBJECTS = tuple(
     dict.fromkeys(item.object_name for item in RUNTIME_PERMISSION_MATRIX)
 )
 
+# These checks deliberately cover both server/database-wide elevation and
+# unrelated data surfaces.  They are metadata reads only; the inspector below
+# never invokes a grant, role change, or data-reading statement.
+PROHIBITED_RUNTIME_ROLE_CHECKS = (
+    "sysadmin",
+    "serveradmin",
+    "securityadmin",
+    "db_owner",
+    "db_datareader",
+    "db_datawriter",
+    "db_securityadmin",
+    "db_ddladmin",
+    "db_backupoperator",
+)
+PROHIBITED_RUNTIME_PERMISSION_CHECKS = (
+    ("control_server", None, None, "CONTROL SERVER"),
+    ("alter_any_login", None, None, "ALTER ANY LOGIN"),
+    ("create_any_database", None, None, "CREATE ANY DATABASE"),
+    ("audit_control", "ctl.MddMacTargetAudit", "OBJECT", "CONTROL"),
+    ("audit_alter", "ctl.MddMacTargetAudit", "OBJECT", "ALTER"),
+    ("audit_delete", "ctl.MddMacTargetAudit", "OBJECT", "DELETE"),
+    ("quota_history_select", "ctl.MddMacSharedQuotaReconciliation", "OBJECT", "SELECT"),
+    ("quota_history_insert", "ctl.MddMacSharedQuotaReconciliation", "OBJECT", "INSERT"),
+    ("analytics_history_select", "analytics.vwMddMacRecordedAtTimeHistory", "OBJECT", "SELECT"),
+    ("analytics_coverage_select", "analytics.vwMddMacSourceFieldCoverage", "OBJECT", "SELECT"),
+    ("import_batch_select", "ctl.MddImportBatch", "OBJECT", "SELECT"),
+    ("source_snapshot_select", "stg.MddMacSourceSnapshot", "OBJECT", "SELECT"),
+)
+
 
 def _generate_password() -> str:
     required = [
@@ -306,6 +335,169 @@ def _negative_permission_checks(settings: MssqlConnectionSettings) -> dict[str, 
         connection.close()
     checks["status"] = "PASS" if all(checks.values()) else "FAIL"
     return checks
+
+
+def _permission_state(value: Any) -> str:
+    """Normalize SQL Server permission metadata without treating NULL as denied."""
+
+    if value is None:
+        return "UNKNOWN"
+    if isinstance(value, bool):
+        return "GRANTED" if value else "DENIED"
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return "GRANTED"
+        if value == 0:
+            return "DENIED"
+        return "UNKNOWN"
+    normalized = str(value).strip().upper()
+    if normalized in {"1", "TRUE", "GRANTED", "YES"}:
+        return "GRANTED"
+    if normalized in {"0", "FALSE", "DENIED", "NO"}:
+        return "DENIED"
+    return "UNKNOWN"
+
+
+def _row_mapping(row: Any) -> dict[str, Any]:
+    if isinstance(row, Mapping):
+        return dict(row)
+    if row is None:
+        return {}
+    return {str(index): value for index, value in enumerate(row)}
+
+
+def _row_field(row: Any, name: str, index: int) -> Any:
+    values = _row_mapping(row)
+    return values.get(name, values.get(str(index)))
+
+
+def inspect_runtime_permissions(settings: MssqlConnectionSettings) -> dict[str, Any]:
+    """Inspect the real runtime security context using read-only metadata.
+
+    The positive checks are generated directly from ``RUNTIME_PERMISSION_MATRIX``.
+    Every ``NULL`` result is retained as ``UNKNOWN`` and fails the gate; it is
+    never converted into a false denial or a false grant.
+    """
+
+    result: dict[str, Any] = {
+        "validation_mode": "READ_ONLY_PERMISSION_METADATA",
+        "status": "FAIL",
+        "connection": settings.redacted(),
+        "required_permission_count": len(RUNTIME_PERMISSION_MATRIX),
+        "positive_permissions": [],
+        "prohibited_privilege_checks": {},
+        "missing_permissions": [],
+        "unknown_permissions": [],
+        "prohibited_privileges": [],
+        "unknown_prohibited_privileges": [],
+    }
+    connection = connect_mssql(settings)
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT DB_NAME() AS database_name,
+                   SUSER_SNAME() AS login_name,
+                   CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)) AS server_name,
+                   CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(128)) AS machine_name,
+                   CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128)) AS instance_name,
+                   CAST(@@SERVERNAME AS NVARCHAR(128)) AS configured_server_name,
+                   IS_SRVROLEMEMBER(N'sysadmin') AS is_sysadmin,
+                   IS_SRVROLEMEMBER(N'serveradmin') AS is_serveradmin,
+                   IS_SRVROLEMEMBER(N'securityadmin') AS is_securityadmin,
+                   IS_ROLEMEMBER(N'db_owner') AS is_db_owner,
+                   IS_ROLEMEMBER(N'db_datareader') AS is_db_datareader,
+                   IS_ROLEMEMBER(N'db_datawriter') AS is_db_datawriter,
+                   IS_ROLEMEMBER(N'db_securityadmin') AS is_db_securityadmin,
+                   IS_ROLEMEMBER(N'db_ddladmin') AS is_db_ddladmin,
+                   IS_ROLEMEMBER(N'db_backupoperator') AS is_db_backupoperator
+            """
+        )
+        identity_row = cursor.fetchone()
+        identity_fields = {
+            "database_name": _row_field(identity_row, "database_name", 0),
+            "login_name": _row_field(identity_row, "login_name", 1),
+            "server_name": _row_field(identity_row, "server_name", 2),
+            "machine_name": _row_field(identity_row, "machine_name", 3),
+            "instance_name": _row_field(identity_row, "instance_name", 4),
+            "configured_server_name": _row_field(identity_row, "configured_server_name", 5),
+        }
+        result["identity"] = {
+            key: str(value or "")
+            for key, value in identity_fields.items()
+        }
+        role_checks: dict[str, str] = {}
+        for offset, role_name in enumerate(PROHIBITED_RUNTIME_ROLE_CHECKS, start=6):
+            role_checks[role_name] = _permission_state(_row_field(identity_row, f"is_{role_name}", offset))
+        result["prohibited_privilege_checks"] = role_checks
+
+        positive_permissions: list[dict[str, Any]] = []
+        for item in RUNTIME_PERMISSION_MATRIX:
+            cursor.execute(
+                "SELECT HAS_PERMS_BY_NAME(%s, N'OBJECT', %s) AS permission_state",
+                (item.object_name, item.permission),
+            )
+            permission_row = cursor.fetchone()
+            state = _permission_state(_row_field(permission_row, "permission_state", 0))
+            entry = {
+                "operation": item.operation,
+                "object": item.object_name,
+                "permission": item.permission,
+                "status": state,
+            }
+            positive_permissions.append(entry)
+            if state == "DENIED":
+                result["missing_permissions"].append(
+                    {"object": item.object_name, "permission": item.permission}
+                )
+            elif state == "UNKNOWN":
+                result["unknown_permissions"].append(
+                    {"object": item.object_name, "permission": item.permission}
+                )
+        result["positive_permissions"] = positive_permissions
+
+        prohibited_checks = dict(result["prohibited_privilege_checks"])
+        for key, object_name, class_name, permission in PROHIBITED_RUNTIME_PERMISSION_CHECKS:
+            if object_name is None:
+                cursor.execute(
+                    "SELECT HAS_PERMS_BY_NAME(NULL, NULL, %s) AS permission_state",
+                    (permission,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT HAS_PERMS_BY_NAME(%s, %s, %s) AS permission_state",
+                    (object_name, class_name, permission),
+                )
+            permission_row = cursor.fetchone()
+            state = _permission_state(_row_field(permission_row, "permission_state", 0))
+            prohibited_checks[key] = state
+            if state == "GRANTED":
+                result["prohibited_privileges"].append(key)
+            elif state == "UNKNOWN":
+                result["unknown_prohibited_privileges"].append(key)
+        result["prohibited_privilege_checks"] = prohibited_checks
+
+        login_ok = str(result["identity"].get("login_name") or "").lower() == RUNTIME_LOGIN.lower()
+        database_ok = str(result["identity"].get("database_name") or "") == settings.database
+        result["runtime_identity_check"] = {
+            "login_matches_expected": login_ok,
+            "database_matches_expected": database_ok,
+            "expected_login": RUNTIME_LOGIN,
+            "expected_database": settings.database,
+        }
+        all_positive_granted = not result["missing_permissions"] and not result["unknown_permissions"]
+        all_prohibited_denied = not result["prohibited_privileges"] and not result["unknown_prohibited_privileges"]
+        result["status"] = (
+            "PASS"
+            if login_ok and database_ok and all_positive_granted and all_prohibited_denied
+            else "FAIL"
+        )
+    except Exception as exc:
+        result["error_type"] = type(exc).__name__
+        result["error"] = str(exc)
+    finally:
+        connection.close()
+    return result
 
 
 def _read_pending_password(provider: Any) -> str | None:

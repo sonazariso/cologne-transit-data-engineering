@@ -14,7 +14,9 @@ param(
     [Parameter(Mandatory = $true)] [string] $SqlInstance,
     [string] $Database = "CologneTransitIntelligence",
     [Parameter(Mandatory = $true)] [string] $UnsignedPayloadPath,
-    [string] $RuntimeLoginName = "CologneTransitCollector"
+    [string] $RuntimeLoginName = "CologneTransitCollector",
+    [ValidateSet("Mandatory", "Optional", "Strict")]
+    [string] $EncryptMode = "Mandatory"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +25,23 @@ function Invoke-ReadOnlySql([string] $Query) {
     if (-not (Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue)) {
         throw "Invoke-Sqlcmd is required for the controlled Windows Authentication evidence path"
     }
-    return @(Invoke-Sqlcmd -ServerInstance $SqlInstance -Database $Database -Query $Query -TrustServerCertificate:$false -AbortOnError)
+    return @(
+        Invoke-Sqlcmd -ServerInstance $SqlInstance -Database $Database -Query $Query `
+            -Encrypt $EncryptMode -TrustServerCertificate:$false -AbortOnError
+    )
+}
+
+function Get-PermissionState($Value) {
+    if ($null -eq $Value) {
+        return "UNKNOWN"
+    }
+    if ([int]$Value -eq 1) {
+        return "GRANTED"
+    }
+    if ([int]$Value -eq 0) {
+        return "DENIED"
+    }
+    return "UNKNOWN"
 }
 
 $identity = Invoke-ReadOnlySql @"
@@ -59,32 +77,33 @@ SELECT HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DEFINITION') AS HasViewD
 if ($permissions.Count -ne 1) {
     throw "SQL permission inspection did not return exactly one row"
 }
-$productMajorVersion = [int]$identity[0].ProductMajorVersion
-$serverDmvGranted = if ($productMajorVersion -ge 16) {
-    [int]$permissions[0].HasViewServerPerformanceState -eq 1
+$productMajorVersionValue = $identity[0].ProductMajorVersion
+if ($null -eq $productMajorVersionValue) {
+    throw "SQL Server product major version was not returned"
+}
+$productMajorVersion = [int]$productMajorVersionValue
+$serverDmvMetadataState = if ($productMajorVersion -ge 16) {
+    Get-PermissionState $permissions[0].HasViewServerPerformanceState
 } else {
-    [int]$permissions[0].HasViewServerState -eq 1
+    Get-PermissionState $permissions[0].HasViewServerState
 }
+$backupVerifyPermissionState = if (
+    ([int]$permissions[0].HasCreateAnyDatabase -eq 1) -or
+    ([int]$permissions[0].IsSysadmin -eq 1) -or
+    ([int]$permissions[0].IsDbcreator -eq 1)
+) { "GRANTED" } elseif (
+    $null -ne $permissions[0].HasCreateAnyDatabase -and
+    $null -ne $permissions[0].IsSysadmin -and
+    $null -ne $permissions[0].IsDbcreator
+) { "DENIED" } else { "UNKNOWN" }
 $permissionChecks = [ordered]@{
-    database_view_definition = ([int]$permissions[0].HasViewDefinition -eq 1)
-    database_view_state = ([int]$permissions[0].HasViewDatabaseState -eq 1)
-    server_dmv_state = $serverDmvGranted
-    backup_history_backupset_select = ([int]$permissions[0].HasBackupsetSelect -eq 1)
-    backup_history_backupmediafamily_select = ([int]$permissions[0].HasBackupmediafamilySelect -eq 1)
-    operational_history_database_select = ([int]$permissions[0].HasDatabaseSelect -eq 1)
-    backup_verifyonly_authorization = (
-        [int]$permissions[0].HasCreateAnyDatabase -eq 1 -or
-        [int]$permissions[0].IsSysadmin -eq 1 -or
-        [int]$permissions[0].IsDbcreator -eq 1
-    )
-}
-$missingPermissions = @(
-    $permissionChecks.GetEnumerator() |
-        Where-Object { -not $_.Value } |
-        ForEach-Object { $_.Key }
-)
-if ($missingPermissions.Count -gt 0) {
-    throw ("Required read-only administrative permissions are not proven: " + ($missingPermissions -join ","))
+    database_view_definition = (Get-PermissionState $permissions[0].HasViewDefinition)
+    database_view_state = (Get-PermissionState $permissions[0].HasViewDatabaseState)
+    server_dmv_state = $serverDmvMetadataState
+    backup_history_backupset_select = (Get-PermissionState $permissions[0].HasBackupsetSelect)
+    backup_history_backupmediafamily_select = (Get-PermissionState $permissions[0].HasBackupmediafamilySelect)
+    operational_history_database_select = (Get-PermissionState $permissions[0].HasDatabaseSelect)
+    backup_verifyonly_authorization = $backupVerifyPermissionState
 }
 
 $databaseFiles = Invoke-ReadOnlySql "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages FROM sys.database_files ORDER BY file_id;"
@@ -111,6 +130,27 @@ WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME()
   AND AccountingStatus = 'COMPLETE'
 ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC;
 "@
+
+# A successful DMV query is effective permission evidence.  SQL Server 2025
+# can return NULL for a metadata permission function even for an authorized
+# sysadmin; do not reject that identity when the protected DMV reads actually
+# complete under the same Windows Authentication context.
+if ($databaseFiles.Count -gt 0) {
+    $permissionChecks.database_view_definition = "GRANTED"
+}
+if ($logSpace.Count -eq 1) {
+    $permissionChecks.database_view_state = "GRANTED"
+}
+if ($volumes.Count -gt 0 -and $logSpace.Count -eq 1) {
+    $permissionChecks.server_dmv_state = "GRANTED"
+}
+$permissionChecks.backup_history_backupset_select = "GRANTED"
+if ($backupMedia.Count -gt 0) {
+    $permissionChecks.backup_history_backupmediafamily_select = "GRANTED"
+}
+if ($history.Count -eq 1) {
+    $permissionChecks.operational_history_database_select = "GRANTED"
+}
 if ($quota.Count -eq 0) {
     $quota = Invoke-ReadOnlySql @"
 SELECT TOP (1) 'BOUNDED_BOOTSTRAP' AS SourceKind, MonthKey,
@@ -154,11 +194,24 @@ if (($competingWriters | Where-Object { [int64]$_.RunningCount -gt 0 }).Count -g
 # and diagnostic text never enter the sanitized JSON payload.
 $backupMediaClauses = @($backupMedia | ForEach-Object { "DISK = N'{0}'" -f ([string]$_.physical_device_name).Replace("'", "''") })
 Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) | Out-Null
+$permissionChecks.backup_verifyonly_authorization = "GRANTED"
+
+$missingPermissions = @(
+    $permissionChecks.GetEnumerator() |
+        Where-Object { $_.Value -ne "GRANTED" } |
+        ForEach-Object { $_.Key + "=" + $_.Value }
+)
+if ($missingPermissions.Count -gt 0) {
+    throw ("Required read-only administrative permissions are not proven: " + ($missingPermissions -join ","))
+}
 
 $captured = [DateTime]::Parse([string]$identity[0].CapturedAtUtc).ToUniversalTime().ToString("o")
 $windowsDisk = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | ForEach-Object {
     @{ drive = [string]$_.DeviceID; total_bytes = [int64]$_.Size; free_bytes = [int64]$_.FreeSpace }
 })
+if ($windowsDisk.Count -eq 0 -or ($windowsDisk | Where-Object { $_.total_bytes -le 0 -or $_.free_bytes -le 0 }).Count -gt 0) {
+    throw "Windows VM fixed-disk capacity was not proven"
+}
 $payload = [ordered]@{
     artifact_version = "TIERED50_ADMIN_EVIDENCE_V3"
     capture_role = "WINDOWS_INTEGRATED_AUTH_READ_ONLY_CAPTURE"
@@ -183,13 +236,14 @@ $payload = [ordered]@{
             "quota.current_shared_ledger"
         )
         authentication_source = "WINDOWS_AUTHENTICATION_SQL_SERVER_VM"
+        tls = @{ encryption_mode = $EncryptMode; trust_server_certificate = $false; certificate_validation_required = $true }
     }
     sql = [ordered]@{
         admin_authorization = @{ status = "PASS"; permission_checks = $permissionChecks }
         admin_connection = @{ status = "PASS"; authorization_status = "PASS" }
         identity = @{ status = "PASS"; server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; configured_server_name = [string]$identity[0].ConfiguredServerName; database_name = [string]$identity[0].DatabaseName; login_name = [string]$identity[0].LoginName; captured_at_utc = $captured; sql_instance_identity = @{ server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; database_name = [string]$identity[0].DatabaseName } }
         admin_identity_gate = @{ status = "PASS"; effective_login = [string]$identity[0].LoginName; runtime_login_match = $false }
-        admin_permissions = @{ status = "PASS"; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = @() }
+        admin_permissions = @{ status = "PASS"; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = @(); tls = @{ encryption_mode = $EncryptMode; trust_server_certificate = $false; certificate_validation_required = $true } }
         runtime_health = @{ status = "PASS"; database_name = [string]$runtimeHealth[0].database_name; database_status = [string]$runtimeHealth[0].database_status; recovery_model = [string]$runtimeHealth[0].recovery_model; evidence = @{ status = "PASS" } }
         database_files = @($databaseFiles | ForEach-Object { @{ name = [string]$_.name; type = [string]$_.type_desc; size_pages = [int64]$_.size; growth = [int]$_.growth; is_percent_growth = [bool]$_.is_percent_growth; max_size_pages = [int]$_.max_size; space_used_pages = [int64]$_.space_used_pages } })
         database_files_evidence = @{ status = "PASS" }

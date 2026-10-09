@@ -30,6 +30,8 @@ Heumarkt request was issued.
 The separate administrator path proved the actual `DataAnalyst-VM` /
 `CologneTransitIntelligence` target, permissions, backup checksum verification,
 database/log/volume capacity, and absence of competing collectors or leases.
+The read-only `CologneTransitCollector` inspection also passed all 34 positive
+matrix permissions and denied every prohibited broad or unrelated privilege.
 The only missing source object was `ctl.MddMacProductionResumeEvent`.
 
 The exact scoped repair command committed that table from the authoritative
@@ -46,12 +48,14 @@ relevant regression set passed 95 tests. The full sanitized repair record is
 [`tiered50-schema-repair-evidence-20261009.json`](tiered50-schema-repair-evidence-20261009.json).
 
 The fresh administrator evidence is
-[`tiered50-production-evidence-current-20261009.json`](tiered50-production-evidence-current-20261009.json).
+[`tiered50-production-evidence-current.json`](tiered50-production-evidence-current.json).
 It is intentionally unsigned because the operator-controlled signing key was
-not supplied. Tiered50 remains stopped, the LaunchAgent remains disabled, zero
-stations are collecting, and the separate Resume authorization was not
-executed. Future monthly rollover remains unverified, unapproved,
-unregistered, and fail-closed.
+not supplied. The current artifact still lacks `sql.windows_vm_disk`: VMware
+guest operations are blocked by the running VM's encryption-password prompt,
+so Windows disk capacity cannot be inferred from Mac or SQL measurements.
+Tiered50 remains stopped, the LaunchAgent remains disabled, zero stations are
+collecting, and the separate Resume authorization was not executed. Future
+monthly rollover remains unverified, unapproved, unregistered, and fail-closed.
 
 ## Latest correction and gate reconciliation — 2026-10-08
 

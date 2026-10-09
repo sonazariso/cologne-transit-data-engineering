@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from cologne_transit_collector.collector import LiveModeBlocked  # noqa: E402
+from cologne_transit_collector.admin_evidence import resolve_current_evidence_path  # noqa: E402
 from cologne_transit_collector.domain import (  # noqa: E402
     ABSOLUTE_PROVIDER_CEILING,
     APPROVED_SUPER_CYCLE_COUNTS,
@@ -67,11 +68,12 @@ from cologne_transit_collector.quota_rollover import (  # noqa: E402
 )
 from package_source_zip import is_forbidden_source_member, source_members  # noqa: E402
 from validate_tiered50_migration import validate_static  # noqa: E402
+from provision_macos_runtime_login import inspect_runtime_permissions  # noqa: E402
 
 
 MIGRATION = ROOT / "sql" / "mdd-mac-collector" / "materialize-tiered50-production.sql"
 QUOTA_RESET_CONTRACT = ROOT / "docs" / "operational" / "mdd-quota-reset-contract.json"
-OPERATIONAL_EVIDENCE = ROOT / "docs" / "operational" / "tiered50-production-evidence.json"
+OPERATIONAL_EVIDENCE = resolve_current_evidence_path(repository_root=ROOT)
 LAUNCHD_TEMPLATES = (
     ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-collector.plist",
     ROOT / "deployment" / "launchd" / "com.cologne-transit-intelligence.mdd-tiered50-collector.plist",
@@ -418,6 +420,7 @@ def validate_live_read_only() -> dict[str, Any]:
         result["windows_vm"] = {"status": "NOT_OBSERVABLE", "reason": "vmrun was not on PATH"}
     try:
         result["runtime_login"] = persistence.runtime_login_status()
+        result["runtime_permission_matrix"] = inspect_runtime_permissions(settings)
         result["runtime_schema"] = persistence.validate_runtime_schema()
         result["tiered50_schema"] = persistence.validate_tiered50_runtime_schema()
         result["quota_usage"] = persistence.current_month_usage()

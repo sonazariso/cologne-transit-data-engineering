@@ -54,12 +54,15 @@ passed 95 tests.
 
 ## Current operational gates
 
-The fresh administrator evidence is
-[`tiered50-production-evidence-current-20261009.json`](tiered50-production-evidence-current-20261009.json).
+The fresh administrator evidence is the stable current artifact
+[`tiered50-production-evidence-current.json`](tiered50-production-evidence-current.json).
 Its administrator, backup, capacity, and collector gates passed, but the
 artifact is intentionally `UNSIGNED` because the operator-controlled signing
-key was not supplied. The exact one-time key setup and public-key configuration
-are documented in
+key was not supplied. The read-only runtime permission inspection passed all
+34 positive matrix permissions and denied every prohibited privilege. Windows
+VM disk capacity remains `NOT_PROVEN` because VMware guest operations require
+the running VM's encryption password; it was not inferred from Mac or SQL
+measurements. The exact one-time key setup and public-key configuration are documented in
 [`tiered50-administrator-setup-request.md`](tiered50-administrator-setup-request.md).
 
 Tiered50 remains stopped, Legacy7 remains retired, zero stations are

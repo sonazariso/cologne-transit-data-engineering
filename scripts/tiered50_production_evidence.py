@@ -40,9 +40,11 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     REQUIRED_CHECK_IDS,
     normalize_sql_instance_identity,
     payload_sha256,
+    resolve_current_evidence_path,
     sign_payload,
     validate_admin_evidence_artifact,
 )
+from provision_macos_runtime_login import inspect_runtime_permissions  # noqa: E402
 
 
 LEGACY_LABEL = "com.cologne-transit-intelligence.mdd-collector"
@@ -50,6 +52,7 @@ TIERED_LABEL = "com.cologne-transit-intelligence.mdd-tiered50-collector"
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
 MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS = "MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS"
 ADMIN_KEYCHAIN_SERVICE = RUNTIME_ADMIN_KEYCHAIN_SERVICE
+OPERATIONAL_EVIDENCE_PATH = resolve_current_evidence_path(repository_root=ROOT)
 
 
 def _row_value(row: Any, name: str, index: int = 0) -> Any:
@@ -808,6 +811,9 @@ def collect(
         sql_evidence["tiered50_schema"] = _safe_runtime_read(
             "validate_tiered50_runtime_schema", runtime_persistence.validate_tiered50_runtime_schema
         )
+        sql_evidence["runtime_permission_matrix"] = _safe_runtime_read(
+            "inspect_runtime_permissions", lambda: inspect_runtime_permissions(runtime_settings)
+        )
         sql_evidence["quota_usage"] = _safe_runtime_read(
             "current_month_usage", lambda: runtime_persistence.current_month_usage(at_utc=generated_at)
         )
@@ -818,7 +824,7 @@ def collect(
             "error_type": type(exc).__name__,
             "reason": str(exc)[:500],
         }
-        for name in ("runtime_login", "runtime_schema", "tiered50_schema", "quota_usage"):
+        for name in ("runtime_login", "runtime_schema", "tiered50_schema", "runtime_permission_matrix", "quota_usage"):
             sql_evidence[name] = {
                 "status": "NOT_PROVEN",
                 "evidence_role": "DEDICATED_RUNTIME_LOGIN",
@@ -1751,6 +1757,7 @@ def collect(
             "runtime_login",
             "runtime_schema",
             "tiered50_schema",
+            "runtime_permission_matrix",
             "quota_usage",
         }
         merged_sql = dict(external_sql)
@@ -1878,6 +1885,23 @@ def collect(
         if not admin_authorized:
             admin_connection.setdefault("blocker_code", MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS)
 
+    runtime_permission_matrix = evidence["sql"].get("runtime_permission_matrix")
+    evidence["sql"]["runtime_permission_gate"] = {
+        "status": "PASS"
+        if isinstance(runtime_permission_matrix, Mapping)
+        and runtime_permission_matrix.get("status") == "PASS"
+        else "NOT_PROVEN",
+        "required_permission_count": len(
+            runtime_permission_matrix.get("positive_permissions", [])
+            if isinstance(runtime_permission_matrix, Mapping)
+            else []
+        ),
+        "reason": None
+        if isinstance(runtime_permission_matrix, Mapping)
+        and runtime_permission_matrix.get("status") == "PASS"
+        else "actual runtime permission matrix is incomplete or failing",
+    }
+
     identity = evidence["sql"].get("identity") or {}
     identity_database = str(identity.get("database_name") or "") if isinstance(identity, dict) else ""
     identity_login = str(identity.get("login_name") or "") if isinstance(identity, dict) else ""
@@ -1935,16 +1959,13 @@ def collect(
             if isinstance(external_provenance, Mapping)
             else sql_evidence.get("admin_role_source")
         ),
+        "tls": (
+            dict(external_provenance.get("tls") or {})
+            if isinstance(external_provenance, Mapping)
+            else {"status": "NOT_APPLICABLE", "driver": "pymssql"}
+        ),
         "windows_integrated_auth_supported": True,
     }
-    if signing_key_path is not None:
-        evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=signing_key_path)
-    else:
-        evidence["artifact_integrity"] = {
-            "status": "UNSIGNED",
-            "payload_sha256": payload_sha256(evidence),
-            "reason": "operator-controlled signing key was not supplied",
-        }
     latest_cutover_evidence = evidence["sql"].get("latest_cutover_evidence") or {}
     latest_cutover = evidence["sql"].get("latest_cutover_record")
     if not isinstance(latest_cutover_evidence, Mapping) or latest_cutover_evidence.get("status") != "PASS":
@@ -1963,15 +1984,21 @@ def collect(
     )
     evidence["current_status"] = current_status
     evidence["status"] = current_status["status"]
+    # Sign only after every signed field, including current_status and status,
+    # has been finalized.  Resume authenticates this exact stable artifact.
+    if signing_key_path is not None:
+        evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=signing_key_path)
+    else:
+        evidence["artifact_integrity"] = {
+            "status": "UNSIGNED",
+            "payload_sha256": payload_sha256(evidence),
+            "reason": "operator-controlled signing key was not supplied",
+        }
     return evidence
 
 
 def main(argv: list[str] | None = None) -> int:
-    output = (
-        Path(argv[0]).expanduser()
-        if argv
-        else ROOT / "docs" / "operational" / "tiered50-production-evidence-current-20261008.json"
-    )
+    output = OPERATIONAL_EVIDENCE_PATH
     signing_key: Path | None = None
     admin_evidence: Path | None = None
     if argv:
@@ -1994,12 +2021,16 @@ def main(argv: list[str] | None = None) -> int:
         output = (
             Path(remaining[0]).expanduser()
             if remaining
-            else ROOT / "docs" / "operational" / "tiered50-production-evidence-current-20261008.json"
+            else OPERATIONAL_EVIDENCE_PATH
         )
     try:
+        from cologne_transit_collector.admin_evidence import require_current_evidence_path
+
+        output = require_current_evidence_path(output, repository_root=ROOT)
         evidence = collect(signing_key_path=signing_key, admin_evidence_path=admin_evidence)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        output.chmod(0o600)
         print(json.dumps({"status": "PASS", "output": str(output), "mdd_requests_issued": 0}, sort_keys=True))
         return 0
     except Exception as exc:

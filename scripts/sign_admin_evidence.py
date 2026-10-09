@@ -18,7 +18,12 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from cologne_transit_collector.admin_evidence import sign_payload, verify_signature  # noqa: E402
+from cologne_transit_collector.admin_evidence import (  # noqa: E402
+    require_current_evidence_path,
+    require_operator_staging_path,
+    sign_payload,
+    verify_signature,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,12 +32,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--signing-key", type=Path, required=True)
     parser.add_argument(
+        "--intermediate",
+        action="store_true",
+        help="write a Windows-side signed staging envelope; without this flag output must be the stable current artifact",
+    )
+    parser.add_argument(
         "--public-key",
         type=Path,
         default=(Path(os.environ["MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"]) if os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY") else None),
         help="public key used to verify the signature; defaults to MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY",
     )
     args = parser.parse_args(argv)
+    if args.intermediate:
+        output = require_operator_staging_path(args.output, repository_root=ROOT)
+    else:
+        output = require_current_evidence_path(args.output, repository_root=ROOT)
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise SystemExit("administrative evidence payload must be a JSON object")
@@ -43,10 +57,10 @@ def main(argv: list[str] | None = None) -> int:
         integrity=payload["artifact_integrity"],
     ):
         raise SystemExit("administrative-evidence signature could not be verified with the configured public key")
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    args.output.chmod(0o600)
-    print(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output.chmod(0o600)
+    print(output)
     return 0
 
 

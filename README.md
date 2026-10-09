@@ -45,7 +45,7 @@ See the
 [dashboard evidence](docs/operational/mdd-october-monitoring-dashboard-evidence.json),
 [bootstrap evidence](docs/operational/mdd-october-conservative-bootstrap-evidence.json),
 [sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
-[fresh operational evidence](docs/operational/tiered50-production-evidence.json),
+[fresh operational evidence](docs/operational/tiered50-production-evidence-current.json),
 and [operator report](docs/operational/tiered50-deployment-validation-report.md).
 
 - Stage 0 — Project Definition: **APPROVED**

@@ -28,6 +28,10 @@ EVIDENCE_ARTIFACT_VERSION = "TIERED50_ADMIN_EVIDENCE_V3"
 SIGNATURE_ALGORITHM = "OPENSSL_DIGEST_SHA256"
 ADMIN_EVIDENCE_MAX_AGE = timedelta(minutes=30)
 ADMIN_EVIDENCE_CLOCK_SKEW = timedelta(seconds=5)
+CURRENT_EVIDENCE_FILENAME = "tiered50-production-evidence-current.json"
+CURRENT_EVIDENCE_PATH_ENV = "MSSQL_ADMIN_EVIDENCE_PATH"
+_APPROVED_EXTERNAL_EVIDENCE_ROOT = Path.home() / "Library" / "Application Support" / "CologneTransitIntelligence"
+_APPROVED_OPERATOR_EVIDENCE_ROOT = Path("/operator-secure")
 REQUIRED_CHECK_IDS = frozenset(
     {
         "admin.identity",
@@ -48,6 +52,139 @@ REQUIRED_CHECK_IDS = frozenset(
 
 class AdminEvidenceError(ValueError):
     """The administrative evidence envelope is not trustworthy or fresh."""
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    """Return whether ``path`` is below ``root`` after both are resolved."""
+
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_controlled_evidence_location(path: Path) -> Path:
+    """Reject symlinked or group/world-writable current-evidence locations."""
+
+    resolved = path.expanduser().resolve(strict=False)
+    if resolved.name != CURRENT_EVIDENCE_FILENAME:
+        raise AdminEvidenceError(
+            f"current administrative evidence must use the stable filename {CURRENT_EVIDENCE_FILENAME}"
+        )
+    if path.expanduser().is_symlink():
+        raise AdminEvidenceError("current administrative evidence may not be a symlink")
+    parent = resolved.parent
+    if not parent.exists() or not parent.is_dir():
+        raise AdminEvidenceError("current administrative evidence parent directory is unavailable")
+    try:
+        parent_mode = stat.S_IMODE(parent.stat().st_mode)
+    except OSError as exc:
+        raise AdminEvidenceError("current administrative evidence parent directory is not inspectable") from exc
+    if parent_mode & 0o022:
+        raise AdminEvidenceError("current administrative evidence parent directory is group/world writable")
+    if resolved.exists():
+        if not resolved.is_file() or resolved.is_symlink():
+            raise AdminEvidenceError("current administrative evidence is not a regular file")
+        try:
+            file_mode = stat.S_IMODE(resolved.stat().st_mode)
+        except OSError as exc:
+            raise AdminEvidenceError("current administrative evidence file is not inspectable") from exc
+        if file_mode & 0o022:
+            raise AdminEvidenceError("current administrative evidence file is group/world writable")
+    return resolved
+
+
+def resolve_current_evidence_path(
+    *,
+    repository_root: str | Path,
+    environ: Mapping[str, Any] | None = None,
+) -> Path:
+    """Resolve the one stable evidence path used by capture, signing, and Resume.
+
+    The default is a repository-local stable artifact.  An operator may move
+    the artifact to an approved owner-controlled application-support or
+    operator-secure location, but a relative path, a daily filename, a
+    temporary path, or a writable location is rejected.
+    """
+
+    root = Path(repository_root).expanduser().resolve()
+    values = os.environ if environ is None else environ
+    configured = str(values.get(CURRENT_EVIDENCE_PATH_ENV) or "").strip()
+    default_path = root / "docs" / "operational" / CURRENT_EVIDENCE_FILENAME
+    if not configured:
+        return _validate_controlled_evidence_location(default_path)
+
+    candidate = Path(configured).expanduser()
+    if not candidate.is_absolute():
+        raise AdminEvidenceError(f"{CURRENT_EVIDENCE_PATH_ENV} must be an absolute path")
+    resolved = candidate.resolve(strict=False)
+    approved_roots = (
+        (root / "docs" / "operational").resolve(strict=False),
+        _APPROVED_EXTERNAL_EVIDENCE_ROOT.expanduser().resolve(strict=False),
+        _APPROVED_OPERATOR_EVIDENCE_ROOT.resolve(strict=False),
+    )
+    if not any(_path_is_within(resolved, approved_root) for approved_root in approved_roots):
+        raise AdminEvidenceError(
+            f"{CURRENT_EVIDENCE_PATH_ENV} is outside the approved administrative-evidence locations"
+        )
+    return _validate_controlled_evidence_location(candidate)
+
+
+def require_current_evidence_path(
+    path: str | Path,
+    *,
+    repository_root: str | Path,
+    environ: Mapping[str, Any] | None = None,
+) -> Path:
+    """Require a supplied path to be exactly the configured current artifact."""
+
+    expected = resolve_current_evidence_path(repository_root=repository_root, environ=environ)
+    supplied = Path(path).expanduser()
+    if not supplied.is_absolute():
+        raise AdminEvidenceError("administrative evidence output path must be absolute")
+    supplied_resolved = supplied.resolve(strict=False)
+    if supplied_resolved != expected:
+        raise AdminEvidenceError(
+            "conflicting administrative evidence path; the final signed artifact must be written to "
+            + str(expected)
+        )
+    return _validate_controlled_evidence_location(supplied)
+
+
+def require_operator_staging_path(
+    path: str | Path,
+    *,
+    repository_root: str | Path,
+) -> Path:
+    """Require a temporary signed-evidence staging file in an approved location."""
+
+    root = Path(repository_root).expanduser().resolve()
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        raise AdminEvidenceError("administrative evidence staging path must be absolute")
+    resolved = candidate.resolve(strict=False)
+    if _path_is_within(resolved, root):
+        raise AdminEvidenceError("intermediate administrative evidence must remain outside the repository")
+    approved_roots = (
+        _APPROVED_EXTERNAL_EVIDENCE_ROOT.expanduser().resolve(strict=False),
+        _APPROVED_OPERATOR_EVIDENCE_ROOT.resolve(strict=False),
+    )
+    if not any(_path_is_within(resolved, approved_root) for approved_root in approved_roots):
+        raise AdminEvidenceError("administrative evidence staging path is outside approved operator locations")
+    if candidate.is_symlink():
+        raise AdminEvidenceError("administrative evidence staging path may not be a symlink")
+    parent = resolved.parent
+    if not parent.exists() or not parent.is_dir():
+        raise AdminEvidenceError("administrative evidence staging parent directory is unavailable")
+    if stat.S_IMODE(parent.stat().st_mode) & 0o022:
+        raise AdminEvidenceError("administrative evidence staging parent directory is group/world writable")
+    if resolved.exists():
+        if not resolved.is_file() or resolved.is_symlink():
+            raise AdminEvidenceError("administrative evidence staging path is not a regular file")
+        if stat.S_IMODE(resolved.stat().st_mode) & 0o077:
+            raise AdminEvidenceError("administrative evidence staging file must be owner-readable only")
+    return resolved
 
 
 def normalize_sql_instance_identity(identity: Mapping[str, Any] | None) -> dict[str, str]:
@@ -289,6 +426,15 @@ def validate_admin_evidence_artifact(
             raise AdminEvidenceError("administrative evidence is bound to a different SQL instance")
     if provenance.get("execution_path") not in {"SEPARATE_SQL_LOGIN", "WINDOWS_INTEGRATED_AUTH"}:
         raise AdminEvidenceError("administrative evidence has no authorized execution path")
+    if provenance.get("execution_path") == "WINDOWS_INTEGRATED_AUTH":
+        tls = provenance.get("tls")
+        if (
+            not isinstance(tls, Mapping)
+            or str(tls.get("encryption_mode") or "") not in {"Mandatory", "Optional", "Strict"}
+            or tls.get("trust_server_certificate") is not False
+            or tls.get("certificate_validation_required") is not True
+        ):
+            raise AdminEvidenceError("Windows administrative evidence does not prove TLS certificate validation")
     try:
         captured_at = _parse_utc(provenance.get("captured_at_utc"), field="capture_provenance.captured_at_utc")
     except AdminEvidenceError:
@@ -306,6 +452,11 @@ def validate_admin_evidence_artifact(
         raise AdminEvidenceError("administrative evidence is not cryptographically signed")
     if integrity.get("payload_sha256") != payload_sha256(evidence):
         raise AdminEvidenceError("administrative evidence payload hash does not match")
+    if public_key_path is not None:
+        public_key = Path(public_key_path).expanduser().resolve()
+        project_root = Path(__file__).resolve().parents[2]
+        if project_root == public_key or project_root in public_key.parents:
+            raise AdminEvidenceError("administrative-evidence public key must remain outside the repository")
     if public_key_path is None or not verify_signature(evidence, public_key_path=public_key_path, integrity=integrity):
         raise AdminEvidenceError("administrative evidence signature is not verified")
 
@@ -338,14 +489,48 @@ def validate_admin_evidence_artifact(
     }
 
 
+def load_current_evidence_artifact(
+    path: str | Path,
+    *,
+    repository_root: str | Path,
+    now_utc: datetime,
+    expected_database: str,
+    public_key_path: str | Path | None,
+    expected_sql_identity: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    """Read and authenticate the exact stable artifact consumed by Resume."""
+
+    current_path = require_current_evidence_path(path, repository_root=repository_root)
+    try:
+        loaded = json.loads(current_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise AdminEvidenceError("current administrative evidence is missing or unreadable") from exc
+    if not isinstance(loaded, dict):
+        raise AdminEvidenceError("current administrative evidence must be a JSON object")
+    authenticated = validate_admin_evidence_artifact(
+        loaded,
+        now_utc=now_utc,
+        expected_database=expected_database,
+        public_key_path=public_key_path,
+        expected_sql_identity=expected_sql_identity,
+    )
+    return loaded, authenticated, current_path
+
+
 __all__ = [
     "ADMIN_EVIDENCE_CLOCK_SKEW",
     "ADMIN_EVIDENCE_MAX_AGE",
     "AdminEvidenceError",
+    "CURRENT_EVIDENCE_FILENAME",
+    "CURRENT_EVIDENCE_PATH_ENV",
     "EVIDENCE_ARTIFACT_VERSION",
     "REQUIRED_CHECK_IDS",
     "canonical_payload",
+    "load_current_evidence_artifact",
     "payload_sha256",
+    "require_current_evidence_path",
+    "require_operator_staging_path",
+    "resolve_current_evidence_path",
     "sign_payload",
     "normalize_sql_instance_identity",
     "sql_instance_identities_match",

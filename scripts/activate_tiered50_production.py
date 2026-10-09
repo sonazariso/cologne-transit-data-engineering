@@ -32,9 +32,10 @@ from cologne_transit_collector.domain import (  # noqa: E402
 )
 from cologne_transit_collector.admin_evidence import (  # noqa: E402
     AdminEvidenceError,
+    load_current_evidence_artifact,
     normalize_sql_instance_identity,
+    resolve_current_evidence_path,
     sql_instance_identities_match,
-    validate_admin_evidence_artifact,
 )
 from cologne_transit_collector.manifest import load_default_manifest  # noqa: E402
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
@@ -58,6 +59,7 @@ from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     resolve_administrator_connection_settings,
     resolve_secret,
 )
+from provision_macos_runtime_login import inspect_runtime_permissions  # noqa: E402
 from install_macos_launch_agent import (  # noqa: E402
     TIERED50_INSTALLED_PATH,
     TIERED50_LABEL,
@@ -72,7 +74,7 @@ from cologne_transit_collector.schedule import validate_launchd_wall_clock_sched
 
 
 TARGET_TABLE = "ctl.MddMacTiered50ProductionTarget"
-OPERATIONAL_EVIDENCE_PATH = ROOT / "docs" / "operational" / "tiered50-production-evidence-current-20261008.json"
+OPERATIONAL_EVIDENCE_PATH = resolve_current_evidence_path(repository_root=ROOT)
 ERA_CODE = "TIERED50_PRODUCTION"
 TIMESTAMP_KIND = "REAL_TIERED50_CUTOVER"
 RESUME_EVENT_TABLE = "ctl.MddMacProductionResumeEvent"
@@ -200,7 +202,16 @@ def _validate_limited_runtime(*, now: datetime) -> dict[str, Any]:
         )
     ):
         raise RuntimeError("dedicated runtime connection has a prohibited broad privilege")
-    privilege_boundary = persistence.runtime_privilege_boundary()
+    runtime_permission_matrix = inspect_runtime_permissions(settings)
+    if runtime_permission_matrix.get("status") != "PASS":
+        missing = runtime_permission_matrix.get("missing_permissions") or []
+        prohibited = runtime_permission_matrix.get("prohibited_privileges") or []
+        detail = ", ".join(str(item) for item in [*missing, *prohibited])
+        raise RuntimeError(
+            "dedicated runtime SQL permission matrix is not proven"
+            + (f": {detail}" if detail else "")
+        )
+    privilege_boundary = runtime_permission_matrix.get("prohibited_privilege_checks", {})
     schema = persistence.validate_runtime_schema()
     tiered_schema = persistence.validate_tiered50_runtime_schema()
     quota = persistence.current_month_usage(at_utc=now)
@@ -212,6 +223,7 @@ def _validate_limited_runtime(*, now: datetime) -> dict[str, Any]:
         "login": login,
         "sql_instance_identity": runtime_sql_identity,
         "privilege_boundary": privilege_boundary,
+        "runtime_permission_matrix": runtime_permission_matrix,
         "runtime_schema": schema,
         "tiered50_schema": tiered_schema,
         "quota": dict(quota),
@@ -252,15 +264,9 @@ def _validate_operational_evidence(
     """Require fresh administrator evidence before changing production state."""
 
     try:
-        evidence = json.loads(OPERATIONAL_EVIDENCE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError("fresh administrator operational evidence is unavailable") from exc
-    generated_at = _utc_datetime(evidence.get("generated_at_utc"))
-    if generated_at is None or generated_at > now + timedelta(seconds=5) or now - generated_at > timedelta(minutes=30):
-        raise RuntimeError("administrator operational evidence is missing or stale")
-    try:
-        authenticated = validate_admin_evidence_artifact(
-            evidence,
+        evidence, authenticated, current_path = load_current_evidence_artifact(
+            OPERATIONAL_EVIDENCE_PATH,
+            repository_root=ROOT,
             now_utc=now,
             expected_database=EXPECTED_SQL_DATABASE,
             public_key_path=os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"),
@@ -268,6 +274,9 @@ def _validate_operational_evidence(
         )
     except AdminEvidenceError as exc:
         raise RuntimeError(str(exc)) from exc
+    generated_at = _utc_datetime(evidence.get("generated_at_utc"))
+    if generated_at is None:
+        raise RuntimeError("administrator operational evidence is missing or stale")
     host = evidence.get("host")
     sql = evidence.get("sql")
     if not isinstance(host, dict) or not isinstance(sql, dict):
@@ -409,7 +418,7 @@ def _validate_operational_evidence(
     if not isinstance(mac_disk, dict) or int(mac_disk.get("free_bytes", 0) or 0) <= 0:
         raise RuntimeError("macOS host capacity is not proven")
     return {
-        "artifact": str(OPERATIONAL_EVIDENCE_PATH),
+        "artifact": str(current_path),
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
         "authenticated_artifact": authenticated,
         "backup_verifyonly": "PASS",
