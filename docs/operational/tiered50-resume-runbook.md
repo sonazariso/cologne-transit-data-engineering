@@ -36,7 +36,7 @@ Keychain item available, run:
 
 ```text
 python3 scripts/tiered50_production_evidence.py \
-  docs/operational/tiered50-production-evidence-current-20261008.json \
+  docs/operational/tiered50-production-evidence-current-20261009.json \
   --signing-key /operator-secure/admin-evidence-signing-key.pem
 ```
 
@@ -59,7 +59,7 @@ operational artifact:
 
 ```text
 python3 scripts/tiered50_production_evidence.py \
-  docs/operational/tiered50-production-evidence-current-20261008.json \
+  docs/operational/tiered50-production-evidence-current-20261009.json \
   --admin-evidence /operator-secure/windows-admin-evidence.json \
   --signing-key /operator-secure/admin-evidence-signing-key.pem
 ```

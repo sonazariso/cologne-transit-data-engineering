@@ -116,7 +116,7 @@ will not be reactivated. See the [dashboard evidence](operational/mdd-october-mo
 [bootstrap evidence](operational/mdd-october-conservative-bootstrap-evidence.json),
 [deployment validation evidence](operational/tiered50-deployment-validation-evidence.json),
 [historical operational evidence](operational/tiered50-production-evidence.json),
-[current operational evidence](operational/tiered50-production-evidence-current-20261008.json),
+[current operational evidence](operational/tiered50-production-evidence-current-20261009.json),
 and [operator report](operational/tiered50-deployment-validation-report.md).
 
 Microsoft SQL Server is the sole authoritative project database. The official
