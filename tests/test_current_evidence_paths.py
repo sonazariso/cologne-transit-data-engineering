@@ -9,6 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,12 +20,16 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     AdminEvidenceError,
     EVIDENCE_ARTIFACT_VERSION,
     REQUIRED_CHECK_IDS,
+    json_safe,
     load_current_evidence_artifact,
     require_current_evidence_path,
     resolve_current_evidence_path,
     sign_payload,
     validate_admin_evidence_artifact,
+    validate_windows_audit_evidence,
+    utc_isoformat,
     verify_signature,
+    WINDOWS_AUDIT_QUERY_IDS,
     WINDOWS_TLS_VALIDATION_METHOD,
 )
 from cologne_transit_collector.mssql_persistence import MssqlConnectionSettings  # noqa: E402
@@ -70,6 +75,25 @@ class CurrentEvidencePathTests(unittest.TestCase):
             "instance_name": "MSSQLSERVER",
             "database_name": "CologneTransitIntelligence",
         }
+        audit_provenance = {
+            query_id: {
+                "query": {
+                    "statement_id": query_id,
+                    "status": "PASS",
+                    "executed": True,
+                    "result_count": 0 if query_id == "collector.tiered50_later_runs" else 1,
+                    "captured_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
+                },
+                "check_status": "PASS",
+                "rows": [] if query_id == "collector.tiered50_later_runs" else [{}],
+                **(
+                    {"linked_to_target_audit": True}
+                    if query_id == "collector.http_attempt_history"
+                    else {}
+                ),
+            }
+            for query_id in WINDOWS_AUDIT_QUERY_IDS
+        }
         return {
             "artifact_version": EVIDENCE_ARTIFACT_VERSION,
             "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
@@ -82,13 +106,14 @@ class CurrentEvidencePathTests(unittest.TestCase):
                 "database_name": "CologneTransitIntelligence",
                 "effective_login": "operator-admin",
                 "captured_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
-                "required_check_ids": sorted(REQUIRED_CHECK_IDS),
+                "required_check_ids": sorted(REQUIRED_CHECK_IDS | WINDOWS_AUDIT_QUERY_IDS),
                 "tls": {
                     "encryption_mode": "Mandatory",
                     "actual_encryption": "TRUE",
                     "actual_transport": "ENCRYPTED",
                     "trust_server_certificate": False,
                     "certificate_validation_required": True,
+                    "certificate_validation_observed": True,
                     "certificate_validation_status": "VALIDATED",
                     "certificate_validation_method": WINDOWS_TLS_VALIDATION_METHOD,
                 },
@@ -100,6 +125,9 @@ class CurrentEvidencePathTests(unittest.TestCase):
                 "capacity_gate": {"status": "PASS"},
                 "log_space_gate": {"status": "PASS"},
                 "quota_integrity": {"status": "PASS", "state_available": True},
+                "tiered50_audit_history_evidence": {"status": "PASS"},
+                "recent_http_attempts_evidence": {"status": "PASS"},
+                "audit_provenance": audit_provenance,
                 "windows_vm_disk": {
                     "status": "PASS",
                     "volumes": [
@@ -310,6 +338,86 @@ class CurrentEvidencePathTests(unittest.TestCase):
         self.assertIn("TrustServerCertificate", script)
         self.assertIn("Win32_Volume", script)
         self.assertIn("sql_volume_headroom", script)
+        self.assertIn("SpecifyKind", script)
+        self.assertIn("InvariantCulture", script)
+        self.assertIn("collector.http_attempt_history", script)
+        self.assertIn("collector.historical_target_audits", script)
+        self.assertIn("audit_provenance", script)
+        self.assertNotIn("$history[0].Tiered50Runs", script)
+
+    def test_sql_datetime2_utc_survives_standard_and_dst_host_timezones(self) -> None:
+        # The SQL value is a UTC clock value with no timezone metadata.  Both
+        # Berlin offsets must preserve its fields rather than subtracting one
+        # or two hours as a local-time conversion would.
+        for local_zone, local_date in (
+            (ZoneInfo("Europe/Berlin"), datetime(2026, 1, 15, 12, 34, 56, 123456)),
+            (ZoneInfo("Europe/Berlin"), datetime(2026, 7, 15, 12, 34, 56, 123456)),
+        ):
+            with self.subTest(zone=local_zone, date=local_date):
+                local_value = local_date.replace(tzinfo=local_zone)
+                self.assertEqual(utc_isoformat(local_date), "2026-" + ("01-15" if local_date.month == 1 else "07-15") + "T12:34:56.123456Z")
+                self.assertEqual(json_safe(local_date), "2026-" + ("01-15" if local_date.month == 1 else "07-15") + "T12:34:56.123456Z")
+                self.assertNotEqual(utc_isoformat(local_value), utc_isoformat(local_date))
+
+    def test_windows_audit_contract_distinguishes_zero_rows_from_failed_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as key_directory:
+            private, public = self._keypair(key_directory)
+            zero_rows = self._evidence()
+            later = zero_rows["sql"]["audit_provenance"]["collector.tiered50_later_runs"]  # type: ignore[index]
+            self.assertEqual(later["query"]["status"], "PASS")  # type: ignore[index]
+            self.assertEqual(later["query"]["result_count"], 0)  # type: ignore[index]
+            zero_rows["artifact_integrity"] = sign_payload(zero_rows, signing_key_path=private)
+            self.assertEqual(
+                validate_windows_audit_evidence(zero_rows["sql"])["status"],  # type: ignore[arg-type,index]
+                "PASS",
+            )
+
+            failed = self._evidence()
+            query = failed["sql"]["audit_provenance"]["collector.http_attempt_history"]["query"]  # type: ignore[index]
+            query.update({"status": "NOT_PROVEN", "reason": "permission denied", "result_count": 0})  # type: ignore[union-attr]
+            entry = failed["sql"]["audit_provenance"]["collector.http_attempt_history"]  # type: ignore[index]
+            entry["rows"] = []  # type: ignore[index]
+            entry["check_status"] = "NOT_PROVEN"  # type: ignore[index]
+            failed["sql"]["recent_http_attempts_evidence"] = {"status": "NOT_PROVEN"}  # type: ignore[index]
+            failed["sql"]["admin_authorization"] = {"status": "PASS"}  # type: ignore[index]
+            failed["artifact_integrity"] = sign_payload(failed, signing_key_path=private)
+            with self.assertRaisesRegex(AdminEvidenceError, "not fully proven|HTTP"):
+                validate_admin_evidence_artifact(
+                    failed,
+                    now_utc=NOW,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                )
+
+    def test_windows_audit_contract_rejects_missing_target_audits_and_unlinked_http(self) -> None:
+        with tempfile.TemporaryDirectory() as key_directory:
+            private, public = self._keypair(key_directory)
+            evidence = self._evidence()
+            target_entry = evidence["sql"]["audit_provenance"]["collector.historical_target_audits"]  # type: ignore[index]
+            target_entry["query"]["result_count"] = 0  # type: ignore[index]
+            target_entry["rows"] = []
+            target_entry["check_status"] = "NOT_PROVEN"
+            evidence["sql"]["tiered50_audit_history_evidence"] = {"status": "PASS"}  # type: ignore[index]
+            evidence["artifact_integrity"] = sign_payload(evidence, signing_key_path=private)
+            with self.assertRaisesRegex(AdminEvidenceError, "not fully proven"):
+                validate_admin_evidence_artifact(
+                    evidence,
+                    now_utc=NOW,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                )
+
+            unlinked = self._evidence()
+            http_entry = unlinked["sql"]["audit_provenance"]["collector.http_attempt_history"]  # type: ignore[index]
+            http_entry["linked_to_target_audit"] = False
+            unlinked["artifact_integrity"] = sign_payload(unlinked, signing_key_path=private)
+            with self.assertRaisesRegex(AdminEvidenceError, "inaccurate check status"):
+                validate_admin_evidence_artifact(
+                    unlinked,
+                    now_utc=NOW,
+                    expected_database="CologneTransitIntelligence",
+                    public_key_path=public,
+                )
 
 
 class _PermissionCursor:

@@ -111,7 +111,119 @@ function Get-PermissionState($Value) {
     return "UNKNOWN"
 }
 
-$identity = Invoke-ReadOnlySql @"
+function Convert-SqlUtcDateTimeToIso8601([object] $Value) {
+    <#
+    SYSUTCDATETIME() returns SQL datetime2, which has no timezone metadata.
+    Its clock fields are already UTC.  Assign UTC to those fields explicitly;
+    never route an unspecified DateTime through the guest's local timezone.
+    #>
+    if ($null -eq $Value) {
+        throw "SQL UTC timestamp was null"
+    }
+    if ($Value -is [DateTimeOffset]) {
+        $utcDateTime = [DateTime]::SpecifyKind($Value.DateTime, [DateTimeKind]::Utc)
+        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+    } elseif ($Value -is [DateTime]) {
+        $utcDateTime = [DateTime]::SpecifyKind([DateTime]$Value, [DateTimeKind]::Utc)
+        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+    } else {
+        $parsedDateTime = [DateTime]::Parse(
+            [string]$Value,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+        )
+        $utcDateTime = [DateTime]::SpecifyKind($parsedDateTime, [DateTimeKind]::Utc)
+        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+    }
+    return $utcValue.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Convert-NullableSqlUtcDateTimeToIso8601([object] $Value) {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        return $null
+    }
+    return Convert-SqlUtcDateTimeToIso8601 $Value
+}
+
+function Get-SanitizedSqlError([object] $ErrorRecord) {
+    $reason = if ($null -ne $ErrorRecord.Exception) {
+        [string]$ErrorRecord.Exception.Message
+    } else {
+        [string]$ErrorRecord
+    }
+    $reason = [regex]::Replace($reason, '(?i)(password|secret|token|apikey|credential)\s*[=:]\s*[^,;\s]+', '$1=<redacted>')
+    $reason = [regex]::Replace($reason, '(?i)(?:[A-Za-z]:[\\/]|/)[^\s'']+', '<path redacted>')
+    if ($reason.Length -gt 500) {
+        return $reason.Substring(0, 500)
+    }
+    return $reason
+}
+
+function New-NotExecutedAuditQuery([string] $StatementId, [string] $Reason) {
+    return [pscustomobject]@{
+        Evidence = [ordered]@{
+            statement_id = $StatementId
+            status = "NOT_PROVEN"
+            executed = $false
+            result_count = 0
+            captured_at_utc = $captured
+            reason = $Reason
+        }
+        Rows = @()
+    }
+}
+
+function Invoke-AuditedReadOnlySql([string] $StatementId, [string] $Query) {
+    $evidence = [ordered]@{
+        statement_id = $StatementId
+        status = "NOT_PROVEN"
+        executed = $false
+        result_count = 0
+        captured_at_utc = $captured
+    }
+    try {
+        $rows = @(Invoke-ReadOnlySql $Query)
+        $requiredColumns = switch ($StatementId) {
+            "collector.production_cutover_history" { @("CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }
+            "collector.historical_runs" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "CollectionContext", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
+            "collector.historical_target_audits" { @("AuditId", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext", "Status", "HttpAttempts", "StartedAtUtc", "CompletedAtUtc"); break }
+            "collector.http_attempt_history" { @("HttpAttemptId", "AuditId", "AttemptNumber", "StartedAtUtc", "CompletedAtUtc", "HttpStatus", "Outcome", "NetworkAttempted", "HttpResponseReceived", "ProviderQuotaStatus", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext"); break }
+            "collector.tiered50_first_heartbeat" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
+            "collector.historical_outage" { @("CutoverId", "CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }
+            "collector.tiered50_later_runs" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
+            default { @() }
+        }
+        foreach ($row in $rows) {
+            foreach ($column in $requiredColumns) {
+                if ($null -eq $row.PSObject.Properties[$column]) {
+                    throw ("query returned a row without expected column " + $column)
+                }
+            }
+        }
+        $evidence.status = "PASS"
+        $evidence.executed = $true
+        $evidence.result_count = [int64]$rows.Count
+        return [pscustomobject]@{
+            Evidence = $evidence
+            Rows = $rows
+        }
+    } catch {
+        $evidence.executed = $true
+        $evidence.reason = Get-SanitizedSqlError $_
+        $evidence.error_type = $_.Exception.GetType().Name
+        $errorCodeMatch = [regex]::Match([string]$_.Exception.Message, '\b\d{3,5}\b')
+        if ($errorCodeMatch.Success) {
+            $evidence.error_code = [int]$errorCodeMatch.Value
+        }
+        return [pscustomobject]@{
+            Evidence = $evidence
+            Rows = @()
+        }
+    }
+}
+
+try {
+    $identity = Invoke-ReadOnlySql @"
 SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS ServerName,
        CAST(SERVERPROPERTY('MachineName') AS nvarchar(128)) AS MachineName,
        CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128)) AS InstanceName,
@@ -120,6 +232,13 @@ SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS ServerName,
        SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc,
        CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS ProductMajorVersion;
 "@
+} catch {
+    $sanitizedSqlError = Get-SanitizedSqlError $_
+    if ($sanitizedSqlError -match '(?i)certificate|trust|ssl|tls|hostname') {
+        throw ("SQL certificate validation failed while TrustServerCertificate=False; " + $sanitizedSqlError)
+    }
+    throw ("Encrypted SQL connection failed before identity was proven; " + $sanitizedSqlError)
+}
 
 if ($identity.Count -ne 1 -or [string]$identity[0].DatabaseName -ne $Database) {
     throw "SQL identity/database binding was not proven"
@@ -127,6 +246,8 @@ if ($identity.Count -ne 1 -or [string]$identity[0].DatabaseName -ne $Database) {
 if ([string]$identity[0].LoginName -eq $RuntimeLoginName) {
     throw "Windows evidence identity must be separate from the limited runtime login"
 }
+
+$captured = Convert-SqlUtcDateTimeToIso8601 $identity[0].CapturedAtUtc
 
 $transport = Invoke-ReadOnlySql @"
 SELECT CAST(encrypt_option AS nvarchar(10)) AS EncryptOption,
@@ -152,6 +273,7 @@ $tlsEvidence = [ordered]@{
     actual_transport = "ENCRYPTED"
     trust_server_certificate = $false
     certificate_validation_required = $true
+    certificate_validation_observed = $true
     certificate_validation_status = "VALIDATED"
     certificate_validation_method = "INVOKE_SQLCMD_TRUST_SERVER_CERTIFICATE_FALSE_AND_DM_EXEC_CONNECTIONS_ENCRYPT_OPTION_TRUE"
     auth_scheme = ([string]$transport[0].AuthScheme).Trim()
@@ -224,12 +346,13 @@ $runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASE
 $volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;"
 $logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();"
 $backup = Invoke-ReadOnlySql "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;"
-$history = Invoke-ReadOnlySql "SELECT TOP (1) COUNT_BIG(*) AS Tiered50Runs FROM ctl.MddMacCollectorRun WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION';"
 $materialization = Invoke-ReadOnlySql "SELECT COUNT_BIG(*) AS TargetCount, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS ActiveCount FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = 'TIERED50_PANEL_V1' AND SamplingEra = 'Tiered50';"
 $backupMedia = if ($backup.Count -eq 1) {
     Invoke-ReadOnlySql ("SELECT family_sequence_number, physical_device_name FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f ([int64]$backup[0].media_set_id))
 } else { @() }
-$cutoverHistory = Invoke-ReadOnlySql "SELECT CutoverKey, PanelVersion, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId;"
+$cutoverHistoryQuery = Invoke-AuditedReadOnlySql "collector.production_cutover_history" "SELECT CutoverKey, PanelVersion, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId;"
+$cutoverHistory = @($cutoverHistoryQuery.Rows)
+$cutoverHistoryEvidence = $cutoverHistoryQuery.Evidence
 $competingWriters = Invoke-ReadOnlySql "SELECT CollectionContext, COUNT_BIG(*) AS RunningCount FROM ctl.MddMacCollectorRun WHERE Status IN ('RUNNING', 'CLAIMED') AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION') GROUP BY CollectionContext;"
 $currentQuotaLedger = Invoke-ReadOnlySql "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC;"
 $quota = Invoke-ReadOnlySql @"
@@ -261,11 +384,8 @@ $permissionChecks.backup_history_backupset_select = "GRANTED"
 if ($backupMedia.Count -gt 0) {
     $permissionChecks.backup_history_backupmediafamily_select = "GRANTED"
 }
-if ($history.Count -eq 1) {
-    $permissionChecks.operational_history_database_select = "GRANTED"
-}
 if ($quota.Count -eq 0) {
-    $quota = Invoke-ReadOnlySql @"
+$quota = Invoke-ReadOnlySql @"
 SELECT TOP (1) 'BOUNDED_BOOTSTRAP' AS SourceKind, MonthKey,
        AuthorizationStatus AS AccountingStatus,
        (ScreenshotCumulativeRequests + ConfirmedLocalAttempts + ConservativeUnknownLocalAttempts + PendingLocalReservations) AS KnownTotal,
@@ -278,13 +398,81 @@ ORDER BY ValidFromUtc DESC, RecordedAtUtc DESC;
 "@
 }
 
+# These are deliberately separate read-only queries.  A successful query with
+# zero rows is recorded as PASS with result_count = 0; a denied, missing, or
+# malformed query is recorded as NOT_PROVEN with a sanitized cause.  The
+# CollectorRun count is not used as a proxy for target-audit or HTTP history.
+$historicalRunsQuery = Invoke-AuditedReadOnlySql "collector.historical_runs" @"
+SELECT TOP (100) MacCollectorRunId, RunId, LogicalDueBucket,
+       CollectionContext, StartedAtUtc, CompletedAtUtc, Status
+FROM ctl.MddMacCollectorRun
+WHERE CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+ORDER BY MacCollectorRunId ASC;
+"@
+$historicalTargetAuditsQuery = Invoke-AuditedReadOnlySql "collector.historical_target_audits" @"
+SELECT TOP (100) AuditId, RunId, TargetIdentity, LogicalDueBucket,
+       CollectionContext, Status, HttpAttempts, StartedAtUtc, CompletedAtUtc
+FROM ctl.MddMacTargetAudit
+WHERE CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+ORDER BY AuditId ASC;
+"@
+$httpAttemptHistoryQuery = Invoke-AuditedReadOnlySql "collector.http_attempt_history" @"
+SELECT TOP (100) h.HttpAttemptId, h.AuditId, h.AttemptNumber,
+       h.StartedAtUtc, h.CompletedAtUtc, h.HttpStatus, h.Outcome,
+       h.NetworkAttempted, h.HttpResponseReceived, h.ProviderQuotaStatus,
+       a.RunId, a.TargetIdentity, a.LogicalDueBucket, a.CollectionContext
+FROM ctl.MddMacHttpAttempt AS h
+INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+WHERE a.CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+ORDER BY h.HttpAttemptId ASC;
+"@
+$firstTiered50HeartbeatQuery = Invoke-AuditedReadOnlySql "collector.tiered50_first_heartbeat" @"
+SELECT TOP (1) MacCollectorRunId, RunId, LogicalDueBucket,
+       StartedAtUtc, CompletedAtUtc, Status
+FROM ctl.MddMacCollectorRun
+WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+ORDER BY MacCollectorRunId ASC;
+"@
+$historicalOutageQuery = Invoke-AuditedReadOnlySql "collector.historical_outage" @"
+SELECT TOP (100) CutoverId, CutoverKey, PanelVersion,
+       Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc
+FROM ctl.MddMacProductionCutover
+WHERE PanelVersion = 'TIERED50_PANEL_V1'
+  AND Tiered50ActivationStatus = 'OUTAGE'
+ORDER BY CutoverId ASC;
+"@
+$firstTiered50HeartbeatRows = @($firstTiered50HeartbeatQuery.Rows)
+if ($firstTiered50HeartbeatRows.Count -eq 1) {
+    $firstTiered50RunId = [int64]$firstTiered50HeartbeatRows[0].MacCollectorRunId
+    $laterTiered50RunsQueryText = @"
+SELECT TOP (100) MacCollectorRunId, RunId, LogicalDueBucket,
+       StartedAtUtc, CompletedAtUtc, Status
+FROM ctl.MddMacCollectorRun
+WHERE CollectionContext = 'MAC_TIERED50_PRODUCTION'
+  AND MacCollectorRunId > {0}
+ORDER BY MacCollectorRunId ASC;
+"@
+    $laterTiered50RunsQuery = Invoke-AuditedReadOnlySql "collector.tiered50_later_runs" ($laterTiered50RunsQueryText -f $firstTiered50RunId)
+} else {
+    $laterTiered50RunsQuery = New-NotExecutedAuditQuery "collector.tiered50_later_runs" "the later-run query was not executed because the original Tiered50 heartbeat was not returned"
+}
+$historicalRunsEvidence = $historicalRunsQuery.Evidence
+$historicalTargetAuditsEvidence = $historicalTargetAuditsQuery.Evidence
+$httpAttemptHistoryEvidence = $httpAttemptHistoryQuery.Evidence
+$firstTiered50HeartbeatEvidence = $firstTiered50HeartbeatQuery.Evidence
+$historicalOutageEvidence = $historicalOutageQuery.Evidence
+$laterTiered50RunsEvidence = $laterTiered50RunsQuery.Evidence
+if ($historicalRunsEvidence.status -eq "PASS") {
+    $permissionChecks.operational_history_database_select = "GRANTED"
+}
+
 if ($null -eq $backup -or $backup.Count -ne 1 -or $backupMedia.Count -lt 1 -or ($backupMedia | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.physical_device_name) }).Count -gt 0) {
     throw "No native full backup path was available for server-side VERIFYONLY"
 }
 if ($databaseFiles.Count -eq 0 -or $runtimeHealth.Count -ne 1 -or [string]$runtimeHealth[0].database_status -ne "ONLINE" -or [string]::IsNullOrWhiteSpace([string]$runtimeHealth[0].recovery_model) -or $volumes.Count -eq 0 -or $logSpace.Count -ne 1) {
     throw "SQL capacity evidence was incomplete"
 }
-if ($history.Count -ne 1 -or $materialization.Count -ne 1 -or [int64]$materialization[0].TargetCount -ne 43 -or [int64]$materialization[0].ActiveCount -ne 43) {
+if ($materialization.Count -ne 1 -or [int64]$materialization[0].TargetCount -ne 43 -or [int64]$materialization[0].ActiveCount -ne 43) {
     throw "Tiered50 materialization or operational-history evidence was incomplete"
 }
 if ($quota.Count -ne 1 -or [string]$quota[0].AccountingStatus -notin @('COMPLETE', 'ACTIVE')) {
@@ -295,9 +483,6 @@ if ($currentQuotaLedger.Count -gt 1) {
 }
 if ($currentQuotaLedger.Count -eq 0 -and ($quota.Count -ne 1 -or [string]$quota[0].SourceKind -ne 'BOUNDED_BOOTSTRAP')) {
     throw "No single current SQL quota ledger or approved bounded bootstrap was available"
-}
-if ($cutoverHistory.Count -lt 1 -or -not ($cutoverHistory | Where-Object { [string]$_.Tiered50ActivationStatus -eq 'ACTIVATED' }) -or -not ($cutoverHistory | Where-Object { [string]$_.Tiered50ActivationStatus -eq 'OUTAGE' })) {
-    throw "Original Tiered50 activation and historical outage evidence was incomplete"
 }
 if (($competingWriters | Where-Object { [int64]$_.RunningCount -gt 0 }).Count -gt 0) {
     throw "A competing production writer is active"
@@ -314,11 +499,8 @@ $missingPermissions = @(
         Where-Object { $_.Value -ne "GRANTED" } |
         ForEach-Object { $_.Key + "=" + $_.Value }
 )
-if ($missingPermissions.Count -gt 0) {
-    throw ("Required read-only administrative permissions are not proven: " + ($missingPermissions -join ","))
-}
+$permissionsProven = $missingPermissions.Count -eq 0
 
-$captured = [DateTime]::Parse([string]$identity[0].CapturedAtUtc).ToUniversalTime().ToString("o")
 $windowsDiskRaw = @(Get-CimInstance Win32_Volume -Filter "DriveType = 3")
 if ($windowsDiskRaw.Count -eq 0) {
     # Win32_LogicalDisk is retained only as a local compatibility fallback;
@@ -389,12 +571,102 @@ if (-not ($sqlVolumeHeadroom | Where-Object { $_.database_file_types -contains "
 if (($sqlVolumeHeadroom | Where-Object { $_.headroom_status -ne "PASS" }).Count -gt 0) {
     throw "SQL data/log volume headroom is below the approved reserve"
 }
+$historicalRunRows = @($historicalRunsQuery.Rows | ForEach-Object {
+    [ordered]@{
+        mac_collector_run_id = [int64]$_.MacCollectorRunId
+        run_id = [string]$_.RunId
+        logical_due_bucket = [int64]$_.LogicalDueBucket
+        collection_context = [string]$_.CollectionContext
+        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        status = [string]$_.Status
+    }
+})
+$historicalTargetAuditRows = @($historicalTargetAuditsQuery.Rows | ForEach-Object {
+    [ordered]@{
+        audit_id = [int64]$_.AuditId
+        run_id = [string]$_.RunId
+        target_identity = [string]$_.TargetIdentity
+        logical_due_bucket = [int64]$_.LogicalDueBucket
+        collection_context = [string]$_.CollectionContext
+        status = [string]$_.Status
+        http_attempts = [int]$_.HttpAttempts
+        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+    }
+})
+$httpAttemptRows = @($httpAttemptHistoryQuery.Rows | ForEach-Object {
+    [ordered]@{
+        http_attempt_id = [int64]$_.HttpAttemptId
+        audit_id = [int64]$_.AuditId
+        attempt_number = [int]$_.AttemptNumber
+        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        http_status = if ($null -eq $_.HttpStatus) { $null } else { [int]$_.HttpStatus }
+        outcome = [string]$_.Outcome
+        network_attempted = [bool]$_.NetworkAttempted
+        http_response_received = [bool]$_.HttpResponseReceived
+        provider_quota_status = [string]$_.ProviderQuotaStatus
+        run_id = [string]$_.RunId
+        target_identity = [string]$_.TargetIdentity
+        logical_due_bucket = [int64]$_.LogicalDueBucket
+        collection_context = [string]$_.CollectionContext
+    }
+})
+$firstHeartbeatRows = @($firstTiered50HeartbeatQuery.Rows | ForEach-Object {
+    [ordered]@{
+        mac_collector_run_id = [int64]$_.MacCollectorRunId
+        run_id = [string]$_.RunId
+        logical_due_bucket = [int64]$_.LogicalDueBucket
+        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        status = [string]$_.Status
+    }
+})
+$historicalOutageRows = @($historicalOutageQuery.Rows | ForEach-Object {
+    [ordered]@{
+        cutover_id = [int64]$_.CutoverId
+        cutover_key = [string]$_.CutoverKey
+        panel_version = [string]$_.PanelVersion
+        tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.Tiered50ActivationAtUtc
+        tiered50_activation_status = [string]$_.Tiered50ActivationStatus
+        recorded_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.RecordedAtUtc
+    }
+})
+$laterTiered50RunRows = @($laterTiered50RunsQuery.Rows | ForEach-Object {
+    [ordered]@{
+        mac_collector_run_id = [int64]$_.MacCollectorRunId
+        run_id = [string]$_.RunId
+        logical_due_bucket = [int64]$_.LogicalDueBucket
+        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        status = [string]$_.Status
+    }
+})
+$historicalRunsCheckStatus = if ($historicalRunsEvidence.status -eq "PASS" -and $historicalRunRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$historicalTargetAuditsCheckStatus = if ($historicalTargetAuditsEvidence.status -eq "PASS" -and $historicalTargetAuditRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$httpAttemptHistoryCheckStatus = if ($httpAttemptHistoryEvidence.status -eq "PASS") { "PASS" } else { "NOT_PROVEN" }
+$firstHeartbeatCheckStatus = if ($firstTiered50HeartbeatEvidence.status -eq "PASS" -and $firstHeartbeatRows.Count -eq 1) { "PASS" } else { "NOT_PROVEN" }
+$historicalOutageCheckStatus = if ($historicalOutageEvidence.status -eq "PASS" -and $historicalOutageRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$laterTiered50RunsCheckStatus = if ($laterTiered50RunsEvidence.status -eq "PASS") { "PASS" } else { "NOT_PROVEN" }
+$cutoverHistoryCheckStatus = if ($cutoverHistoryEvidence.status -eq "PASS" -and $cutoverHistory.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$auditHistoryProven = @(
+    $historicalRunsCheckStatus,
+    $historicalTargetAuditsCheckStatus,
+    $httpAttemptHistoryCheckStatus,
+    $firstHeartbeatCheckStatus,
+    $historicalOutageCheckStatus,
+    $laterTiered50RunsCheckStatus,
+    $cutoverHistoryCheckStatus
+) -notcontains "NOT_PROVEN"
+$adminAuthorizationProven = $auditHistoryProven -and $permissionsProven
+
 $payload = [ordered]@{
     artifact_version = "TIERED50_ADMIN_EVIDENCE_V3"
     capture_role = "WINDOWS_INTEGRATED_AUTH_READ_ONLY_CAPTURE"
     generated_at_utc = $captured
     capture_provenance = [ordered]@{
-        status = "PASS"
+        status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }
         read_only = $true
         execution_path = "WINDOWS_INTEGRATED_AUTH"
         server_name = [string]$identity[0].ServerName
@@ -410,17 +682,20 @@ $payload = [ordered]@{
             "backup.latest_full_backup_history", "backup.restore_verifyonly_with_checksum",
             "collector_runtime_history_or_materialization",
             "collector.production_cutover_history", "collector.competing_production_writers",
-            "quota.current_shared_ledger"
+            "quota.current_shared_ledger",
+            "collector.historical_runs", "collector.historical_target_audits",
+            "collector.http_attempt_history", "collector.tiered50_first_heartbeat",
+            "collector.historical_outage", "collector.tiered50_later_runs"
         )
         authentication_source = "WINDOWS_AUTHENTICATION_SQL_SERVER_VM"
         tls = $tlsEvidence
     }
     sql = [ordered]@{
-        admin_authorization = @{ status = "PASS"; permission_checks = $permissionChecks }
-        admin_connection = @{ status = "PASS"; authorization_status = "PASS"; tls = $tlsEvidence }
+        admin_authorization = @{ status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; permission_checks = $permissionChecks; audit_history_proven = $auditHistoryProven }
+        admin_connection = @{ status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; authorization_status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; tls = $tlsEvidence }
         identity = @{ status = "PASS"; server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; configured_server_name = [string]$identity[0].ConfiguredServerName; database_name = [string]$identity[0].DatabaseName; login_name = [string]$identity[0].LoginName; captured_at_utc = $captured; sql_instance_identity = @{ server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; database_name = [string]$identity[0].DatabaseName } }
         admin_identity_gate = @{ status = "PASS"; effective_login = [string]$identity[0].LoginName; runtime_login_match = $false }
-        admin_permissions = @{ status = "PASS"; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = @(); tls = $tlsEvidence }
+        admin_permissions = @{ status = if ($permissionsProven) { "PASS" } else { "NOT_PROVEN" }; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = $missingPermissions; tls = $tlsEvidence }
         runtime_health = @{ status = "PASS"; database_name = [string]$runtimeHealth[0].database_name; database_status = [string]$runtimeHealth[0].database_status; recovery_model = [string]$runtimeHealth[0].recovery_model; evidence = @{ status = "PASS" } }
         database_files = @($databaseFileDetails | ForEach-Object { @{ name = [string]$_.name; type = [string]$_.type; size_pages = [int64]$_.size_pages; growth = [int]$_.growth; is_percent_growth = [bool]$_.is_percent_growth; max_size_pages = [int64]$_.max_size_pages; space_used_pages = [int64]$_.space_used_pages; size_bytes = [int64]$_.size_bytes; space_used_bytes = [int64]$_.space_used_bytes } })
         database_files_evidence = @{ status = "PASS" }
@@ -437,15 +712,23 @@ $payload = [ordered]@{
         latest_full_backup_evidence = @{ status = "PASS" }
         latest_full_backup_media_evidence = @{ status = "PASS"; media_count = [int]$backupMedia.Count }
         tiered50_materialization = @{ status = "PASS"; target_count = [int64]$materialization[0].TargetCount; active_count = [int64]$materialization[0].ActiveCount }
-        tiered50_audit_history_evidence = @{ status = "PASS"; tiered50_run_count = [int64]$history[0].Tiered50Runs }
-        recent_http_attempts_evidence = @{ status = "PASS" }
-        production_cutover_history = @($cutoverHistory | ForEach-Object { @{ cutover_key = [string]$_.CutoverKey; panel_version = [string]$_.PanelVersion; tiered50_activation_at_utc = [string]$_.Tiered50ActivationAtUtc; tiered50_activation_status = [string]$_.Tiered50ActivationStatus; recorded_at_utc = [string]$_.RecordedAtUtc } })
-        production_cutover_history_evidence = @{ status = "PASS" }
+        tiered50_audit_history_evidence = @{ status = $historicalTargetAuditsEvidence.status; statement_id = $historicalTargetAuditsEvidence.statement_id; executed = $historicalTargetAuditsEvidence.executed; result_count = $historicalTargetAuditsEvidence.result_count; captured_at_utc = $historicalTargetAuditsEvidence.captured_at_utc; check_status = $historicalTargetAuditsCheckStatus; reason = $historicalTargetAuditsEvidence.reason }
+        recent_http_attempts_evidence = @{ status = $httpAttemptHistoryEvidence.status; statement_id = $httpAttemptHistoryEvidence.statement_id; executed = $httpAttemptHistoryEvidence.executed; result_count = $httpAttemptHistoryEvidence.result_count; captured_at_utc = $httpAttemptHistoryEvidence.captured_at_utc; check_status = $httpAttemptHistoryCheckStatus; reason = $httpAttemptHistoryEvidence.reason }
+        production_cutover_history = @($cutoverHistory | ForEach-Object { @{ cutover_key = [string]$_.CutoverKey; panel_version = [string]$_.PanelVersion; tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.Tiered50ActivationAtUtc; tiered50_activation_status = [string]$_.Tiered50ActivationStatus; recorded_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.RecordedAtUtc } })
+        production_cutover_history_evidence = @{ status = $cutoverHistoryEvidence.status; statement_id = $cutoverHistoryEvidence.statement_id; executed = $cutoverHistoryEvidence.executed; result_count = [int64]$cutoverHistory.Count; captured_at_utc = $cutoverHistoryEvidence.captured_at_utc; check_status = $cutoverHistoryCheckStatus; reason = $cutoverHistoryEvidence.reason }
         competing_production_writers = @($competingWriters | ForEach-Object { @{ collection_context = [string]$_.CollectionContext; running_count = [int64]$_.RunningCount } })
         competing_production_writers_evidence = @{ status = "PASS" }
-        current_quota_ledger = @($currentQuotaLedger | ForEach-Object { @{ month_key = [string]$_.MonthKey; provider_quota_ceiling = [int64]$_.ProviderQuotaCeiling; normal_operational_maximum = [int64]$_.NormalOperationalMaximum; retry_protection_boundary = [int64]$_.RetryProtectionBoundary; confirmed_provider_attempts = [int64]$_.ConfirmedProviderAttempts; conservative_unknown_attempts = [int64]$_.ConservativeUnknownAttempts; reserved_shared_usage = [int64]$_.ExplicitSharedConsumerReservedAttempts; accounting_status = [string]$_.AccountingStatus; includes_all_shared_consumers = [bool]$_.IncludesAllSharedConsumers; provider_period_start_utc = [string]$_.ProviderPeriodStartUtc; provider_period_end_utc = [string]$_.ProviderPeriodEndUtc; local_usage_included_through_utc = [string]$_.LocalUsageIncludedThroughUtc; source_evidence_hash = [string]$_.SourceEvidenceHash; reconciliation_key = [string]$_.ReconciliationKey } })
+        current_quota_ledger = @($currentQuotaLedger | ForEach-Object { @{ month_key = [string]$_.MonthKey; provider_quota_ceiling = [int64]$_.ProviderQuotaCeiling; normal_operational_maximum = [int64]$_.NormalOperationalMaximum; retry_protection_boundary = [int64]$_.RetryProtectionBoundary; confirmed_provider_attempts = [int64]$_.ConfirmedProviderAttempts; conservative_unknown_attempts = [int64]$_.ConservativeUnknownAttempts; reserved_shared_usage = [int64]$_.ExplicitSharedConsumerReservedAttempts; accounting_status = [string]$_.AccountingStatus; includes_all_shared_consumers = [bool]$_.IncludesAllSharedConsumers; provider_period_start_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.ProviderPeriodStartUtc; provider_period_end_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.ProviderPeriodEndUtc; local_usage_included_through_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.LocalUsageIncludedThroughUtc; source_evidence_hash = [string]$_.SourceEvidenceHash; reconciliation_key = [string]$_.ReconciliationKey } })
         current_quota_ledger_evidence = @{ status = "PASS" }
         windows_vm_disk = @{ status = "PASS"; minimum_free_percent = $MinimumFreePercent; minimum_free_reserve_bytes = $MinimumFreeReserveBytes; volumes = $windowsDisk; sql_volume_headroom = $sqlVolumeHeadroom }
+        audit_provenance = [ordered]@{
+            "collector.historical_runs" = @{ query = $historicalRunsEvidence; check_status = $historicalRunsCheckStatus; rows = $historicalRunRows }
+            "collector.historical_target_audits" = @{ query = $historicalTargetAuditsEvidence; check_status = $historicalTargetAuditsCheckStatus; rows = $historicalTargetAuditRows }
+            "collector.http_attempt_history" = @{ query = $httpAttemptHistoryEvidence; check_status = $httpAttemptHistoryCheckStatus; linked_to_target_audit = $true; rows = $httpAttemptRows }
+            "collector.tiered50_first_heartbeat" = @{ query = $firstTiered50HeartbeatEvidence; check_status = $firstHeartbeatCheckStatus; rows = $firstHeartbeatRows }
+            "collector.historical_outage" = @{ query = $historicalOutageEvidence; check_status = $historicalOutageCheckStatus; rows = $historicalOutageRows }
+            "collector.tiered50_later_runs" = @{ query = $laterTiered50RunsEvidence; check_status = $laterTiered50RunsCheckStatus; later_collection_exists = ($laterTiered50RunRows.Count -gt 0); rows = $laterTiered50RunRows }
+        }
     }
 }
 

@@ -38,6 +38,7 @@ from cologne_transit_collector.admin_evidence import (  # noqa: E402
     EVIDENCE_ARTIFACT_VERSION,
     AdminEvidenceError,
     REQUIRED_CHECK_IDS,
+    json_safe,
     normalize_sql_instance_identity,
     payload_sha256,
     resolve_current_evidence_path,
@@ -225,6 +226,12 @@ def _statement_id(statement: str) -> str:
         return "backup.restore_verifyonly_with_checksum"
     if "sys.database_files" in normalized:
         return "capacity.database_files"
+    if "mddmachttpattempt" in normalized:
+        return "collector.http_attempt_history"
+    if "mddmactargetaudit" in normalized:
+        return "collector.historical_target_audits"
+    if "mddmaccollectorrun" in normalized:
+        return "collector.historical_runs"
     if "mddmac" in normalized or "mdd_mac" in normalized:
         return "collector_runtime_history_or_materialization"
     if "@@servername" in normalized or "suser_sname" in normalized:
@@ -1376,7 +1383,7 @@ def collect(
             ORDER BY h.CompletedAtUtc DESC
             """
         )
-        recent_http_evidence = _query_evidence(cursor, statement_id="collector_runtime_history_or_materialization")
+        recent_http_evidence = _query_evidence(cursor, statement_id="collector.http_attempt_history")
         evidence["sql"]["recent_http_attempts"] = [
             {
                 "http_status": _row_value(row, "HttpStatus", 0),
@@ -1402,7 +1409,7 @@ def collect(
             ORDER BY LogicalDueBucket ASC
             """
         )
-        tiered_audit_evidence = _query_evidence(cursor, statement_id="collector.tiered50_audit_history")
+        tiered_audit_evidence = _query_evidence(cursor, statement_id="collector.historical_target_audits")
         tiered_rows = list(cursor.fetchall())
         evidence["sql"]["tiered50_recent_audit_buckets"] = [
             {
@@ -1985,6 +1992,10 @@ def collect(
     )
     evidence["current_status"] = current_status
     evidence["status"] = current_status["status"]
+    # Normalize SQL driver's naive datetime2 values before signing and writing.
+    # SQL datetime2 fields in this schema are UTC by contract; json_safe assigns
+    # UTC rather than allowing the Mac host timezone to reinterpret them.
+    evidence = json_safe(evidence)
     # Sign only after every signed field, including current_status and status,
     # has been finalized.  Resume authenticates this exact stable artifact.
     if signing_key_path is not None:

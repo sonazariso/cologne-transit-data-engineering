@@ -36,6 +36,16 @@ WINDOWS_TLS_VALIDATION_METHOD = (
 )
 WINDOWS_MIN_FREE_PERCENT = 5.0
 WINDOWS_MIN_FREE_RESERVE_BYTES = 1024 * 1024 * 1024
+WINDOWS_AUDIT_QUERY_IDS = frozenset(
+    {
+        "collector.historical_runs",
+        "collector.historical_target_audits",
+        "collector.http_attempt_history",
+        "collector.tiered50_first_heartbeat",
+        "collector.historical_outage",
+        "collector.tiered50_later_runs",
+    }
+)
 _APPROVED_EXTERNAL_EVIDENCE_ROOT = Path.home() / "Library" / "Application Support" / "CologneTransitIntelligence"
 _APPROVED_OPERATOR_EVIDENCE_ROOT = Path("/operator-secure")
 REQUIRED_CHECK_IDS = frozenset(
@@ -250,6 +260,26 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def utc_isoformat(value: datetime) -> str:
+    """Serialize an evidence timestamp as an unambiguous UTC ISO-8601 value.
+
+    SQL ``datetime2`` values have no timezone metadata.  Database timestamps in
+    this project are UTC by contract, so a naive Python value is assigned UTC;
+    it is never passed through the Mac host's local timezone first.
+    """
+
+    if not isinstance(value, datetime):
+        raise AdminEvidenceError("evidence timestamp must be a datetime")
+    parsed = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def json_safe(value: Any) -> Any:
+    """Recursively normalize datetimes before an evidence artifact is written."""
+
+    return _json_safe(value)
+
+
 def canonical_payload(evidence: Mapping[str, Any]) -> bytes:
     """Serialize the signed payload without mutable integrity metadata."""
 
@@ -397,6 +427,8 @@ def validate_windows_tls_evidence(tls: Mapping[str, Any] | None) -> dict[str, An
         raise AdminEvidenceError("Windows administrative evidence must disable Trust Server Certificate")
     if tls.get("certificate_validation_required") is not True:
         raise AdminEvidenceError("Windows administrative evidence does not require certificate validation")
+    if tls.get("certificate_validation_observed") is not True:
+        raise AdminEvidenceError("Windows administrative evidence does not record a successful certificate-validation path")
     actual_encryption = str(tls.get("actual_encryption") or "").strip().upper()
     if actual_encryption not in {"TRUE", "YES", "1"}:
         raise AdminEvidenceError("Windows administrative evidence does not prove encrypted SQL transport")
@@ -473,6 +505,103 @@ def validate_windows_vm_disk_evidence(sql: Mapping[str, Any] | None) -> dict[str
     }
 
 
+def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Require executed, timestamped Windows audit queries and honest results.
+
+    A successful query returning no rows is a valid SQL execution result.  It
+    is not, however, evidence that a required historical record exists.  The
+    Windows capture therefore carries both the query result and a semantic
+    ``check_status`` for the historical-preservation checks.
+    """
+
+    if not isinstance(sql, Mapping):
+        raise AdminEvidenceError("Windows administrative evidence is missing SQL audit evidence")
+    audit = sql.get("audit_provenance")
+    if not isinstance(audit, Mapping):
+        raise AdminEvidenceError("Windows administrative evidence is missing audit provenance")
+
+    expected_semantics = {
+        "collector.historical_runs": "historical_rows",
+        "collector.historical_target_audits": "historical_rows",
+        "collector.http_attempt_history": "linked_query",
+        "collector.tiered50_first_heartbeat": "exactly_one",
+        "collector.historical_outage": "historical_rows",
+        "collector.tiered50_later_runs": "query",
+    }
+    results: dict[str, Any] = {}
+    for query_id in sorted(WINDOWS_AUDIT_QUERY_IDS):
+        entry = audit.get(query_id)
+        if not isinstance(entry, Mapping):
+            raise AdminEvidenceError(f"Windows administrative evidence is missing audit query {query_id}")
+        query = entry.get("query")
+        if not isinstance(query, Mapping):
+            raise AdminEvidenceError(f"Windows audit query {query_id} has no query result metadata")
+        if query.get("statement_id") != query_id:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has the wrong statement identifier")
+        query_status = str(query.get("status") or "").upper()
+        if query_status not in {"PASS", "NOT_PROVEN"}:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has an invalid status")
+        if not isinstance(query.get("executed"), bool):
+            raise AdminEvidenceError(f"Windows audit query {query_id} does not record execution")
+        if query_status == "PASS" and query.get("executed") is not True:
+            raise AdminEvidenceError(f"Windows audit query {query_id} claims PASS without execution")
+        try:
+            result_count = int(query.get("result_count", -1))
+        except (TypeError, ValueError) as exc:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has an invalid result count") from exc
+        if result_count < 0:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has an invalid result count")
+        try:
+            captured_at = _parse_utc(
+                query.get("captured_at_utc"),
+                field=f"sql.audit_provenance.{query_id}.query.captured_at_utc",
+            )
+        except AdminEvidenceError:
+            raise
+        rows = entry.get("rows")
+        if not isinstance(rows, list):
+            raise AdminEvidenceError(f"Windows audit query {query_id} has malformed result rows")
+        if query_status == "PASS" and len(rows) != result_count:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has an inconsistent result count")
+        if query_status == "NOT_PROVEN" and rows:
+            raise AdminEvidenceError(f"Windows audit query {query_id} includes rows despite being unproven")
+        if query_status == "NOT_PROVEN" and query.get("executed") is not True:
+            if not str(query.get("reason") or "").strip():
+                raise AdminEvidenceError(f"Windows audit query {query_id} was not executed without a cause")
+        if query_status == "NOT_PROVEN" and not str(query.get("reason") or "").strip():
+            raise AdminEvidenceError(f"Windows audit query {query_id} is unproven without a sanitized cause")
+
+        check_status = str(entry.get("check_status") or "").upper()
+        semantic = expected_semantics[query_id]
+        if semantic == "query":
+            expected_check_status = "PASS" if query_status == "PASS" else "NOT_PROVEN"
+        elif semantic == "linked_query":
+            linked = entry.get("linked_to_target_audit") is True
+            expected_check_status = "PASS" if query_status == "PASS" and linked else "NOT_PROVEN"
+        elif semantic == "exactly_one":
+            expected_check_status = "PASS" if query_status == "PASS" and result_count == 1 else "NOT_PROVEN"
+        else:
+            expected_check_status = "PASS" if query_status == "PASS" and result_count > 0 else "NOT_PROVEN"
+        if check_status != expected_check_status:
+            raise AdminEvidenceError(f"Windows audit query {query_id} has an inaccurate check status")
+        results[query_id] = {
+            "status": query_status,
+            "check_status": check_status,
+            "result_count": result_count,
+            "captured_at_utc": captured_at.isoformat().replace("+00:00", "Z"),
+        }
+
+    if any(result["check_status"] != "PASS" for result in results.values()):
+        raise AdminEvidenceError("Windows administrative audit evidence is not fully proven")
+    if str((sql.get("admin_authorization") or {}).get("status") or "").upper() != "PASS":
+        raise AdminEvidenceError("Windows administrative audit evidence is not fully proven")
+    if str((sql.get("tiered50_audit_history_evidence") or {}).get("status") or "").upper() != "PASS":
+        raise AdminEvidenceError("Windows target-audit history query is not proven")
+    if str((sql.get("recent_http_attempts_evidence") or {}).get("status") or "").upper() != "PASS":
+        raise AdminEvidenceError("Windows HTTP attempt history query is not proven")
+    return {"status": "PASS", "queries": results}
+
+
 def validate_admin_evidence_artifact(
     evidence: Mapping[str, Any],
     *,
@@ -540,6 +669,12 @@ def validate_admin_evidence_artifact(
     if not REQUIRED_CHECK_IDS.issubset(required):
         missing = sorted(REQUIRED_CHECK_IDS - required)
         raise AdminEvidenceError("administrative evidence omits required checks: " + ", ".join(missing))
+    if provenance.get("execution_path") == "WINDOWS_INTEGRATED_AUTH":
+        missing_windows_queries = sorted(WINDOWS_AUDIT_QUERY_IDS - required)
+        if missing_windows_queries:
+            raise AdminEvidenceError(
+                "Windows administrative evidence omits audit queries: " + ", ".join(missing_windows_queries)
+            )
 
     integrity = evidence.get("artifact_integrity")
     if not isinstance(integrity, Mapping) or integrity.get("status") != "SIGNED":
@@ -572,6 +707,7 @@ def validate_admin_evidence_artifact(
         raise AdminEvidenceError("current SQL quota ledger is not proven")
     if provenance.get("execution_path") == "WINDOWS_INTEGRATED_AUTH":
         validate_windows_vm_disk_evidence(sql)
+        validate_windows_audit_evidence(sql)
     return {
         "status": "PASS",
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
@@ -624,11 +760,13 @@ __all__ = [
     "CURRENT_EVIDENCE_PATH_ENV",
     "EVIDENCE_ARTIFACT_VERSION",
     "REQUIRED_CHECK_IDS",
+    "WINDOWS_AUDIT_QUERY_IDS",
     "WINDOWS_ENCRYPTION_MODES",
     "WINDOWS_MIN_FREE_PERCENT",
     "WINDOWS_MIN_FREE_RESERVE_BYTES",
     "WINDOWS_TLS_VALIDATION_METHOD",
     "canonical_payload",
+    "json_safe",
     "load_current_evidence_artifact",
     "payload_sha256",
     "require_current_evidence_path",
@@ -639,6 +777,8 @@ __all__ = [
     "sql_instance_identities_match",
     "validate_admin_evidence_artifact",
     "validate_windows_tls_evidence",
+    "validate_windows_audit_evidence",
     "validate_windows_vm_disk_evidence",
+    "utc_isoformat",
     "verify_signature",
 ]
