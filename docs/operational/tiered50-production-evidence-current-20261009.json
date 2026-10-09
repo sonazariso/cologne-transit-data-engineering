@@ -1,13 +1,13 @@
 {
   "artifact_integrity": {
-    "payload_sha256": "8f9ea26b64201183c0df5d7f5473f7b54182c51e96b18b39a168468018706f9c",
+    "payload_sha256": "b84b6f39df2b3bd84c7bafd6ea18822e53fc6a6a4bf5fa11f7e024ab246f79e7",
     "reason": "operator-controlled signing key was not supplied",
     "status": "UNSIGNED"
   },
   "artifact_version": "TIERED50_ADMIN_EVIDENCE_V3",
   "capture_provenance": {
     "authentication_source": "MSSQL_ADMIN_*_KEYCHAIN",
-    "captured_at_utc": "2026-10-09 08:08:26.066908",
+    "captured_at_utc": "2026-10-09 08:56:17.419055",
     "database_name": "CologneTransitIntelligence",
     "effective_login": "sa",
     "execution_path": "SEPARATE_SQL_LOGIN",
@@ -52,7 +52,7 @@
     "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
     "tiered50_active": false
   },
-  "generated_at_utc": "2026-10-09T08:08:24.200696Z",
+  "generated_at_utc": "2026-10-09T08:56:15.668899Z",
   "host": {
     "legacy7_launchd": {
       "command": "/bin/launchctl",
@@ -74,14 +74,14 @@
       "start_interval_seconds": 300
     },
     "mac_disk": {
-      "free_bytes": 79173332992,
+      "free_bytes": 79158349824,
       "total_bytes": 250685575168
     },
     "power_assertions": {
       "command": "/usr/bin/pmset",
       "returncode": 0,
       "stderr": "",
-      "stdout": "2026-10-09 10:08:24 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    1\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000015000980b5] 00:05:47 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000772 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 1027(caffeinate): [0x0000021c000182cf] 01:13:05 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000582d0] 01:13:05 PreventUserIdleDisplaySleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000782d1] 01:13:05 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000f82d2] 01:13:05 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=09.10.26, 08:55  mod=09.10.26, 09:38 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
+      "stdout": "2026-10-09 10:56:15 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    1\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000015000980b5] 00:02:50 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000772 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 1027(caffeinate): [0x0000021c000182cf] 02:00:57 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000582d0] 02:00:57 PreventUserIdleDisplaySleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000782d1] 02:00:57 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000f82d2] 02:00:57 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=09.10.26, 08:55  mod=09.10.26, 09:38 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
     },
     "tiered50_launchd": {
       "command": "/bin/launchctl",
@@ -121,7 +121,7 @@
       "command": "/usr/bin/uptime",
       "returncode": 0,
       "stderr": "",
-      "stdout": "10:08  up  1:22, 2 users, load averages: 3.78 4.10 3.92\n"
+      "stdout": "10:56  up  2:10, 2 users, load averages: 3.81 3.95 3.97\n"
     },
     "vmware": {
       "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
@@ -277,7 +277,7 @@
         "max_size_pages": -1,
         "name": "CologneTransitIntelligence",
         "size_pages": 736032,
-        "space_used_pages": 728872,
+        "space_used_pages": 728888,
         "type": "ROWS"
       },
       {
@@ -286,7 +286,7 @@
         "max_size_pages": 268435456,
         "name": "CologneTransitIntelligence_log",
         "size_pages": 238592,
-        "space_used_pages": 4093,
+        "space_used_pages": 4144,
         "type": "LOG"
       }
     ],
@@ -362,7 +362,7 @@
       "validation_status": "FAILED_CADENCE_OR_PERSISTENCE_GATE"
     },
     "identity": {
-      "captured_at_utc": "2026-10-09 08:08:26.066908",
+      "captured_at_utc": "2026-10-09 08:56:17.419055",
       "configured_server_name": "DataAnalyst-VM",
       "database_name": "CologneTransitIntelligence",
       "instance_name": "",
@@ -519,8 +519,8 @@
     ],
     "log_space": {
       "total_bytes": 1954537472,
-      "used_bytes": 33533952,
-      "used_percent": 1.7156975269317627
+      "used_bytes": 33947648,
+      "used_percent": 1.7368634939193726
     },
     "log_space_evidence": {
       "statement_id": "capacity.database_log_space_dm_db_log_space_usage",
@@ -532,17 +532,7 @@
       "status": "PASS"
     },
     "permission_error_297": [],
-    "privileged_query_failures": [
-      {
-        "error_code": 208,
-        "error_type": "ProgrammingError",
-        "phase": "execute",
-        "reason": "(208, b\"Invalid object name 'ctl.MddMacProductionResumeEvent'.DB-Lib error message 20018, severity 16:\\nGeneral SQL Server error: Check messages from the SQL Server\\n\")",
-        "statement": "SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode, SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc, LaunchAgentLabel, RecordedAtUtc FROM ctl.MddMacProductionResumeEvent WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY ResumeEventId DESC",
-        "statement_id": "collector_runtime_history_or_materialization",
-        "status": "NOT_PROVEN"
-      }
-    ],
+    "privileged_query_failures": [],
     "production_cutover_history": [
       {
         "cutover_key": "TIERED50_PANEL_V1:2026-10-08T09:58:07.991246+00:00:OUTAGE",
@@ -947,13 +937,8 @@
     ],
     "tiered50_resume_history": [],
     "tiered50_resume_history_evidence": {
-      "error_code": 208,
-      "error_type": "ProgrammingError",
-      "phase": "execute",
-      "reason": "(208, b\"Invalid object name 'ctl.MddMacProductionResumeEvent'.DB-Lib error message 20018, severity 16:\\nGeneral SQL Server error: Check messages from the SQL Server\\n\")",
-      "statement": "SELECT TOP (20) ResumeEventId, ResumeKey, PanelVersion, EraCode, SamplingEraId, OriginalActivationAtUtc, ResumeAtUtc, LaunchAgentLabel, RecordedAtUtc FROM ctl.MddMacProductionResumeEvent WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY ResumeEventId DESC",
-      "statement_id": "collector_runtime_history_or_materialization",
-      "status": "NOT_PROVEN"
+      "statement_id": "collector.tiered50_resume_history",
+      "status": "PASS"
     },
     "tiered50_schema": {
       "evidence_role": "DEDICATED_RUNTIME_LOGIN",
@@ -996,7 +981,7 @@
     },
     "volume_capacity": [
       {
-        "available_bytes": 44975087616,
+        "available_bytes": 44967096320,
         "total_bytes": 95511638016,
         "volume": "C:\\"
       }

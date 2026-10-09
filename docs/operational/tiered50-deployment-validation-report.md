@@ -27,53 +27,31 @@ Heumarkt request was issued.
 
 ## Current operational refresh — 2026-10-09
 
-The complete 346-test suite passed five consecutive times with
-`ResourceWarning` treated as an error. Compilation and the offline architecture,
-SQL migration, Tiered50 manifest/materialization, quota, schedule, JSON, and
-preflight validators passed. The static skip-audit validator remains explicitly
-`NOT_RUN`; its real rollback-only path was not allowed to run without the
-separate administrator identity.
+The separate administrator path proved the actual `DataAnalyst-VM` /
+`CologneTransitIntelligence` target, permissions, backup checksum verification,
+database/log/volume capacity, and absence of competing collectors or leases.
+The only missing source object was `ctl.MddMacProductionResumeEvent`.
 
-The restricted read-only runtime preflight connected to the authoritative
-`CologneTransitIntelligence` database on `DataAnalyst-VM` as
-`CologneTransitCollector` and confirmed the Tiered50 runtime schema, 43 active
-rows with IDs 8–50, zero competing Legacy7/Tiered50 writers, and the current
-October ledger. The latest ledger total is `808` attempts: `721` confirmed HTTP
-responses plus `87` conservative live attempts, with `0` reserved shared usage;
-the two post-cutoff local attempts remain accounted conservatively. No MDD
-request or SQL write was issued.
+The exact scoped repair command committed that table from the authoritative
+source-faithful DDL. Fresh administrator verification confirms the ten ordered
+columns, identity, nullability, primary and unique keys, foreign key,
+check/default constraints, indexes, permissions, and `ctl` ownership. The
+former history-query SQL error 208 is resolved. No ResumeEvent row, quota
+rewrite, cutover repeat, collector activation, or MDD request was performed.
+Legacy7, its history, Power BI, and the Tiered50 materialization were preserved.
 
-The pre-cutover materialization helper reports the actual post-activation state
-as `43 active / 0 prepared` instead of its original `0 active / 43 prepared`
-expectation. This is consistent with the already committed Tiered50 activation;
-no materialization migration or second cutover was issued. The read-only
-Tiered50 migration validator and production preflight both pass against the
-current state.
+The real SQL Server Skip Audit validator passed and rolled back all probe rows;
+zero rows remained and historical production audit rows were unchanged. The
+relevant regression set passed 95 tests. The full sanitized repair record is
+[`tiered50-schema-repair-evidence-20261009.json`](tiered50-schema-repair-evidence-20261009.json).
 
-The latest source fingerprint was installed into the user-local Tiered50 bundle
-`tiered50-v1-f12437b7d3681544` with the existing installer in disabled mode.
-The plist is secret-free, `RunAtLoad=false`, has the twelve `00..55` wall-clock
-entries, and the LaunchAgent is not loaded. No resume transition was attempted.
-
-Full administrator validation remains blocked by the exact
-`MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS` condition: no `MSSQL_ADMIN_*`
-identity or matching Keychain configuration is present. A full-schema probe
-using the restricted runtime login returned an `MssqlSchemaError` for the
-additive/admin/import objects, and its baseline read returned SQL Server error
-229 (`SELECT` permission denied on `stg.MddRealtimeStopSituationLink`). This
-does not establish that those objects are absent and is not administrator
-evidence. Consequently database/log/volume capacity, latest native full-backup
-history and `RESTORE VERIFYONLY WITH CHECKSUM`, immutable activation history,
-the rollback-only SQL Skip Audit, signed evidence, and the resume lifecycle all
-remain `NOT_PROVEN`.
-
-The fresh sanitized capture is
+The fresh administrator evidence is
 [`tiered50-production-evidence-current-20261009.json`](tiered50-production-evidence-current-20261009.json).
-It was generated at `2026-10-09T07:02:57Z`, is intentionally unsigned because
-no operator signing key/admin envelope was supplied, records zero MDD requests
-and zero writes, and keeps Tiered50 `BLOCKED` with zero collecting stations.
-The October bootstrap remains unchanged. Future monthly rollover remains
-unverified, unapproved, unregistered, and fail-closed.
+It is intentionally unsigned because the operator-controlled signing key was
+not supplied. Tiered50 remains stopped, the LaunchAgent remains disabled, zero
+stations are collecting, and the separate Resume authorization was not
+executed. Future monthly rollover remains unverified, unapproved,
+unregistered, and fail-closed.
 
 ## Latest correction and gate reconciliation — 2026-10-08
 

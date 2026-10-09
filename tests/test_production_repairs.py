@@ -230,6 +230,11 @@ class ProductionRepairTests(unittest.TestCase):
             },
         )
 
+    def test_schema_verification_accepts_binary_sql_identity_metadata(self) -> None:
+        self.assertTrue(repair_module._numeric_equal(b"\x01\x00\x00\x00\x00\x00\x00\x00", 1))
+        self.assertTrue(repair_module._numeric_equal(memoryview(b"\x01\x00\x00\x00\x00\x00\x00\x00"), 1))
+        self.assertFalse(repair_module._numeric_equal(b"\x02\x00\x00\x00\x00\x00\x00\x00", 1))
+
     @staticmethod
     def _missing_resume_inventory() -> dict[str, object]:
         return {"source_defined_objects": {"missing": [RESUME_EVENT_OBJECT]}}
@@ -317,6 +322,22 @@ class ProductionRepairTests(unittest.TestCase):
         self.assertEqual(result["schema_verification_before_commit"]["status"], "NOT_PROVEN")
         self.assertTrue(result["rollback_confirmed"])
         self.assertFalse(result["commit_confirmed"])
+
+    def test_repair_closes_server_transaction_before_dbapi_commit(self) -> None:
+        result, connection = self._apply_with_verifications(
+            [
+                self._verification("NOT_PROVEN", False),
+                self._verification("PASS", True),
+            ],
+            reconciliation={
+                "status": "PASS",
+                "object_exists": True,
+                "schema_verification": self._verification("PASS", True),
+            },
+        )
+        self.assertEqual(result["creation_status"], "CREATED_BY_THIS_OPERATION")
+        self.assertTrue(result["transaction_committed"])
+        self.assertIn("COMMIT TRANSACTION;", connection.cursor_value.statements)
 
     def test_repair_treats_commit_exception_as_unknown_and_reconciles(self) -> None:
         result, connection = self._apply_with_verifications(

@@ -1,100 +1,71 @@
-# Tiered50 schema-repair readiness
+# Tiered50 schema-repair closeout
 
-Captured 2026-10-09 from the read-only administrator path. No MDD request,
-production DDL, collector activation, quota rewrite, or historical-row update
-was performed.
+Captured 2026-10-09 from the separate administrator path. The scoped schema
+repair is complete. It created only
+`ctl.MddMacProductionResumeEvent` from the authoritative source-faithful DDL;
+it did not insert a ResumeEvent, activate a collector, rewrite quota state,
+repeat cutover, or issue an MDD request.
 
-## Read-only production findings
+The sanitized machine-readable result is
+[`tiered50-schema-repair-evidence-20261009.json`](tiered50-schema-repair-evidence-20261009.json).
 
-- Target identity was proven as `DataAnalyst-VM` / `CologneTransitIntelligence`
-  at `172.16.192.128:1433`, using the separate `sa` administrator login.
-- The authoritative source-object inventory found exactly one missing required
-  object: `ctl.MddMacProductionResumeEvent`. `ctl.MddMacProductionCutover`,
-  `ctl.MddMacSamplingEra`, `ctl.MddMacQuotaResetContract`, all required
-  procedures, and the remaining source tables were present.
-- Related columns, indexes, constraints, and SQL-expression dependencies were
-  inventoried. The repair path extracts the exact idempotent ResumeEvent batch
-  from `sql/mdd-mac-collector/create-source-faithful-persistence.sql`.
-- Backup `VERIFYONLY ... WITH CHECKSUM`, database files, log space, and volume
-  capacity checks passed. No active production collector or lease was found.
-- Administrative permissions passed after recognizing effective sysadmin
-  authorization and successful DMV execution. SQL Server major version was
-  `17`; the newer DMV permission metadata was NULL, not a verified denial.
-- Runtime health passed with database status `ONLINE` and recovery model
-  `SIMPLE` after decoding SQL driver byte values.
-- The administrative history query still returns SQL error 208 for the missing
-  ResumeEvent table. This is the only remaining schema-drift defect.
+## Preconditions and repair result
 
-## Repair state
+- The target was proven as `DataAnalyst-VM` /
+  `CologneTransitIntelligence` at `172.16.192.128:1433`, using the separate
+  `sa` administrator login.
+- A fresh inventory found exactly one missing required source object:
+  `ctl.MddMacProductionResumeEvent`. No competing production collector or
+  lease was active, and the MDD request counter remained zero.
+- The latest native full backup passed server-side
+  `RESTORE VERIFYONLY ... WITH CHECKSUM`; database, log, and volume capacity
+  gates passed.
+- The exact authorized command was:
 
-`scripts/repair_mdd_mac_schema.py` is prepared and defaults to read-only
-inventory. It requires both `--apply` and the explicit
-`--authorize-production-ddl` flag before it can execute DDL. If authorized, it
-creates only the missing table in one rollbackable transaction, verifies the
-authoritative columns, constraints, indexes, and permissions, records the
-created object, and is safe to repeat.
+  ```text
+  python3 scripts/repair_mdd_mac_schema.py --apply --authorize-production-ddl
+  ```
 
-Actual production repair: **NOT APPLIED — explicit operator DDL authorization
-was not supplied.**
+- The operation reported `CREATED_BY_THIS_OPERATION`, committed its transaction,
+  and independently reconciled the table as valid. The authoritative columns,
+  identity, nullability, primary and unique keys, foreign key, check/default
+  constraints, indexes, schema ownership, and administrator permissions all
+  verified.
+- A fresh post-repair administrator history query returned no SQL error 208.
+  The table is present and contains zero ResumeEvent rows.
 
-## Explicit production DDL authorization request
+An earlier guarded attempt rolled back during schema verification; the final
+authorized invocation succeeded after the existing validator was corrected for
+SQL Server driver byte-valued identity metadata. No object or row from the
+rolled-back attempt remained.
 
-The exact proposed change is additive and limited to one object:
+## Preservation and validation
 
-```text
-ctl.MddMacProductionResumeEvent
-```
+The seven historical target IDs remain intact, the 43 Tiered50 targets remain
+IDs 8–50, and the controlled before/after administrator evidence matched for
+the existing materialization, cutover, quota, Legacy7, and Tiered50 history.
+The repair batch was invariant-checked to create only the approved table.
 
-If approved, the repair command will first confirm the SQL Server instance and
-database, the latest successful checksum-bearing backup verification, absence
-of a competing production collector or lease, and a fresh read-only inventory.
-It will then acquire the scoped
-`CologneTransitIntelligence:SCHEMA:ctl.MddMacProductionResumeEvent` SQL
-application lock and execute only the idempotent `IF OBJECT_ID ... IS NULL`
-CREATE batch extracted from
-`sql/mdd-mac-collector/create-source-faithful-persistence.sql`. The operation
-will not run the general migration, create a SamplingEra, repeat cutover,
-rewrite quota rows, or write a ResumeEvent.
+The real SQL Server Skip Audit validator passed in
+`REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK` mode for row counts 1, 16, 18, and
+19. Zero rows remained after rollback, historical production audit rows were
+unchanged, and zero MDD requests were issued. The relevant regression set
+passed 95 tests.
 
-The result will independently verify the table through a new administrator
-connection, including ordered columns and SQL types/lengths, nullability and
-identity, primary/unique key structure, foreign-key target and column, check
-and default constraints, indexes, `ctl` schema ownership, and administrator
-access. The result distinguishes `CREATED_BY_THIS_OPERATION`,
-`ALREADY_EXISTS_AND_VALID`, `CREATED_OR_CHANGED_BY_ANOTHER_OPERATION`,
-`CREATION_FAILED`, and `COMMIT_OUTCOME_UNKNOWN`; an ambiguous COMMIT is never
-reported as a successful rollback.
+## Current operational gates
 
-Explicit approval requested (not granted):
-
-> I approve creating only `ctl.MddMacProductionResumeEvent` and its
-> source-defined constraints from the authoritative migration, after the
-> stated identity, backup, collector, and read-only inventory checks pass. I
-> do not approve the general migration, SamplingEra creation, cutover repeat,
-> quota rewrite, ResumeEvent insertion, collector activation, or Tiered50
-> Resume.
-
-Fresh sanitized evidence is in
+The fresh administrator evidence is
 [`tiered50-production-evidence-current-20261009.json`](tiered50-production-evidence-current-20261009.json).
-It is read-only and unsigned because an operator-controlled private signing key
-was not supplied; no signature was fabricated.
+Its administrator, backup, capacity, and collector gates passed, but the
+artifact is intentionally `UNSIGNED` because the operator-controlled signing
+key was not supplied. The exact one-time key setup and public-key configuration
+are documented in
+[`tiered50-administrator-setup-request.md`](tiered50-administrator-setup-request.md).
 
-The rollback-only real SQL Skip Audit validation is preserved as a reported
-real-SQL result: **PASS** as
-`REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK` for row counts 1, 16, 18, and 19;
-zero rows remained after rollback, and zero MDD requests were issued. No
-sanitized machine-readable output from that execution was found in this
-checkout, so this is not presented as a newly independently replayed result.
-The tracked `tiered50-skip-audit-benchmark-20261008.json` is a separate
-disposable-SQLite overhead comparison and must not be substituted for the
-reported SQL Server evidence.
+Tiered50 remains stopped, Legacy7 remains retired, zero stations are
+collecting, and no Resume operation was executed. Schema repair approval does
+not authorize Resume; signed evidence, the separate operational authorization,
+and the remaining rollover/coverage gates are still required. Legacy7 and
+Power BI were not changed.
 
-## Current operational blockers
-
-- The ResumeEvent schema repair remains unapplied, so the history query remains
-  unproven with error 208.
-- Tiered50 remains stopped after the recorded outage; no ResumeEvent exists and
-  the six-bucket production coverage gate is not proven.
-- A signed post-repair evidence artifact requires the operator-controlled
-  private signing key or an explicitly authorized signing setup.
-- The future monthly rollover contract remains separately unapproved.
+The current status is therefore **BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED**.

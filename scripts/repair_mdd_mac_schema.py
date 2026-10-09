@@ -712,8 +712,28 @@ def _normalized_sql_expression(value: Any) -> str:
 
 
 def _numeric_equal(left: Any, right: Any) -> bool:
+    """Compare numeric metadata across DB-API driver representations.
+
+    Some SQL Server drivers return ``sys.identity_columns.seed_value`` and
+    ``increment_value`` as little-endian binary values even though the server
+    exposes them as numeric metadata.  Decode those values before falling
+    back to the text comparison used for other driver-specific scalars.
+    """
+
+    def numeric_value(value: Any) -> float:
+        if isinstance(value, memoryview):
+            value = value.tobytes()
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            try:
+                return float(raw.decode("ascii").strip())
+            except (UnicodeDecodeError, ValueError):
+                if len(raw) in {1, 2, 4, 8}:
+                    return float(int.from_bytes(raw, byteorder="little", signed=True))
+        return float(value)
+
     try:
-        return float(left) == float(right)
+        return numeric_value(left) == numeric_value(right)
     except (TypeError, ValueError):
         return _text(left).strip() == _text(right).strip()
 
@@ -1445,6 +1465,11 @@ def apply_resume_event_repair(
         if original_error is None:
             commit_attempted = True
             try:
+                # Explicitly close the server-side transaction before the
+                # DB-API commit call.  pymssql can acknowledge the client-side
+                # commit while leaving an explicit T-SQL transaction open;
+                # closing the connection would then roll the DDL back.
+                cursor.execute("COMMIT TRANSACTION;")
                 connection.commit()
                 commit_confirmed = True
             except BaseException as exc:

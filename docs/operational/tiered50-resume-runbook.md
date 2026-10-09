@@ -176,10 +176,12 @@ service in `BLOCKED` status.
 
 ## Current review state
 
-This review did not execute resume, live SQL skip-audit validation, or any MDD
-request. The current sanitized evidence remains blocked because no fresh,
-authenticated administrative artifact is available. Monthly provider rollover
-also remains fail-closed: the exact provider reset boundary is unverified, and
+This review did not execute Resume or any MDD request. The separate schema
+repair is complete and the live SQL Skip Audit validator passed with its probe
+transaction rolled back. The current sanitized administrator evidence is fresh
+and its target, backup, capacity, and collector gates pass, but it remains
+unsigned because the operator-controlled signing key was not supplied. Monthly
+provider rollover also remains fail-closed: the exact provider reset boundary is unverified, and
 the bounded calendar-month policy is implemented but requires explicit
 operator approval of the global UTC-12 through UTC+14 envelope, a 30-minute
 post-boundary delay, and its documented temporary collection gaps before use.

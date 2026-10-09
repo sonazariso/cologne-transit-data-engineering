@@ -1,10 +1,11 @@
 # One-time Tiered50 administrator setup request
 
 This is the reusable one-time setup template. The 2026-10-09 administrator
-refresh has now proven the separate read-only SQL path with the existing
-operator-configured identity; Tiered50 remains stopped because the narrow
-schema repair, signed fresh evidence, and separate Resume authorization gates
-are still pending. No credential is being invented or stored by the collector.
+refresh has now proven the separate administrator path with the existing
+operator-configured identity, and the narrow schema repair is complete. Tiered50
+remains stopped because signed fresh evidence and the separate Resume
+authorization gates are still pending. No credential is being invented or
+stored by the collector.
 
 Please provide one existing, separately authorized SQL identity for the
 `CologneTransitIntelligence` database. It must be allowed to:
@@ -76,7 +77,8 @@ The restricted `CologneTransitCollector` login must remain unchanged and must
 not receive administrator, broad database, backup-verification, or lifecycle
 write privileges.
 
-After the identity is available, rerun the authenticated evidence capture,
-rollback-only SQL Skip Audit validator, and the controlled resume command. If
-the identity or any required permission is unavailable, leave Tiered50 stopped
-and retain the exact `NOT_PROVEN` result.
+After the signing key is available, rerun the authenticated evidence capture
+and verify it before considering the separately authorized Resume command. The
+rollback-only SQL Skip Audit validator has already passed against the real SQL
+Server and left zero rows. If the key or any required permission is
+unavailable, leave Tiered50 stopped and retain the unsigned/blocked result.
