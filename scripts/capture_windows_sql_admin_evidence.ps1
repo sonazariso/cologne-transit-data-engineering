@@ -74,10 +74,12 @@ function Invoke-ReadOnlySql([string] $Query) {
     Invoke-Sqlcmd writes DataRow objects to the PowerShell pipeline.  Returning
     that pipeline directly is unsafe: a single DataRow is assigned as a scalar,
     and indexing it can address a column instead of a row.  Accumulate complete
-    row objects in a List and emit that List as one non-enumerated pipeline
-    object.  This preserves zero-, one-, and multi-row results without ever
-    enumerating DataRow columns.  A terminating Invoke-Sqlcmd error is not
-    converted into an empty collection; it still propagates to the caller.
+    row objects in a List, then return its Object[] with unary comma so
+    PowerShell 5.1 and PowerShell 7 assign one predictable System.Object[]
+    collection for zero, one, and multiple rows.  This preserves complete
+    DataRow objects without enumerating their columns.  A terminating
+    Invoke-Sqlcmd error is not converted into an empty collection; it still
+    propagates to the caller.
     #>
     $rows = New-Object 'System.Collections.Generic.List[object]'
     foreach ($result in @(& $SqlCmdCommand @parameters)) {
@@ -85,7 +87,7 @@ function Invoke-ReadOnlySql([string] $Query) {
             [void]$rows.Add($result)
         }
     }
-    Write-Output -NoEnumerate -InputObject $rows
+    return ,($rows.ToArray())
 }
 
 function Normalize-VolumePath([string] $Value) {
@@ -198,8 +200,9 @@ function Invoke-AuditedReadOnlySql([string] $StatementId, [string] $Query) {
         captured_at_utc = $captured
     }
     try {
-        # Invoke-ReadOnlySql returns one non-enumerated row collection.  Do not
-        # wrap the invocation in @(), which would turn it into a list-of-list.
+        # Invoke-ReadOnlySql returns one non-enumerated System.Object[] row
+        # collection.  Do not wrap the invocation in @(), which would turn it
+        # into a list-of-list.
         $rows = Invoke-ReadOnlySql $Query
         $requiredColumns = switch ($StatementId) {
             "collector.production_cutover_history" { @("CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }

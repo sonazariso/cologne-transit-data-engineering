@@ -17,7 +17,8 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
         script = SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn("System.Collections.Generic.List[object]", script)
-        self.assertIn("Write-Output -NoEnumerate -InputObject $rows", script)
+        self.assertIn("return ,($rows.ToArray())", script)
+        self.assertNotIn("Write-Output -NoEnumerate -InputObject $rows", script)
         self.assertNotIn("return @(& $SqlCmdCommand @parameters)", script)
         self.assertIn("$rows = Invoke-ReadOnlySql $Query", script)
         self.assertNotIn("$rows = @(Invoke-ReadOnlySql $Query)", script)
@@ -26,8 +27,12 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
         self.assertIn("$evidence.reason = Get-SanitizedSqlError $_", script)
 
     def test_actual_datarow_zero_one_many_missing_column_and_error_paths(self) -> None:
-        shell = shutil.which("powershell") or shutil.which("pwsh")
-        if shell is None:
+        shells = [
+            (name, shell)
+            for name in ("powershell", "pwsh")
+            if (shell := shutil.which(name)) is not None
+        ]
+        if not shells:
             self.skipTest("PowerShell 5.1 or PowerShell 7 is not installed")
 
         harness = textwrap.dedent(
@@ -79,6 +84,7 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
             }
 
             function Invoke-SqlFixture {
+                [CmdletBinding()]
                 param(
                     [string] $ServerInstance,
                     [string] $Database,
@@ -119,19 +125,19 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
             $captured = "2026-10-10T10:00:00.0000000Z"
 
             $single = Invoke-ReadOnlySql "single"
-            if (-not ($single -is [System.Collections.IList]) -or $single.Count -ne 1) {
-                throw "single DataRow was not returned as a one-row collection"
+            if ($single.GetType().FullName -ne "System.Object[]" -or $single.Count -ne 1) {
+                throw "single DataRow was not returned as System.Object[] with Count = 1"
             }
             if ($single[0].GetType().FullName -ne "System.Data.DataRow") {
                 throw "single result was not a DataRow"
             }
-            if ([string]$single[0].DatabaseName -ne "CologneTransitIntelligence") {
+            if ($single[0].DatabaseName -ne "CologneTransitIntelligence") {
                 throw "single DataRow columns were flattened or lost"
             }
 
             $multiple = Invoke-ReadOnlySql "multiple"
-            if (-not ($multiple -is [System.Collections.IList]) -or $multiple.Count -ne 2) {
-                throw "multiple DataRows were not preserved"
+            if ($multiple.GetType().FullName -ne "System.Object[]" -or $multiple.Count -ne 2) {
+                throw "multiple DataRows were not returned as System.Object[]"
             }
             if ($multiple[0].GetType().FullName -ne "System.Data.DataRow" -or
                 $multiple[1].GetType().FullName -ne "System.Data.DataRow") {
@@ -139,8 +145,8 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
             }
 
             $empty = Invoke-ReadOnlySql "empty"
-            if (-not ($empty -is [System.Collections.IList]) -or $empty.Count -ne 0) {
-                throw "zero-row SQL result was not an empty collection"
+            if ($empty.GetType().FullName -ne "System.Object[]" -or $empty.Count -ne 0) {
+                throw "zero-row SQL result was not an empty System.Object[]"
             }
 
             try {
@@ -158,7 +164,7 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
                 [string]$missing.Evidence.reason -notmatch "MacCollectorRunId") {
                 throw "missing expected SQL columns were not fail-closed"
             }
-            if (-not ($missing.Rows -is [System.Collections.IList]) -or $missing.Rows.Count -ne 0) {
+            if ($missing.Rows.GetType().FullName -ne "System.Object[]" -or $missing.Rows.Count -ne 0) {
                 throw "failed audited query did not return a predictable empty collection"
             }
 
@@ -169,30 +175,35 @@ class WindowsSqlResultShapeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             harness_path = Path(directory) / "result-shape-harness.ps1"
             harness_path.write_text(harness, encoding="utf-8")
-            completed = subprocess.run(
-                [
-                    shell,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(harness_path),
-                    "-SourcePath",
-                    str(SCRIPT),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            for shell_name, shell in shells:
+                with self.subTest(shell=shell_name):
+                    completed = subprocess.run(
+                        [
+                            shell,
+                            "-NoLogo",
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            str(harness_path),
+                            "-SourcePath",
+                            str(SCRIPT),
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
 
-        self.assertEqual(
-            completed.returncode,
-            0,
-            msg=f"PowerShell result-shape harness failed:\n{completed.stdout}\n{completed.stderr}",
-        )
-        self.assertIn("WINDOWS_SQL_RESULT_SHAPE_TEST_PASS", completed.stdout)
+                    self.assertEqual(
+                        completed.returncode,
+                        0,
+                        msg=(
+                            f"{shell_name} result-shape harness failed:\n"
+                            f"{completed.stdout}\n{completed.stderr}"
+                        ),
+                    )
+                    self.assertIn("WINDOWS_SQL_RESULT_SHAPE_TEST_PASS", completed.stdout)
 
 
 if __name__ == "__main__":
