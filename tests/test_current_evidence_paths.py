@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,25 +76,64 @@ class CurrentEvidencePathTests(unittest.TestCase):
             "instance_name": "MSSQLSERVER",
             "database_name": "CologneTransitIntelligence",
         }
-        audit_provenance = {
-            query_id: {
+        heartbeat_run_id = "tiered50-first-run"
+        heartbeat_target_audit_rows = [
+            {"audit_id": 101, "run_id": heartbeat_run_id, "target_identity": "target-1"},
+            {"audit_id": 102, "run_id": heartbeat_run_id, "target_identity": "target-2"},
+        ]
+        heartbeat_http_attempt_rows = [
+            {
+                "http_attempt_id": 201,
+                "audit_id": 101,
+                "run_id": heartbeat_run_id,
+                "target_identity": "target-1",
+                "http_status": 200,
+                "outcome": "SUCCEEDED",
+            },
+            {
+                "http_attempt_id": 202,
+                "audit_id": 102,
+                "run_id": heartbeat_run_id,
+                "target_identity": "target-2",
+                "http_status": 200,
+                "outcome": "SUCCEEDED",
+            },
+        ]
+        rows_by_query = {
+            "collector.historical_runs": [{"run_id": "legacy-run"}],
+            "collector.historical_target_audits": heartbeat_target_audit_rows,
+            "collector.http_attempt_history": heartbeat_http_attempt_rows,
+            "collector.tiered50_first_heartbeat": [{"run_id": heartbeat_run_id}],
+            "collector.tiered50_first_heartbeat_target_audits": heartbeat_target_audit_rows,
+            "collector.tiered50_first_heartbeat_http_attempts": heartbeat_http_attempt_rows,
+            "collector.historical_outage": [{"cutover_id": 1}],
+            "collector.tiered50_later_runs": [],
+        }
+        audit_provenance = {}
+        for query_id in WINDOWS_AUDIT_QUERY_IDS:
+            rows = rows_by_query[query_id]
+            entry = {
                 "query": {
                     "statement_id": query_id,
                     "status": "PASS",
                     "executed": True,
-                    "result_count": 0 if query_id == "collector.tiered50_later_runs" else 1,
+                    "result_count": len(rows),
                     "captured_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
                 },
                 "check_status": "PASS",
-                "rows": [] if query_id == "collector.tiered50_later_runs" else [{}],
-                **(
-                    {"linked_to_target_audit": True}
-                    if query_id == "collector.http_attempt_history"
-                    else {}
-                ),
+                "rows": rows,
             }
-            for query_id in WINDOWS_AUDIT_QUERY_IDS
-        }
+            if query_id == "collector.http_attempt_history":
+                entry["linked_to_target_audit"] = True
+            if query_id in {
+                "collector.tiered50_first_heartbeat_target_audits",
+                "collector.tiered50_first_heartbeat_http_attempts",
+            }:
+                entry["linked_to_first_heartbeat_run"] = True
+                entry["run_id"] = heartbeat_run_id
+            if query_id == "collector.tiered50_first_heartbeat_http_attempts":
+                entry["linked_to_target_audit"] = True
+            audit_provenance[query_id] = entry
         return {
             "artifact_version": EVIDENCE_ARTIFACT_VERSION,
             "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
@@ -342,8 +382,70 @@ class CurrentEvidencePathTests(unittest.TestCase):
         self.assertIn("InvariantCulture", script)
         self.assertIn("collector.http_attempt_history", script)
         self.assertIn("collector.historical_target_audits", script)
+        self.assertIn("collector.tiered50_first_heartbeat_target_audits", script)
+        self.assertIn("collector.tiered50_first_heartbeat_http_attempts", script)
+        self.assertIn("ORDER BY AuditId DESC", script)
+        self.assertIn("ORDER BY h.CompletedAtUtc DESC, h.HttpAttemptId DESC", script)
         self.assertIn("audit_provenance", script)
         self.assertNotIn("$history[0].Tiered50Runs", script)
+
+    def test_recent_samples_keep_late_tiered50_rows_after_large_legacy7_history(self) -> None:
+        script = (ROOT / "scripts" / "capture_windows_sql_admin_evidence.ps1").read_text(encoding="utf-8")
+        target_sample = re.search(
+            r"\$historicalTargetAuditsQuery.*?ORDER BY AuditId DESC;",
+            script,
+            flags=re.DOTALL,
+        )
+        http_sample = re.search(
+            r"\$httpAttemptHistoryQuery.*?ORDER BY h\.CompletedAtUtc DESC, h\.HttpAttemptId DESC;",
+            script,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(target_sample)
+        self.assertIsNotNone(http_sample)
+
+        evidence = self._evidence()
+        target_entry = evidence["sql"]["audit_provenance"]["collector.historical_target_audits"]  # type: ignore[index]
+        target_rows = [
+            {"audit_id": index, "run_id": f"legacy-{index}"}
+            for index in range(1, 99)
+        ] + [
+            {"audit_id": 1001, "run_id": "tiered50-later-run"},
+            {"audit_id": 1002, "run_id": "tiered50-first-run"},
+        ]
+        target_entry["rows"] = target_rows
+        target_entry["query"]["result_count"] = len(target_rows)  # type: ignore[index]
+        target_entry["check_status"] = "PASS"
+
+        http_entry = evidence["sql"]["audit_provenance"]["collector.http_attempt_history"]  # type: ignore[index]
+        http_rows = [
+            {"http_attempt_id": index, "audit_id": index, "run_id": f"legacy-{index}"}
+            for index in range(1, 99)
+        ] + [
+            {"http_attempt_id": 2001, "audit_id": 1002, "run_id": "tiered50-first-run"},
+            {"http_attempt_id": 2002, "audit_id": 1002, "run_id": "tiered50-first-run"},
+        ]
+        http_entry["rows"] = http_rows
+        http_entry["query"]["result_count"] = len(http_rows)  # type: ignore[index]
+        http_entry["check_status"] = "PASS"
+
+        self.assertEqual(
+            validate_windows_audit_evidence(evidence["sql"])["status"],  # type: ignore[arg-type,index]
+            "PASS",
+        )
+
+    def test_first_heartbeat_cross_check_requires_matching_run_and_audit_ids(self) -> None:
+        evidence = self._evidence()
+        linked_http = evidence["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]  # type: ignore[index]
+        linked_http["rows"][0]["run_id"] = "different-run"  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "not linked by RunId"):
+            validate_windows_audit_evidence(evidence["sql"])  # type: ignore[arg-type,index]
+
+        evidence = self._evidence()
+        linked_http = evidence["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]  # type: ignore[index]
+        linked_http["rows"][0]["audit_id"] = 9999  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "not linked to its target audits"):
+            validate_windows_audit_evidence(evidence["sql"])  # type: ignore[arg-type,index]
 
     def test_sql_datetime2_utc_survives_standard_and_dst_host_timezones(self) -> None:
         # The SQL value is a UTC clock value with no timezone metadata.  Both

@@ -25,6 +25,33 @@ VMware guest. Legacy7 was then unloaded and disabled. No Windows collector or
 competing Legacy7 writer was active in that evidence, and no manual MDD or
 Heumarkt request was issued.
 
+## Current source and operational review — 2026-10-10
+
+The Windows evidence source now reports bounded recent target-audit and HTTP
+samples newest-first. The original first Tiered50 heartbeat and outage remain
+separate authoritative queries; the first heartbeat's target audits and HTTP
+attempts are separately queried and cross-checked by RunId and AuditId. Query
+execution status remains distinct from proof that historical rows are present,
+and zero rows remain valid only for queries whose contract permits them. No SQL
+history, target, quota, cutover, or Power BI data was changed.
+
+The complete repository suite passed five consecutive times with
+`ResourceWarning` promoted to an error, with 382 tests in each run. The
+offline migration, architecture, runtime-permission, and read-only production
+preflight validators passed; the Stage 15 result remains
+`INSUFFICIENT_EVIDENCE`, and the skip-audit validator remains static-only
+(`NOT_RUN`) because no new live SQL transaction was authorized.
+
+No actual Windows PowerShell capture, detached signing, Mac evidence merge,
+Resume, or six-bucket collection cycle was performed in this environment. The
+VMX confirms the existing repository shared-folder configuration, but guest-side
+access and the Windows `SqlServer`/TLS prerequisite were not independently
+verified because routine `vmrun` guest operations require the encrypted VM
+password. No operator signing key/public-key pair was present in the approved
+locations. Tiered50 therefore remains stopped with 43 active materialized
+Tiered50 targets (panel records 8–50), zero stations collecting, and no proven
+full six-bucket result; future rollover remains unverified and fail-closed.
+
 ## Current operational refresh — 2026-10-09
 
 The separate administrator path proved the actual `DataAnalyst-VM` /

@@ -42,6 +42,8 @@ WINDOWS_AUDIT_QUERY_IDS = frozenset(
         "collector.historical_target_audits",
         "collector.http_attempt_history",
         "collector.tiered50_first_heartbeat",
+        "collector.tiered50_first_heartbeat_target_audits",
+        "collector.tiered50_first_heartbeat_http_attempts",
         "collector.historical_outage",
         "collector.tiered50_later_runs",
     }
@@ -525,6 +527,8 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
         "collector.historical_target_audits": "historical_rows",
         "collector.http_attempt_history": "linked_query",
         "collector.tiered50_first_heartbeat": "exactly_one",
+        "collector.tiered50_first_heartbeat_target_audits": "first_heartbeat_target_audits",
+        "collector.tiered50_first_heartbeat_http_attempts": "first_heartbeat_http_attempts",
         "collector.historical_outage": "historical_rows",
         "collector.tiered50_later_runs": "query",
     }
@@ -580,6 +584,19 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
             expected_check_status = "PASS" if query_status == "PASS" and linked else "NOT_PROVEN"
         elif semantic == "exactly_one":
             expected_check_status = "PASS" if query_status == "PASS" and result_count == 1 else "NOT_PROVEN"
+        elif semantic == "first_heartbeat_target_audits":
+            linked = entry.get("linked_to_first_heartbeat_run") is True
+            expected_check_status = (
+                "PASS"
+                if query_status == "PASS" and result_count > 0 and linked
+                else "NOT_PROVEN"
+            )
+        elif semantic == "first_heartbeat_http_attempts":
+            linked = (
+                entry.get("linked_to_first_heartbeat_run") is True
+                and entry.get("linked_to_target_audit") is True
+            )
+            expected_check_status = "PASS" if query_status == "PASS" and linked else "NOT_PROVEN"
         else:
             expected_check_status = "PASS" if query_status == "PASS" and result_count > 0 else "NOT_PROVEN"
         if check_status != expected_check_status:
@@ -590,6 +607,52 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
             "result_count": result_count,
             "captured_at_utc": captured_at.isoformat().replace("+00:00", "Z"),
         }
+
+    first_heartbeat = audit["collector.tiered50_first_heartbeat"]
+    first_heartbeat_rows = first_heartbeat.get("rows")
+    if not isinstance(first_heartbeat_rows, list) or len(first_heartbeat_rows) != 1:
+        raise AdminEvidenceError("Windows first-heartbeat provenance is not available for RunId cross-check")
+    first_heartbeat_row = first_heartbeat_rows[0]
+    if not isinstance(first_heartbeat_row, Mapping):
+        raise AdminEvidenceError("Windows first-heartbeat provenance has malformed row data")
+    first_heartbeat_run_id = str(first_heartbeat_row.get("run_id") or "").strip()
+    if not first_heartbeat_run_id:
+        raise AdminEvidenceError("Windows first-heartbeat provenance is missing RunId")
+
+    linked_target_audits = audit["collector.tiered50_first_heartbeat_target_audits"]
+    linked_target_rows = linked_target_audits.get("rows")
+    if not isinstance(linked_target_rows, list):
+        raise AdminEvidenceError("Windows first-heartbeat target-audit rows are malformed")
+    target_audit_ids: set[int] = set()
+    for row in linked_target_rows:
+        if not isinstance(row, Mapping):
+            raise AdminEvidenceError("Windows first-heartbeat target-audit rows are malformed")
+        row_run_id = str(row.get("run_id") or "").strip()
+        if row_run_id != first_heartbeat_run_id:
+            raise AdminEvidenceError("Windows first-heartbeat target audits are not linked by RunId")
+        try:
+            target_audit_ids.add(int(row["audit_id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AdminEvidenceError("Windows first-heartbeat target audits are missing AuditId") from exc
+
+    linked_http_attempts = audit["collector.tiered50_first_heartbeat_http_attempts"]
+    linked_http_rows = linked_http_attempts.get("rows")
+    if not isinstance(linked_http_rows, list):
+        raise AdminEvidenceError("Windows first-heartbeat HTTP-attempt rows are malformed")
+    for row in linked_http_rows:
+        if not isinstance(row, Mapping):
+            raise AdminEvidenceError("Windows first-heartbeat HTTP-attempt rows are malformed")
+        row_run_id = str(row.get("run_id") or "").strip()
+        if row_run_id != first_heartbeat_run_id:
+            raise AdminEvidenceError("Windows first-heartbeat HTTP attempts are not linked by RunId")
+        try:
+            audit_id = int(row["audit_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AdminEvidenceError("Windows first-heartbeat HTTP attempts are missing AuditId") from exc
+        if audit_id not in target_audit_ids:
+            raise AdminEvidenceError(
+                "Windows first-heartbeat HTTP attempts are not linked to its target audits"
+            )
 
     if any(result["check_status"] != "PASS" for result in results.values()):
         raise AdminEvidenceError("Windows administrative audit evidence is not fully proven")
