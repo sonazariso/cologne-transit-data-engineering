@@ -1,13 +1,13 @@
 {
   "artifact_integrity": {
-    "payload_sha256": "14d8894569607c78f066c3859b8a91dd5ff5917c2d4cee2dc07537cb58373f97",
+    "payload_sha256": "ab3db3508770f0d1ed3ae986ef2e520dfcef4867a6b5bab496c93b11a8ccf935",
     "reason": "operator-controlled signing key was not supplied",
     "status": "UNSIGNED"
   },
   "artifact_version": "TIERED50_ADMIN_EVIDENCE_V3",
   "capture_provenance": {
     "authentication_source": "MSSQL_ADMIN_*_KEYCHAIN",
-    "captured_at_utc": "2026-10-09 09:31:34.292699",
+    "captured_at_utc": "2026-10-10T21:07:09.133345Z",
     "database_name": "CologneTransitIntelligence",
     "effective_login": "sa",
     "execution_path": "SEPARATE_SQL_LOGIN",
@@ -56,7 +56,7 @@
     "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
     "tiered50_active": false
   },
-  "generated_at_utc": "2026-10-09T09:31:32.225402Z",
+  "generated_at_utc": "2026-10-10T21:07:06.758263Z",
   "host": {
     "legacy7_launchd": {
       "command": "/bin/launchctl",
@@ -78,14 +78,14 @@
       "start_interval_seconds": 300
     },
     "mac_disk": {
-      "free_bytes": 79153987584,
+      "free_bytes": 81433210880,
       "total_bytes": 250685575168
     },
     "power_assertions": {
       "command": "/usr/bin/pmset",
       "returncode": 0,
       "stderr": "",
-      "stdout": "2026-10-09 11:31:32 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    1\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000015000980b5] 00:06:55 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000772 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 1027(caffeinate): [0x0000021c000182cf] 02:36:14 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000582d0] 02:36:14 PreventUserIdleDisplaySleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000782d1] 02:36:13 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000f82d2] 02:36:13 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=09.10.26, 08:55  mod=09.10.26, 09:38 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
+      "stdout": "2026-10-10 23:07:06 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    1\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000016000980cb] 00:00:00 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000747 service:AppleHIDKeyboardEventDriverV2 product:Apple Internal Keyboard / Trackpad eventType:3\"  \n   pid 838(caffeinate): [0x00000059000182d0] 02:14:21 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 838(caffeinate): [0x00000059000582d1] 02:14:21 PreventUserIdleDisplaySleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 838(caffeinate): [0x00000059000782d2] 02:14:21 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 838(caffeinate): [0x00000059000f82d3] 02:14:21 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=10.10.26, 21:02 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
     },
     "tiered50_launchd": {
       "command": "/bin/launchctl",
@@ -125,7 +125,7 @@
       "command": "/usr/bin/uptime",
       "returncode": 0,
       "stderr": "",
-      "stdout": "11:31  up  2:45, 2 users, load averages: 2.84 3.31 3.68\n"
+      "stdout": "23:07  up  2:16, 2 users, load averages: 4.74 4.37 3.92\n"
     },
     "vmware": {
       "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
@@ -281,7 +281,7 @@
         "max_size_pages": -1,
         "name": "CologneTransitIntelligence",
         "size_pages": 736032,
-        "space_used_pages": 728896,
+        "space_used_pages": 728808,
         "type": "ROWS"
       },
       {
@@ -290,7 +290,7 @@
         "max_size_pages": 268435456,
         "name": "CologneTransitIntelligence_log",
         "size_pages": 238592,
-        "space_used_pages": 4190,
+        "space_used_pages": 4612,
         "type": "LOG"
       }
     ],
@@ -299,7 +299,7 @@
       "status": "PASS"
     },
     "final_legacy7_run": {
-      "completed_at_utc": "2026-10-08 09:57:32.860000",
+      "completed_at_utc": "2026-10-08T09:57:32.860000Z",
       "logical_due_bucket": 5971511,
       "run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
       "status": "COMPLETE"
@@ -311,7 +311,7 @@
     "first_tiered50_scheduled_cycle": {
       "attempts_without_permit": 0,
       "audit_error_count": 0,
-      "completed_at_utc": "2026-10-08 12:30:47.931000",
+      "completed_at_utc": "2026-10-08T12:30:47.931000Z",
       "confirmed_permits": 2,
       "coverage": null,
       "failed_target_audits": 0,
@@ -357,7 +357,7 @@
       "run_id": "177056c4-1e5a-4db8-9f8d-fa3eaabf0661",
       "run_status": "COMPLETE",
       "skipped_target_audits": 16,
-      "started_at_utc": "2026-10-08 12:29:03.586000",
+      "started_at_utc": "2026-10-08T12:29:03.586000Z",
       "successful_target_audits": 2,
       "target_audits": 18,
       "timing": null,
@@ -366,7 +366,7 @@
       "validation_status": "FAILED_CADENCE_OR_PERSISTENCE_GATE"
     },
     "identity": {
-      "captured_at_utc": "2026-10-09 09:31:34.292699",
+      "captured_at_utc": "2026-10-10T21:07:09.133345Z",
       "configured_server_name": "DataAnalyst-VM",
       "database_name": "CologneTransitIntelligence",
       "instance_name": "",
@@ -385,13 +385,13 @@
       "status": "PASS"
     },
     "latest_cutover_record": {
-      "activation_at_utc": "2026-10-08 12:32:47.759000",
+      "activation_at_utc": "2026-10-08T12:32:47.759000Z",
       "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842Z:OUTAGE_AFTER_HEARTBEAT_5971541",
-      "recorded_at_utc": "2026-10-08 12:32:48.033308",
+      "recorded_at_utc": "2026-10-08T12:32:48.033308Z",
       "status": "OUTAGE"
     },
     "latest_full_backup": {
-      "backup_finish_date": "2026-10-07 09:00:52",
+      "backup_finish_date": "2026-10-07T09:00:52Z",
       "backup_set_id": 1,
       "complete_media_set_proven": true,
       "compressed_backup_size": 606591622,
@@ -410,7 +410,7 @@
     },
     "latest_tiered50_resume": null,
     "latest_tiered50_run": {
-      "completed_at_utc": "2026-10-08 12:30:47.931000",
+      "completed_at_utc": "2026-10-08T12:30:47.931000Z",
       "coverage": null,
       "failed_target_audits": 0,
       "logical_due_bucket": 5971541,
@@ -427,7 +427,7 @@
       "run_id": "177056c4-1e5a-4db8-9f8d-fa3eaabf0661",
       "run_status": "COMPLETE",
       "skipped_target_audits": 16,
-      "started_at_utc": "2026-10-08 12:29:03.586000",
+      "started_at_utc": "2026-10-08T12:29:03.586000Z",
       "successful_target_audits": 2,
       "target_audits": 18
     },
@@ -438,84 +438,84 @@
     "legacy7_recent_audit_buckets": [
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:57:32.621000",
+        "last_completed_at_utc": "2026-10-08T09:57:32.621000Z",
         "logical_due_bucket": 5971511,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:52:23.010000",
+        "last_completed_at_utc": "2026-10-08T09:52:23.010000Z",
         "logical_due_bucket": 5971510,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:47:16.162000",
+        "last_completed_at_utc": "2026-10-08T09:47:16.162000Z",
         "logical_due_bucket": 5971509,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:42:06.324000",
+        "last_completed_at_utc": "2026-10-08T09:42:06.324000Z",
         "logical_due_bucket": 5971508,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:36:57.656000",
+        "last_completed_at_utc": "2026-10-08T09:36:57.656000Z",
         "logical_due_bucket": 5971507,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:31:49.971000",
+        "last_completed_at_utc": "2026-10-08T09:31:49.971000Z",
         "logical_due_bucket": 5971506,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:26:39.326000",
+        "last_completed_at_utc": "2026-10-08T09:26:39.326000Z",
         "logical_due_bucket": 5971505,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:21:30.992000",
+        "last_completed_at_utc": "2026-10-08T09:21:30.992000Z",
         "logical_due_bucket": 5971504,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:16:22.126000",
+        "last_completed_at_utc": "2026-10-08T09:16:22.126000Z",
         "logical_due_bucket": 5971503,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:11:15.282000",
+        "last_completed_at_utc": "2026-10-08T09:11:15.282000Z",
         "logical_due_bucket": 5971502,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:06:07.533000",
+        "last_completed_at_utc": "2026-10-08T09:06:07.533000Z",
         "logical_due_bucket": 5971501,
         "skipped_count": 0,
         "succeeded_count": 1
       },
       {
         "audit_count": 1,
-        "last_completed_at_utc": "2026-10-08 09:00:54.979000",
+        "last_completed_at_utc": "2026-10-08T09:00:54.979000Z",
         "logical_due_bucket": 5971500,
         "skipped_count": 0,
         "succeeded_count": 1
@@ -523,8 +523,8 @@
     ],
     "log_space": {
       "total_bytes": 1954537472,
-      "used_bytes": 34324480,
-      "used_percent": 1.75614333152771
+      "used_bytes": 37781504,
+      "used_percent": 1.9330151081085205
     },
     "log_space_evidence": {
       "statement_id": "capacity.database_log_space_dm_db_log_space_usage",
@@ -542,24 +542,24 @@
         "cutover_key": "TIERED50_PANEL_V1:2026-10-08T09:58:07.991246+00:00:OUTAGE",
         "final_legacy7_run_id": null,
         "panel_version": "TIERED50_PANEL_V1",
-        "recorded_at_utc": "2026-10-08 09:58:08.618114",
-        "tiered50_activation_at_utc": "2026-10-08 09:58:07.991000",
+        "recorded_at_utc": "2026-10-08T09:58:08.618114Z",
+        "tiered50_activation_at_utc": "2026-10-08T09:58:07.991000Z",
         "tiered50_activation_status": "OUTAGE"
       },
       {
         "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842+00:00:ACTIVATED",
         "final_legacy7_run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
         "panel_version": "TIERED50_PANEL_V1",
-        "recorded_at_utc": "2026-10-08 12:24:02.672130",
-        "tiered50_activation_at_utc": "2026-10-08 12:24:01.212000",
+        "recorded_at_utc": "2026-10-08T12:24:02.672130Z",
+        "tiered50_activation_at_utc": "2026-10-08T12:24:01.212000Z",
         "tiered50_activation_status": "ACTIVATED"
       },
       {
         "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842Z:OUTAGE_AFTER_HEARTBEAT_5971541",
         "final_legacy7_run_id": null,
         "panel_version": "TIERED50_PANEL_V1",
-        "recorded_at_utc": "2026-10-08 12:32:48.033308",
-        "tiered50_activation_at_utc": "2026-10-08 12:32:47.759000",
+        "recorded_at_utc": "2026-10-08T12:32:48.033308Z",
+        "tiered50_activation_at_utc": "2026-10-08T12:32:47.759000Z",
         "tiered50_activation_status": "OUTAGE"
       }
     ],
@@ -653,140 +653,140 @@
     },
     "recent_http_attempts": [
       {
-        "completed_at_utc": "2026-10-08 09:57:26.984000",
+        "completed_at_utc": "2026-10-08T09:57:26.984000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:52:20.320000",
+        "completed_at_utc": "2026-10-08T09:52:20.320000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:47:10.397000",
+        "completed_at_utc": "2026-10-08T09:47:10.397000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:42:02.286000",
+        "completed_at_utc": "2026-10-08T09:42:02.286000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:36:54.143000",
+        "completed_at_utc": "2026-10-08T09:36:54.143000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:31:43.970000",
+        "completed_at_utc": "2026-10-08T09:31:43.970000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:26:35.126000",
+        "completed_at_utc": "2026-10-08T09:26:35.126000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:21:26.313000",
+        "completed_at_utc": "2026-10-08T09:21:26.313000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:16:19.485000",
+        "completed_at_utc": "2026-10-08T09:16:19.485000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:11:11.646000",
+        "completed_at_utc": "2026-10-08T09:11:11.646000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:06:00.079000",
+        "completed_at_utc": "2026-10-08T09:06:00.079000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 09:00:50.920000",
+        "completed_at_utc": "2026-10-08T09:00:50.920000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 08:55:40.655000",
+        "completed_at_utc": "2026-10-08T08:55:40.655000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 08:50:31.082000",
+        "completed_at_utc": "2026-10-08T08:50:31.082000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 08:45:23.531000",
+        "completed_at_utc": "2026-10-08T08:45:23.531000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 08:40:14.580000",
+        "completed_at_utc": "2026-10-08T08:40:14.580000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 08:35:04.095000",
+        "completed_at_utc": "2026-10-08T08:35:04.095000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 07:49:26.185000",
+        "completed_at_utc": "2026-10-08T07:49:26.185000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 07:44:16.836000",
+        "completed_at_utc": "2026-10-08T07:44:16.836000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
         "provider_quota_status": "CONFIRMED"
       },
       {
-        "completed_at_utc": "2026-10-08 07:39:10.134000",
+        "completed_at_utc": "2026-10-08T07:39:10.134000Z",
         "http_response_received": true,
         "http_status": 200,
         "network_attempted": true,
@@ -794,7 +794,7 @@
       }
     ],
     "recent_http_attempts_evidence": {
-      "statement_id": "collector_runtime_history_or_materialization",
+      "statement_id": "collector.http_attempt_history",
       "status": "PASS"
     },
     "runtime_connection": {
@@ -1127,42 +1127,42 @@
       "accounted_buckets": [
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:31:49.971000",
+          "last_completed_at_utc": "2026-10-08T09:31:49.971000Z",
           "logical_due_bucket": 5971506,
           "skipped_count": 0,
           "succeeded_count": 1
         },
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:36:57.656000",
+          "last_completed_at_utc": "2026-10-08T09:36:57.656000Z",
           "logical_due_bucket": 5971507,
           "skipped_count": 0,
           "succeeded_count": 1
         },
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:42:06.324000",
+          "last_completed_at_utc": "2026-10-08T09:42:06.324000Z",
           "logical_due_bucket": 5971508,
           "skipped_count": 0,
           "succeeded_count": 1
         },
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:47:16.162000",
+          "last_completed_at_utc": "2026-10-08T09:47:16.162000Z",
           "logical_due_bucket": 5971509,
           "skipped_count": 0,
           "succeeded_count": 1
         },
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:52:23.010000",
+          "last_completed_at_utc": "2026-10-08T09:52:23.010000Z",
           "logical_due_bucket": 5971510,
           "skipped_count": 0,
           "succeeded_count": 1
         },
         {
           "audit_count": 1,
-          "last_completed_at_utc": "2026-10-08 09:57:32.621000",
+          "last_completed_at_utc": "2026-10-08T09:57:32.621000Z",
           "logical_due_bucket": 5971511,
           "skipped_count": 0,
           "succeeded_count": 1
@@ -1180,7 +1180,7 @@
       ]
     },
     "tiered50_audit_history_evidence": {
-      "statement_id": "collector.tiered50_audit_history",
+      "statement_id": "collector.historical_target_audits",
       "status": "PASS"
     },
     "tiered50_materialization": {
@@ -1200,7 +1200,7 @@
         "audit_count": 18,
         "failed_count": 0,
         "http_attempts": 2,
-        "last_completed_at_utc": "2026-10-08 12:30:47.705000",
+        "last_completed_at_utc": "2026-10-08T12:30:47.705000Z",
         "logical_due_bucket": 5971541,
         "skipped_count": 16,
         "succeeded_count": 2
@@ -1252,7 +1252,7 @@
     },
     "volume_capacity": [
       {
-        "available_bytes": 44963319808,
+        "available_bytes": 44238929920,
         "total_bytes": 95511638016,
         "volume": "C:\\"
       }

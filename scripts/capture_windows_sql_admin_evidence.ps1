@@ -69,7 +69,23 @@ function Invoke-ReadOnlySql([string] $Query) {
     if ($SqlCmdCommand.Parameters.ContainsKey("AbortOnError")) {
         $parameters.AbortOnError = $true
     }
-    return @(& $SqlCmdCommand @parameters)
+
+    <#
+    Invoke-Sqlcmd writes DataRow objects to the PowerShell pipeline.  Returning
+    that pipeline directly is unsafe: a single DataRow is assigned as a scalar,
+    and indexing it can address a column instead of a row.  Accumulate complete
+    row objects in a List and emit that List as one non-enumerated pipeline
+    object.  This preserves zero-, one-, and multi-row results without ever
+    enumerating DataRow columns.  A terminating Invoke-Sqlcmd error is not
+    converted into an empty collection; it still propagates to the caller.
+    #>
+    $rows = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($result in @(& $SqlCmdCommand @parameters)) {
+        if ($null -ne $result) {
+            [void]$rows.Add($result)
+        }
+    }
+    Write-Output -NoEnumerate -InputObject $rows
 }
 
 function Normalize-VolumePath([string] $Value) {
@@ -182,15 +198,17 @@ function Invoke-AuditedReadOnlySql([string] $StatementId, [string] $Query) {
         captured_at_utc = $captured
     }
     try {
-        $rows = @(Invoke-ReadOnlySql $Query)
+        # Invoke-ReadOnlySql returns one non-enumerated row collection.  Do not
+        # wrap the invocation in @(), which would turn it into a list-of-list.
+        $rows = Invoke-ReadOnlySql $Query
         $requiredColumns = switch ($StatementId) {
             "collector.production_cutover_history" { @("CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }
             "collector.historical_runs" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "CollectionContext", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
             "collector.historical_target_audits" { @("AuditId", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext", "Status", "HttpAttempts", "StartedAtUtc", "CompletedAtUtc"); break }
-            "collector.http_attempt_history" { @("HttpAttemptId", "AuditId", "AttemptNumber", "StartedAtUtc", "CompletedAtUtc", "HttpStatus", "Outcome", "NetworkAttempted", "HttpResponseReceived", "ProviderQuotaStatus", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext"); break }
+            "collector.http_attempt_history" { @("HttpAttemptId", "AuditId", "AttemptNumber", "StartedAtUtc", "CompletedAtUtc", "HttpStatus", "Outcome", "NetworkAttempted", "HttpResponseReceived", "ProviderQuotaStatus", "JoinedAuditId", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext"); break }
             "collector.tiered50_first_heartbeat" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
             "collector.tiered50_first_heartbeat_target_audits" { @("AuditId", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext", "Status", "HttpAttempts", "StartedAtUtc", "CompletedAtUtc"); break }
-            "collector.tiered50_first_heartbeat_http_attempts" { @("HttpAttemptId", "AuditId", "AttemptNumber", "StartedAtUtc", "CompletedAtUtc", "HttpStatus", "Outcome", "NetworkAttempted", "HttpResponseReceived", "ProviderQuotaStatus", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext"); break }
+            "collector.tiered50_first_heartbeat_http_attempts" { @("HttpAttemptId", "AuditId", "AttemptNumber", "StartedAtUtc", "CompletedAtUtc", "HttpStatus", "Outcome", "NetworkAttempted", "HttpResponseReceived", "ProviderQuotaStatus", "JoinedAuditId", "RunId", "TargetIdentity", "LogicalDueBucket", "CollectionContext"); break }
             "collector.historical_outage" { @("CutoverId", "CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }
             "collector.tiered50_later_runs" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
             default { @() }
@@ -422,10 +440,12 @@ $httpAttemptHistoryQuery = Invoke-AuditedReadOnlySql "collector.http_attempt_his
 SELECT TOP (100) h.HttpAttemptId, h.AuditId, h.AttemptNumber,
        h.StartedAtUtc, h.CompletedAtUtc, h.HttpStatus, h.Outcome,
        h.NetworkAttempted, h.HttpResponseReceived, h.ProviderQuotaStatus,
-       a.RunId, a.TargetIdentity, a.LogicalDueBucket, a.CollectionContext
+       a.AuditId AS JoinedAuditId, a.RunId, a.TargetIdentity,
+       a.LogicalDueBucket, a.CollectionContext
 FROM ctl.MddMacHttpAttempt AS h
-INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+LEFT JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
 WHERE a.CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+   OR a.AuditId IS NULL
 ORDER BY h.CompletedAtUtc DESC, h.HttpAttemptId DESC;
 "@
 # These two queries deliberately remain separate from the recent samples above.
@@ -452,22 +472,23 @@ if ($firstTiered50HeartbeatRows.Count -eq 1 -and -not [string]::IsNullOrWhiteSpa
     $firstTiered50RunId = [int64]$firstTiered50HeartbeatRows[0].MacCollectorRunId
     $firstTiered50RunIdText = [string]$firstTiered50HeartbeatRows[0].RunId
     $escapedFirstTiered50RunId = $firstTiered50RunIdText.Replace("'", "''")
-    $firstTiered50HeartbeatTargetAuditsQuery = Invoke-AuditedReadOnlySql "collector.tiered50_first_heartbeat_target_audits" (@"
-SELECT TOP (50) AuditId, RunId, TargetIdentity, LogicalDueBucket,
+$firstTiered50HeartbeatTargetAuditsQuery = Invoke-AuditedReadOnlySql "collector.tiered50_first_heartbeat_target_audits" (@"
+SELECT AuditId, RunId, TargetIdentity, LogicalDueBucket,
        CollectionContext, Status, HttpAttempts, StartedAtUtc, CompletedAtUtc
 FROM ctl.MddMacTargetAudit
 WHERE RunId = N'{0}'
 ORDER BY AuditId ASC;
 "@ -f $escapedFirstTiered50RunId)
     $firstTiered50HeartbeatHttpAttemptsQuery = Invoke-AuditedReadOnlySql "collector.tiered50_first_heartbeat_http_attempts" (@"
-SELECT TOP (100) h.HttpAttemptId, h.AuditId, h.AttemptNumber,
+SELECT h.HttpAttemptId, h.AuditId, h.AttemptNumber,
        h.StartedAtUtc, h.CompletedAtUtc, h.HttpStatus, h.Outcome,
        h.NetworkAttempted, h.HttpResponseReceived, h.ProviderQuotaStatus,
-       a.RunId, a.TargetIdentity, a.LogicalDueBucket, a.CollectionContext
+       a.AuditId AS JoinedAuditId, a.RunId, a.TargetIdentity,
+       a.LogicalDueBucket, a.CollectionContext
 FROM ctl.MddMacHttpAttempt AS h
-INNER JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
-WHERE a.RunId = N'{0}'
-ORDER BY h.HttpAttemptId ASC;
+LEFT JOIN ctl.MddMacTargetAudit AS a ON a.AuditId = h.AuditId
+WHERE a.RunId = N'{0}' OR a.AuditId IS NULL
+ORDER BY h.CompletedAtUtc ASC, h.HttpAttemptId ASC;
 "@ -f $escapedFirstTiered50RunId)
     $laterTiered50RunsQueryText = @"
 SELECT TOP (100) MacCollectorRunId, RunId, LogicalDueBucket,
@@ -637,6 +658,7 @@ $httpAttemptRows = @($httpAttemptHistoryQuery.Rows | ForEach-Object {
         network_attempted = [bool]$_.NetworkAttempted
         http_response_received = [bool]$_.HttpResponseReceived
         provider_quota_status = [string]$_.ProviderQuotaStatus
+        joined_audit_id = if ($null -eq $_.JoinedAuditId) { $null } else { [int64]$_.JoinedAuditId }
         run_id = [string]$_.RunId
         target_identity = [string]$_.TargetIdentity
         logical_due_bucket = [int64]$_.LogicalDueBucket
@@ -655,22 +677,22 @@ $firstHeartbeatRows = @($firstTiered50HeartbeatQuery.Rows | ForEach-Object {
 })
 $firstHeartbeatTargetAuditRows = @($firstTiered50HeartbeatTargetAuditsQuery.Rows | ForEach-Object {
     [ordered]@{
-        audit_id = [int64]$_.AuditId
+        audit_id = if ($null -eq $_.AuditId) { $null } else { [int64]$_.AuditId }
         run_id = [string]$_.RunId
         target_identity = [string]$_.TargetIdentity
         logical_due_bucket = [int64]$_.LogicalDueBucket
         collection_context = [string]$_.CollectionContext
         status = [string]$_.Status
-        http_attempts = [int]$_.HttpAttempts
+        http_attempts = if ($null -eq $_.HttpAttempts) { $null } else { [int]$_.HttpAttempts }
         started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
         completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
     }
 })
 $firstHeartbeatHttpAttemptRows = @($firstTiered50HeartbeatHttpAttemptsQuery.Rows | ForEach-Object {
     [ordered]@{
-        http_attempt_id = [int64]$_.HttpAttemptId
-        audit_id = [int64]$_.AuditId
-        attempt_number = [int]$_.AttemptNumber
+        http_attempt_id = if ($null -eq $_.HttpAttemptId) { $null } else { [int64]$_.HttpAttemptId }
+        audit_id = if ($null -eq $_.AuditId) { $null } else { [int64]$_.AuditId }
+        attempt_number = if ($null -eq $_.AttemptNumber) { $null } else { [int]$_.AttemptNumber }
         started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
         completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
         http_status = if ($null -eq $_.HttpStatus) { $null } else { [int]$_.HttpStatus }
@@ -678,6 +700,7 @@ $firstHeartbeatHttpAttemptRows = @($firstTiered50HeartbeatHttpAttemptsQuery.Rows
         network_attempted = [bool]$_.NetworkAttempted
         http_response_received = [bool]$_.HttpResponseReceived
         provider_quota_status = [string]$_.ProviderQuotaStatus
+        joined_audit_id = if ($null -eq $_.JoinedAuditId) { $null } else { [int64]$_.JoinedAuditId }
         run_id = [string]$_.RunId
         target_identity = [string]$_.TargetIdentity
         logical_due_bucket = [int64]$_.LogicalDueBucket
@@ -705,38 +728,200 @@ $laterTiered50RunRows = @($laterTiered50RunsQuery.Rows | ForEach-Object {
     }
 })
 $firstHeartbeatRunIdCrossCheck = if ($firstHeartbeatRows.Count -eq 1) { [string]$firstHeartbeatRows[0].run_id } else { "" }
-$firstHeartbeatTargetAuditIds = @($firstHeartbeatTargetAuditRows | ForEach-Object { [int64]$_.audit_id })
-$firstHeartbeatTargetAuditRunIdMismatch = @(
-    $firstHeartbeatTargetAuditRows |
-        Where-Object { [string]$_.run_id -ne $firstHeartbeatRunIdCrossCheck }
-).Count -gt 0
-$firstHeartbeatHttpAttemptRunIdMismatch = @(
-    $firstHeartbeatHttpAttemptRows |
-        Where-Object { [string]$_.run_id -ne $firstHeartbeatRunIdCrossCheck }
-).Count -gt 0
-$firstHeartbeatHttpAttemptAuditMismatch = @(
-    $firstHeartbeatHttpAttemptRows |
-        Where-Object { $firstHeartbeatTargetAuditIds -notcontains [int64]$_.audit_id }
-).Count -gt 0
-$historicalRunsCheckStatus = if ($historicalRunsEvidence.status -eq "PASS" -and $historicalRunRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
-$historicalTargetAuditsCheckStatus = if ($historicalTargetAuditsEvidence.status -eq "PASS" -and $historicalTargetAuditRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
-$httpAttemptHistoryCheckStatus = if ($httpAttemptHistoryEvidence.status -eq "PASS") { "PASS" } else { "NOT_PROVEN" }
-$firstHeartbeatCheckStatus = if ($firstTiered50HeartbeatEvidence.status -eq "PASS" -and $firstHeartbeatRows.Count -eq 1) { "PASS" } else { "NOT_PROVEN" }
+$firstHeartbeatTargetAuditReasons = @()
+$firstHeartbeatTargetAuditById = @{}
+$duplicateTargetAuditIds = @()
+$declaredHttpAttempts = [int64]0
+foreach ($row in $firstHeartbeatTargetAuditRows) {
+    if ($null -eq $row.audit_id) {
+        $firstHeartbeatTargetAuditReasons += "first-heartbeat target audits are missing AuditId"
+        continue
+    }
+    $auditId = [int64]$row.audit_id
+    if ($firstHeartbeatTargetAuditById.ContainsKey($auditId)) {
+        $duplicateTargetAuditIds += $auditId
+        continue
+    }
+    $firstHeartbeatTargetAuditById[$auditId] = $row
+    if ([string]$row.run_id -ne $firstHeartbeatRunIdCrossCheck) {
+        $firstHeartbeatTargetAuditReasons += "first-heartbeat target audits are not linked by RunId"
+    }
+    if ($null -eq $row.http_attempts -or [int64]$row.http_attempts -lt 0) {
+        $firstHeartbeatTargetAuditReasons += ("AuditId {0} is missing a non-negative HttpAttempts count" -f $auditId)
+    } else {
+        $declaredHttpAttempts += [int64]$row.http_attempts
+    }
+}
+if ($duplicateTargetAuditIds.Count -gt 0) {
+    $firstHeartbeatTargetAuditReasons += (
+        "duplicated target-audit AuditId(s): " + (($duplicateTargetAuditIds | Sort-Object -Unique) -join ", ")
+    )
+}
+if ($firstHeartbeatTargetAuditRows.Count -eq 0) {
+    $firstHeartbeatTargetAuditReasons += "the original heartbeat returned no target-audit rows"
+}
+if ($firstTiered50HeartbeatTargetAuditsEvidence.status -ne "PASS") {
+    $firstHeartbeatTargetAuditReasons += [string]$firstTiered50HeartbeatTargetAuditsEvidence.reason
+}
+if ([string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)) {
+    $firstHeartbeatTargetAuditReasons += "the original Tiered50 heartbeat RunId was not returned"
+}
+
+$firstHeartbeatHttpAttemptReasons = @()
+$firstHeartbeatHttpAttemptById = @{}
+$firstHeartbeatHttpAttemptKeySet = @{}
+$firstHeartbeatHttpAttemptCounts = @{}
+$duplicateHttpAttemptIds = @()
+$duplicateHttpAttemptKeys = @()
+$orphanHttpAttemptIds = @()
+$actualHttpAttemptCount = [int64]$firstHeartbeatHttpAttemptRows.Count
+foreach ($row in $firstHeartbeatHttpAttemptRows) {
+    if ($null -eq $row.http_attempt_id) {
+        $firstHeartbeatHttpAttemptReasons += "first-heartbeat HTTP attempts are missing HttpAttemptId"
+    } else {
+        $httpAttemptId = [int64]$row.http_attempt_id
+        if ($firstHeartbeatHttpAttemptById.ContainsKey($httpAttemptId)) {
+            $duplicateHttpAttemptIds += $httpAttemptId
+        } else {
+            $firstHeartbeatHttpAttemptById[$httpAttemptId] = $row
+        }
+    }
+    if ([string]$row.run_id -ne $firstHeartbeatRunIdCrossCheck) {
+        $firstHeartbeatHttpAttemptReasons += "first-heartbeat HTTP attempts are not linked by RunId"
+    }
+    if ($null -eq $row.audit_id) {
+        $firstHeartbeatHttpAttemptReasons += "first-heartbeat HTTP attempts are missing AuditId"
+        continue
+    }
+    $auditId = [int64]$row.audit_id
+    if (-not $firstHeartbeatTargetAuditById.ContainsKey($auditId)) {
+        $orphanHttpAttemptIds += if ($null -eq $row.http_attempt_id) { [string]$auditId } else { [string]$row.http_attempt_id }
+    } else {
+        if ($firstHeartbeatHttpAttemptCounts.ContainsKey($auditId)) {
+            $firstHeartbeatHttpAttemptCounts[$auditId] += 1
+        } else {
+            $firstHeartbeatHttpAttemptCounts[$auditId] = 1
+        }
+        $targetRow = $firstHeartbeatTargetAuditById[$auditId]
+        foreach ($field in @("target_identity", "logical_due_bucket", "collection_context")) {
+            if ($row.Keys -contains $field -and $targetRow.Keys -contains $field -and
+                -not [string]::IsNullOrWhiteSpace([string]$row[$field]) -and
+                -not [string]::IsNullOrWhiteSpace([string]$targetRow[$field]) -and
+                [string]$row[$field] -ne [string]$targetRow[$field]) {
+                $firstHeartbeatHttpAttemptReasons += ("HTTP attempt for AuditId {0} has inconsistently attributed {1}" -f $auditId, $field)
+            }
+        }
+    }
+    if ($null -eq $row.attempt_number -or [int]$row.attempt_number -lt 1) {
+        $firstHeartbeatHttpAttemptReasons += ("HTTP attempt for AuditId {0} has an invalid AttemptNumber" -f $auditId)
+    } else {
+        $attemptKey = "{0}/{1}" -f $auditId, [int]$row.attempt_number
+        if ($firstHeartbeatHttpAttemptKeySet.ContainsKey($attemptKey)) {
+            $duplicateHttpAttemptKeys += $attemptKey
+        } else {
+            $firstHeartbeatHttpAttemptKeySet[$attemptKey] = $true
+        }
+    }
+    if ($row.Keys -contains "joined_audit_id" -and $null -eq $row.joined_audit_id) {
+        $orphanHttpAttemptIds += if ($null -eq $row.http_attempt_id) { [string]$auditId } else { [string]$row.http_attempt_id }
+    } elseif ($row.Keys -contains "joined_audit_id" -and [int64]$row.joined_audit_id -ne $auditId) {
+        $firstHeartbeatHttpAttemptReasons += ("HTTP attempt for AuditId {0} has an inconsistent joined AuditId" -f $auditId)
+    }
+}
+if ($duplicateHttpAttemptIds.Count -gt 0) {
+    $firstHeartbeatHttpAttemptReasons += (
+        "duplicated HTTP attempt HttpAttemptId(s): " + (($duplicateHttpAttemptIds | Sort-Object -Unique) -join ", ")
+    )
+}
+if ($duplicateHttpAttemptKeys.Count -gt 0) {
+    $firstHeartbeatHttpAttemptReasons += (
+        "duplicated HTTP attempt AuditId/AttemptNumber pair(s): " + (($duplicateHttpAttemptKeys | Sort-Object -Unique) -join ", ")
+    )
+}
+if ($orphanHttpAttemptIds.Count -gt 0) {
+    $firstHeartbeatHttpAttemptReasons += (
+        "first-heartbeat HTTP attempts are not linked to its target audits; orphaned HTTP attempt row(s): " +
+        (($orphanHttpAttemptIds | Sort-Object -Unique) -join ", ")
+    )
+}
+foreach ($auditId in $firstHeartbeatTargetAuditById.Keys) {
+    $declared = [int64]$firstHeartbeatTargetAuditById[$auditId].http_attempts
+    $actual = if ($firstHeartbeatHttpAttemptCounts.ContainsKey($auditId)) { [int64]$firstHeartbeatHttpAttemptCounts[$auditId] } else { [int64]0 }
+    if ($declared -ne $actual) {
+        $classification = if ($actual -lt $declared) { "missing" } else { "duplicated or extra" }
+        $firstHeartbeatHttpAttemptReasons += ("AuditId {0} declares {1} HTTP attempt(s) but {2} actual row(s) were returned ({3} history)" -f $auditId, $declared, $actual, $classification)
+    }
+}
+if ($declaredHttpAttempts -gt 0 -and $actualHttpAttemptCount -eq 0) {
+    $firstHeartbeatHttpAttemptReasons += "known historical HTTP activity has no preserved first-heartbeat HTTP attempt rows"
+}
+if ($declaredHttpAttempts -eq 0 -and $actualHttpAttemptCount -gt 0) {
+    $firstHeartbeatHttpAttemptReasons += "HTTP attempt rows exist although the first-heartbeat target audits declare no attempts"
+}
+if ($firstTiered50HeartbeatHttpAttemptsEvidence.status -ne "PASS") {
+    $firstHeartbeatHttpAttemptReasons += [string]$firstTiered50HeartbeatHttpAttemptsEvidence.reason
+}
+if ([string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)) {
+    $firstHeartbeatHttpAttemptReasons += "first-heartbeat HTTP attempts are not linked to the authoritative target-audit query"
+}
+
 $firstHeartbeatTargetAuditsCheckStatus = if (
     $firstTiered50HeartbeatTargetAuditsEvidence.status -eq "PASS" -and
     $firstHeartbeatTargetAuditRows.Count -gt 0 -and
-    -not $firstHeartbeatTargetAuditRunIdMismatch -and
-    -not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)
+    $firstHeartbeatTargetAuditById.Count -gt 0 -and
+    $firstHeartbeatTargetAuditReasons.Count -eq 0
 ) { "PASS" } else { "NOT_PROVEN" }
 $firstHeartbeatHttpAttemptsCheckStatus = if (
     $firstTiered50HeartbeatHttpAttemptsEvidence.status -eq "PASS" -and
-    -not $firstHeartbeatHttpAttemptRunIdMismatch -and
-    -not $firstHeartbeatHttpAttemptAuditMismatch -and
-    -not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)
+    $firstHeartbeatTargetAuditsCheckStatus -eq "PASS" -and
+    $firstHeartbeatHttpAttemptReasons.Count -eq 0
 ) { "PASS" } else { "NOT_PROVEN" }
+$firstHeartbeatTargetAuditsReason = if ($firstHeartbeatTargetAuditReasons.Count -gt 0) { $firstHeartbeatTargetAuditReasons -join "; " } else { $null }
+$firstHeartbeatHttpAttemptsReason = if ($firstHeartbeatHttpAttemptReasons.Count -gt 0) { $firstHeartbeatHttpAttemptReasons -join "; " } else { $null }
+$firstHeartbeatReconciliationReasons = @()
+if (-not [string]::IsNullOrWhiteSpace([string]$firstHeartbeatTargetAuditsReason)) {
+    $firstHeartbeatReconciliationReasons += $firstHeartbeatTargetAuditsReason
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$firstHeartbeatHttpAttemptsReason)) {
+    $firstHeartbeatReconciliationReasons += $firstHeartbeatHttpAttemptsReason
+}
+
+$historicalHttpOrphanRows = @(
+    $httpAttemptRows |
+        Where-Object {
+            ($_.Keys -contains "joined_audit_id" -and $null -eq $_.joined_audit_id) -or
+            [string]::IsNullOrWhiteSpace([string]$_.run_id)
+        }
+)
+$httpAttemptHistoryLinked = $httpAttemptHistoryEvidence.status -eq "PASS" -and $historicalHttpOrphanRows.Count -eq 0
+$httpAttemptHistoryReason = if ($historicalHttpOrphanRows.Count -gt 0) {
+    "{0} HTTP attempt row(s) are orphaned from their target audit" -f $historicalHttpOrphanRows.Count
+} else { $null }
+$historicalRunsCheckStatus = if ($historicalRunsEvidence.status -eq "PASS" -and $historicalRunRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$historicalTargetAuditsCheckStatus = if ($historicalTargetAuditsEvidence.status -eq "PASS" -and $historicalTargetAuditRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$httpAttemptHistoryCheckStatus = if ($httpAttemptHistoryLinked) { "PASS" } else { "NOT_PROVEN" }
+$firstHeartbeatCheckStatus = if ($firstTiered50HeartbeatEvidence.status -eq "PASS" -and $firstHeartbeatRows.Count -eq 1) { "PASS" } else { "NOT_PROVEN" }
 $historicalOutageCheckStatus = if ($historicalOutageEvidence.status -eq "PASS" -and $historicalOutageRows.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
 $laterTiered50RunsCheckStatus = if ($laterTiered50RunsEvidence.status -eq "PASS") { "PASS" } else { "NOT_PROVEN" }
 $cutoverHistoryCheckStatus = if ($cutoverHistoryEvidence.status -eq "PASS" -and $cutoverHistory.Count -gt 0) { "PASS" } else { "NOT_PROVEN" }
+$firstHeartbeatReconciliation = [ordered]@{
+    status = if ($firstHeartbeatTargetAuditsCheckStatus -eq "PASS" -and $firstHeartbeatHttpAttemptsCheckStatus -eq "PASS") { "PASS" } else { "NOT_PROVEN" }
+    reason = if ($firstHeartbeatReconciliationReasons.Count -gt 0) { $firstHeartbeatReconciliationReasons -join "; " } else { $null }
+    run_id = $firstHeartbeatRunIdCrossCheck
+    target_audit_count = [int64]$firstHeartbeatTargetAuditRows.Count
+    declared_http_attempt_count = $declaredHttpAttempts
+    actual_http_attempt_count = $actualHttpAttemptCount
+    http_backed_successful_target_count = @($firstHeartbeatTargetAuditRows | Where-Object { [string]$_.status -eq "SUCCEEDED" -and $null -ne $_.http_attempts -and [int64]$_.http_attempts -gt 0 }).Count
+    skipped_target_count = @($firstHeartbeatTargetAuditRows | Where-Object { [string]$_.status -eq "SKIPPED" }).Count
+    duplicate_target_audit_ids = @($duplicateTargetAuditIds | Sort-Object -Unique)
+    duplicate_http_attempt_ids = @($duplicateHttpAttemptIds | Sort-Object -Unique)
+    duplicate_http_attempt_keys = @($duplicateHttpAttemptKeys | Sort-Object -Unique)
+    orphan_http_attempt_ids = @($orphanHttpAttemptIds | Sort-Object -Unique)
+    target_check_status = $firstHeartbeatTargetAuditsCheckStatus
+    target_check_reason = $firstHeartbeatTargetAuditsReason
+    http_check_status = $firstHeartbeatHttpAttemptsCheckStatus
+    http_check_reason = $firstHeartbeatHttpAttemptsReason
+}
 $auditHistoryProven = @(
     $historicalRunsCheckStatus,
     $historicalTargetAuditsCheckStatus,
@@ -804,9 +989,10 @@ $payload = [ordered]@{
         latest_full_backup_media_evidence = @{ status = "PASS"; media_count = [int]$backupMedia.Count }
         tiered50_materialization = @{ status = "PASS"; target_count = [int64]$materialization[0].TargetCount; active_count = [int64]$materialization[0].ActiveCount }
         tiered50_audit_history_evidence = @{ status = $historicalTargetAuditsEvidence.status; statement_id = $historicalTargetAuditsEvidence.statement_id; executed = $historicalTargetAuditsEvidence.executed; result_count = $historicalTargetAuditsEvidence.result_count; captured_at_utc = $historicalTargetAuditsEvidence.captured_at_utc; check_status = $historicalTargetAuditsCheckStatus; reason = $historicalTargetAuditsEvidence.reason }
-        recent_http_attempts_evidence = @{ status = $httpAttemptHistoryEvidence.status; statement_id = $httpAttemptHistoryEvidence.statement_id; executed = $httpAttemptHistoryEvidence.executed; result_count = $httpAttemptHistoryEvidence.result_count; captured_at_utc = $httpAttemptHistoryEvidence.captured_at_utc; check_status = $httpAttemptHistoryCheckStatus; reason = $httpAttemptHistoryEvidence.reason }
-        first_tiered50_heartbeat_target_audits_evidence = @{ status = $firstTiered50HeartbeatTargetAuditsEvidence.status; statement_id = $firstTiered50HeartbeatTargetAuditsEvidence.statement_id; executed = $firstTiered50HeartbeatTargetAuditsEvidence.executed; result_count = $firstTiered50HeartbeatTargetAuditsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatTargetAuditsEvidence.captured_at_utc; check_status = $firstHeartbeatTargetAuditsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = $firstTiered50HeartbeatTargetAuditsEvidence.reason }
-        first_tiered50_heartbeat_http_attempts_evidence = @{ status = $firstTiered50HeartbeatHttpAttemptsEvidence.status; statement_id = $firstTiered50HeartbeatHttpAttemptsEvidence.statement_id; executed = $firstTiered50HeartbeatHttpAttemptsEvidence.executed; result_count = $firstTiered50HeartbeatHttpAttemptsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatHttpAttemptsEvidence.captured_at_utc; check_status = $firstHeartbeatHttpAttemptsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = $firstTiered50HeartbeatHttpAttemptsEvidence.reason }
+        recent_http_attempts_evidence = @{ status = $httpAttemptHistoryEvidence.status; statement_id = $httpAttemptHistoryEvidence.statement_id; executed = $httpAttemptHistoryEvidence.executed; result_count = $httpAttemptHistoryEvidence.result_count; captured_at_utc = $httpAttemptHistoryEvidence.captured_at_utc; check_status = $httpAttemptHistoryCheckStatus; reason = if ($httpAttemptHistoryReason) { $httpAttemptHistoryReason } else { $httpAttemptHistoryEvidence.reason } }
+        first_tiered50_heartbeat_target_audits_evidence = @{ status = $firstTiered50HeartbeatTargetAuditsEvidence.status; statement_id = $firstTiered50HeartbeatTargetAuditsEvidence.statement_id; executed = $firstTiered50HeartbeatTargetAuditsEvidence.executed; result_count = $firstTiered50HeartbeatTargetAuditsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatTargetAuditsEvidence.captured_at_utc; check_status = $firstHeartbeatTargetAuditsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = if ($firstHeartbeatTargetAuditsReason) { $firstHeartbeatTargetAuditsReason } else { $firstTiered50HeartbeatTargetAuditsEvidence.reason } }
+        first_tiered50_heartbeat_http_attempts_evidence = @{ status = $firstTiered50HeartbeatHttpAttemptsEvidence.status; statement_id = $firstTiered50HeartbeatHttpAttemptsEvidence.statement_id; executed = $firstTiered50HeartbeatHttpAttemptsEvidence.executed; result_count = $firstTiered50HeartbeatHttpAttemptsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatHttpAttemptsEvidence.captured_at_utc; check_status = $firstHeartbeatHttpAttemptsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = if ($firstHeartbeatHttpAttemptsReason) { $firstHeartbeatHttpAttemptsReason } else { $firstTiered50HeartbeatHttpAttemptsEvidence.reason } }
+        first_tiered50_heartbeat_reconciliation = $firstHeartbeatReconciliation
         production_cutover_history = @($cutoverHistory | ForEach-Object { @{ cutover_key = [string]$_.CutoverKey; panel_version = [string]$_.PanelVersion; tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.Tiered50ActivationAtUtc; tiered50_activation_status = [string]$_.Tiered50ActivationStatus; recorded_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.RecordedAtUtc } })
         production_cutover_history_evidence = @{ status = $cutoverHistoryEvidence.status; statement_id = $cutoverHistoryEvidence.statement_id; executed = $cutoverHistoryEvidence.executed; result_count = [int64]$cutoverHistory.Count; captured_at_utc = $cutoverHistoryEvidence.captured_at_utc; check_status = $cutoverHistoryCheckStatus; reason = $cutoverHistoryEvidence.reason }
         competing_production_writers = @($competingWriters | ForEach-Object { @{ collection_context = [string]$_.CollectionContext; running_count = [int64]$_.RunningCount } })
@@ -817,10 +1003,10 @@ $payload = [ordered]@{
         audit_provenance = [ordered]@{
             "collector.historical_runs" = @{ query = $historicalRunsEvidence; check_status = $historicalRunsCheckStatus; rows = $historicalRunRows }
             "collector.historical_target_audits" = @{ query = $historicalTargetAuditsEvidence; check_status = $historicalTargetAuditsCheckStatus; rows = $historicalTargetAuditRows }
-            "collector.http_attempt_history" = @{ query = $httpAttemptHistoryEvidence; check_status = $httpAttemptHistoryCheckStatus; linked_to_target_audit = $true; rows = $httpAttemptRows }
+            "collector.http_attempt_history" = @{ query = $httpAttemptHistoryEvidence; check_status = $httpAttemptHistoryCheckStatus; linked_to_target_audit = $httpAttemptHistoryLinked; rows = $httpAttemptRows; reason = $httpAttemptHistoryReason }
             "collector.tiered50_first_heartbeat" = @{ query = $firstTiered50HeartbeatEvidence; check_status = $firstHeartbeatCheckStatus; rows = $firstHeartbeatRows }
-            "collector.tiered50_first_heartbeat_target_audits" = @{ query = $firstTiered50HeartbeatTargetAuditsEvidence; check_status = $firstHeartbeatTargetAuditsCheckStatus; linked_to_first_heartbeat_run = (-not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)); run_id = $firstHeartbeatRunIdCrossCheck; rows = $firstHeartbeatTargetAuditRows }
-            "collector.tiered50_first_heartbeat_http_attempts" = @{ query = $firstTiered50HeartbeatHttpAttemptsEvidence; check_status = $firstHeartbeatHttpAttemptsCheckStatus; linked_to_first_heartbeat_run = (-not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)); linked_to_target_audit = (-not $firstHeartbeatHttpAttemptAuditMismatch); run_id = $firstHeartbeatRunIdCrossCheck; rows = $firstHeartbeatHttpAttemptRows }
+            "collector.tiered50_first_heartbeat_target_audits" = @{ query = $firstTiered50HeartbeatTargetAuditsEvidence; check_status = $firstHeartbeatTargetAuditsCheckStatus; linked_to_first_heartbeat_run = (-not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)); run_id = $firstHeartbeatRunIdCrossCheck; rows = $firstHeartbeatTargetAuditRows; reason = $firstHeartbeatTargetAuditsReason }
+            "collector.tiered50_first_heartbeat_http_attempts" = @{ query = $firstTiered50HeartbeatHttpAttemptsEvidence; check_status = $firstHeartbeatHttpAttemptsCheckStatus; linked_to_first_heartbeat_run = (-not [string]::IsNullOrWhiteSpace($firstHeartbeatRunIdCrossCheck)); linked_to_target_audit = ($firstHeartbeatHttpAttemptReasons.Count -eq 0); run_id = $firstHeartbeatRunIdCrossCheck; rows = $firstHeartbeatHttpAttemptRows; reason = $firstHeartbeatHttpAttemptsReason }
             "collector.historical_outage" = @{ query = $historicalOutageEvidence; check_status = $historicalOutageCheckStatus; rows = $historicalOutageRows }
             "collector.tiered50_later_runs" = @{ query = $laterTiered50RunsEvidence; check_status = $laterTiered50RunsCheckStatus; later_collection_exists = ($laterTiered50RunRows.Count -gt 0); rows = $laterTiered50RunRows }
         }

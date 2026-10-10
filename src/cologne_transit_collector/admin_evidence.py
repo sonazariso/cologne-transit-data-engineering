@@ -513,7 +513,10 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
     A successful query returning no rows is a valid SQL execution result.  It
     is not, however, evidence that a required historical record exists.  The
     Windows capture therefore carries both the query result and a semantic
-    ``check_status`` for the historical-preservation checks.
+    ``check_status`` for the historical-preservation checks.  In particular,
+    the first heartbeat's target-audit ``HttpAttempts`` counters are reconciled
+    with the actual attempt rows.  A zero-row attempt query cannot prove a
+    known historical request was preserved.
     """
 
     if not isinstance(sql, Mapping):
@@ -533,6 +536,9 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
         "collector.tiered50_later_runs": "query",
     }
     results: dict[str, Any] = {}
+    query_entries: dict[str, Mapping[str, Any]] = {}
+    query_rows: dict[str, list[Any]] = {}
+    semantic_reasons: dict[str, str] = {}
     for query_id in sorted(WINDOWS_AUDIT_QUERY_IDS):
         entry = audit.get(query_id)
         if not isinstance(entry, Mapping):
@@ -575,6 +581,8 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
         if query_status == "NOT_PROVEN" and not str(query.get("reason") or "").strip():
             raise AdminEvidenceError(f"Windows audit query {query_id} is unproven without a sanitized cause")
 
+        query_entries[query_id] = entry
+        query_rows[query_id] = rows
         check_status = str(entry.get("check_status") or "").upper()
         semantic = expected_semantics[query_id]
         if semantic == "query":
@@ -599,7 +607,25 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
             expected_check_status = "PASS" if query_status == "PASS" and linked else "NOT_PROVEN"
         else:
             expected_check_status = "PASS" if query_status == "PASS" and result_count > 0 else "NOT_PROVEN"
-        if check_status != expected_check_status:
+        if query_id == "collector.http_attempt_history" and expected_check_status == "PASS":
+            orphan_rows = [
+                row
+                for row in rows
+                if isinstance(row, Mapping)
+                and (
+                    ("joined_audit_id" in row and row.get("joined_audit_id") in (None, ""))
+                    or ("run_id" in row and not str(row.get("run_id") or "").strip())
+                )
+            ]
+            if orphan_rows:
+                expected_check_status = "NOT_PROVEN"
+                semantic_reasons[query_id] = (
+                    f"{len(orphan_rows)} HTTP attempt row(s) are orphaned from their target audit"
+                )
+        if query_id not in {
+            "collector.tiered50_first_heartbeat_target_audits",
+            "collector.tiered50_first_heartbeat_http_attempts",
+        } and check_status != expected_check_status:
             raise AdminEvidenceError(f"Windows audit query {query_id} has an inaccurate check status")
         results[query_id] = {
             "status": query_status,
@@ -619,50 +645,284 @@ def validate_windows_audit_evidence(sql: Mapping[str, Any] | None) -> dict[str, 
     if not first_heartbeat_run_id:
         raise AdminEvidenceError("Windows first-heartbeat provenance is missing RunId")
 
-    linked_target_audits = audit["collector.tiered50_first_heartbeat_target_audits"]
-    linked_target_rows = linked_target_audits.get("rows")
-    if not isinstance(linked_target_rows, list):
-        raise AdminEvidenceError("Windows first-heartbeat target-audit rows are malformed")
-    target_audit_ids: set[int] = set()
+    linked_target_audits = query_entries["collector.tiered50_first_heartbeat_target_audits"]
+    linked_target_rows = query_rows["collector.tiered50_first_heartbeat_target_audits"]
+    linked_http_attempts = query_entries["collector.tiered50_first_heartbeat_http_attempts"]
+    linked_http_rows = query_rows["collector.tiered50_first_heartbeat_http_attempts"]
+
+    target_errors: list[str] = []
+    http_errors: list[str] = []
+    target_audit_rows_by_id: dict[int, Mapping[str, Any]] = {}
+    duplicate_target_audit_ids: set[int] = set()
+    declared_attempts_by_audit: dict[int, int] = {}
+
+    if linked_target_audits.get("linked_to_first_heartbeat_run") is not True:
+        target_errors.append("first-heartbeat target audits are not linked to the original RunId")
+    metadata_run_id = str(linked_target_audits.get("run_id") or "").strip()
+    if metadata_run_id and metadata_run_id != first_heartbeat_run_id:
+        target_errors.append("first-heartbeat target-audit metadata has a mismatched RunId")
     for row in linked_target_rows:
         if not isinstance(row, Mapping):
-            raise AdminEvidenceError("Windows first-heartbeat target-audit rows are malformed")
+            target_errors.append("first-heartbeat target-audit rows are malformed")
+            continue
         row_run_id = str(row.get("run_id") or "").strip()
         if row_run_id != first_heartbeat_run_id:
-            raise AdminEvidenceError("Windows first-heartbeat target audits are not linked by RunId")
-        try:
-            target_audit_ids.add(int(row["audit_id"]))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise AdminEvidenceError("Windows first-heartbeat target audits are missing AuditId") from exc
-
-    linked_http_attempts = audit["collector.tiered50_first_heartbeat_http_attempts"]
-    linked_http_rows = linked_http_attempts.get("rows")
-    if not isinstance(linked_http_rows, list):
-        raise AdminEvidenceError("Windows first-heartbeat HTTP-attempt rows are malformed")
-    for row in linked_http_rows:
-        if not isinstance(row, Mapping):
-            raise AdminEvidenceError("Windows first-heartbeat HTTP-attempt rows are malformed")
-        row_run_id = str(row.get("run_id") or "").strip()
-        if row_run_id != first_heartbeat_run_id:
-            raise AdminEvidenceError("Windows first-heartbeat HTTP attempts are not linked by RunId")
+            target_errors.append("first-heartbeat target audits are not linked by RunId")
         try:
             audit_id = int(row["audit_id"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise AdminEvidenceError("Windows first-heartbeat HTTP attempts are missing AuditId") from exc
-        if audit_id not in target_audit_ids:
-            raise AdminEvidenceError(
-                "Windows first-heartbeat HTTP attempts are not linked to its target audits"
-            )
+            target_errors.append("first-heartbeat target audits are missing AuditId")
+            continue
+        if audit_id in target_audit_rows_by_id:
+            duplicate_target_audit_ids.add(audit_id)
+        else:
+            target_audit_rows_by_id[audit_id] = row
+        try:
+            declared_attempts = row["http_attempts"]
+            if isinstance(declared_attempts, bool):
+                raise ValueError
+            declared_attempts = int(declared_attempts)
+        except (KeyError, TypeError, ValueError):
+            target_errors.append(f"AuditId {audit_id} is missing a numeric HttpAttempts count")
+            continue
+        if declared_attempts < 0:
+            target_errors.append(f"AuditId {audit_id} has a negative HttpAttempts count")
+            continue
+        declared_attempts_by_audit[audit_id] = declared_attempts
+    if duplicate_target_audit_ids:
+        target_errors.append(
+            "duplicated target-audit AuditId(s): "
+            + ", ".join(str(value) for value in sorted(duplicate_target_audit_ids))
+        )
+    if not linked_target_rows:
+        target_errors.append("the original heartbeat returned no target-audit rows")
 
+    http_attempt_rows_by_audit: dict[int, int] = {}
+    http_attempt_ids: set[int] = set()
+    duplicate_http_attempt_ids: set[int] = set()
+    http_attempt_keys: set[tuple[int, int]] = set()
+    duplicate_http_attempt_keys: set[tuple[int, int]] = set()
+    orphan_http_attempt_ids: list[str] = []
+    for row in linked_http_rows:
+        if not isinstance(row, Mapping):
+            http_errors.append("first-heartbeat HTTP-attempt rows are malformed")
+            continue
+        row_run_id = str(row.get("run_id") or "").strip()
+        if row_run_id != first_heartbeat_run_id:
+            http_errors.append("first-heartbeat HTTP attempts are not linked by RunId")
+        try:
+            http_attempt_id = int(row["http_attempt_id"])
+        except (KeyError, TypeError, ValueError):
+            http_errors.append("first-heartbeat HTTP attempts are missing HttpAttemptId")
+            http_attempt_id = None
+        if http_attempt_id is not None:
+            if http_attempt_id in http_attempt_ids:
+                duplicate_http_attempt_ids.add(http_attempt_id)
+            http_attempt_ids.add(http_attempt_id)
+        try:
+            audit_id = int(row["audit_id"])
+        except (KeyError, TypeError, ValueError):
+            http_errors.append("first-heartbeat HTTP attempts are missing AuditId")
+            continue
+        if audit_id not in target_audit_rows_by_id:
+            orphan_http_attempt_ids.append(str(http_attempt_id or audit_id))
+        else:
+            http_attempt_rows_by_audit[audit_id] = http_attempt_rows_by_audit.get(audit_id, 0) + 1
+            target_row = target_audit_rows_by_id[audit_id]
+            if "joined_audit_id" in row and row.get("joined_audit_id") not in (None, ""):
+                try:
+                    joined_audit_id = int(row["joined_audit_id"])
+                except (TypeError, ValueError):
+                    joined_audit_id = None
+                if joined_audit_id != audit_id:
+                    http_errors.append(
+                        f"HTTP attempt for AuditId {audit_id} has an inconsistent joined AuditId"
+                    )
+            for field in ("target_identity", "logical_due_bucket", "collection_context"):
+                if field not in row or field not in target_row:
+                    continue
+                left = row.get(field)
+                right = target_row.get(field)
+                if left is None or right is None or str(left).strip() == "" or str(right).strip() == "":
+                    continue
+                if field == "logical_due_bucket":
+                    try:
+                        same = int(left) == int(right)
+                    except (TypeError, ValueError):
+                        same = False
+                else:
+                    same = str(left).strip() == str(right).strip()
+                if not same:
+                    http_errors.append(
+                        f"HTTP attempt for AuditId {audit_id} has inconsistently attributed {field}"
+                    )
+        try:
+            attempt_number = row["attempt_number"]
+            if isinstance(attempt_number, bool):
+                raise ValueError
+            attempt_number = int(attempt_number)
+            if attempt_number < 1:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            http_errors.append(f"HTTP attempt for AuditId {audit_id} has an invalid AttemptNumber")
+            continue
+        attempt_key = (audit_id, attempt_number)
+        if attempt_key in http_attempt_keys:
+            duplicate_http_attempt_keys.add(attempt_key)
+        http_attempt_keys.add(attempt_key)
+        if "joined_audit_id" in row and row.get("joined_audit_id") in (None, ""):
+            orphan_http_attempt_ids.append(str(http_attempt_id or audit_id))
+
+    if duplicate_http_attempt_ids:
+        http_errors.append(
+            "duplicated HTTP attempt HttpAttemptId(s): "
+            + ", ".join(str(value) for value in sorted(duplicate_http_attempt_ids))
+        )
+    if duplicate_http_attempt_keys:
+        http_errors.append(
+            "duplicated HTTP attempt AuditId/AttemptNumber pair(s): "
+            + ", ".join(f"{audit_id}/{attempt}" for audit_id, attempt in sorted(duplicate_http_attempt_keys))
+        )
+    if orphan_http_attempt_ids:
+        http_errors.append(
+            "first-heartbeat HTTP attempts are not linked to its target audits; "
+            "orphaned HTTP attempt row(s) reference missing target AuditId(s): "
+            + ", ".join(sorted(set(orphan_http_attempt_ids)))
+        )
+
+    for audit_id, declared_count in declared_attempts_by_audit.items():
+        actual_count = http_attempt_rows_by_audit.get(audit_id, 0)
+        if actual_count != declared_count:
+            classification = "missing" if actual_count < declared_count else "duplicated or extra"
+            http_errors.append(
+                f"AuditId {audit_id} declares {declared_count} HTTP attempt(s) but "
+                f"{actual_count} actual row(s) were returned ({classification} history)"
+            )
+    declared_total = sum(declared_attempts_by_audit.values())
+    actual_total = len(linked_http_rows)
+    if declared_total > 0 and actual_total == 0:
+        http_errors.append(
+            "known historical HTTP activity has no preserved first-heartbeat HTTP attempt rows"
+        )
+    if declared_total == 0 and actual_total > 0:
+        http_errors.append(
+            "HTTP attempt rows exist although the first-heartbeat target audits declare no attempts"
+        )
+
+    target_query = query_entries["collector.tiered50_first_heartbeat_target_audits"].get("query")
+    http_query = query_entries["collector.tiered50_first_heartbeat_http_attempts"].get("query")
+    target_query_pass = (
+        isinstance(target_query, Mapping)
+        and str(target_query.get("status") or "").upper() == "PASS"
+    )
+    http_query_pass = (
+        isinstance(http_query, Mapping)
+        and str(http_query.get("status") or "").upper() == "PASS"
+    )
+    target_base_pass = (
+        target_query_pass
+        and bool(linked_target_rows)
+        and linked_target_audits.get("linked_to_first_heartbeat_run") is True
+    )
+    http_base_pass = (
+        http_query_pass
+        and linked_http_attempts.get("linked_to_first_heartbeat_run") is True
+        and linked_http_attempts.get("linked_to_target_audit") is True
+    )
+    if not target_query_pass:
+        target_errors.append(
+            str((target_query or {}).get("reason") or "first-heartbeat target-audit query is not proven")
+        )
+    if not http_query_pass:
+        http_errors.append(
+            str((http_query or {}).get("reason") or "first-heartbeat HTTP-attempt query is not proven")
+        )
+    if not http_base_pass:
+        http_errors.append("first-heartbeat HTTP attempts are not linked to the authoritative target-audit query")
+    if not target_base_pass:
+        http_errors.append("first-heartbeat HTTP attempts cannot be proven while target-audit history is incomplete")
+
+    target_status = "PASS" if target_base_pass and not target_errors else "NOT_PROVEN"
+    http_status = "PASS" if http_base_pass and target_status == "PASS" and not http_errors else "NOT_PROVEN"
+    target_reason = "; ".join(dict.fromkeys(target_errors)) if target_errors else None
+    http_reason = "; ".join(dict.fromkeys(http_errors)) if http_errors else None
+    reconciliation = {
+        "status": "PASS" if target_status == "PASS" and http_status == "PASS" else "NOT_PROVEN",
+        "reason": "; ".join(value for value in (target_reason, http_reason) if value) or None,
+        "run_id": first_heartbeat_run_id,
+        "target_audit_count": len(linked_target_rows),
+        "declared_http_attempt_count": declared_total,
+        "actual_http_attempt_count": actual_total,
+        "http_backed_successful_target_count": sum(
+            1
+            for audit_id, row in target_audit_rows_by_id.items()
+            if str(row.get("status") or "").strip().upper() == "SUCCEEDED"
+            and declared_attempts_by_audit.get(audit_id, 0) > 0
+        ),
+        "skipped_target_count": sum(
+            1
+            for row in linked_target_rows
+            if isinstance(row, Mapping)
+            and str(row.get("status") or "").strip().upper() == "SKIPPED"
+        ),
+        "duplicate_target_audit_ids": sorted(duplicate_target_audit_ids),
+        "duplicate_http_attempt_ids": sorted(duplicate_http_attempt_ids),
+        "duplicate_http_attempt_keys": [
+            {"audit_id": audit_id, "attempt_number": attempt}
+            for audit_id, attempt in sorted(duplicate_http_attempt_keys)
+        ],
+        "orphan_http_attempt_ids": sorted(set(orphan_http_attempt_ids)),
+        "target_check_status": target_status,
+        "target_check_reason": target_reason,
+        "http_check_status": http_status,
+        "http_check_reason": http_reason,
+    }
+
+    expected_first_heartbeat_statuses = {
+        "collector.tiered50_first_heartbeat_target_audits": target_status,
+        "collector.tiered50_first_heartbeat_http_attempts": http_status,
+    }
+    for query_id, expected_check_status in expected_first_heartbeat_statuses.items():
+        entry = query_entries[query_id]
+        check_status = str(entry.get("check_status") or "").upper()
+        if check_status != expected_check_status:
+            raise AdminEvidenceError(
+                f"Windows audit query {query_id} has an inaccurate check status; "
+                f"expected {expected_check_status} ({reconciliation.get('reason') or 'relationship validation failed'})"
+            )
+        if expected_check_status == "NOT_PROVEN" and not str(entry.get("reason") or "").strip():
+            # A failed relationship must be visible in the captured artifact;
+            # do not let a bare status hide which historical link was missing.
+            raise AdminEvidenceError(
+                f"Windows audit query {query_id} is not fully proven and has no accurate reason: "
+                f"{reconciliation.get('reason') or 'historical relationship validation failed'}"
+            )
+        results[query_id]["check_status"] = check_status
+        if expected_check_status == "NOT_PROVEN":
+            results[query_id]["reason"] = str(entry.get("reason") or reconciliation.get("reason"))
+
+    if semantic_reasons.get("collector.http_attempt_history"):
+        raise AdminEvidenceError(
+            "Windows administrative audit evidence is not fully proven: "
+            + semantic_reasons["collector.http_attempt_history"]
+        )
     if any(result["check_status"] != "PASS" for result in results.values()):
-        raise AdminEvidenceError("Windows administrative audit evidence is not fully proven")
+        details = [
+            f"{query_id}: {query_entries[query_id].get('reason') or query_entries[query_id].get('query', {}).get('reason', 'semantic check is NOT_PROVEN')}"
+            for query_id, result in results.items()
+            if result["check_status"] != "PASS"
+        ]
+        raise AdminEvidenceError(
+            "Windows administrative audit evidence is not fully proven"
+            + (": " + "; ".join(details) if details else "")
+        )
     if str((sql.get("admin_authorization") or {}).get("status") or "").upper() != "PASS":
         raise AdminEvidenceError("Windows administrative audit evidence is not fully proven")
     if str((sql.get("tiered50_audit_history_evidence") or {}).get("status") or "").upper() != "PASS":
         raise AdminEvidenceError("Windows target-audit history query is not proven")
     if str((sql.get("recent_http_attempts_evidence") or {}).get("status") or "").upper() != "PASS":
         raise AdminEvidenceError("Windows HTTP attempt history query is not proven")
-    return {"status": "PASS", "queries": results}
+    return {"status": "PASS", "queries": results, "first_heartbeat_reconciliation": reconciliation}
 
 
 def validate_admin_evidence_artifact(

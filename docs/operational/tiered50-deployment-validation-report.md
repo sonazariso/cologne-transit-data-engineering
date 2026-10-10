@@ -32,11 +32,20 @@ samples newest-first. The original first Tiered50 heartbeat and outage remain
 separate authoritative queries; the first heartbeat's target audits and HTTP
 attempts are separately queried and cross-checked by RunId and AuditId. Query
 execution status remains distinct from proof that historical rows are present,
-and zero rows remain valid only for queries whose contract permits them. No SQL
-history, target, quota, cutover, or Power BI data was changed.
+and zero rows remain valid only for queries whose contract permits them. The
+first-heartbeat validator now reconciles every target audit's declared
+`HttpAttempts` count with actual HTTP-attempt rows, detects missing, duplicate,
+orphaned, and inconsistently attributed attempts, and derives the target,
+successful HTTP-backed, and skipped counts from the authoritative rows. Thus
+the preserved 18/2/16 history remains reportable when present without becoming
+a universal requirement for another installation. The Windows SQL helper now
+also retains `Invoke-Sqlcmd` `System.Data.DataRow` results as a predictable
+non-enumerated collection, so one-row identity and permission queries cannot
+accidentally index a column; empty results and terminating SQL errors remain
+honest. No SQL history, target, quota, cutover, or Power BI data was changed.
 
 The complete repository suite passed five consecutive times with
-`ResourceWarning` promoted to an error, with 382 tests in each run. The
+`ResourceWarning` promoted to an error, with 388 tests in each run. The
 offline migration, architecture, runtime-permission, and read-only production
 preflight validators passed; the Stage 15 result remains
 `INSUFFICIENT_EVIDENCE`, and the skip-audit validator remains static-only
@@ -44,13 +53,28 @@ preflight validators passed; the Stage 15 result remains
 
 No actual Windows PowerShell capture, detached signing, Mac evidence merge,
 Resume, or six-bucket collection cycle was performed in this environment. The
-VMX confirms the existing repository shared-folder configuration, but guest-side
-access and the Windows `SqlServer`/TLS prerequisite were not independently
-verified because routine `vmrun` guest operations require the encrypted VM
-password. No operator signing key/public-key pair was present in the approved
-locations. Tiered50 therefore remains stopped with 43 active materialized
-Tiered50 targets (panel records 8–50), zero stations collecting, and no proven
-full six-bucket result; future rollover remains unverified and fail-closed.
+running VMware configuration maps the host `/Users/admin/Documents` as the
+guest `powerbi` shared folder, so the current script is available at the
+documented guest path; however, in-guest execution/output could not be
+observed because VMware guest operations require the encrypted VM password.
+There is no local PowerShell executable or operator signing key/public-key pair
+in the approved locations. Windows-side `Invoke-Sqlcmd`, TLS validation,
+Windows disk measurements, and SQL evidence therefore remain unobserved;
+Python tests do not substitute for that proof. Tiered50 therefore remains
+stopped with 43 active materialized Tiered50 targets (panel records 8–50),
+zero stations collecting, and no proven full six-bucket result; future rollover
+remains unverified and fail-closed.
+
+The single remaining operator action is to use the existing interactive
+Windows 11 VM under the authorized Windows identity: open the latest
+`scripts/capture_windows_sql_admin_evidence.ps1` from
+`\\vmware-host\powerbi\cologne-transit-intelligence\scripts\`; if that share is
+unavailable, copy only that script to a secure Windows local directory, verify
+the supported `SqlServer` module exposes `Invoke-Sqlcmd` with encrypted,
+certificate-validating parameters, run the read-only capture against the
+approved SQL instance/database, and transfer only the sanitized unsigned
+payload for the existing signing/merge workflow. No password is requested or
+stored in chat.
 
 ## Current operational refresh — 2026-10-09
 

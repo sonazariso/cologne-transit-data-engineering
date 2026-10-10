@@ -78,13 +78,26 @@ class CurrentEvidencePathTests(unittest.TestCase):
         }
         heartbeat_run_id = "tiered50-first-run"
         heartbeat_target_audit_rows = [
-            {"audit_id": 101, "run_id": heartbeat_run_id, "target_identity": "target-1"},
-            {"audit_id": 102, "run_id": heartbeat_run_id, "target_identity": "target-2"},
+            {
+                "audit_id": 101,
+                "run_id": heartbeat_run_id,
+                "target_identity": "target-1",
+                "status": "SUCCEEDED",
+                "http_attempts": 1,
+            },
+            {
+                "audit_id": 102,
+                "run_id": heartbeat_run_id,
+                "target_identity": "target-2",
+                "status": "SUCCEEDED",
+                "http_attempts": 1,
+            },
         ]
         heartbeat_http_attempt_rows = [
             {
                 "http_attempt_id": 201,
                 "audit_id": 101,
+                "attempt_number": 1,
                 "run_id": heartbeat_run_id,
                 "target_identity": "target-1",
                 "http_status": 200,
@@ -93,6 +106,7 @@ class CurrentEvidencePathTests(unittest.TestCase):
             {
                 "http_attempt_id": 202,
                 "audit_id": 102,
+                "attempt_number": 1,
                 "run_id": heartbeat_run_id,
                 "target_identity": "target-2",
                 "http_status": 200,
@@ -386,6 +400,10 @@ class CurrentEvidencePathTests(unittest.TestCase):
         self.assertIn("collector.tiered50_first_heartbeat_http_attempts", script)
         self.assertIn("ORDER BY AuditId DESC", script)
         self.assertIn("ORDER BY h.CompletedAtUtc DESC, h.HttpAttemptId DESC", script)
+        self.assertIn("LEFT JOIN ctl.MddMacTargetAudit", script)
+        self.assertIn("HttpAttempts", script)
+        self.assertIn("declared_http_attempt_count", script)
+        self.assertIn("joined_audit_id", script)
         self.assertIn("audit_provenance", script)
         self.assertNotIn("$history[0].Tiered50Runs", script)
 
@@ -446,6 +464,91 @@ class CurrentEvidencePathTests(unittest.TestCase):
         linked_http["rows"][0]["audit_id"] = 9999  # type: ignore[index]
         with self.assertRaisesRegex(AdminEvidenceError, "not linked to its target audits"):
             validate_windows_audit_evidence(evidence["sql"])  # type: ignore[arg-type,index]
+
+    def test_first_heartbeat_reconciles_two_valid_http_attempts(self) -> None:
+        evidence = self._evidence()
+        target_entry = evidence["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_target_audits"]  # type: ignore[index]
+        target_rows = list(target_entry["rows"]) + [  # type: ignore[index]
+            {
+                "audit_id": 100 + index,
+                "run_id": "tiered50-first-run",
+                "target_identity": f"skipped-{index}",
+                "status": "SKIPPED",
+                "http_attempts": 0,
+            }
+            for index in range(3, 19)
+        ]
+        target_entry["rows"] = target_rows
+        target_entry["query"]["result_count"] = len(target_rows)  # type: ignore[index]
+        result = validate_windows_audit_evidence(evidence["sql"])  # type: ignore[arg-type,index]
+        reconciliation = result["first_heartbeat_reconciliation"]
+        self.assertEqual(reconciliation["status"], "PASS")
+        self.assertEqual(reconciliation["target_audit_count"], 18)
+        self.assertEqual(reconciliation["declared_http_attempt_count"], 2)
+        self.assertEqual(reconciliation["actual_http_attempt_count"], 2)
+        self.assertEqual(reconciliation["http_backed_successful_target_count"], 2)
+        self.assertEqual(reconciliation["skipped_target_count"], 16)
+
+    def test_first_heartbeat_missing_or_empty_http_history_is_not_proven(self) -> None:
+        for returned_rows in ([], [self._evidence()["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]["rows"][0]]):  # type: ignore[index]
+            with self.subTest(returned_rows=len(returned_rows)):
+                evidence = self._evidence()
+                entry = evidence["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]  # type: ignore[index]
+                entry["rows"] = returned_rows
+                entry["query"]["result_count"] = len(returned_rows)  # type: ignore[index]
+                entry["check_status"] = "PASS"
+                with self.assertRaisesRegex(AdminEvidenceError, "inaccurate check status|not fully proven"):
+                    validate_windows_audit_evidence(evidence["sql"])  # type: ignore[arg-type,index]
+
+    def test_first_heartbeat_audit_ids_detect_missing_duplicates_orphans_and_extra_attempts(self) -> None:
+        duplicate_target = self._evidence()
+        target_rows = duplicate_target["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_target_audits"]["rows"]  # type: ignore[index]
+        target_rows[1]["audit_id"] = target_rows[0]["audit_id"]  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "duplicated.*AuditId"):
+            validate_windows_audit_evidence(duplicate_target["sql"])  # type: ignore[arg-type,index]
+
+        missing_http_audit = self._evidence()
+        http_rows = missing_http_audit["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]["rows"]  # type: ignore[index]
+        http_rows[0].pop("audit_id")  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "missing AuditId"):
+            validate_windows_audit_evidence(missing_http_audit["sql"])  # type: ignore[arg-type,index]
+
+        orphan = self._evidence()
+        orphan_entry = orphan["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]  # type: ignore[index]
+        orphan_entry["rows"].append(  # type: ignore[index]
+            {
+                "http_attempt_id": 203,
+                "audit_id": 9999,
+                "attempt_number": 1,
+                "run_id": "tiered50-first-run",
+            }
+        )
+        orphan_entry["query"]["result_count"] = 3  # type: ignore[index]
+        orphan["sql"]["audit_provenance"]["collector.http_attempt_history"]["query"]["result_count"] = 3  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "orphaned|not linked to its target audits"):
+            validate_windows_audit_evidence(orphan["sql"])  # type: ignore[arg-type,index]
+
+        duplicated_attempt = self._evidence()
+        duplicated_rows = duplicated_attempt["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]["rows"]  # type: ignore[index]
+        duplicated_rows[1]["http_attempt_id"] = duplicated_rows[0]["http_attempt_id"]  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "duplicated HTTP attempt"):
+            validate_windows_audit_evidence(duplicated_attempt["sql"])  # type: ignore[arg-type,index]
+
+    def test_first_heartbeat_inconsistent_attribution_and_malformed_query_are_not_proven(self) -> None:
+        inconsistent = self._evidence()
+        inconsistent["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]["rows"][0]["target_identity"] = "other-target"  # type: ignore[index]
+        with self.assertRaisesRegex(AdminEvidenceError, "inconsistently attributed"):
+            validate_windows_audit_evidence(inconsistent["sql"])  # type: ignore[arg-type,index]
+
+        malformed = self._evidence()
+        query = malformed["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]["query"]  # type: ignore[index]
+        query.update({"status": "NOT_PROVEN", "executed": True, "result_count": 0, "reason": "malformed query result"})
+        entry = malformed["sql"]["audit_provenance"]["collector.tiered50_first_heartbeat_http_attempts"]  # type: ignore[index]
+        entry["rows"] = []
+        entry["check_status"] = "NOT_PROVEN"
+        entry["reason"] = "malformed query result"
+        with self.assertRaisesRegex(AdminEvidenceError, "malformed query result|not fully proven"):
+            validate_windows_audit_evidence(malformed["sql"])  # type: ignore[arg-type,index]
 
     def test_sql_datetime2_utc_survives_standard_and_dst_host_timezones(self) -> None:
         # The SQL value is a UTC clock value with no timezone metadata.  Both

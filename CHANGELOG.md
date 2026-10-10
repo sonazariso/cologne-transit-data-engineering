@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Corrected the Windows `Invoke-ReadOnlySql` result boundary to retain zero-,
+  one-, and multi-row `System.Data.DataRow` results in a non-enumerating
+  collection, preserving complete rows for every evidence query and allowing
+  SQL failures to remain fail-closed. Added focused PowerShell result-shape
+  regression coverage for DataRows, missing columns, empty results, and SQL
+  errors.
+- Corrected first-heartbeat Windows evidence validation: successful zero-row
+  SQL reads no longer prove known historical HTTP activity; target-audit
+  `HttpAttempts` counts are reconciled with actual rows, RunId/AuditId links
+  are checked, and missing, duplicate, orphaned, or inconsistently attributed
+  attempts are reported as `NOT_PROVEN`. Optional later-run zero-row queries
+  retain honest `PASS` execution semantics. The Windows capture preserves
+  newest-first recent samples and derives, rather than hardcodes, the
+  historical target/success/skip counts.
+
 Earlier Stage 13 entries retain their historical as-of wording; the current
 Stage 14 status is recorded in the entries below.
 
