@@ -57,7 +57,7 @@ function Initialize-SqlCmdCommand {
 
 $SqlCmdCommand = Initialize-SqlCmdCommand
 
-function Invoke-ReadOnlySql([string] $Query) {
+function Invoke-ReadOnlySql([string] $Query, [string] $StatementId = "admin.read_only_query") {
     $parameters = @{
         ServerInstance = $SqlInstance
         Database = $Database
@@ -81,13 +81,17 @@ function Invoke-ReadOnlySql([string] $Query) {
     Invoke-Sqlcmd error is not converted into an empty collection; it still
     propagates to the caller.
     #>
-    $rows = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($result in @(& $SqlCmdCommand @parameters)) {
-        if ($null -ne $result) {
-            [void]$rows.Add($result)
+    try {
+        $rows = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($result in @(& $SqlCmdCommand @parameters)) {
+            if ($null -ne $result) {
+                [void]$rows.Add($result)
+            }
         }
+        return ,($rows.ToArray())
+    } catch {
+        throw ("SQL query '{0}' execution failed: {1}" -f $StatementId, (Get-SanitizedSqlError $_))
     }
-    return ,($rows.ToArray())
 }
 
 function Normalize-VolumePath([string] $Value) {
@@ -116,51 +120,282 @@ function Test-SameVolume([string] $Left, [string] $Right) {
     return $normalizedLeft.Equals($normalizedRight, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
-function Get-PermissionState($Value) {
-    if ($null -eq $Value) {
-        return "UNKNOWN"
+function Test-SqlNullValue([object] $Value) {
+    return ($null -eq $Value -or $Value -is [System.DBNull])
+}
+
+function Get-SqlFieldValue([object] $Row, [string] $StatementId, [string] $FieldName) {
+    if ($null -eq $Row) {
+        throw ("SQL query '{0}' returned no row while reading field '{1}'" -f $StatementId, $FieldName)
     }
-    if ([int]$Value -eq 1) {
+    $property = $Row.PSObject.Properties[$FieldName]
+    if ($null -eq $property) {
+        throw ("SQL query '{0}' returned a row without field '{1}'" -f $StatementId, $FieldName)
+    }
+    return $property.Value
+}
+
+function Convert-SqlRequiredInt64([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required field '{1}'" -f $StatementId, $FieldName)
+    }
+    $parsed = [decimal]0
+    $valid = $true
+    try {
+        if ($Value -is [bool]) {
+            $valid = $false
+        } elseif ($Value -is [string]) {
+            $text = $Value.Trim()
+            $valid = -not [string]::IsNullOrWhiteSpace($text) -and
+                [decimal]::TryParse(
+                    $text,
+                    [System.Globalization.NumberStyles]::Integer,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [ref]$parsed
+                )
+        } elseif ($Value -is [System.IConvertible]) {
+            $parsed = [decimal]$Value
+        } else {
+            $valid = $false
+        }
+    } catch {
+        $valid = $false
+    }
+    $minimum = [decimal]([int64]::MinValue)
+    $maximum = [decimal]([int64]::MaxValue)
+    if (-not $valid -or [decimal]::Truncate($parsed) -ne $parsed -or $parsed -lt $minimum -or $parsed -gt $maximum) {
+        throw ("SQL query '{0}' returned malformed integer field '{1}'" -f $StatementId, $FieldName)
+    }
+    try {
+        return [int64]$parsed
+    } catch {
+        throw ("SQL query '{0}' returned out-of-range integer field '{1}'" -f $StatementId, $FieldName)
+    }
+}
+
+function Convert-SqlNullableInt64([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        return $null
+    }
+    return Convert-SqlRequiredInt64 $Value $StatementId $FieldName
+}
+
+function Convert-SqlRequiredInt32([object] $Value, [string] $StatementId, [string] $FieldName) {
+    $parsed = Convert-SqlRequiredInt64 $Value $StatementId $FieldName
+    if ($parsed -lt [int32]::MinValue -or $parsed -gt [int32]::MaxValue) {
+        throw ("SQL query '{0}' returned out-of-range 32-bit integer field '{1}'" -f $StatementId, $FieldName)
+    }
+    return [int32]$parsed
+}
+
+function Convert-SqlNullableInt32([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        return $null
+    }
+    return Convert-SqlRequiredInt32 $Value $StatementId $FieldName
+}
+
+function Convert-SqlRequiredDecimal([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required field '{1}'" -f $StatementId, $FieldName)
+    }
+    $parsed = [decimal]0
+    $valid = $true
+    try {
+        if ($Value -is [bool]) {
+            $valid = $false
+        } elseif ($Value -is [string]) {
+            $text = $Value.Trim()
+            $valid = -not [string]::IsNullOrWhiteSpace($text) -and
+                [decimal]::TryParse(
+                    $text,
+                    [System.Globalization.NumberStyles]::Float,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [ref]$parsed
+                )
+        } elseif ($Value -is [System.IConvertible]) {
+            $parsed = [decimal]$Value
+        } else {
+            $valid = $false
+        }
+    } catch {
+        $valid = $false
+    }
+    if (-not $valid) {
+        throw ("SQL query '{0}' returned malformed decimal field '{1}'" -f $StatementId, $FieldName)
+    }
+    return $parsed
+}
+
+function Convert-SqlRequiredString([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required field '{1}'" -f $StatementId, $FieldName)
+    }
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        throw ("SQL query '{0}' returned malformed string field '{1}'" -f $StatementId, $FieldName)
+    }
+    return [string]$Value
+}
+
+function Convert-SqlNullableString([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        return $null
+    }
+    if ($Value -isnot [string]) {
+        throw ("SQL query '{0}' returned malformed string field '{1}'" -f $StatementId, $FieldName)
+    }
+    return [string]$Value
+}
+
+function Convert-SqlRequiredBoolean([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required field '{1}'" -f $StatementId, $FieldName)
+    }
+    if ($Value -is [bool]) {
+        return [bool]$Value
+    }
+    if ($Value -is [string]) {
+        switch ($Value.Trim().ToUpperInvariant()) {
+            "TRUE" { return $true }
+            "YES" { return $true }
+            "1" { return $true }
+            "FALSE" { return $false }
+            "NO" { return $false }
+            "0" { return $false }
+        }
+    }
+    try {
+        $parsed = Convert-SqlRequiredInt64 $Value $StatementId $FieldName
+        if ($parsed -eq 1) { return $true }
+        if ($parsed -eq 0) { return $false }
+    } catch {
+        # Replace conversion details with the stable query/field diagnostic below.
+    }
+    throw ("SQL query '{0}' returned malformed Boolean field '{1}'" -f $StatementId, $FieldName)
+}
+
+function Convert-SqlNullableBoolean([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        return $null
+    }
+    return Convert-SqlRequiredBoolean $Value $StatementId $FieldName
+}
+
+function Get-SqlRequiredInt64([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlRequiredInt64 (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlNullableInt64([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlNullableInt64 (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlRequiredInt32([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlRequiredInt32 (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlNullableInt32([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlNullableInt32 (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlRequiredDecimal([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlRequiredDecimal (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlRequiredString([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlRequiredString (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlNullableString([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlNullableString (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlRequiredBoolean([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlRequiredBoolean (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Get-SqlNullableBoolean([object] $Row, [string] $StatementId, [string] $FieldName) {
+    return Convert-SqlNullableBoolean (Get-SqlFieldValue $Row $StatementId $FieldName) $StatementId $FieldName
+}
+
+function Convert-SqlRequiredSourceText([object] $Value, [string] $StatementId, [string] $FieldName) {
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required field '{1}'" -f $StatementId, $FieldName)
+    }
+    if (($Value -isnot [string]) -and ($Value -isnot [DateTime]) -and ($Value -isnot [DateTimeOffset])) {
+        throw ("SQL query '{0}' returned malformed source field '{1}'" -f $StatementId, $FieldName)
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Value)) {
+        throw ("SQL query '{0}' returned an empty required field '{1}'" -f $StatementId, $FieldName)
+    }
+    return [string]$Value
+}
+
+function Resolve-PermissionState([string] $MetadataState, [bool] $AuthoritativeAccessProven) {
+    if ($MetadataState -eq "UNKNOWN" -and $AuthoritativeAccessProven) {
         return "GRANTED"
     }
-    if ([int]$Value -eq 0) {
+    return $MetadataState
+}
+
+function Get-PermissionState($Value) {
+    if (Test-SqlNullValue $Value) {
+        return "UNKNOWN"
+    }
+    try {
+        $parsed = Convert-SqlNullableInt32 $Value "admin.permissions" "permission_metadata"
+    } catch {
+        return "UNKNOWN"
+    }
+    if ($null -eq $parsed) {
+        return "UNKNOWN"
+    }
+    if ($parsed -eq 1) {
+        return "GRANTED"
+    }
+    if ($parsed -eq 0) {
         return "DENIED"
     }
     return "UNKNOWN"
 }
 
-function Convert-SqlUtcDateTimeToIso8601([object] $Value) {
+function Convert-SqlUtcDateTimeToIso8601([object] $Value, [string] $StatementId = "admin.read_only_query", [string] $FieldName = "timestamp") {
     <#
     SYSUTCDATETIME() returns SQL datetime2, which has no timezone metadata.
     Its clock fields are already UTC.  Assign UTC to those fields explicitly;
     never route an unspecified DateTime through the guest's local timezone.
     #>
-    if ($null -eq $Value) {
-        throw "SQL UTC timestamp was null"
+    if (Test-SqlNullValue $Value) {
+        throw ("SQL query '{0}' returned SQL NULL for required timestamp field '{1}'" -f $StatementId, $FieldName)
     }
-    if ($Value -is [DateTimeOffset]) {
-        $utcDateTime = [DateTime]::SpecifyKind($Value.DateTime, [DateTimeKind]::Utc)
-        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
-    } elseif ($Value -is [DateTime]) {
-        $utcDateTime = [DateTime]::SpecifyKind([DateTime]$Value, [DateTimeKind]::Utc)
-        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
-    } else {
-        $parsedDateTime = [DateTime]::Parse(
-            [string]$Value,
-            [System.Globalization.CultureInfo]::InvariantCulture,
-            [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
-        )
-        $utcDateTime = [DateTime]::SpecifyKind($parsedDateTime, [DateTimeKind]::Utc)
-        $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+    try {
+        if ($Value -is [DateTimeOffset]) {
+            $utcDateTime = [DateTime]::SpecifyKind($Value.DateTime, [DateTimeKind]::Utc)
+            $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+        } elseif ($Value -is [DateTime]) {
+            $utcDateTime = [DateTime]::SpecifyKind([DateTime]$Value, [DateTimeKind]::Utc)
+            $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+        } elseif ($Value -is [string]) {
+            $parsedDateTime = [DateTime]::Parse(
+                [string]$Value,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+            )
+            $utcDateTime = [DateTime]::SpecifyKind($parsedDateTime, [DateTimeKind]::Utc)
+            $utcValue = New-Object -TypeName System.DateTimeOffset -ArgumentList $utcDateTime
+        } else {
+            throw "unsupported timestamp type"
+        }
+    } catch {
+        throw ("SQL query '{0}' returned malformed UTC timestamp field '{1}'" -f $StatementId, $FieldName)
     }
     return $utcValue.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Convert-NullableSqlUtcDateTimeToIso8601([object] $Value) {
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+function Convert-NullableSqlUtcDateTimeToIso8601([object] $Value, [string] $StatementId = "admin.read_only_query", [string] $FieldName = "timestamp") {
+    if (Test-SqlNullValue $Value) {
         return $null
     }
-    return Convert-SqlUtcDateTimeToIso8601 $Value
+    return Convert-SqlUtcDateTimeToIso8601 $Value $StatementId $FieldName
 }
 
 function Get-SanitizedSqlError([object] $ErrorRecord) {
@@ -203,7 +438,7 @@ function Invoke-AuditedReadOnlySql([string] $StatementId, [string] $Query) {
         # Invoke-ReadOnlySql returns one non-enumerated System.Object[] row
         # collection.  Do not wrap the invocation in @(), which would turn it
         # into a list-of-list.
-        $rows = Invoke-ReadOnlySql $Query
+        $rows = Invoke-ReadOnlySql $Query $StatementId
         $requiredColumns = switch ($StatementId) {
             "collector.production_cutover_history" { @("CutoverKey", "PanelVersion", "Tiered50ActivationAtUtc", "Tiered50ActivationStatus", "RecordedAtUtc"); break }
             "collector.historical_runs" { @("MacCollectorRunId", "RunId", "LogicalDueBucket", "CollectionContext", "StartedAtUtc", "CompletedAtUtc", "Status"); break }
@@ -246,7 +481,7 @@ function Invoke-AuditedReadOnlySql([string] $StatementId, [string] $Query) {
 }
 
 try {
-    $identity = Invoke-ReadOnlySql @"
+    $identityQuery = @"
 SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS ServerName,
        CAST(SERVERPROPERTY('MachineName') AS nvarchar(128)) AS MachineName,
        CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128)) AS InstanceName,
@@ -255,6 +490,7 @@ SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS ServerName,
        SUSER_SNAME() AS LoginName, SYSUTCDATETIME() AS CapturedAtUtc,
        CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS ProductMajorVersion;
 "@
+    $identity = Invoke-ReadOnlySql $identityQuery "admin.identity"
 } catch {
     $sanitizedSqlError = Get-SanitizedSqlError $_
     if ($sanitizedSqlError -match '(?i)certificate|trust|ssl|tls|hostname') {
@@ -263,47 +499,60 @@ SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS ServerName,
     throw ("Encrypted SQL connection failed before identity was proven; " + $sanitizedSqlError)
 }
 
-if ($identity.Count -ne 1 -or [string]$identity[0].DatabaseName -ne $Database) {
+if ($identity.Count -ne 1) {
     throw "SQL identity/database binding was not proven"
 }
-if ([string]$identity[0].LoginName -eq $RuntimeLoginName) {
+$identityDatabaseName = Get-SqlRequiredString $identity[0] "admin.identity" "DatabaseName"
+$identityLoginName = Get-SqlRequiredString $identity[0] "admin.identity" "LoginName"
+if ($identityDatabaseName -ne $Database) {
+    throw "SQL identity/database binding was not proven"
+}
+if ($identityLoginName -eq $RuntimeLoginName) {
     throw "Windows evidence identity must be separate from the limited runtime login"
 }
 
-$captured = Convert-SqlUtcDateTimeToIso8601 $identity[0].CapturedAtUtc
+$captured = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $identity[0] "admin.identity" "CapturedAtUtc") "admin.identity" "CapturedAtUtc"
+$identityServerName = Get-SqlRequiredString $identity[0] "admin.identity" "ServerName"
+$identityMachineName = Get-SqlRequiredString $identity[0] "admin.identity" "MachineName"
+$identityInstanceName = Get-SqlNullableString $identity[0] "admin.identity" "InstanceName"
+$identityConfiguredServerName = Get-SqlRequiredString $identity[0] "admin.identity" "ConfiguredServerName"
 
-$transport = Invoke-ReadOnlySql @"
+$transportQuery = @"
 SELECT CAST(encrypt_option AS nvarchar(10)) AS EncryptOption,
        CAST(auth_scheme AS nvarchar(128)) AS AuthScheme,
        CAST(net_transport AS nvarchar(128)) AS NetTransport
 FROM sys.dm_exec_connections
 WHERE session_id = @@SPID;
 "@
+$transport = Invoke-ReadOnlySql $transportQuery "admin.transport"
 if ($transport.Count -ne 1) {
     throw "SQL connection transport security was not returned for the evidence session"
 }
-$actualEncryptOption = ([string]$transport[0].EncryptOption).Trim().ToUpperInvariant()
+$transportEncryptOption = Get-SqlRequiredString $transport[0] "admin.transport" "EncryptOption"
+$transportAuthScheme = Get-SqlRequiredString $transport[0] "admin.transport" "AuthScheme"
+$transportNetTransport = Get-SqlRequiredString $transport[0] "admin.transport" "NetTransport"
+$actualEncryptOption = $transportEncryptOption.Trim().ToUpperInvariant()
 if ($actualEncryptOption -notin @("TRUE", "YES", "1")) {
     throw "SQL connection did not prove encrypted transport; no administrative evidence was written"
 }
-$authScheme = ([string]$transport[0].AuthScheme).Trim().ToUpperInvariant()
+$authScheme = $transportAuthScheme.Trim().ToUpperInvariant()
 if ($authScheme -notin @("KERBEROS", "NTLM")) {
     throw "SQL connection did not prove Windows Authentication; no administrative evidence was written"
 }
 $tlsEvidence = [ordered]@{
     encryption_mode = $EncryptMode
-    actual_encryption = ([string]$transport[0].EncryptOption).Trim()
+    actual_encryption = $transportEncryptOption.Trim()
     actual_transport = "ENCRYPTED"
     trust_server_certificate = $false
     certificate_validation_required = $true
     certificate_validation_observed = $true
     certificate_validation_status = "VALIDATED"
     certificate_validation_method = "INVOKE_SQLCMD_TRUST_SERVER_CERTIFICATE_FALSE_AND_DM_EXEC_CONNECTIONS_ENCRYPT_OPTION_TRUE"
-    auth_scheme = ([string]$transport[0].AuthScheme).Trim()
-    net_transport = ([string]$transport[0].NetTransport).Trim()
+    auth_scheme = $transportAuthScheme.Trim()
+    net_transport = $transportNetTransport.Trim()
 }
 
-$permissions = Invoke-ReadOnlySql @"
+$permissionsQuery = @"
 SELECT HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DEFINITION') AS HasViewDefinition,
        HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DATABASE STATE') AS HasViewDatabaseState,
        HAS_PERMS_BY_NAME(NULL, N'SERVER', N'VIEW SERVER STATE') AS HasViewServerState,
@@ -315,70 +564,185 @@ SELECT HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'VIEW DEFINITION') AS HasViewD
        IS_SRVROLEMEMBER(N'sysadmin') AS IsSysadmin,
        IS_SRVROLEMEMBER(N'dbcreator') AS IsDbcreator;
 "@
+$permissions = Invoke-ReadOnlySql $permissionsQuery "admin.permissions"
 
 if ($permissions.Count -ne 1) {
     throw "SQL permission inspection did not return exactly one row"
 }
-$productMajorVersionValue = $identity[0].ProductMajorVersion
-if ($null -eq $productMajorVersionValue) {
-    throw "SQL Server product major version was not returned"
+$productMajorVersion = Get-SqlRequiredInt32 $identity[0] "admin.identity" "ProductMajorVersion"
+$permissionMetadata = [ordered]@{
+    HasViewDefinition = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasViewDefinition"
+    HasViewDatabaseState = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasViewDatabaseState"
+    HasViewServerState = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasViewServerState"
+    HasViewServerPerformanceState = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasViewServerPerformanceState"
+    HasBackupsetSelect = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasBackupsetSelect"
+    HasBackupmediafamilySelect = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasBackupmediafamilySelect"
+    HasDatabaseSelect = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasDatabaseSelect"
+    HasCreateAnyDatabase = Get-SqlFieldValue $permissions[0] "admin.permissions" "HasCreateAnyDatabase"
+    IsSysadmin = Get-SqlFieldValue $permissions[0] "admin.permissions" "IsSysadmin"
+    IsDbcreator = Get-SqlFieldValue $permissions[0] "admin.permissions" "IsDbcreator"
 }
-$productMajorVersion = [int]$productMajorVersionValue
+$permissionMetadataStates = [ordered]@{
+    database_view_definition = Get-PermissionState $permissionMetadata.HasViewDefinition
+    database_view_state = Get-PermissionState $permissionMetadata.HasViewDatabaseState
+    server_view_state = Get-PermissionState $permissionMetadata.HasViewServerState
+    server_view_performance_state = Get-PermissionState $permissionMetadata.HasViewServerPerformanceState
+    backup_history_backupset_select = Get-PermissionState $permissionMetadata.HasBackupsetSelect
+    backup_history_backupmediafamily_select = Get-PermissionState $permissionMetadata.HasBackupmediafamilySelect
+    operational_history_database_select = Get-PermissionState $permissionMetadata.HasDatabaseSelect
+    create_any_database = Get-PermissionState $permissionMetadata.HasCreateAnyDatabase
+    sysadmin = Get-PermissionState $permissionMetadata.IsSysadmin
+    dbcreator = Get-PermissionState $permissionMetadata.IsDbcreator
+}
 $serverDmvMetadataState = if ($productMajorVersion -ge 16) {
-    Get-PermissionState $permissions[0].HasViewServerPerformanceState
+    $permissionMetadataStates.server_view_performance_state
 } else {
-    Get-PermissionState $permissions[0].HasViewServerState
+    $permissionMetadataStates.server_view_state
 }
 $backupVerifyPermissionState = if (
-    ([int]$permissions[0].HasCreateAnyDatabase -eq 1) -or
-    ([int]$permissions[0].IsSysadmin -eq 1) -or
-    ([int]$permissions[0].IsDbcreator -eq 1)
-) { "GRANTED" } elseif (
-    $null -ne $permissions[0].HasCreateAnyDatabase -and
-    $null -ne $permissions[0].IsSysadmin -and
-    $null -ne $permissions[0].IsDbcreator
-) { "DENIED" } else { "UNKNOWN" }
+    @(
+        $permissionMetadataStates.create_any_database,
+        $permissionMetadataStates.sysadmin,
+        $permissionMetadataStates.dbcreator
+    ) -contains "GRANTED"
+) {
+    "GRANTED"
+} elseif (
+    @(
+        $permissionMetadataStates.create_any_database,
+        $permissionMetadataStates.sysadmin,
+        $permissionMetadataStates.dbcreator
+    ) -notcontains "UNKNOWN" -and
+    @(
+        $permissionMetadataStates.create_any_database,
+        $permissionMetadataStates.sysadmin,
+        $permissionMetadataStates.dbcreator
+    ) -contains "DENIED"
+) {
+    "DENIED"
+} else {
+    "UNKNOWN"
+}
 $permissionChecks = [ordered]@{
-    database_view_definition = (Get-PermissionState $permissions[0].HasViewDefinition)
-    database_view_state = (Get-PermissionState $permissions[0].HasViewDatabaseState)
+    database_view_definition = $permissionMetadataStates.database_view_definition
+    database_view_state = $permissionMetadataStates.database_view_state
     server_dmv_state = $serverDmvMetadataState
-    backup_history_backupset_select = (Get-PermissionState $permissions[0].HasBackupsetSelect)
-    backup_history_backupmediafamily_select = (Get-PermissionState $permissions[0].HasBackupmediafamilySelect)
-    operational_history_database_select = (Get-PermissionState $permissions[0].HasDatabaseSelect)
+    backup_history_backupset_select = $permissionMetadataStates.backup_history_backupset_select
+    backup_history_backupmediafamily_select = $permissionMetadataStates.backup_history_backupmediafamily_select
+    operational_history_database_select = $permissionMetadataStates.operational_history_database_select
     backup_verifyonly_authorization = $backupVerifyPermissionState
 }
 
-$databaseFiles = Invoke-ReadOnlySql "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages, physical_name FROM sys.database_files ORDER BY file_id;"
+$databaseFiles = Invoke-ReadOnlySql "SELECT name, type_desc, size, growth, is_percent_growth, max_size, FILEPROPERTY(name, 'SpaceUsed') AS space_used_pages, physical_name FROM sys.database_files ORDER BY file_id;" "capacity.database_files"
 $databaseFileDetails = @($databaseFiles | ForEach-Object {
-    $sizePages = [int64]$_.size
-    $spaceUsedPages = if ($null -eq $_.space_used_pages) { [int64]0 } else { [int64]$_.space_used_pages }
+    $sizePages = Get-SqlRequiredInt64 $_ "capacity.database_files" "size"
+    $spaceUsedPages = Get-SqlNullableInt64 $_ "capacity.database_files" "space_used_pages"
     @{
-        name = [string]$_.name
-        type = [string]$_.type_desc
+        name = Get-SqlRequiredString $_ "capacity.database_files" "name"
+        type = Get-SqlRequiredString $_ "capacity.database_files" "type_desc"
         size_pages = $sizePages
-        growth = [int]$_.growth
-        is_percent_growth = [bool]$_.is_percent_growth
-        max_size_pages = [int64]$_.max_size
+        growth = Get-SqlRequiredInt32 $_ "capacity.database_files" "growth"
+        is_percent_growth = Get-SqlRequiredBoolean $_ "capacity.database_files" "is_percent_growth"
+        max_size_pages = Get-SqlRequiredInt64 $_ "capacity.database_files" "max_size"
         space_used_pages = $spaceUsedPages
-        size_bytes = $sizePages * 8192
-        space_used_bytes = $spaceUsedPages * 8192
-        physical_name = [string]$_.physical_name
+        size_bytes = [int64]($sizePages * 8192)
+        space_used_bytes = if ($null -eq $spaceUsedPages) { $null } else { [int64]($spaceUsedPages * 8192) }
+        physical_name = Get-SqlRequiredString $_ "capacity.database_files" "physical_name"
     }
 })
-$runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model;"
-$volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;"
-$logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();"
-$backup = Invoke-ReadOnlySql "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;"
-$materialization = Invoke-ReadOnlySql "SELECT COUNT_BIG(*) AS TargetCount, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS ActiveCount FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = 'TIERED50_PANEL_V1' AND SamplingEra = 'Tiered50';"
+$runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model;" "admin.sql_runtime_health"
+$volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;" "capacity.volume_capacity_dm_os_volume_stats"
+$logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();" "capacity.database_log_space_dm_db_log_space_usage"
+$backup = Invoke-ReadOnlySql "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;" "backup.latest_full_backup_history"
+$materialization = Invoke-ReadOnlySql "SELECT COUNT_BIG(*) AS TargetCount, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS ActiveCount FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = 'TIERED50_PANEL_V1' AND SamplingEra = 'Tiered50';" "collector_runtime_history_or_materialization"
+$runtimeHealth = @($runtimeHealth | ForEach-Object {
+    [pscustomobject]@{
+        database_name = Get-SqlRequiredString $_ "admin.sql_runtime_health" "database_name"
+        database_status = Get-SqlRequiredString $_ "admin.sql_runtime_health" "database_status"
+        recovery_model = Get-SqlRequiredString $_ "admin.sql_runtime_health" "recovery_model"
+    }
+})
+$volumes = @($volumes | ForEach-Object {
+    [pscustomobject]@{
+        volume_mount_point = Get-SqlRequiredString $_ "capacity.volume_capacity_dm_os_volume_stats" "volume_mount_point"
+        total_bytes = Get-SqlRequiredInt64 $_ "capacity.volume_capacity_dm_os_volume_stats" "total_bytes"
+        available_bytes = Get-SqlRequiredInt64 $_ "capacity.volume_capacity_dm_os_volume_stats" "available_bytes"
+    }
+})
+$logSpace = @($logSpace | ForEach-Object {
+    [pscustomobject]@{
+        total_log_size_in_bytes = Get-SqlRequiredInt64 $_ "capacity.database_log_space_dm_db_log_space_usage" "total_log_size_in_bytes"
+        used_log_space_in_bytes = Get-SqlRequiredInt64 $_ "capacity.database_log_space_dm_db_log_space_usage" "used_log_space_in_bytes"
+        used_log_space_in_percent = Get-SqlRequiredDecimal $_ "capacity.database_log_space_dm_db_log_space_usage" "used_log_space_in_percent"
+    }
+})
+$backup = @($backup | ForEach-Object {
+    [pscustomobject]@{
+        backup_set_id = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "backup_set_id"
+        media_set_id = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "media_set_id"
+        backup_finish_date = Convert-SqlRequiredSourceText (Get-SqlFieldValue $_ "backup.latest_full_backup_history" "backup_finish_date") "backup.latest_full_backup_history" "backup_finish_date"
+        is_copy_only = Get-SqlRequiredBoolean $_ "backup.latest_full_backup_history" "is_copy_only"
+        has_backup_checksums = Get-SqlRequiredBoolean $_ "backup.latest_full_backup_history" "has_backup_checksums"
+        compressed_backup_size = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "compressed_backup_size"
+    }
+})
+$materialization = @($materialization | ForEach-Object {
+    [pscustomobject]@{
+        TargetCount = Get-SqlRequiredInt64 $_ "collector_runtime_history_or_materialization" "TargetCount"
+        ActiveCount = Get-SqlRequiredInt64 $_ "collector_runtime_history_or_materialization" "ActiveCount"
+    }
+})
+$backupMediaQueryExecuted = $false
 $backupMedia = if ($backup.Count -eq 1) {
-    Invoke-ReadOnlySql ("SELECT family_sequence_number, physical_device_name FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f ([int64]$backup[0].media_set_id))
+    $backupMediaQueryExecuted = $true
+    $mediaSetId = [int64]$backup[0].media_set_id
+    $mediaRows = Invoke-ReadOnlySql ("SELECT family_sequence_number, physical_device_name FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f $mediaSetId) "backup.latest_full_backup_media_set"
+    @($mediaRows | ForEach-Object {
+        [pscustomobject]@{
+            family_sequence_number = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_media_set" "family_sequence_number"
+            physical_device_name = Get-SqlRequiredString $_ "backup.latest_full_backup_media_set" "physical_device_name"
+        }
+    })
 } else { @() }
 $cutoverHistoryQuery = Invoke-AuditedReadOnlySql "collector.production_cutover_history" "SELECT CutoverKey, PanelVersion, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId;"
-$cutoverHistory = @($cutoverHistoryQuery.Rows)
+$cutoverHistory = @($cutoverHistoryQuery.Rows | ForEach-Object {
+    [ordered]@{
+        cutover_key = Get-SqlRequiredString $_ "collector.production_cutover_history" "CutoverKey"
+        panel_version = Get-SqlRequiredString $_ "collector.production_cutover_history" "PanelVersion"
+        tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.production_cutover_history" "Tiered50ActivationAtUtc") "collector.production_cutover_history" "Tiered50ActivationAtUtc"
+        tiered50_activation_status = Get-SqlRequiredString $_ "collector.production_cutover_history" "Tiered50ActivationStatus"
+        recorded_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.production_cutover_history" "RecordedAtUtc") "collector.production_cutover_history" "RecordedAtUtc"
+    }
+})
 $cutoverHistoryEvidence = $cutoverHistoryQuery.Evidence
-$competingWriters = Invoke-ReadOnlySql "SELECT CollectionContext, COUNT_BIG(*) AS RunningCount FROM ctl.MddMacCollectorRun WHERE Status IN ('RUNNING', 'CLAIMED') AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION') GROUP BY CollectionContext;"
-$currentQuotaLedger = Invoke-ReadOnlySql "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC;"
-$quota = Invoke-ReadOnlySql @"
+$competingWriters = Invoke-ReadOnlySql "SELECT CollectionContext, COUNT_BIG(*) AS RunningCount FROM ctl.MddMacCollectorRun WHERE Status IN ('RUNNING', 'CLAIMED') AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION') GROUP BY CollectionContext;" "collector.competing_production_writers"
+$competingWriters = @($competingWriters | ForEach-Object {
+    [pscustomobject]@{
+        CollectionContext = Get-SqlRequiredString $_ "collector.competing_production_writers" "CollectionContext"
+        RunningCount = Get-SqlRequiredInt64 $_ "collector.competing_production_writers" "RunningCount"
+    }
+})
+$currentQuotaLedger = Invoke-ReadOnlySql "SELECT TOP (2) MonthKey, ProviderQuotaCeiling, NormalOperationalMaximum, RetryProtectionBoundary, ConfirmedProviderAttempts, ConservativeUnknownAttempts, ExplicitSharedConsumerReservedAttempts, AccountingStatus, IncludesAllSharedConsumers, ProviderPeriodStartUtc, ProviderPeriodEndUtc, LocalUsageIncludedThroughUtc, SourceEvidenceHash, ReconciliationKey FROM ctl.MddMacSharedQuotaAccounting WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME() AND ProviderPeriodEndUtc > SYSUTCDATETIME() ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC;" "quota.current_shared_ledger"
+$currentQuotaLedger = @($currentQuotaLedger | ForEach-Object {
+    [ordered]@{
+        month_key = Get-SqlRequiredString $_ "quota.current_shared_ledger" "MonthKey"
+        provider_quota_ceiling = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "ProviderQuotaCeiling"
+        normal_operational_maximum = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "NormalOperationalMaximum"
+        retry_protection_boundary = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "RetryProtectionBoundary"
+        confirmed_provider_attempts = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "ConfirmedProviderAttempts"
+        conservative_unknown_attempts = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "ConservativeUnknownAttempts"
+        reserved_shared_usage = Get-SqlRequiredInt64 $_ "quota.current_shared_ledger" "ExplicitSharedConsumerReservedAttempts"
+        accounting_status = Get-SqlRequiredString $_ "quota.current_shared_ledger" "AccountingStatus"
+        includes_all_shared_consumers = Get-SqlRequiredBoolean $_ "quota.current_shared_ledger" "IncludesAllSharedConsumers"
+        provider_period_start_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "quota.current_shared_ledger" "ProviderPeriodStartUtc") "quota.current_shared_ledger" "ProviderPeriodStartUtc"
+        provider_period_end_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "quota.current_shared_ledger" "ProviderPeriodEndUtc") "quota.current_shared_ledger" "ProviderPeriodEndUtc"
+        local_usage_included_through_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "quota.current_shared_ledger" "LocalUsageIncludedThroughUtc") "quota.current_shared_ledger" "LocalUsageIncludedThroughUtc"
+        source_evidence_hash = Get-SqlNullableString $_ "quota.current_shared_ledger" "SourceEvidenceHash"
+        reconciliation_key = Get-SqlNullableString $_ "quota.current_shared_ledger" "ReconciliationKey"
+    }
+})
+$quotaSourceStatementId = "quota.current_shared_ledger"
+$quotaQuery = @"
 SELECT TOP (1) 'COMPLETE_PROVIDER_PERIOD' AS SourceKind, MonthKey,
        AccountingStatus,
        (ConfirmedProviderAttempts + ConservativeUnknownAttempts + ExplicitSharedConsumerReservedAttempts) AS KnownTotal,
@@ -389,26 +753,28 @@ WHERE ProviderPeriodStartUtc <= SYSUTCDATETIME()
   AND AccountingStatus = 'COMPLETE'
 ORDER BY ProviderPeriodStartUtc DESC, RecordedAtUtc DESC;
 "@
+$quota = Invoke-ReadOnlySql $quotaQuery "quota.current_shared_ledger"
 
 # A successful DMV query is effective permission evidence.  SQL Server 2025
 # can return NULL for a metadata permission function even for an authorized
 # sysadmin; do not reject that identity when the protected DMV reads actually
 # complete under the same Windows Authentication context.
 if ($databaseFiles.Count -gt 0) {
-    $permissionChecks.database_view_definition = "GRANTED"
+    $permissionChecks.database_view_definition = Resolve-PermissionState $permissionChecks.database_view_definition $true
 }
 if ($logSpace.Count -eq 1) {
-    $permissionChecks.database_view_state = "GRANTED"
+    $permissionChecks.database_view_state = Resolve-PermissionState $permissionChecks.database_view_state $true
 }
 if ($volumes.Count -gt 0 -and $logSpace.Count -eq 1) {
-    $permissionChecks.server_dmv_state = "GRANTED"
+    $permissionChecks.server_dmv_state = Resolve-PermissionState $permissionChecks.server_dmv_state $true
 }
-$permissionChecks.backup_history_backupset_select = "GRANTED"
-if ($backupMedia.Count -gt 0) {
-    $permissionChecks.backup_history_backupmediafamily_select = "GRANTED"
+$permissionChecks.backup_history_backupset_select = Resolve-PermissionState $permissionChecks.backup_history_backupset_select $true
+if ($backupMediaQueryExecuted) {
+    $permissionChecks.backup_history_backupmediafamily_select = Resolve-PermissionState $permissionChecks.backup_history_backupmediafamily_select $true
 }
 if ($quota.Count -eq 0) {
-$quota = Invoke-ReadOnlySql @"
+$quotaSourceStatementId = "quota.bounded_bootstrap"
+$bootstrapQuotaQuery = @"
 SELECT TOP (1) 'BOUNDED_BOOTSTRAP' AS SourceKind, MonthKey,
        AuthorizationStatus AS AccountingStatus,
        (ScreenshotCumulativeRequests + ConfirmedLocalAttempts + ConservativeUnknownLocalAttempts + PendingLocalReservations) AS KnownTotal,
@@ -419,7 +785,17 @@ WHERE AuthorizationStatus = 'ACTIVE'
   AND StopAtUtc > SYSUTCDATETIME()
 ORDER BY ValidFromUtc DESC, RecordedAtUtc DESC;
 "@
+$quota = Invoke-ReadOnlySql $bootstrapQuotaQuery "quota.bounded_bootstrap"
 }
+$quota = @($quota | ForEach-Object {
+    [pscustomobject]@{
+        SourceKind = Get-SqlRequiredString $_ $quotaSourceStatementId "SourceKind"
+        MonthKey = Get-SqlRequiredString $_ $quotaSourceStatementId "MonthKey"
+        AccountingStatus = Get-SqlRequiredString $_ $quotaSourceStatementId "AccountingStatus"
+        KnownTotal = Get-SqlRequiredInt64 $_ $quotaSourceStatementId "KnownTotal"
+        ReservedSharedUsage = Get-SqlRequiredInt64 $_ $quotaSourceStatementId "ReservedSharedUsage"
+    }
+})
 
 # These are deliberately separate read-only queries.  A successful query with
 # zero rows is recorded as PASS with result_count = 0; a denied, missing, or
@@ -471,9 +847,9 @@ WHERE PanelVersion = 'TIERED50_PANEL_V1'
 ORDER BY CutoverId ASC;
 "@
 $firstTiered50HeartbeatRows = @($firstTiered50HeartbeatQuery.Rows)
-if ($firstTiered50HeartbeatRows.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$firstTiered50HeartbeatRows[0].RunId)) {
-    $firstTiered50RunId = [int64]$firstTiered50HeartbeatRows[0].MacCollectorRunId
-    $firstTiered50RunIdText = [string]$firstTiered50HeartbeatRows[0].RunId
+if ($firstTiered50HeartbeatRows.Count -eq 1) {
+    $firstTiered50RunId = Get-SqlRequiredInt64 $firstTiered50HeartbeatRows[0] "collector.tiered50_first_heartbeat" "MacCollectorRunId"
+    $firstTiered50RunIdText = Get-SqlRequiredString $firstTiered50HeartbeatRows[0] "collector.tiered50_first_heartbeat" "RunId"
     $escapedFirstTiered50RunId = $firstTiered50RunIdText.Replace("'", "''")
 $firstTiered50HeartbeatTargetAuditsQuery = Invoke-AuditedReadOnlySql "collector.tiered50_first_heartbeat_target_audits" (@"
 SELECT AuditId, RunId, TargetIdentity, LogicalDueBucket,
@@ -517,13 +893,13 @@ $firstTiered50HeartbeatHttpAttemptsEvidence = $firstTiered50HeartbeatHttpAttempt
 $historicalOutageEvidence = $historicalOutageQuery.Evidence
 $laterTiered50RunsEvidence = $laterTiered50RunsQuery.Evidence
 if ($historicalRunsEvidence.status -eq "PASS") {
-    $permissionChecks.operational_history_database_select = "GRANTED"
+    $permissionChecks.operational_history_database_select = Resolve-PermissionState $permissionChecks.operational_history_database_select $true
 }
 
 if ($null -eq $backup -or $backup.Count -ne 1 -or $backupMedia.Count -lt 1 -or ($backupMedia | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.physical_device_name) }).Count -gt 0) {
     throw "No native full backup path was available for server-side VERIFYONLY"
 }
-if ($databaseFiles.Count -eq 0 -or $runtimeHealth.Count -ne 1 -or [string]$runtimeHealth[0].database_status -ne "ONLINE" -or [string]::IsNullOrWhiteSpace([string]$runtimeHealth[0].recovery_model) -or $volumes.Count -eq 0 -or $logSpace.Count -ne 1) {
+if ($databaseFiles.Count -eq 0 -or $runtimeHealth.Count -ne 1 -or $runtimeHealth[0].database_status -ne "ONLINE" -or [string]::IsNullOrWhiteSpace([string]$runtimeHealth[0].recovery_model) -or $volumes.Count -eq 0 -or $logSpace.Count -ne 1) {
     throw "SQL capacity evidence was incomplete"
 }
 if ($materialization.Count -ne 1 -or [int64]$materialization[0].TargetCount -ne 43 -or [int64]$materialization[0].ActiveCount -ne 43) {
@@ -545,8 +921,8 @@ if (($competingWriters | Where-Object { [int64]$_.RunningCount -gt 0 }).Count -g
 # VERIFYONLY is executed by SQL Server, not by the Windows client.  Its path
 # and diagnostic text never enter the sanitized JSON payload.
 $backupMediaClauses = @($backupMedia | ForEach-Object { "DISK = N'{0}'" -f ([string]$_.physical_device_name).Replace("'", "''") })
-Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) | Out-Null
-$permissionChecks.backup_verifyonly_authorization = "GRANTED"
+Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) "backup.restore_verifyonly_with_checksum" | Out-Null
+$permissionChecks.backup_verifyonly_authorization = Resolve-PermissionState $permissionChecks.backup_verifyonly_authorization $true
 
 $missingPermissions = @(
     $permissionChecks.GetEnumerator() |
@@ -601,6 +977,7 @@ $sqlVolumeHeadroom = @($volumes | ForEach-Object {
     $headroomBytes = $availableBytes - $requiredBytes
     $availablePercent = if ($totalBytes -gt 0) { [double]($availableBytes * 100.0 / $totalBytes) } else { 0.0 }
     $fileTypes = @($filesOnVolume | ForEach-Object { [string]$_.type } | Sort-Object -Unique)
+    $spaceUsedBytesUnknown = @($filesOnVolume | Where-Object { $null -eq $_.space_used_bytes }).Count -gt 0
     $headroomStatus = if ($headroomBytes -gt 0 -and $availablePercent -ge $MinimumFreePercent) { "PASS" } else { "FAIL" }
     @{
         volume = $sqlVolume
@@ -613,7 +990,7 @@ $sqlVolumeHeadroom = @($volumes | ForEach-Object {
         database_file_types = $fileTypes
         database_file_count = [int]$filesOnVolume.Count
         database_file_size_bytes = [int64](($filesOnVolume | Measure-Object -Property size_bytes -Sum).Sum)
-        database_file_space_used_bytes = [int64](($filesOnVolume | Measure-Object -Property space_used_bytes -Sum).Sum)
+        database_file_space_used_bytes = if ($spaceUsedBytesUnknown) { $null } else { [int64](($filesOnVolume | Measure-Object -Property space_used_bytes -Sum).Sum) }
     }
 })
 if (-not ($sqlVolumeHeadroom | Where-Object { $_.database_file_types -contains "ROWS" })) {
@@ -627,107 +1004,107 @@ if (($sqlVolumeHeadroom | Where-Object { $_.headroom_status -ne "PASS" }).Count 
 }
 $historicalRunRows = @($historicalRunsQuery.Rows | ForEach-Object {
     [ordered]@{
-        mac_collector_run_id = [int64]$_.MacCollectorRunId
-        run_id = [string]$_.RunId
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        collection_context = [string]$_.CollectionContext
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
-        status = [string]$_.Status
+        mac_collector_run_id = Get-SqlRequiredInt64 $_ "collector.historical_runs" "MacCollectorRunId"
+        run_id = Get-SqlRequiredString $_ "collector.historical_runs" "RunId"
+        logical_due_bucket = Get-SqlRequiredInt64 $_ "collector.historical_runs" "LogicalDueBucket"
+        collection_context = Get-SqlRequiredString $_ "collector.historical_runs" "CollectionContext"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_runs" "StartedAtUtc") "collector.historical_runs" "StartedAtUtc"
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_runs" "CompletedAtUtc") "collector.historical_runs" "CompletedAtUtc"
+        status = Get-SqlRequiredString $_ "collector.historical_runs" "Status"
     }
 })
 $historicalTargetAuditRows = @($historicalTargetAuditsQuery.Rows | ForEach-Object {
     [ordered]@{
-        audit_id = [int64]$_.AuditId
-        run_id = [string]$_.RunId
-        target_identity = [string]$_.TargetIdentity
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        collection_context = [string]$_.CollectionContext
-        status = [string]$_.Status
-        http_attempts = [int]$_.HttpAttempts
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        audit_id = Get-SqlRequiredInt64 $_ "collector.historical_target_audits" "AuditId"
+        run_id = Get-SqlRequiredString $_ "collector.historical_target_audits" "RunId"
+        target_identity = Get-SqlRequiredString $_ "collector.historical_target_audits" "TargetIdentity"
+        logical_due_bucket = Get-SqlRequiredInt64 $_ "collector.historical_target_audits" "LogicalDueBucket"
+        collection_context = Get-SqlRequiredString $_ "collector.historical_target_audits" "CollectionContext"
+        status = Get-SqlRequiredString $_ "collector.historical_target_audits" "Status"
+        http_attempts = Get-SqlRequiredInt32 $_ "collector.historical_target_audits" "HttpAttempts"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_target_audits" "StartedAtUtc") "collector.historical_target_audits" "StartedAtUtc"
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_target_audits" "CompletedAtUtc") "collector.historical_target_audits" "CompletedAtUtc"
     }
 })
 $httpAttemptRows = @($httpAttemptHistoryQuery.Rows | ForEach-Object {
     [ordered]@{
-        http_attempt_id = [int64]$_.HttpAttemptId
-        audit_id = [int64]$_.AuditId
-        attempt_number = [int]$_.AttemptNumber
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
-        http_status = if ($null -eq $_.HttpStatus) { $null } else { [int]$_.HttpStatus }
-        outcome = [string]$_.Outcome
-        network_attempted = [bool]$_.NetworkAttempted
-        http_response_received = [bool]$_.HttpResponseReceived
-        provider_quota_status = [string]$_.ProviderQuotaStatus
-        joined_audit_id = if ($null -eq $_.JoinedAuditId) { $null } else { [int64]$_.JoinedAuditId }
-        run_id = [string]$_.RunId
-        target_identity = [string]$_.TargetIdentity
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        collection_context = [string]$_.CollectionContext
+        http_attempt_id = Get-SqlRequiredInt64 $_ "collector.http_attempt_history" "HttpAttemptId"
+        audit_id = Get-SqlRequiredInt64 $_ "collector.http_attempt_history" "AuditId"
+        attempt_number = Get-SqlRequiredInt32 $_ "collector.http_attempt_history" "AttemptNumber"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.http_attempt_history" "StartedAtUtc") "collector.http_attempt_history" "StartedAtUtc"
+        completed_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.http_attempt_history" "CompletedAtUtc") "collector.http_attempt_history" "CompletedAtUtc"
+        http_status = Get-SqlNullableInt32 $_ "collector.http_attempt_history" "HttpStatus"
+        outcome = Get-SqlRequiredString $_ "collector.http_attempt_history" "Outcome"
+        network_attempted = Get-SqlRequiredBoolean $_ "collector.http_attempt_history" "NetworkAttempted"
+        http_response_received = Get-SqlRequiredBoolean $_ "collector.http_attempt_history" "HttpResponseReceived"
+        provider_quota_status = Get-SqlRequiredString $_ "collector.http_attempt_history" "ProviderQuotaStatus"
+        joined_audit_id = Get-SqlNullableInt64 $_ "collector.http_attempt_history" "JoinedAuditId"
+        run_id = Get-SqlNullableString $_ "collector.http_attempt_history" "RunId"
+        target_identity = Get-SqlNullableString $_ "collector.http_attempt_history" "TargetIdentity"
+        logical_due_bucket = Get-SqlNullableInt64 $_ "collector.http_attempt_history" "LogicalDueBucket"
+        collection_context = Get-SqlNullableString $_ "collector.http_attempt_history" "CollectionContext"
     }
 })
 $firstHeartbeatRows = @($firstTiered50HeartbeatQuery.Rows | ForEach-Object {
     [ordered]@{
-        mac_collector_run_id = [int64]$_.MacCollectorRunId
-        run_id = [string]$_.RunId
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
-        status = [string]$_.Status
+        mac_collector_run_id = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat" "MacCollectorRunId"
+        run_id = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat" "RunId"
+        logical_due_bucket = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat" "LogicalDueBucket"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat" "StartedAtUtc") "collector.tiered50_first_heartbeat" "StartedAtUtc"
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat" "CompletedAtUtc") "collector.tiered50_first_heartbeat" "CompletedAtUtc"
+        status = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat" "Status"
     }
 })
 $firstHeartbeatTargetAuditRows = @($firstTiered50HeartbeatTargetAuditsQuery.Rows | ForEach-Object {
     [ordered]@{
-        audit_id = if ($null -eq $_.AuditId) { $null } else { [int64]$_.AuditId }
-        run_id = [string]$_.RunId
-        target_identity = [string]$_.TargetIdentity
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        collection_context = [string]$_.CollectionContext
-        status = [string]$_.Status
-        http_attempts = if ($null -eq $_.HttpAttempts) { $null } else { [int]$_.HttpAttempts }
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
+        audit_id = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat_target_audits" "AuditId"
+        run_id = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_target_audits" "RunId"
+        target_identity = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_target_audits" "TargetIdentity"
+        logical_due_bucket = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat_target_audits" "LogicalDueBucket"
+        collection_context = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_target_audits" "CollectionContext"
+        status = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_target_audits" "Status"
+        http_attempts = Get-SqlRequiredInt32 $_ "collector.tiered50_first_heartbeat_target_audits" "HttpAttempts"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat_target_audits" "StartedAtUtc") "collector.tiered50_first_heartbeat_target_audits" "StartedAtUtc"
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat_target_audits" "CompletedAtUtc") "collector.tiered50_first_heartbeat_target_audits" "CompletedAtUtc"
     }
 })
 $firstHeartbeatHttpAttemptRows = @($firstTiered50HeartbeatHttpAttemptsQuery.Rows | ForEach-Object {
     [ordered]@{
-        http_attempt_id = if ($null -eq $_.HttpAttemptId) { $null } else { [int64]$_.HttpAttemptId }
-        audit_id = if ($null -eq $_.AuditId) { $null } else { [int64]$_.AuditId }
-        attempt_number = if ($null -eq $_.AttemptNumber) { $null } else { [int]$_.AttemptNumber }
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
-        http_status = if ($null -eq $_.HttpStatus) { $null } else { [int]$_.HttpStatus }
-        outcome = [string]$_.Outcome
-        network_attempted = [bool]$_.NetworkAttempted
-        http_response_received = [bool]$_.HttpResponseReceived
-        provider_quota_status = [string]$_.ProviderQuotaStatus
-        joined_audit_id = if ($null -eq $_.JoinedAuditId) { $null } else { [int64]$_.JoinedAuditId }
-        run_id = [string]$_.RunId
-        target_identity = [string]$_.TargetIdentity
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        collection_context = [string]$_.CollectionContext
+        http_attempt_id = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat_http_attempts" "HttpAttemptId"
+        audit_id = Get-SqlRequiredInt64 $_ "collector.tiered50_first_heartbeat_http_attempts" "AuditId"
+        attempt_number = Get-SqlRequiredInt32 $_ "collector.tiered50_first_heartbeat_http_attempts" "AttemptNumber"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat_http_attempts" "StartedAtUtc") "collector.tiered50_first_heartbeat_http_attempts" "StartedAtUtc"
+        completed_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_first_heartbeat_http_attempts" "CompletedAtUtc") "collector.tiered50_first_heartbeat_http_attempts" "CompletedAtUtc"
+        http_status = Get-SqlNullableInt32 $_ "collector.tiered50_first_heartbeat_http_attempts" "HttpStatus"
+        outcome = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_http_attempts" "Outcome"
+        network_attempted = Get-SqlRequiredBoolean $_ "collector.tiered50_first_heartbeat_http_attempts" "NetworkAttempted"
+        http_response_received = Get-SqlRequiredBoolean $_ "collector.tiered50_first_heartbeat_http_attempts" "HttpResponseReceived"
+        provider_quota_status = Get-SqlRequiredString $_ "collector.tiered50_first_heartbeat_http_attempts" "ProviderQuotaStatus"
+        joined_audit_id = Get-SqlNullableInt64 $_ "collector.tiered50_first_heartbeat_http_attempts" "JoinedAuditId"
+        run_id = Get-SqlNullableString $_ "collector.tiered50_first_heartbeat_http_attempts" "RunId"
+        target_identity = Get-SqlNullableString $_ "collector.tiered50_first_heartbeat_http_attempts" "TargetIdentity"
+        logical_due_bucket = Get-SqlNullableInt64 $_ "collector.tiered50_first_heartbeat_http_attempts" "LogicalDueBucket"
+        collection_context = Get-SqlNullableString $_ "collector.tiered50_first_heartbeat_http_attempts" "CollectionContext"
     }
 })
 $historicalOutageRows = @($historicalOutageQuery.Rows | ForEach-Object {
     [ordered]@{
-        cutover_id = [int64]$_.CutoverId
-        cutover_key = [string]$_.CutoverKey
-        panel_version = [string]$_.PanelVersion
-        tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.Tiered50ActivationAtUtc
-        tiered50_activation_status = [string]$_.Tiered50ActivationStatus
-        recorded_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.RecordedAtUtc
+        cutover_id = Get-SqlRequiredInt64 $_ "collector.historical_outage" "CutoverId"
+        cutover_key = Get-SqlRequiredString $_ "collector.historical_outage" "CutoverKey"
+        panel_version = Get-SqlRequiredString $_ "collector.historical_outage" "PanelVersion"
+        tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_outage" "Tiered50ActivationAtUtc") "collector.historical_outage" "Tiered50ActivationAtUtc"
+        tiered50_activation_status = Get-SqlRequiredString $_ "collector.historical_outage" "Tiered50ActivationStatus"
+        recorded_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.historical_outage" "RecordedAtUtc") "collector.historical_outage" "RecordedAtUtc"
     }
 })
 $laterTiered50RunRows = @($laterTiered50RunsQuery.Rows | ForEach-Object {
     [ordered]@{
-        mac_collector_run_id = [int64]$_.MacCollectorRunId
-        run_id = [string]$_.RunId
-        logical_due_bucket = [int64]$_.LogicalDueBucket
-        started_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.StartedAtUtc
-        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.CompletedAtUtc
-        status = [string]$_.Status
+        mac_collector_run_id = Get-SqlRequiredInt64 $_ "collector.tiered50_later_runs" "MacCollectorRunId"
+        run_id = Get-SqlRequiredString $_ "collector.tiered50_later_runs" "RunId"
+        logical_due_bucket = Get-SqlRequiredInt64 $_ "collector.tiered50_later_runs" "LogicalDueBucket"
+        started_at_utc = Convert-SqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_later_runs" "StartedAtUtc") "collector.tiered50_later_runs" "StartedAtUtc"
+        completed_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 (Get-SqlFieldValue $_ "collector.tiered50_later_runs" "CompletedAtUtc") "collector.tiered50_later_runs" "CompletedAtUtc"
+        status = Get-SqlRequiredString $_ "collector.tiered50_later_runs" "Status"
     }
 })
 $firstHeartbeatRunIdCrossCheck = if ($firstHeartbeatRows.Count -eq 1) { [string]$firstHeartbeatRows[0].run_id } else { "" }
@@ -946,10 +1323,10 @@ $payload = [ordered]@{
         status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }
         read_only = $true
         execution_path = "WINDOWS_INTEGRATED_AUTH"
-        server_name = [string]$identity[0].ServerName
-        sql_instance_identity = @{ server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; database_name = [string]$identity[0].DatabaseName }
-        database_name = [string]$identity[0].DatabaseName
-        effective_login = [string]$identity[0].LoginName
+        server_name = $identityServerName
+        sql_instance_identity = @{ server_name = $identityServerName; machine_name = $identityMachineName; instance_name = $identityInstanceName; database_name = $identityDatabaseName }
+        database_name = $identityDatabaseName
+        effective_login = $identityLoginName
         captured_at_utc = $captured
         required_check_ids = @(
             "admin.identity", "admin.permissions", "capacity.database_files",
@@ -972,35 +1349,35 @@ $payload = [ordered]@{
     sql = [ordered]@{
         admin_authorization = @{ status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; permission_checks = $permissionChecks; audit_history_proven = $auditHistoryProven }
         admin_connection = @{ status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; authorization_status = if ($adminAuthorizationProven) { "PASS" } else { "NOT_PROVEN" }; tls = $tlsEvidence }
-        identity = @{ status = "PASS"; server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; configured_server_name = [string]$identity[0].ConfiguredServerName; database_name = [string]$identity[0].DatabaseName; login_name = [string]$identity[0].LoginName; captured_at_utc = $captured; sql_instance_identity = @{ server_name = [string]$identity[0].ServerName; machine_name = [string]$identity[0].MachineName; instance_name = [string]$identity[0].InstanceName; database_name = [string]$identity[0].DatabaseName } }
-        admin_identity_gate = @{ status = "PASS"; effective_login = [string]$identity[0].LoginName; runtime_login_match = $false }
+        identity = @{ status = "PASS"; server_name = $identityServerName; machine_name = $identityMachineName; instance_name = $identityInstanceName; configured_server_name = $identityConfiguredServerName; database_name = $identityDatabaseName; login_name = $identityLoginName; captured_at_utc = $captured; sql_instance_identity = @{ server_name = $identityServerName; machine_name = $identityMachineName; instance_name = $identityInstanceName; database_name = $identityDatabaseName } }
+        admin_identity_gate = @{ status = "PASS"; effective_login = $identityLoginName; runtime_login_match = $false }
         admin_permissions = @{ status = if ($permissionsProven) { "PASS" } else { "NOT_PROVEN" }; product_major_version = $productMajorVersion; permission_checks = $permissionChecks; missing_permissions = $missingPermissions; tls = $tlsEvidence }
-        runtime_health = @{ status = "PASS"; database_name = [string]$runtimeHealth[0].database_name; database_status = [string]$runtimeHealth[0].database_status; recovery_model = [string]$runtimeHealth[0].recovery_model; evidence = @{ status = "PASS" } }
-        database_files = @($databaseFileDetails | ForEach-Object { @{ name = [string]$_.name; type = [string]$_.type; size_pages = [int64]$_.size_pages; growth = [int]$_.growth; is_percent_growth = [bool]$_.is_percent_growth; max_size_pages = [int64]$_.max_size_pages; space_used_pages = [int64]$_.space_used_pages; size_bytes = [int64]$_.size_bytes; space_used_bytes = [int64]$_.space_used_bytes } })
+        runtime_health = @{ status = "PASS"; database_name = $runtimeHealth[0].database_name; database_status = $runtimeHealth[0].database_status; recovery_model = $runtimeHealth[0].recovery_model; evidence = @{ status = "PASS" } }
+        database_files = @($databaseFileDetails | ForEach-Object { @{ name = $_.name; type = $_.type; size_pages = $_.size_pages; growth = $_.growth; is_percent_growth = $_.is_percent_growth; max_size_pages = $_.max_size_pages; space_used_pages = $_.space_used_pages; size_bytes = $_.size_bytes; space_used_bytes = $_.space_used_bytes } })
         database_files_evidence = @{ status = "PASS" }
-        volume_capacity = @($volumes | ForEach-Object { @{ volume = [string]$_.volume_mount_point; total_bytes = [int64]$_.total_bytes; available_bytes = [int64]$_.available_bytes } })
+        volume_capacity = @($volumes | ForEach-Object { @{ volume = $_.volume_mount_point; total_bytes = $_.total_bytes; available_bytes = $_.available_bytes } })
         volume_capacity_evidence = @{ status = "PASS" }
-        log_space = @{ total_bytes = [int64]$logSpace[0].total_log_size_in_bytes; used_bytes = [int64]$logSpace[0].used_log_space_in_bytes; used_percent = [double]$logSpace[0].used_log_space_in_percent }
+        log_space = @{ total_bytes = $logSpace[0].total_log_size_in_bytes; used_bytes = $logSpace[0].used_log_space_in_bytes; used_percent = [double]$logSpace[0].used_log_space_in_percent }
         log_space_evidence = @{ status = "PASS" }
         backup_verifyonly = @{ status = "PASS"; checksum_verified = $true; media_count = [int]$backupMedia.Count; cause_classification = "VERIFIED" }
         backup_gate = @{ status = "PASS" }
         capacity_gate = @{ status = "PASS" }
         log_space_gate = @{ status = "PASS" }
-        quota_integrity = @{ status = "PASS"; state_available = $true; source_kind = [string]$quota[0].SourceKind; month_key = [string]$quota[0].MonthKey; accounting_status = [string]$quota[0].AccountingStatus; known_total = [int64]$quota[0].KnownTotal; reserved_shared_usage = [int64]$quota[0].ReservedSharedUsage }
-        latest_full_backup = @{ backup_set_id = [int64]$backup[0].backup_set_id; media_set_id = [int64]$backup[0].media_set_id; backup_finish_date = [string]$backup[0].backup_finish_date; copy_only = [bool]$backup[0].is_copy_only; has_backup_checksums = [bool]$backup[0].has_backup_checksums; compressed_backup_size = [int64]$backup[0].compressed_backup_size; media_count = [int]$backupMedia.Count; complete_media_set_proven = $true }
+        quota_integrity = @{ status = "PASS"; state_available = $true; source_kind = $quota[0].SourceKind; month_key = $quota[0].MonthKey; accounting_status = $quota[0].AccountingStatus; known_total = $quota[0].KnownTotal; reserved_shared_usage = $quota[0].ReservedSharedUsage }
+        latest_full_backup = @{ backup_set_id = $backup[0].backup_set_id; media_set_id = $backup[0].media_set_id; backup_finish_date = $backup[0].backup_finish_date; copy_only = $backup[0].is_copy_only; has_backup_checksums = $backup[0].has_backup_checksums; compressed_backup_size = $backup[0].compressed_backup_size; media_count = [int]$backupMedia.Count; complete_media_set_proven = $true }
         latest_full_backup_evidence = @{ status = "PASS" }
         latest_full_backup_media_evidence = @{ status = "PASS"; media_count = [int]$backupMedia.Count }
-        tiered50_materialization = @{ status = "PASS"; target_count = [int64]$materialization[0].TargetCount; active_count = [int64]$materialization[0].ActiveCount }
+        tiered50_materialization = @{ status = "PASS"; target_count = $materialization[0].TargetCount; active_count = $materialization[0].ActiveCount }
         tiered50_audit_history_evidence = @{ status = $historicalTargetAuditsEvidence.status; statement_id = $historicalTargetAuditsEvidence.statement_id; executed = $historicalTargetAuditsEvidence.executed; result_count = $historicalTargetAuditsEvidence.result_count; captured_at_utc = $historicalTargetAuditsEvidence.captured_at_utc; check_status = $historicalTargetAuditsCheckStatus; reason = $historicalTargetAuditsEvidence.reason }
         recent_http_attempts_evidence = @{ status = $httpAttemptHistoryEvidence.status; statement_id = $httpAttemptHistoryEvidence.statement_id; executed = $httpAttemptHistoryEvidence.executed; result_count = $httpAttemptHistoryEvidence.result_count; captured_at_utc = $httpAttemptHistoryEvidence.captured_at_utc; check_status = $httpAttemptHistoryCheckStatus; reason = if ($httpAttemptHistoryReason) { $httpAttemptHistoryReason } else { $httpAttemptHistoryEvidence.reason } }
         first_tiered50_heartbeat_target_audits_evidence = @{ status = $firstTiered50HeartbeatTargetAuditsEvidence.status; statement_id = $firstTiered50HeartbeatTargetAuditsEvidence.statement_id; executed = $firstTiered50HeartbeatTargetAuditsEvidence.executed; result_count = $firstTiered50HeartbeatTargetAuditsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatTargetAuditsEvidence.captured_at_utc; check_status = $firstHeartbeatTargetAuditsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = if ($firstHeartbeatTargetAuditsReason) { $firstHeartbeatTargetAuditsReason } else { $firstTiered50HeartbeatTargetAuditsEvidence.reason } }
         first_tiered50_heartbeat_http_attempts_evidence = @{ status = $firstTiered50HeartbeatHttpAttemptsEvidence.status; statement_id = $firstTiered50HeartbeatHttpAttemptsEvidence.statement_id; executed = $firstTiered50HeartbeatHttpAttemptsEvidence.executed; result_count = $firstTiered50HeartbeatHttpAttemptsEvidence.result_count; captured_at_utc = $firstTiered50HeartbeatHttpAttemptsEvidence.captured_at_utc; check_status = $firstHeartbeatHttpAttemptsCheckStatus; run_id = $firstHeartbeatRunIdCrossCheck; reason = if ($firstHeartbeatHttpAttemptsReason) { $firstHeartbeatHttpAttemptsReason } else { $firstTiered50HeartbeatHttpAttemptsEvidence.reason } }
         first_tiered50_heartbeat_reconciliation = $firstHeartbeatReconciliation
-        production_cutover_history = @($cutoverHistory | ForEach-Object { @{ cutover_key = [string]$_.CutoverKey; panel_version = [string]$_.PanelVersion; tiered50_activation_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.Tiered50ActivationAtUtc; tiered50_activation_status = [string]$_.Tiered50ActivationStatus; recorded_at_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.RecordedAtUtc } })
+        production_cutover_history = @($cutoverHistory | ForEach-Object { @{ cutover_key = $_.cutover_key; panel_version = $_.panel_version; tiered50_activation_at_utc = $_.tiered50_activation_at_utc; tiered50_activation_status = $_.tiered50_activation_status; recorded_at_utc = $_.recorded_at_utc } })
         production_cutover_history_evidence = @{ status = $cutoverHistoryEvidence.status; statement_id = $cutoverHistoryEvidence.statement_id; executed = $cutoverHistoryEvidence.executed; result_count = [int64]$cutoverHistory.Count; captured_at_utc = $cutoverHistoryEvidence.captured_at_utc; check_status = $cutoverHistoryCheckStatus; reason = $cutoverHistoryEvidence.reason }
-        competing_production_writers = @($competingWriters | ForEach-Object { @{ collection_context = [string]$_.CollectionContext; running_count = [int64]$_.RunningCount } })
+        competing_production_writers = @($competingWriters | ForEach-Object { @{ collection_context = $_.CollectionContext; running_count = $_.RunningCount } })
         competing_production_writers_evidence = @{ status = "PASS" }
-        current_quota_ledger = @($currentQuotaLedger | ForEach-Object { @{ month_key = [string]$_.MonthKey; provider_quota_ceiling = [int64]$_.ProviderQuotaCeiling; normal_operational_maximum = [int64]$_.NormalOperationalMaximum; retry_protection_boundary = [int64]$_.RetryProtectionBoundary; confirmed_provider_attempts = [int64]$_.ConfirmedProviderAttempts; conservative_unknown_attempts = [int64]$_.ConservativeUnknownAttempts; reserved_shared_usage = [int64]$_.ExplicitSharedConsumerReservedAttempts; accounting_status = [string]$_.AccountingStatus; includes_all_shared_consumers = [bool]$_.IncludesAllSharedConsumers; provider_period_start_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.ProviderPeriodStartUtc; provider_period_end_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.ProviderPeriodEndUtc; local_usage_included_through_utc = Convert-NullableSqlUtcDateTimeToIso8601 $_.LocalUsageIncludedThroughUtc; source_evidence_hash = [string]$_.SourceEvidenceHash; reconciliation_key = [string]$_.ReconciliationKey } })
+        current_quota_ledger = @($currentQuotaLedger | ForEach-Object { @{ month_key = $_.month_key; provider_quota_ceiling = $_.provider_quota_ceiling; normal_operational_maximum = $_.normal_operational_maximum; retry_protection_boundary = $_.retry_protection_boundary; confirmed_provider_attempts = $_.confirmed_provider_attempts; conservative_unknown_attempts = $_.conservative_unknown_attempts; reserved_shared_usage = $_.reserved_shared_usage; accounting_status = $_.accounting_status; includes_all_shared_consumers = $_.includes_all_shared_consumers; provider_period_start_utc = $_.provider_period_start_utc; provider_period_end_utc = $_.provider_period_end_utc; local_usage_included_through_utc = $_.local_usage_included_through_utc; source_evidence_hash = $_.source_evidence_hash; reconciliation_key = $_.reconciliation_key } })
         current_quota_ledger_evidence = @{ status = "PASS" }
         windows_vm_disk = @{ status = "PASS"; minimum_free_percent = $MinimumFreePercent; minimum_free_reserve_bytes = $MinimumFreeReserveBytes; volumes = $windowsDisk; sql_volume_headroom = $sqlVolumeHeadroom }
         audit_provenance = [ordered]@{
