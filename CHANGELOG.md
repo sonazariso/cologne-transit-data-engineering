@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Corrected Windows backup evidence discovery so one-row backup-media results
+  remain a predictable collection across Windows PowerShell versions. The
+  capture now validates selected full-backup history, media presence, path
+  completeness, family ordering, and disk device types independently, while
+  classifying server-side file-access and `RESTORE VERIFYONLY WITH CHECKSUM`
+  failures without retaining physical backup paths. Added focused regression
+  coverage for COPY_ONLY backups, empty or malformed history, NULL paths,
+  multiple media families, unsupported devices, ordering errors, inaccessible
+  files, and failed verification.
 - Corrected the Windows `Invoke-ReadOnlySql` result boundary to retain zero-,
   one-, and multi-row `System.Data.DataRow` results in a non-enumerating
   collection, preserving complete rows for every evidence query and allowing

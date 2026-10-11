@@ -405,11 +405,184 @@ function Get-SanitizedSqlError([object] $ErrorRecord) {
         [string]$ErrorRecord
     }
     $reason = [regex]::Replace($reason, '(?i)(password|secret|token|apikey|credential)\s*[=:]\s*[^,;\s]+', '$1=<redacted>')
+    # SQL Server error text can include UNC backup paths.  Redact those before
+    # the diagnostic reaches a console, log, or review artifact.
+    $reason = [regex]::Replace($reason, '(?i)\\\\[^''"]+', '<path redacted>')
     $reason = [regex]::Replace($reason, '(?i)(?:[A-Za-z]:[\\/]|/)[^\s'']+', '<path redacted>')
     if ($reason.Length -gt 500) {
         return $reason.Substring(0, 500)
     }
     return $reason
+}
+
+function Convert-BackupHistoryRows([object[]] $Rows) {
+    $selectedRows = @($Rows)
+    if ($selectedRows.Count -eq 0) {
+        return ,([object[]]@())
+    }
+    if ($selectedRows.Count -ne 1) {
+        throw ("BACKUP_HISTORY_MULTIPLE: expected exactly one selected full-backup record; returned {0}" -f $selectedRows.Count)
+    }
+
+    try {
+        $row = $selectedRows[0]
+        foreach ($fieldName in @(
+            "backup_set_id", "media_set_id", "backup_finish_date",
+            "is_copy_only", "has_backup_checksums", "compressed_backup_size"
+        )) {
+            if ($null -eq $row.PSObject.Properties[$fieldName]) {
+                throw ("selected full-backup record is missing field '{0}'" -f $fieldName)
+            }
+        }
+        $normalized = [pscustomobject]@{
+            backup_set_id = Get-SqlRequiredInt64 $row "backup.latest_full_backup_history" "backup_set_id"
+            media_set_id = Get-SqlRequiredInt64 $row "backup.latest_full_backup_history" "media_set_id"
+            backup_finish_date = Convert-SqlRequiredSourceText (Get-SqlFieldValue $row "backup.latest_full_backup_history" "backup_finish_date") "backup.latest_full_backup_history" "backup_finish_date"
+            is_copy_only = Get-SqlRequiredBoolean $row "backup.latest_full_backup_history" "is_copy_only"
+            has_backup_checksums = Get-SqlRequiredBoolean $row "backup.latest_full_backup_history" "has_backup_checksums"
+            compressed_backup_size = Get-SqlRequiredInt64 $row "backup.latest_full_backup_history" "compressed_backup_size"
+        }
+        $normalizedRows = @($normalized)
+        return ,($normalizedRows)
+    } catch {
+        throw ("BACKUP_HISTORY_MALFORMED: selected full-backup record could not be normalized; {0}" -f (Get-SanitizedSqlError $_))
+    }
+}
+
+function Convert-BackupMediaRows([object[]] $Rows) {
+    $normalizedRows = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($row in @($Rows)) {
+        try {
+            foreach ($fieldName in @("family_sequence_number", "physical_device_name", "device_type")) {
+                if ($null -eq $row.PSObject.Properties[$fieldName]) {
+                    throw ("selected backup-media record is missing field '{0}'" -f $fieldName)
+                }
+            }
+            [void]$normalizedRows.Add([pscustomobject]@{
+                family_sequence_number = Get-SqlRequiredInt64 $row "backup.latest_full_backup_media_set" "family_sequence_number"
+                physical_device_name = Convert-SqlNullableString (Get-SqlFieldValue $row "backup.latest_full_backup_media_set" "physical_device_name") "backup.latest_full_backup_media_set" "physical_device_name"
+                device_type = Get-SqlRequiredInt32 $row "backup.latest_full_backup_media_set" "device_type"
+            })
+        } catch {
+            throw ("BACKUP_MEDIA_MALFORMED: selected backup-media record could not be normalized; {0}" -f (Get-SanitizedSqlError $_))
+        }
+    }
+    return ,($normalizedRows.ToArray())
+}
+
+function Get-BackupVerifyOnlyFailureClassification([string] $Reason) {
+    if ([string]::IsNullOrWhiteSpace($Reason)) {
+        return "RESTORE_VERIFYONLY_FAILED"
+    }
+    if ($Reason -match '(?i)\b3201\b|cannot open backup device|access is denied|file not found|path not found|network name cannot be found|could not locate|failed to open') {
+        return "BACKUP_FILE_INACCESSIBLE_TO_SQL_SERVER"
+    }
+    return "RESTORE_VERIFYONLY_FAILED"
+}
+
+function Get-BackupMetadataValidation([object[]] $Backup, [object[]] $BackupMedia) {
+    $result = [ordered]@{
+        status = "NOT_PROVEN"
+        failure_code = $null
+        reason = $null
+    }
+    if ($null -eq $Backup) {
+        $result.failure_code = "BACKUP_HISTORY_NOT_RETURNED"
+        $result.reason = "full-backup history collection was null"
+        return [pscustomobject]$result
+    }
+    $backupRows = @($Backup)
+    if ($backupRows.Count -eq 0) {
+        $result.failure_code = "BACKUP_HISTORY_EMPTY"
+        $result.reason = "no full-backup history record was returned"
+        return [pscustomobject]$result
+    }
+    if ($backupRows.Count -gt 1) {
+        $result.failure_code = "BACKUP_HISTORY_MULTIPLE"
+        $result.reason = "multiple selected full-backup records were returned"
+        return [pscustomobject]$result
+    }
+    if ($backupRows.Count -ne 1) {
+        $result.failure_code = "BACKUP_HISTORY_MALFORMED"
+        $result.reason = "selected full-backup record count was not exactly one"
+        return [pscustomobject]$result
+    }
+    foreach ($fieldName in @(
+        "backup_set_id", "media_set_id", "backup_finish_date",
+        "is_copy_only", "has_backup_checksums", "compressed_backup_size"
+    )) {
+        if ($null -eq $backupRows[0].PSObject.Properties[$fieldName]) {
+            $result.failure_code = "BACKUP_HISTORY_MALFORMED"
+            $result.reason = ("selected full-backup record is missing field '{0}'" -f $fieldName)
+            return [pscustomobject]$result
+        }
+        if (Test-SqlNullValue $backupRows[0].PSObject.Properties[$fieldName].Value) {
+            $result.failure_code = "BACKUP_HISTORY_MALFORMED"
+            $result.reason = ("selected full-backup record has SQL NULL in field '{0}'" -f $fieldName)
+            return [pscustomobject]$result
+        }
+    }
+    if ($null -eq $BackupMedia) {
+        $result.failure_code = "BACKUP_MEDIA_ROWS_MISSING"
+        $result.reason = "backup-media collection was null"
+        return [pscustomobject]$result
+    }
+    $mediaRows = @($BackupMedia)
+    if ($mediaRows.Count -eq 0) {
+        $result.failure_code = "BACKUP_MEDIA_ROWS_MISSING"
+        $result.reason = "no backup-media rows were returned for the selected full backup"
+        return [pscustomobject]$result
+    }
+    foreach ($row in $mediaRows) {
+        foreach ($fieldName in @("family_sequence_number", "physical_device_name", "device_type")) {
+            if ($null -eq $row.PSObject.Properties[$fieldName]) {
+                $result.failure_code = "BACKUP_MEDIA_MALFORMED"
+                $result.reason = ("selected backup-media record is missing field '{0}'" -f $fieldName)
+                return [pscustomobject]$result
+            }
+        }
+        if (Test-SqlNullValue $row.family_sequence_number -or Test-SqlNullValue $row.device_type) {
+            $result.failure_code = "BACKUP_MEDIA_MALFORMED"
+            $result.reason = "selected backup-media record has a NULL sequence or device type"
+            return [pscustomobject]$result
+        }
+    }
+    $missingPaths = @(
+        $mediaRows | Where-Object {
+            Test-SqlNullValue $_.physical_device_name -or
+            [string]::IsNullOrWhiteSpace([string]$_.physical_device_name)
+        }
+    )
+    if ($missingPaths.Count -gt 0) {
+        $result.failure_code = "BACKUP_MEDIA_PATH_MISSING"
+        $result.reason = ("{0} backup-media row(s) had a NULL or blank physical media path" -f $missingPaths.Count)
+        return [pscustomobject]$result
+    }
+    $invalidOrdering = $false
+    $previousSequence = $null
+    for ($index = 0; $index -lt [int]$mediaRows.Count; $index++) {
+        $sequence = [int64]$mediaRows[$index].family_sequence_number
+        $expectedSequence = [int64]($index + 1)
+        if ($sequence -ne $expectedSequence -or
+            ($null -ne $previousSequence -and $sequence -le $previousSequence)) {
+            $invalidOrdering = $true
+            break
+        }
+        $previousSequence = $sequence
+    }
+    if ($invalidOrdering) {
+        $result.failure_code = "BACKUP_MEDIA_ORDER_INVALID"
+        $result.reason = "backup-media family sequence numbers were not contiguous and ascending"
+        return [pscustomobject]$result
+    }
+    $unsupportedDevices = @($mediaRows | Where-Object { [int]$_.device_type -ne 2 })
+    if ($unsupportedDevices.Count -gt 0) {
+        $result.failure_code = "BACKUP_MEDIA_DEVICE_UNSUPPORTED"
+        $result.reason = "only disk backup media (device_type 2) are supported"
+        return [pscustomobject]$result
+    }
+    $result.status = "PASS"
+    return [pscustomobject]$result
 }
 
 function New-NotExecutedAuditQuery([string] $StatementId, [string] $Reason) {
@@ -653,7 +826,13 @@ $databaseFileDetails = @($databaseFiles | ForEach-Object {
 $runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status, DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model;" "admin.sql_runtime_health"
 $volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;" "capacity.volume_capacity_dm_os_volume_stats"
 $logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();" "capacity.database_log_space_dm_db_log_space_usage"
-$backup = Invoke-ReadOnlySql "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;" "backup.latest_full_backup_history"
+$backupHistoryRows = try {
+    # TOP (2) lets the fail-closed selection distinguish one selected record
+    # from multiple records without materializing unbounded backup history.
+    Invoke-ReadOnlySql "SELECT TOP (2) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;" "backup.latest_full_backup_history"
+} catch {
+    throw ("BACKUP_HISTORY_QUERY_FAILED: {0}" -f (Get-SanitizedSqlError $_))
+}
 $materialization = Invoke-ReadOnlySql "SELECT COUNT_BIG(*) AS TargetCount, COALESCE(SUM(CASE WHEN IsEnabled = 1 THEN 1 ELSE 0 END), 0) AS ActiveCount FROM ctl.MddMacTiered50ProductionTarget WHERE PanelVersion = 'TIERED50_PANEL_V1' AND SamplingEra = 'Tiered50';" "collector_runtime_history_or_materialization"
 $runtimeHealth = @($runtimeHealth | ForEach-Object {
     [pscustomobject]@{
@@ -676,16 +855,6 @@ $logSpace = @($logSpace | ForEach-Object {
         used_log_space_in_percent = Get-SqlRequiredDecimal $_ "capacity.database_log_space_dm_db_log_space_usage" "used_log_space_in_percent"
     }
 })
-$backup = @($backup | ForEach-Object {
-    [pscustomobject]@{
-        backup_set_id = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "backup_set_id"
-        media_set_id = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "media_set_id"
-        backup_finish_date = Convert-SqlRequiredSourceText (Get-SqlFieldValue $_ "backup.latest_full_backup_history" "backup_finish_date") "backup.latest_full_backup_history" "backup_finish_date"
-        is_copy_only = Get-SqlRequiredBoolean $_ "backup.latest_full_backup_history" "is_copy_only"
-        has_backup_checksums = Get-SqlRequiredBoolean $_ "backup.latest_full_backup_history" "has_backup_checksums"
-        compressed_backup_size = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_history" "compressed_backup_size"
-    }
-})
 $materialization = @($materialization | ForEach-Object {
     [pscustomobject]@{
         TargetCount = Get-SqlRequiredInt64 $_ "collector_runtime_history_or_materialization" "TargetCount"
@@ -693,17 +862,22 @@ $materialization = @($materialization | ForEach-Object {
     }
 })
 $backupMediaQueryExecuted = $false
-$backupMedia = if ($backup.Count -eq 1) {
+$backup = @($backupHistoryRows)
+if ($backupHistoryRows.Count -eq 1) {
+    $backup = Convert-BackupHistoryRows $backupHistoryRows
     $backupMediaQueryExecuted = $true
     $mediaSetId = [int64]$backup[0].media_set_id
-    $mediaRows = Invoke-ReadOnlySql ("SELECT family_sequence_number, physical_device_name FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f $mediaSetId) "backup.latest_full_backup_media_set"
-    @($mediaRows | ForEach-Object {
-        [pscustomobject]@{
-            family_sequence_number = Get-SqlRequiredInt64 $_ "backup.latest_full_backup_media_set" "family_sequence_number"
-            physical_device_name = Get-SqlRequiredString $_ "backup.latest_full_backup_media_set" "physical_device_name"
-        }
-    })
-} else { @() }
+    try {
+        $mediaRows = Invoke-ReadOnlySql ("SELECT family_sequence_number, physical_device_name, device_type FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f $mediaSetId) "backup.latest_full_backup_media_set"
+    } catch {
+        throw ("BACKUP_MEDIA_QUERY_FAILED: {0}" -f (Get-SanitizedSqlError $_))
+    }
+    # Convert-BackupMediaRows returns a unary-comma System.Object[] so a
+    # one-row media result is not unwrapped by Windows PowerShell 5.1.
+    $backupMedia = Convert-BackupMediaRows $mediaRows
+} else {
+    $backupMedia = @()
+}
 $cutoverHistoryQuery = Invoke-AuditedReadOnlySql "collector.production_cutover_history" "SELECT CutoverKey, PanelVersion, Tiered50ActivationAtUtc, Tiered50ActivationStatus, RecordedAtUtc FROM ctl.MddMacProductionCutover WHERE PanelVersion = 'TIERED50_PANEL_V1' ORDER BY CutoverId;"
 $cutoverHistory = @($cutoverHistoryQuery.Rows | ForEach-Object {
     [ordered]@{
@@ -896,8 +1070,9 @@ if ($historicalRunsEvidence.status -eq "PASS") {
     $permissionChecks.operational_history_database_select = Resolve-PermissionState $permissionChecks.operational_history_database_select $true
 }
 
-if ($null -eq $backup -or $backup.Count -ne 1 -or $backupMedia.Count -lt 1 -or ($backupMedia | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.physical_device_name) }).Count -gt 0) {
-    throw "No native full backup path was available for server-side VERIFYONLY"
+$backupValidation = Get-BackupMetadataValidation $backup $backupMedia
+if ($backupValidation.status -ne "PASS") {
+    throw ("{0}: {1}" -f $backupValidation.failure_code, $backupValidation.reason)
 }
 if ($databaseFiles.Count -eq 0 -or $runtimeHealth.Count -ne 1 -or $runtimeHealth[0].database_status -ne "ONLINE" -or [string]::IsNullOrWhiteSpace([string]$runtimeHealth[0].recovery_model) -or $volumes.Count -eq 0 -or $logSpace.Count -ne 1) {
     throw "SQL capacity evidence was incomplete"
@@ -921,7 +1096,13 @@ if (($competingWriters | Where-Object { [int64]$_.RunningCount -gt 0 }).Count -g
 # VERIFYONLY is executed by SQL Server, not by the Windows client.  Its path
 # and diagnostic text never enter the sanitized JSON payload.
 $backupMediaClauses = @($backupMedia | ForEach-Object { "DISK = N'{0}'" -f ([string]$_.physical_device_name).Replace("'", "''") })
-Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) "backup.restore_verifyonly_with_checksum" | Out-Null
+try {
+    Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) "backup.restore_verifyonly_with_checksum" | Out-Null
+} catch {
+    $verifyOnlyReason = Get-SanitizedSqlError $_
+    $verifyOnlyClassification = Get-BackupVerifyOnlyFailureClassification $verifyOnlyReason
+    throw ("{0}: server-side RESTORE VERIFYONLY WITH CHECKSUM did not pass; {1}" -f $verifyOnlyClassification, $verifyOnlyReason)
+}
 $permissionChecks.backup_verifyonly_authorization = Resolve-PermissionState $permissionChecks.backup_verifyonly_authorization $true
 
 $missingPermissions = @(
@@ -1361,6 +1542,7 @@ $payload = [ordered]@{
         log_space_evidence = @{ status = "PASS" }
         backup_verifyonly = @{ status = "PASS"; checksum_verified = $true; media_count = [int]$backupMedia.Count; cause_classification = "VERIFIED" }
         backup_gate = @{ status = "PASS" }
+        backup_metadata_validation = @{ status = $backupValidation.status; failure_code = $backupValidation.failure_code; reason = $backupValidation.reason; media_count = [int]$backupMedia.Count; disk_media_only = $true; media_order = "CONTIGUOUS_ASCENDING"; paths_present = $true }
         capacity_gate = @{ status = "PASS" }
         log_space_gate = @{ status = "PASS" }
         quota_integrity = @{ status = "PASS"; state_available = $true; source_kind = $quota[0].SourceKind; month_key = $quota[0].MonthKey; accounting_status = $quota[0].AccountingStatus; known_total = $quota[0].KnownTotal; reserved_shared_usage = $quota[0].ReservedSharedUsage }
