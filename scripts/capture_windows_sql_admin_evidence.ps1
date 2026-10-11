@@ -470,6 +470,15 @@ function Convert-BackupMediaRows([object[]] $Rows) {
     return ,($normalizedRows.ToArray())
 }
 
+function Test-BackupMediaPathMissing([object] $Value) {
+    # Keep the SQL DBNull/PowerShell-null check separate from the string check.
+    # The explicit Boolean values prevent PowerShell from treating -or as an
+    # additional argument to Test-SqlNullValue.
+    $isSqlNull = (Test-SqlNullValue $Value)
+    $isBlankString = ([string]::IsNullOrWhiteSpace([string]$Value))
+    return ([bool]$isSqlNull -or [bool]$isBlankString)
+}
+
 function Get-BackupVerifyOnlyFailureClassification([string] $Reason) {
     if ([string]::IsNullOrWhiteSpace($Reason)) {
         return "RESTORE_VERIFYONLY_FAILED"
@@ -541,7 +550,8 @@ function Get-BackupMetadataValidation([object[]] $Backup, [object[]] $BackupMedi
                 return [pscustomobject]$result
             }
         }
-        if (Test-SqlNullValue $row.family_sequence_number -or Test-SqlNullValue $row.device_type) {
+        if ((Test-SqlNullValue $row.family_sequence_number) -or
+            (Test-SqlNullValue $row.device_type)) {
             $result.failure_code = "BACKUP_MEDIA_MALFORMED"
             $result.reason = "selected backup-media record has a NULL sequence or device type"
             return [pscustomobject]$result
@@ -549,8 +559,7 @@ function Get-BackupMetadataValidation([object[]] $Backup, [object[]] $BackupMedi
     }
     $missingPaths = @(
         $mediaRows | Where-Object {
-            Test-SqlNullValue $_.physical_device_name -or
-            [string]::IsNullOrWhiteSpace([string]$_.physical_device_name)
+            Test-BackupMediaPathMissing $_.physical_device_name
         }
     )
     if ($missingPaths.Count -gt 0) {
@@ -583,6 +592,26 @@ function Get-BackupMetadataValidation([object[]] $Backup, [object[]] $BackupMedi
     }
     $result.status = "PASS"
     return [pscustomobject]$result
+}
+
+function Invoke-BackupVerifyOnly([object[]] $BackupMedia) {
+    # VERIFYONLY is executed by SQL Server, not by the Windows client.  The
+    # generated query is never written to sanitized evidence or diagnostics.
+    $backupMediaClauses = @(
+        $BackupMedia | ForEach-Object {
+            "DISK = N'{0}'" -f ([string]$_.physical_device_name).Replace("'", "''")
+        }
+    )
+    if ($backupMediaClauses.Count -eq 0) {
+        throw "BACKUP_MEDIA_ROWS_MISSING: no backup-media rows were available for RESTORE VERIFYONLY"
+    }
+    try {
+        Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) "backup.restore_verifyonly_with_checksum" | Out-Null
+    } catch {
+        $verifyOnlyReason = Get-SanitizedSqlError $_
+        $verifyOnlyClassification = Get-BackupVerifyOnlyFailureClassification $verifyOnlyReason
+        throw ("{0}: server-side RESTORE VERIFYONLY WITH CHECKSUM did not pass; {1}" -f $verifyOnlyClassification, $verifyOnlyReason)
+    }
 }
 
 function New-NotExecutedAuditQuery([string] $StatementId, [string] $Reason) {
@@ -827,9 +856,10 @@ $runtimeHealth = Invoke-ReadOnlySql "SELECT DB_NAME() AS database_name, DATABASE
 $volumes = Invoke-ReadOnlySql "SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes FROM sys.database_files AS df CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs ORDER BY vs.volume_mount_point;" "capacity.volume_capacity_dm_os_volume_stats"
 $logSpace = Invoke-ReadOnlySql "SELECT total_log_size_in_bytes, used_log_space_in_bytes, used_log_space_in_percent FROM sys.dm_db_log_space_usage WHERE database_id = DB_ID();" "capacity.database_log_space_dm_db_log_space_usage"
 $backupHistoryRows = try {
-    # TOP (2) lets the fail-closed selection distinguish one selected record
-    # from multiple records without materializing unbounded backup history.
-    Invoke-ReadOnlySql "SELECT TOP (2) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC;" "backup.latest_full_backup_history"
+    # Select one deterministic latest eligible full backup.  The backup_set_id
+    # tie-breaker prevents equal finish timestamps from changing the selected
+    # media set; no older backup is substituted if this one later fails.
+    Invoke-ReadOnlySql "SELECT TOP (1) bs.backup_set_id, bs.media_set_id, bs.backup_finish_date, bs.is_copy_only, bs.has_backup_checksums, bs.compressed_backup_size FROM msdb.dbo.backupset AS bs WHERE bs.database_name = DB_NAME() AND bs.type = 'D' ORDER BY bs.backup_finish_date DESC, bs.backup_set_id DESC;" "backup.latest_full_backup_history"
 } catch {
     throw ("BACKUP_HISTORY_QUERY_FAILED: {0}" -f (Get-SanitizedSqlError $_))
 }
@@ -1093,16 +1123,7 @@ if (($competingWriters | Where-Object { [int64]$_.RunningCount -gt 0 }).Count -g
     throw "A competing production writer is active"
 }
 
-# VERIFYONLY is executed by SQL Server, not by the Windows client.  Its path
-# and diagnostic text never enter the sanitized JSON payload.
-$backupMediaClauses = @($backupMedia | ForEach-Object { "DISK = N'{0}'" -f ([string]$_.physical_device_name).Replace("'", "''") })
-try {
-    Invoke-ReadOnlySql ("RESTORE VERIFYONLY FROM {0} WITH CHECKSUM;" -f ($backupMediaClauses -join ", ")) "backup.restore_verifyonly_with_checksum" | Out-Null
-} catch {
-    $verifyOnlyReason = Get-SanitizedSqlError $_
-    $verifyOnlyClassification = Get-BackupVerifyOnlyFailureClassification $verifyOnlyReason
-    throw ("{0}: server-side RESTORE VERIFYONLY WITH CHECKSUM did not pass; {1}" -f $verifyOnlyClassification, $verifyOnlyReason)
-}
+Invoke-BackupVerifyOnly $backupMedia
 $permissionChecks.backup_verifyonly_authorization = Resolve-PermissionState $permissionChecks.backup_verifyonly_authorization $true
 
 $missingPermissions = @(
