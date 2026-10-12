@@ -402,7 +402,9 @@ def _parse_utc(value: Any, *, field: str) -> datetime:
         parsed = value
     else:
         try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            text = str(value).replace("Z", "+00:00")
+            text = re.sub(r"(\.\d{6})\d(?=[+-]\d{2}:\d{2}$)", r"\1", text)
+            parsed = datetime.fromisoformat(text)
         except (TypeError, ValueError) as exc:
             raise AdminEvidenceError(f"{field} is not a valid timestamp") from exc
     if parsed.tzinfo is None:

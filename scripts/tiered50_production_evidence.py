@@ -1961,7 +1961,14 @@ def collect(
         "sql_instance_identity": dict(identity_instance) if isinstance(identity_instance, Mapping) else None,
         "effective_login": identity_login,
         "captured_at_utc": identity_captured_at or evidence["generated_at_utc"],
-        "required_check_ids": sorted(REQUIRED_CHECK_IDS),
+        "required_check_ids": sorted(
+            set(REQUIRED_CHECK_IDS)
+            | (
+                set(external_provenance.get("required_check_ids") or ())
+                if provenance_ok and isinstance(external_provenance, Mapping)
+                else set()
+            )
+        ),
         "authentication_source": (
             external_provenance.get("authentication_source")
             if isinstance(external_provenance, Mapping)

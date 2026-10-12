@@ -45,7 +45,7 @@ from cologne_transit_collector.transport import (
     _read_bounded,
     _transport_category,
 )
-from cologne_transit_collector.trias import parse_trias_response
+from cologne_transit_collector.trias import _path_is_retained, parse_trias_response
 
 
 AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
@@ -374,6 +374,39 @@ class Stage14CorrectionTests(unittest.TestCase):
         self.assertEqual(gap["source_value"], "retained-parser-gap-evidence")
         self.assertEqual(gap["association_scope"], "SERVICE")
         self.assertEqual(gap["call_scope"], None)
+
+        # Regression: preserve path boundaries and avoid full scans.
+        retained = {
+            "$.result[0].call": True,
+            "$.result[0].arrival": False,
+            "$.result[12].call": True,
+        }
+
+        for path, expected in (
+            ("$.result[0].call", True),
+            ("$.result[0].call[0].time", True),
+            ("$.result[0].call.time", True),
+            ("$.result[0].callback", False),
+            ("$.result[0].arrival", True),
+            ("$.result[0].arrival.time", False),
+            ("$.result[1].call.time", False),
+            ("$.result[12].call.time", True),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    _path_is_retained(path, retained), expected
+                )
+
+        class NoScanDict(dict):
+            def items(self):
+                raise AssertionError("Full retained-path scan detected")
+
+        self.assertTrue(
+            _path_is_retained(
+                "$.result[0].call[0].time",
+                NoScanDict(retained),
+            )
+        )
 
     def test_parser_does_not_project_event_fields_or_call_data_from_broader_scopes(self) -> None:
         parsed = parse_trias_response(SOURCE_FAITHFUL_JSON_FIXTURE.read_bytes(), "application/json")

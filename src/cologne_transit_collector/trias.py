@@ -598,13 +598,11 @@ def _mark_direct_named_paths(
 
 
 def _path_is_retained(path: str, retained_paths: Mapping[str, bool]) -> bool:
-    for retained_path, includes_children in retained_paths.items():
-        if path == retained_path:
-            return True
-        if includes_children and (
-            path.startswith(retained_path + ".")
-            or path.startswith(retained_path + "[")
-        ):
+    """Check exact retention or an inclusive ancestor at a path boundary."""
+    if path in retained_paths:
+        return True
+    for index, character in enumerate(path):
+        if character in ".[" and retained_paths.get(path[:index], False):
             return True
     return False
 
