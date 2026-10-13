@@ -58,6 +58,7 @@ from .conservative_bootstrap import (
     bootstrap_local_counts,
     validate_stored_bootstrap_row,
 )
+from .compact_observation import build_compact_envelope, encode_compact_envelope
 from .quota_rollover import (
     AUTOMATIC_ROLLOVER_ACCOUNTING_MODEL,
     BOUNDED_TIMEZONE_ENVELOPE_MARKER,
@@ -109,6 +110,14 @@ class MssqlSchemaError(RuntimeError):
 
 class MssqlSafetyError(RuntimeError):
     """Raised when a prepared collector operation would cross its safety gate."""
+
+
+COMPACT_OBSERVATION_WRITE_ENABLED_ENV = "MSSQL_COMPACT_OBSERVATION_WRITE_ENABLED"
+COMPACT_OBSERVATION_COMPATIBILITY_VERIFIED_ENV = "MSSQL_COMPACT_OBSERVATION_COMPATIBILITY_VERIFIED"
+
+
+def _env_flag(environ: Mapping[str, str], name: str) -> bool:
+    return str(environ.get(name, "0")).strip().casefold() in {"1", "true", "yes", "on"}
 
 
 # SQL Server accepts at most 2,100 parameters in one prepared statement.  A
@@ -267,6 +276,31 @@ FULL_SCHEMA_ROUTINES = (
     "stg.uspPersistMddMacSnapshot",
     "analytics.vwMddMacRecordedAtTimeHistory",
     "analytics.vwMddMacSourceFieldCoverage",
+)
+
+COMPACT_SCHEMA_TABLES = (
+    "stg.MddMacCompactStorageState",
+    "stg.MddMacCompactIdentityAllocator",
+    "stg.MddMacCompactObservationEnvelope",
+    "stg.MddMacCompactMigration",
+    "stg.MddMacCompactMigrationUnit",
+)
+
+COMPACT_SCHEMA_ROUTINES = (
+    "stg.uspMddMacCompactStoreHistoricalEnvelope",
+    "stg.uspMddMacCompactMarkUnit",
+    "stg.uspPersistMddMacSnapshotCompact",
+    "stg.vMddMacCompactObservationEnvelopeJson",
+    "stg.vMddMacCompactSourceSnapshot",
+    "stg.vMddMacCompactCallObservation",
+    "stg.vMddMacCompactTimingObservation",
+    "stg.vMddMacCompactSituationEvidence",
+    "stg.vMddMacCompactServiceSectionEvidence",
+    "stg.vMddMacCompactAttributeEvidence",
+    "stg.vMddMacCompactResponseError",
+    "stg.vMddMacCompactParserGap",
+    "analytics.vwMddMacCompactSourceFieldCoverage",
+    "analytics.vwMddMacCompactRecordedAtTimeHistory",
 )
 
 RUNTIME_SCHEMA_TABLES = (
@@ -1042,10 +1076,31 @@ class MssqlPersistence:
         collection_context: str = MAC_COLLECTION_CONTEXT,
         authorization_clock_fn: Callable[[], datetime] | None = None,
         allow_injected_authorization_time: bool = False,
+        compact_observation_enabled: bool | None = None,
+        compact_observation_compatibility_verified: bool | None = None,
     ) -> None:
         self.settings = settings or MssqlConnectionSettings.from_environment()
         self._connection_factory = connection_factory or (lambda: connect_mssql(self.settings))
         self.collection_context = collection_context
+        configured_enabled = (
+            _env_flag(os.environ, COMPACT_OBSERVATION_WRITE_ENABLED_ENV)
+            if compact_observation_enabled is None
+            else bool(compact_observation_enabled)
+        )
+        configured_verified = (
+            _env_flag(os.environ, COMPACT_OBSERVATION_COMPATIBILITY_VERIFIED_ENV)
+            if compact_observation_compatibility_verified is None
+            else bool(compact_observation_compatibility_verified)
+        )
+        if configured_enabled and collection_context != MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT:
+            raise MssqlSafetyError(
+                "compact observation writes are restricted to the Tiered50 production context"
+            )
+        if configured_enabled and not configured_verified:
+            raise MssqlSafetyError(
+                "compact observation writes require an explicit compatibility-verification gate"
+            )
+        self.compact_observation_enabled = bool(configured_enabled)
         if (
             (authorization_clock_fn is not None or allow_injected_authorization_time)
             and collection_context != "OFFLINE_DEVELOPMENT"
@@ -1216,6 +1271,53 @@ class MssqlPersistence:
             "expected_routine_count": len(FULL_SCHEMA_ROUTINES),
             "required_legacy7_audit_columns": sorted(required_columns),
             "missing": [],
+        }
+
+    def validate_compact_storage_schema(self) -> Mapping[str, Any]:
+        """Validate the additive compact-storage contract under admin access."""
+
+        with self._connection() as connection:
+            cursor = self._cursor(connection)
+            cursor.execute(
+                """
+                SELECT s.name + N'.' + o.name AS object_name, o.type AS object_type
+                FROM sys.objects AS o
+                INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+                WHERE (s.name = N'stg' AND (o.name LIKE N'MddMacCompact%'
+                       OR o.name LIKE N'vMddMacCompact%'
+                       OR o.name IN (N'uspPersistMddMacSnapshotCompact',
+                                     N'uspMddMacCompactStoreHistoricalEnvelope',
+                                     N'uspMddMacCompactMarkUnit')))
+                   OR (s.name = N'analytics' AND o.name LIKE N'vwMddMacCompact%')
+                """
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT FutureWriteEnabled, CompatibilityVerified,
+                       HistoricalReadbackVerified, LegacyRetirementApproved
+                FROM stg.MddMacCompactStorageState
+                WHERE StateId = 1
+                """
+            )
+            state = cursor.fetchone()
+        names = {str(_row_value(row, "object_name", 0)) for row in rows}
+        required = COMPACT_SCHEMA_TABLES + COMPACT_SCHEMA_ROUTINES
+        missing = sorted(set(required) - names)
+        state_values = {
+            "future_write_enabled": bool(_row_value(state, "FutureWriteEnabled", 0)) if state else None,
+            "compatibility_verified": bool(_row_value(state, "CompatibilityVerified", 1)) if state else None,
+            "historical_readback_verified": bool(_row_value(state, "HistoricalReadbackVerified", 2)) if state else None,
+            "legacy_retirement_approved": bool(_row_value(state, "LegacyRetirementApproved", 3)) if state else None,
+        }
+        if missing or state is None:
+            raise MssqlSchemaError("compact storage objects/state are missing: " + ", ".join(missing or ["stg.MddMacCompactStorageState"]))
+        return {
+            "status": "PASS",
+            "validation_scope": "COMPACT_ADMIN",
+            "required_objects": len(required),
+            "missing": [],
+            "state": state_values,
         }
 
     def validate_runtime_schema(self) -> Mapping[str, Any]:
@@ -2816,49 +2918,102 @@ class MssqlPersistence:
                 run_id = _row_value(audit_row, "RunId", 0)
                 if not run_id:
                     raise KeyError(f"unknown MDD Mac audit: {audit_id}")
-                cursor.execute(
-                    """
-                    EXEC stg.uspPersistMddMacSnapshot
-                        @RunId=%s,
-                        @AuditId=%s,
-                        @TargetIdentity=%s,
-                        @SamplingTargetId=%s,
-                        @LogicalDueBucket=%s,
-                        @ObservedAtUtc=%s,
-                        @ResponseTimestampSourceText=%s,
-                        @ParserVersion=%s,
-                        @ApplicationStatus=%s,
-                        @PayloadHashSha256=%s,
-                        @SnapshotJson=%s,
-                        @CallsJson=%s,
-                        @TimingsJson=%s,
-                        @SituationEvidenceJson=%s,
-                        @ServiceSectionsJson=%s,
-                        @AttributesJson=%s,
-                        @ResponseErrorsJson=%s,
-                        @ParserGapsJson=%s
-                    """,
-                    (
-                        str(run_id),
-                        int(audit_id),
-                        target.source_parent_station_id,
-                        _target_sampling_id(target),
-                        int(logical_due_bucket),
-                        _utc(persisted_at),
-                        _text(snapshot.get("response_timestamp")),
-                        str(snapshot.get("parser_version", "unknown")),
-                        _text(snapshot.get("application_status")),
-                        hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest(),
-                        snapshot_json,
-                        json.dumps(row_sets["calls"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["timings"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["situations"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["service_sections"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["attributes"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["response_errors"], ensure_ascii=False, sort_keys=True, default=str),
-                        json.dumps(row_sets["parser_gaps"], ensure_ascii=False, sort_keys=True, default=str),
-                    ),
-                )
+                target_identity = target.source_parent_station_id
+                sampling_target_id = _target_sampling_id(target)
+                observed_at = _utc(persisted_at)
+                response_timestamp = _text(snapshot.get("response_timestamp"))
+                parser_version = str(snapshot.get("parser_version", "unknown"))
+                application_status = _text(snapshot.get("application_status"))
+                payload_hash = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+                row_json = {
+                    family: json.dumps(row_sets[family], ensure_ascii=False, sort_keys=True, default=str)
+                    for family in (
+                        "calls",
+                        "timings",
+                        "situations",
+                        "service_sections",
+                        "attributes",
+                        "response_errors",
+                        "parser_gaps",
+                    )
+                }
+                if self.compact_observation_enabled:
+                    compact_source_snapshot = {
+                        "snapshot_id": None,
+                        "run_id": str(run_id),
+                        "audit_id": int(audit_id),
+                        "target_identity": target_identity,
+                        "sampling_target_id": sampling_target_id,
+                        "logical_due_bucket": int(logical_due_bucket),
+                        "observed_at_utc": _iso(observed_at),
+                        "response_timestamp_source_text": response_timestamp,
+                        "parser_version": parser_version,
+                        "application_status": application_status,
+                        "payload_hash_sha256": payload_hash,
+                        "snapshot_json": snapshot_json,
+                        "result_count": snapshot.get("result_count"),
+                    }
+                    compact_envelope = build_compact_envelope(
+                        source_snapshot=compact_source_snapshot,
+                        row_sets=row_sets,
+                    )
+                    encoded_envelope = encode_compact_envelope(compact_envelope)
+                    cursor.execute(
+                        """
+                        EXEC stg.uspPersistMddMacSnapshotCompact
+                            @RunId=%s,
+                            @AuditId=%s,
+                            @TargetIdentity=%s,
+                            @SamplingTargetId=%s,
+                            @LogicalDueBucket=%s,
+                            @ObservedAtUtc=%s,
+                            @ResponseTimestampSourceText=%s,
+                            @ParserVersion=%s,
+                            @ApplicationStatus=%s,
+                            @PayloadHashSha256=%s,
+                            @EnvelopeJson=%s,
+                            @EnvelopeSha256=%s
+                        """,
+                        (
+                            str(run_id), int(audit_id), target_identity, sampling_target_id,
+                            int(logical_due_bucket), observed_at, response_timestamp,
+                            parser_version, application_status, payload_hash,
+                            encoded_envelope.canonical_json, encoded_envelope.sha256,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        EXEC stg.uspPersistMddMacSnapshot
+                            @RunId=%s,
+                            @AuditId=%s,
+                            @TargetIdentity=%s,
+                            @SamplingTargetId=%s,
+                            @LogicalDueBucket=%s,
+                            @ObservedAtUtc=%s,
+                            @ResponseTimestampSourceText=%s,
+                            @ParserVersion=%s,
+                            @ApplicationStatus=%s,
+                            @PayloadHashSha256=%s,
+                            @SnapshotJson=%s,
+                            @CallsJson=%s,
+                            @TimingsJson=%s,
+                            @SituationEvidenceJson=%s,
+                            @ServiceSectionsJson=%s,
+                            @AttributesJson=%s,
+                            @ResponseErrorsJson=%s,
+                            @ParserGapsJson=%s
+                        """,
+                        (
+                            str(run_id), int(audit_id), target_identity, sampling_target_id,
+                            int(logical_due_bucket), observed_at, response_timestamp,
+                            parser_version, application_status, payload_hash,
+                            snapshot_json, row_json["calls"], row_json["timings"],
+                            row_json["situations"], row_json["service_sections"],
+                            row_json["attributes"], row_json["response_errors"],
+                            row_json["parser_gaps"],
+                        ),
+                    )
                 # The procedure emits one result set.  Consume it before the
                 # connection is committed so DB-API clients can reuse it.
                 try:

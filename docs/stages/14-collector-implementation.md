@@ -414,7 +414,7 @@ reported in each run. In the current cadence-correction review, the complete
 repository suite passed in five consecutive runs with 392 tests per run and
 `ResourceWarning` promoted to an error; no SQLite resource warning was emitted.
 
-Following the 2026-10-12 timestamp regression additions, the current repository suite reports 395 tests per run.
+Following the 2026-10-12 timestamp regression additions, the current repository suite reports 401 tests per run.
 The five consecutive clean runs remain historical evidence for the 392-test suite.
 The Stage 14 validator
 passed with 50 manifest targets, 7 Legacy7 targets, 43 new targets, schedule
