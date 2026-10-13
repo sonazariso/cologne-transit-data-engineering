@@ -695,7 +695,11 @@ def validate_existing_tiered50_activation(
         row
         for row in outage_rows
         if str(_named_value(row, "Tiered50ActivationStatus", 1) or "") == "OUTAGE"
-        and _utc_datetime(_named_value(row, "Tiered50ActivationAtUtc", 2)) == effective_at
+        and (
+            (outage_at := _utc_datetime(_named_value(row, "Tiered50ActivationAtUtc", 2)))
+            is not None
+            and outage_at >= effective_at
+        )
     ]
     if not matching_outages:
         raise RuntimeError("the historical Tiered50 outage record is missing")

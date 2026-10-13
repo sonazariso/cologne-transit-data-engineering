@@ -1435,9 +1435,14 @@ BEGIN
         ParserVersion VARCHAR(80) NOT NULL,
         ApplicationStatus VARCHAR(80) NULL,
         PayloadHashSha256 CHAR(64) NOT NULL,
-        SnapshotJson NVARCHAR(MAX) NOT NULL,
+        -- Exactly one representation is persisted for each source snapshot.
+        SnapshotJson NVARCHAR(MAX) NULL,
+        SnapshotJsonGzip VARBINARY(MAX) NULL,
         CreatedAtUtc DATETIME2(7) NOT NULL
             CONSTRAINT DF_stg_MddMacSourceSnapshot_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT CK_stg_MddMacSourceSnapshot_OnePayload
+            CHECK ((SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL)
+                OR (SnapshotJson IS NULL AND SnapshotJsonGzip IS NOT NULL)),
         CONSTRAINT UQ_stg_MddMacSourceSnapshot_Audit UNIQUE (AuditId),
         CONSTRAINT FK_stg_MddMacSourceSnapshot_Run
             FOREIGN KEY (RunId) REFERENCES ctl.MddMacCollectorRun (RunId),
@@ -1445,6 +1450,31 @@ BEGIN
             FOREIGN KEY (AuditId) REFERENCES ctl.MddMacTargetAudit (AuditId)
     );
 END;
+GO
+
+-- Upgrade existing, uncompressed deployments before installing the new
+-- snapshot procedure. New installations already have these columns/constraint.
+IF COL_LENGTH(N'stg.MddMacSourceSnapshot', 'SnapshotJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSourceSnapshot
+        ADD SnapshotJsonGzip VARBINARY(MAX) NULL;
+GO
+IF EXISTS (
+    SELECT 1 FROM sys.columns
+    WHERE object_id = OBJECT_ID(N'stg.MddMacSourceSnapshot')
+      AND name = N'SnapshotJson' AND is_nullable = 0
+)
+    ALTER TABLE stg.MddMacSourceSnapshot
+        ALTER COLUMN SnapshotJson NVARCHAR(MAX) NULL;
+GO
+IF NOT EXISTS (
+    SELECT 1 FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID(N'stg.MddMacSourceSnapshot')
+      AND name = N'CK_stg_MddMacSourceSnapshot_OnePayload'
+)
+    ALTER TABLE stg.MddMacSourceSnapshot WITH CHECK ADD CONSTRAINT
+        CK_stg_MddMacSourceSnapshot_OnePayload
+        CHECK ((SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL)
+            OR (SnapshotJson IS NULL AND SnapshotJsonGzip IS NOT NULL));
 GO
 
 IF NOT EXISTS
@@ -1497,6 +1527,8 @@ BEGIN
         DestinationText NVARCHAR(1000) NULL,
         SourcePathsJson NVARCHAR(MAX) NULL,
         SourceEventJson NVARCHAR(MAX) NULL,
+        SourcePathsJsonGzip VARBINARY(MAX) NULL,
+        SourceEventJsonGzip VARBINARY(MAX) NULL,
         CONSTRAINT UQ_stg_MddMacCallObservation_Occurrence
             UNIQUE (SnapshotId, EventOrdinal, CallScope, CallOrdinal),
         CONSTRAINT FK_stg_MddMacCallObservation_Snapshot
@@ -1555,8 +1587,12 @@ BEGIN
         SourceEventIdentityStatus VARCHAR(60) NULL,
         SourceEventIdentityBasisJson NVARCHAR(MAX) NULL,
         SourceEventIdentityMissingFieldsJson NVARCHAR(MAX) NULL,
+        SourceEventIdentityMissingFieldsJsonGzip VARBINARY(MAX) NULL,
         SourceEventIdentityAmbiguityJson NVARCHAR(MAX) NULL,
+        SourceEventIdentityAmbiguityJsonGzip VARBINARY(MAX) NULL,
         SourcePathsJson NVARCHAR(MAX) NULL,
+        SourcePathsJsonGzip VARBINARY(MAX) NULL,
+        SourceEventIdentityBasisJsonGzip VARBINARY(MAX) NULL,
         CONSTRAINT UQ_stg_MddMacTimingObservation_Occurrence
             UNIQUE (SnapshotId, EventOrdinal, CallScope, CallOrdinal, TimingContext),
         CONSTRAINT FK_stg_MddMacTimingObservation_Snapshot
@@ -1595,7 +1631,9 @@ BEGIN
         Identifier NVARCHAR(500) NULL,
         Summary NVARCHAR(4000) NULL,
         Description NVARCHAR(MAX) NULL,
+        DescriptionGzip VARBINARY(MAX) NULL,
         Detail NVARCHAR(MAX) NULL,
+        DetailGzip VARBINARY(MAX) NULL,
         CreationTimeSourceText NVARCHAR(256) NULL,
         ValidFromSourceText NVARCHAR(256) NULL,
         ValidToSourceText NVARCHAR(256) NULL,
@@ -1603,16 +1641,23 @@ BEGIN
         ProviderSourceType NVARCHAR(1000) NULL,
         PrioritySourceText NVARCHAR(200) NULL,
         AffectsJson NVARCHAR(MAX) NULL,
+        AffectsJsonGzip VARBINARY(MAX) NULL,
         AffectedEntityJson NVARCHAR(MAX) NULL,
+        AffectedEntityJsonGzip VARBINARY(MAX) NULL,
         AffectedJourneyJson NVARCHAR(MAX) NULL,
+        AffectedJourneyJsonGzip VARBINARY(MAX) NULL,
         AffectedLineJson NVARCHAR(MAX) NULL,
+        AffectedLineJsonGzip VARBINARY(MAX) NULL,
         IdentityKey NVARCHAR(1000) NULL,
         AssociationScope VARCHAR(40) NULL,
         CallScope VARCHAR(20) NULL,
         SourcePath NVARCHAR(2048) NULL,
         FieldPathsJson NVARCHAR(MAX) NULL,
+        FieldPathsJsonGzip VARBINARY(MAX) NULL,
         AffectedEntityFieldPathsJson NVARCHAR(MAX) NULL,
+        AffectedEntityFieldPathsJsonGzip VARBINARY(MAX) NULL,
         SourceRepresentationJson NVARCHAR(MAX) NULL,
+        SourceRepresentationJsonGzip VARBINARY(MAX) NULL,
         CONSTRAINT FK_stg_MddMacSituationEvidence_Snapshot
             FOREIGN KEY (SnapshotId) REFERENCES stg.MddMacSourceSnapshot (SnapshotId)
     );
@@ -1651,12 +1696,18 @@ BEGIN
         Name NVARCHAR(1000) NULL,
         ShortName NVARCHAR(1000) NULL,
         Description NVARCHAR(MAX) NULL,
+        DescriptionGzip VARBINARY(MAX) NULL,
         RouteDescription NVARCHAR(MAX) NULL,
+        RouteDescriptionGzip VARBINARY(MAX) NULL,
         Via NVARCHAR(MAX) NULL,
+        ViaGzip VARBINARY(MAX) NULL,
         PublishedLineName NVARCHAR(1000) NULL,
         ModeSourceJson NVARCHAR(MAX) NULL,
+        ModeSourceJsonGzip VARBINARY(MAX) NULL,
         SourcePathsJson NVARCHAR(MAX) NULL,
+        SourcePathsJsonGzip VARBINARY(MAX) NULL,
         SourceRepresentationJson NVARCHAR(MAX) NULL,
+        SourceRepresentationJsonGzip VARBINARY(MAX) NULL,
         SemanticRole VARCHAR(80) NOT NULL,
         CONSTRAINT UQ_stg_MddMacServiceSectionEvidence_Occurrence
             UNIQUE (SnapshotId, EventOrdinal, SectionOrdinal, SourcePath),
@@ -1694,12 +1745,17 @@ BEGIN
         CallScope VARCHAR(20) NULL,
         CodeSourceText NVARCHAR(2000) NULL,
         TextSourceText NVARCHAR(MAX) NULL,
+        TextSourceTextGzip VARBINARY(MAX) NULL,
         IncidentCallSourcePath NVARCHAR(2048) NULL,
         InfoCallSourcePath NVARCHAR(2048) NULL,
         CodeSourcePathsJson NVARCHAR(MAX) NULL,
+        CodeSourcePathsJsonGzip VARBINARY(MAX) NULL,
         TextSourcePathsJson NVARCHAR(MAX) NULL,
+        TextSourcePathsJsonGzip VARBINARY(MAX) NULL,
         SourceFieldPathsJson NVARCHAR(MAX) NULL,
+        SourceFieldPathsJsonGzip VARBINARY(MAX) NULL,
         SourceRepresentationJson NVARCHAR(MAX) NULL,
+        SourceRepresentationJsonGzip VARBINARY(MAX) NULL,
         SemanticRole VARCHAR(100) NOT NULL,
         CONSTRAINT UQ_stg_MddMacAttributeEvidence_Occurrence
             UNIQUE (SnapshotId, EventOrdinal, AttributeOrdinal, SourcePath),
@@ -1747,6 +1803,7 @@ BEGIN
         ValueType VARCHAR(80) NOT NULL,
         SourceValue NVARCHAR(2000) NULL,
         SourceRepresentationJson NVARCHAR(MAX) NULL,
+        SourceRepresentationJsonGzip VARBINARY(MAX) NULL,
         ValueExcerpt NVARCHAR(2000) NULL,
         MappingStatus VARCHAR(100) NOT NULL,
         SemanticHint VARCHAR(200) NULL,
@@ -1769,6 +1826,97 @@ IF NOT EXISTS
 )
     CREATE INDEX IX_stg_MddMacParserGap_Field_Observed
         ON stg.MddMacParserGap (NormalizedFieldName, SnapshotId);
+GO
+
+-- STORAGE V2: metadata-only additive columns on existing large tables.
+-- Legacy rows remain readable in plaintext; subsequent INSERTs gzip selected
+-- evidence JSON inside stg.uspPersistMddMacSnapshot, not Python.
+IF COL_LENGTH(N'stg.MddMacCallObservation', 'SourcePathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacCallObservation ADD SourcePathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacCallObservation', 'SourceEventJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacCallObservation ADD SourceEventJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacTimingObservation', 'SourcePathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacTimingObservation ADD SourcePathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacTimingObservation', 'SourceEventIdentityBasisJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacTimingObservation ADD SourceEventIdentityBasisJsonGzip VARBINARY(MAX) NULL;
+GO
+
+-- STORAGE V3: compress the remaining nullable MAX source-evidence fields on
+-- future inserts.  Existing plaintext values remain readable; no historical
+-- backfill is performed by this schema definition.
+IF COL_LENGTH(N'stg.MddMacTimingObservation', 'SourceEventIdentityMissingFieldsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacTimingObservation
+        ADD SourceEventIdentityMissingFieldsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacTimingObservation', 'SourceEventIdentityAmbiguityJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacTimingObservation
+        ADD SourceEventIdentityAmbiguityJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'DescriptionGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD DescriptionGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'DetailGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD DetailGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'AffectsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD AffectsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'AffectedEntityJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD AffectedEntityJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'AffectedJourneyJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD AffectedJourneyJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'AffectedLineJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD AffectedLineJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'FieldPathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD FieldPathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'AffectedEntityFieldPathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD AffectedEntityFieldPathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacSituationEvidence', 'SourceRepresentationJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacSituationEvidence ADD SourceRepresentationJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'DescriptionGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD DescriptionGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'RouteDescriptionGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD RouteDescriptionGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'ViaGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD ViaGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'ModeSourceJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD ModeSourceJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'SourcePathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD SourcePathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacServiceSectionEvidence', 'SourceRepresentationJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacServiceSectionEvidence ADD SourceRepresentationJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacAttributeEvidence', 'TextSourceTextGzip') IS NULL
+    ALTER TABLE stg.MddMacAttributeEvidence ADD TextSourceTextGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacAttributeEvidence', 'CodeSourcePathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacAttributeEvidence ADD CodeSourcePathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacAttributeEvidence', 'TextSourcePathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacAttributeEvidence ADD TextSourcePathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacAttributeEvidence', 'SourceFieldPathsJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacAttributeEvidence ADD SourceFieldPathsJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacAttributeEvidence', 'SourceRepresentationJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacAttributeEvidence ADD SourceRepresentationJsonGzip VARBINARY(MAX) NULL;
+GO
+IF COL_LENGTH(N'stg.MddMacParserGap', 'SourceRepresentationJsonGzip') IS NULL
+    ALTER TABLE stg.MddMacParserGap ADD SourceRepresentationJsonGzip VARBINARY(MAX) NULL;
 GO
 
 CREATE OR ALTER PROCEDURE stg.uspPersistMddMacSnapshot
@@ -1850,13 +1998,15 @@ BEGIN
             (
                 RunId, AuditId, TargetIdentity, SamplingTargetId,
                 LogicalDueBucket, ObservedAtUtc, ResponseTimestampSourceText,
-                ParserVersion, ApplicationStatus, PayloadHashSha256, SnapshotJson
+                ParserVersion, ApplicationStatus, PayloadHashSha256,
+                SnapshotJson, SnapshotJsonGzip
             )
             VALUES
             (
                 @RunId, @AuditId, @TargetIdentity, @SamplingTargetId,
                 @LogicalDueBucket, @ObservedAtUtc, @ResponseTimestampSourceText,
-                @ParserVersion, @ApplicationStatus, @PayloadHashSha256, @SnapshotJson
+                @ParserVersion, @ApplicationStatus, @PayloadHashSha256,
+                NULL, COMPRESS(@SnapshotJson)
             );
             SET @SnapshotId = CONVERT(BIGINT, SCOPE_IDENTITY());
 
@@ -1870,7 +2020,8 @@ BEGIN
                 JourneyRef, VehicleJourneyRef, DatedVehicleJourneyRef, LineRef,
                 DirectionRef, OperatorRef, PtMode, Submode,
                 OriginStopPointRef, OriginText, DestinationStopPointRef,
-                DestinationText, SourcePathsJson, SourceEventJson
+                DestinationText, SourcePathsJson, SourceEventJson,
+                SourcePathsJsonGzip, SourceEventJsonGzip
             )
             SELECT
                 @SnapshotId, ResultId, ResultOrdinal, EventOrdinal, CallScope,
@@ -1881,7 +2032,8 @@ BEGIN
                 JourneyRef, VehicleJourneyRef, DatedVehicleJourneyRef, LineRef,
                 DirectionRef, OperatorRef, PtMode, Submode,
                 OriginStopPointRef, OriginText, DestinationStopPointRef,
-                DestinationText, SourcePathsJson, SourceEventJson
+                DestinationText, NULL, NULL,
+                COMPRESS(SourcePathsJson), COMPRESS(SourceEventJson)
             FROM OPENJSON(@CallsJson)
             WITH
             (
@@ -1935,7 +2087,8 @@ BEGIN
                 StopSeqNumberSourcePath, SourceEventIdentity,
                 SourceEventIdentityVersion, SourceEventIdentityStatus,
                 SourceEventIdentityBasisJson, SourceEventIdentityMissingFieldsJson,
-                SourceEventIdentityAmbiguityJson, SourcePathsJson
+                SourceEventIdentityAmbiguityJson, SourcePathsJson,
+                SourcePathsJsonGzip, SourceEventIdentityBasisJsonGzip
             )
             SELECT
                 @SnapshotId, ResultId, ResultOrdinal, EventOrdinal, CallScope,
@@ -1950,8 +2103,9 @@ BEGIN
                 RecordedAtTimeSourcePath, StopPointRefSourcePath,
                 StopSeqNumberSourcePath, SourceEventIdentity,
                 SourceEventIdentityVersion, SourceEventIdentityStatus,
-                SourceEventIdentityBasisJson, SourceEventIdentityMissingFieldsJson,
-                SourceEventIdentityAmbiguityJson, SourcePathsJson
+                NULL, SourceEventIdentityMissingFieldsJson,
+                SourceEventIdentityAmbiguityJson, NULL,
+                COMPRESS(SourcePathsJson), COMPRESS(SourceEventIdentityBasisJson)
             FROM OPENJSON(@TimingsJson)
             WITH
             (
@@ -2200,6 +2354,497 @@ BEGIN
     END CATCH;
 END;
 GO
+
+-- STORAGE V3: future-write compression for the remaining nullable MAX source
+-- evidence.  The triggers run in the caller's transaction, preserve NULL and
+-- empty-string semantics, and do not alter observation keys or row grain.
+CREATE OR ALTER TRIGGER stg.trg_MddMacTimingObservation_StorageV3
+ON stg.MddMacTimingObservation
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE target
+    SET SourceEventIdentityMissingFieldsJsonGzip =
+            CASE WHEN target.SourceEventIdentityMissingFieldsJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceEventIdentityMissingFieldsJson))
+                            < DATALENGTH(inserted.SourceEventIdentityMissingFieldsJson)
+                 THEN COMPRESS(inserted.SourceEventIdentityMissingFieldsJson)
+                 ELSE target.SourceEventIdentityMissingFieldsJsonGzip END,
+        SourceEventIdentityMissingFieldsJson =
+            CASE WHEN target.SourceEventIdentityMissingFieldsJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceEventIdentityMissingFieldsJson))
+                            < DATALENGTH(inserted.SourceEventIdentityMissingFieldsJson)
+                 THEN NULL ELSE target.SourceEventIdentityMissingFieldsJson END,
+        SourceEventIdentityAmbiguityJsonGzip =
+            CASE WHEN target.SourceEventIdentityAmbiguityJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceEventIdentityAmbiguityJson))
+                            < DATALENGTH(inserted.SourceEventIdentityAmbiguityJson)
+                 THEN COMPRESS(inserted.SourceEventIdentityAmbiguityJson)
+                 ELSE target.SourceEventIdentityAmbiguityJsonGzip END,
+        SourceEventIdentityAmbiguityJson =
+            CASE WHEN target.SourceEventIdentityAmbiguityJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceEventIdentityAmbiguityJson))
+                            < DATALENGTH(inserted.SourceEventIdentityAmbiguityJson)
+                 THEN NULL ELSE target.SourceEventIdentityAmbiguityJson END
+    FROM stg.MddMacTimingObservation AS target
+    INNER JOIN inserted
+        ON inserted.TimingObservationId = target.TimingObservationId
+    WHERE target.SourceEventIdentityMissingFieldsJsonGzip IS NULL
+       OR target.SourceEventIdentityAmbiguityJsonGzip IS NULL;
+END;
+GO
+
+CREATE OR ALTER TRIGGER stg.trg_MddMacSituationEvidence_StorageV3
+ON stg.MddMacSituationEvidence
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE target
+    SET DescriptionGzip = CASE WHEN target.DescriptionGzip IS NULL
+                                    AND DATALENGTH(COMPRESS(inserted.Description))
+                                          < DATALENGTH(inserted.Description)
+                               THEN COMPRESS(inserted.Description)
+                               ELSE target.DescriptionGzip END,
+        Description = CASE WHEN target.DescriptionGzip IS NULL
+                                AND DATALENGTH(COMPRESS(inserted.Description))
+                                      < DATALENGTH(inserted.Description)
+                           THEN NULL ELSE target.Description END,
+        DetailGzip = CASE WHEN target.DetailGzip IS NULL
+                               AND DATALENGTH(COMPRESS(inserted.Detail))
+                                     < DATALENGTH(inserted.Detail)
+                          THEN COMPRESS(inserted.Detail)
+                          ELSE target.DetailGzip END,
+        Detail = CASE WHEN target.DetailGzip IS NULL
+                           AND DATALENGTH(COMPRESS(inserted.Detail))
+                                 < DATALENGTH(inserted.Detail)
+                      THEN NULL ELSE target.Detail END,
+        AffectsJsonGzip = CASE WHEN target.AffectsJsonGzip IS NULL
+                                    AND DATALENGTH(COMPRESS(inserted.AffectsJson))
+                                          < DATALENGTH(inserted.AffectsJson)
+                               THEN COMPRESS(inserted.AffectsJson)
+                               ELSE target.AffectsJsonGzip END,
+        AffectsJson = CASE WHEN target.AffectsJsonGzip IS NULL
+                                AND DATALENGTH(COMPRESS(inserted.AffectsJson))
+                                      < DATALENGTH(inserted.AffectsJson)
+                           THEN NULL ELSE target.AffectsJson END,
+        AffectedEntityJsonGzip = CASE WHEN target.AffectedEntityJsonGzip IS NULL
+                                           AND DATALENGTH(COMPRESS(inserted.AffectedEntityJson))
+                                                 < DATALENGTH(inserted.AffectedEntityJson)
+                                      THEN COMPRESS(inserted.AffectedEntityJson)
+                                      ELSE target.AffectedEntityJsonGzip END,
+        AffectedEntityJson = CASE WHEN target.AffectedEntityJsonGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.AffectedEntityJson))
+                                             < DATALENGTH(inserted.AffectedEntityJson)
+                                  THEN NULL ELSE target.AffectedEntityJson END,
+        AffectedJourneyJsonGzip = CASE WHEN target.AffectedJourneyJsonGzip IS NULL
+                                            AND DATALENGTH(COMPRESS(inserted.AffectedJourneyJson))
+                                                  < DATALENGTH(inserted.AffectedJourneyJson)
+                                       THEN COMPRESS(inserted.AffectedJourneyJson)
+                                       ELSE target.AffectedJourneyJsonGzip END,
+        AffectedJourneyJson = CASE WHEN target.AffectedJourneyJsonGzip IS NULL
+                                        AND DATALENGTH(COMPRESS(inserted.AffectedJourneyJson))
+                                              < DATALENGTH(inserted.AffectedJourneyJson)
+                                   THEN NULL ELSE target.AffectedJourneyJson END,
+        AffectedLineJsonGzip = CASE WHEN target.AffectedLineJsonGzip IS NULL
+                                         AND DATALENGTH(COMPRESS(inserted.AffectedLineJson))
+                                               < DATALENGTH(inserted.AffectedLineJson)
+                                    THEN COMPRESS(inserted.AffectedLineJson)
+                                    ELSE target.AffectedLineJsonGzip END,
+        AffectedLineJson = CASE WHEN target.AffectedLineJsonGzip IS NULL
+                                      AND DATALENGTH(COMPRESS(inserted.AffectedLineJson))
+                                            < DATALENGTH(inserted.AffectedLineJson)
+                                THEN NULL ELSE target.AffectedLineJson END,
+        FieldPathsJsonGzip = CASE WHEN target.FieldPathsJsonGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.FieldPathsJson))
+                                             < DATALENGTH(inserted.FieldPathsJson)
+                                  THEN COMPRESS(inserted.FieldPathsJson)
+                                  ELSE target.FieldPathsJsonGzip END,
+        FieldPathsJson = CASE WHEN target.FieldPathsJsonGzip IS NULL
+                                   AND DATALENGTH(COMPRESS(inserted.FieldPathsJson))
+                                         < DATALENGTH(inserted.FieldPathsJson)
+                              THEN NULL ELSE target.FieldPathsJson END,
+        AffectedEntityFieldPathsJsonGzip =
+            CASE WHEN target.AffectedEntityFieldPathsJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.AffectedEntityFieldPathsJson))
+                            < DATALENGTH(inserted.AffectedEntityFieldPathsJson)
+                 THEN COMPRESS(inserted.AffectedEntityFieldPathsJson)
+                 ELSE target.AffectedEntityFieldPathsJsonGzip END,
+        AffectedEntityFieldPathsJson =
+            CASE WHEN target.AffectedEntityFieldPathsJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.AffectedEntityFieldPathsJson))
+                            < DATALENGTH(inserted.AffectedEntityFieldPathsJson)
+                 THEN NULL ELSE target.AffectedEntityFieldPathsJson END,
+        SourceRepresentationJsonGzip =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN COMPRESS(inserted.SourceRepresentationJson)
+                 ELSE target.SourceRepresentationJsonGzip END,
+        SourceRepresentationJson =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN NULL ELSE target.SourceRepresentationJson END
+    FROM stg.MddMacSituationEvidence AS target
+    INNER JOIN inserted
+        ON inserted.SituationEvidenceId = target.SituationEvidenceId
+    WHERE target.DescriptionGzip IS NULL
+       OR target.DetailGzip IS NULL
+       OR target.AffectsJsonGzip IS NULL
+       OR target.AffectedEntityJsonGzip IS NULL
+       OR target.AffectedJourneyJsonGzip IS NULL
+       OR target.AffectedLineJsonGzip IS NULL
+       OR target.FieldPathsJsonGzip IS NULL
+       OR target.AffectedEntityFieldPathsJsonGzip IS NULL
+       OR target.SourceRepresentationJsonGzip IS NULL;
+END;
+GO
+
+CREATE OR ALTER TRIGGER stg.trg_MddMacServiceSectionEvidence_StorageV3
+ON stg.MddMacServiceSectionEvidence
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE target
+    SET DescriptionGzip = CASE WHEN target.DescriptionGzip IS NULL
+                                    AND DATALENGTH(COMPRESS(inserted.Description))
+                                          < DATALENGTH(inserted.Description)
+                               THEN COMPRESS(inserted.Description)
+                               ELSE target.DescriptionGzip END,
+        Description = CASE WHEN target.DescriptionGzip IS NULL
+                                AND DATALENGTH(COMPRESS(inserted.Description))
+                                      < DATALENGTH(inserted.Description)
+                           THEN NULL ELSE target.Description END,
+        RouteDescriptionGzip = CASE WHEN target.RouteDescriptionGzip IS NULL
+                                         AND DATALENGTH(COMPRESS(inserted.RouteDescription))
+                                               < DATALENGTH(inserted.RouteDescription)
+                                    THEN COMPRESS(inserted.RouteDescription)
+                                    ELSE target.RouteDescriptionGzip END,
+        RouteDescription = CASE WHEN target.RouteDescriptionGzip IS NULL
+                                      AND DATALENGTH(COMPRESS(inserted.RouteDescription))
+                                            < DATALENGTH(inserted.RouteDescription)
+                                THEN NULL ELSE target.RouteDescription END,
+        ViaGzip = CASE WHEN target.ViaGzip IS NULL
+                            AND DATALENGTH(COMPRESS(inserted.Via))
+                                  < DATALENGTH(inserted.Via)
+                       THEN COMPRESS(inserted.Via)
+                       ELSE target.ViaGzip END,
+        Via = CASE WHEN target.ViaGzip IS NULL
+                        AND DATALENGTH(COMPRESS(inserted.Via))
+                              < DATALENGTH(inserted.Via)
+                   THEN NULL ELSE target.Via END,
+        ModeSourceJsonGzip = CASE WHEN target.ModeSourceJsonGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.ModeSourceJson))
+                                             < DATALENGTH(inserted.ModeSourceJson)
+                                  THEN COMPRESS(inserted.ModeSourceJson)
+                                  ELSE target.ModeSourceJsonGzip END,
+        ModeSourceJson = CASE WHEN target.ModeSourceJsonGzip IS NULL
+                                   AND DATALENGTH(COMPRESS(inserted.ModeSourceJson))
+                                         < DATALENGTH(inserted.ModeSourceJson)
+                              THEN NULL ELSE target.ModeSourceJson END,
+        SourcePathsJsonGzip = CASE WHEN target.SourcePathsJsonGzip IS NULL
+                                        AND DATALENGTH(COMPRESS(inserted.SourcePathsJson))
+                                              < DATALENGTH(inserted.SourcePathsJson)
+                                   THEN COMPRESS(inserted.SourcePathsJson)
+                                   ELSE target.SourcePathsJsonGzip END,
+        SourcePathsJson = CASE WHEN target.SourcePathsJsonGzip IS NULL
+                                    AND DATALENGTH(COMPRESS(inserted.SourcePathsJson))
+                                          < DATALENGTH(inserted.SourcePathsJson)
+                               THEN NULL ELSE target.SourcePathsJson END,
+        SourceRepresentationJsonGzip =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN COMPRESS(inserted.SourceRepresentationJson)
+                 ELSE target.SourceRepresentationJsonGzip END,
+        SourceRepresentationJson =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN NULL ELSE target.SourceRepresentationJson END
+    FROM stg.MddMacServiceSectionEvidence AS target
+    INNER JOIN inserted
+        ON inserted.ServiceSectionEvidenceId = target.ServiceSectionEvidenceId
+    WHERE target.DescriptionGzip IS NULL
+       OR target.RouteDescriptionGzip IS NULL
+       OR target.ViaGzip IS NULL
+       OR target.ModeSourceJsonGzip IS NULL
+       OR target.SourcePathsJsonGzip IS NULL
+       OR target.SourceRepresentationJsonGzip IS NULL;
+END;
+GO
+
+CREATE OR ALTER TRIGGER stg.trg_MddMacAttributeEvidence_StorageV3
+ON stg.MddMacAttributeEvidence
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE target
+    SET TextSourceTextGzip = CASE WHEN target.TextSourceTextGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.TextSourceText))
+                                             < DATALENGTH(inserted.TextSourceText)
+                                  THEN COMPRESS(inserted.TextSourceText)
+                                  ELSE target.TextSourceTextGzip END,
+        TextSourceText = CASE WHEN target.TextSourceTextGzip IS NULL
+                                   AND DATALENGTH(COMPRESS(inserted.TextSourceText))
+                                         < DATALENGTH(inserted.TextSourceText)
+                              THEN NULL ELSE target.TextSourceText END,
+        CodeSourcePathsJsonGzip = CASE WHEN target.CodeSourcePathsJsonGzip IS NULL
+                                           AND DATALENGTH(COMPRESS(inserted.CodeSourcePathsJson))
+                                                 < DATALENGTH(inserted.CodeSourcePathsJson)
+                                       THEN COMPRESS(inserted.CodeSourcePathsJson)
+                                       ELSE target.CodeSourcePathsJsonGzip END,
+        CodeSourcePathsJson = CASE WHEN target.CodeSourcePathsJsonGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.CodeSourcePathsJson))
+                                             < DATALENGTH(inserted.CodeSourcePathsJson)
+                                   THEN NULL ELSE target.CodeSourcePathsJson END,
+        TextSourcePathsJsonGzip = CASE WHEN target.TextSourcePathsJsonGzip IS NULL
+                                           AND DATALENGTH(COMPRESS(inserted.TextSourcePathsJson))
+                                                 < DATALENGTH(inserted.TextSourcePathsJson)
+                                       THEN COMPRESS(inserted.TextSourcePathsJson)
+                                       ELSE target.TextSourcePathsJsonGzip END,
+        TextSourcePathsJson = CASE WHEN target.TextSourcePathsJsonGzip IS NULL
+                                       AND DATALENGTH(COMPRESS(inserted.TextSourcePathsJson))
+                                             < DATALENGTH(inserted.TextSourcePathsJson)
+                                   THEN NULL ELSE target.TextSourcePathsJson END,
+        SourceFieldPathsJsonGzip = CASE WHEN target.SourceFieldPathsJsonGzip IS NULL
+                                             AND DATALENGTH(COMPRESS(inserted.SourceFieldPathsJson))
+                                                   < DATALENGTH(inserted.SourceFieldPathsJson)
+                                        THEN COMPRESS(inserted.SourceFieldPathsJson)
+                                        ELSE target.SourceFieldPathsJsonGzip END,
+        SourceFieldPathsJson = CASE WHEN target.SourceFieldPathsJsonGzip IS NULL
+                                         AND DATALENGTH(COMPRESS(inserted.SourceFieldPathsJson))
+                                               < DATALENGTH(inserted.SourceFieldPathsJson)
+                                    THEN NULL ELSE target.SourceFieldPathsJson END,
+        SourceRepresentationJsonGzip =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN COMPRESS(inserted.SourceRepresentationJson)
+                 ELSE target.SourceRepresentationJsonGzip END,
+        SourceRepresentationJson =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN NULL ELSE target.SourceRepresentationJson END
+    FROM stg.MddMacAttributeEvidence AS target
+    INNER JOIN inserted
+        ON inserted.AttributeEvidenceId = target.AttributeEvidenceId
+    WHERE target.TextSourceTextGzip IS NULL
+       OR target.CodeSourcePathsJsonGzip IS NULL
+       OR target.TextSourcePathsJsonGzip IS NULL
+       OR target.SourceFieldPathsJsonGzip IS NULL
+       OR target.SourceRepresentationJsonGzip IS NULL;
+END;
+GO
+
+CREATE OR ALTER TRIGGER stg.trg_MddMacParserGap_StorageV3
+ON stg.MddMacParserGap
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE target
+    SET SourceRepresentationJsonGzip =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN COMPRESS(inserted.SourceRepresentationJson)
+                 ELSE target.SourceRepresentationJsonGzip END,
+        SourceRepresentationJson =
+            CASE WHEN target.SourceRepresentationJsonGzip IS NULL
+                      AND DATALENGTH(COMPRESS(inserted.SourceRepresentationJson))
+                            < DATALENGTH(inserted.SourceRepresentationJson)
+                 THEN NULL ELSE target.SourceRepresentationJson END
+    FROM stg.MddMacParserGap AS target
+    INNER JOIN inserted
+        ON inserted.ParserGapId = target.ParserGapId
+    WHERE target.SourceRepresentationJsonGzip IS NULL;
+END;
+GO
+
+-- Only a read accessor; consumers must not assume the physical SnapshotJson
+-- column is populated after a compressed write. No history is lost.
+CREATE OR ALTER VIEW stg.vMddMacSourceSnapshotJson
+AS
+SELECT
+    SnapshotId, RunId, AuditId, TargetIdentity, SamplingTargetId,
+    LogicalDueBucket, ObservedAtUtc, ResponseTimestampSourceText,
+    ParserVersion, ApplicationStatus, PayloadHashSha256, CreatedAtUtc,
+    COALESCE(SnapshotJson,
+        CONVERT(NVARCHAR(MAX), DECOMPRESS(SnapshotJsonGzip))) AS SnapshotJson
+FROM stg.MddMacSourceSnapshot;
+GO
+
+-- V2 read accessor for legacy plaintext and new compressed normalized evidence.
+-- Queries needing large JSON must use this view rather than the physical JSON column.
+CREATE OR ALTER VIEW stg.vMddMacCallObservationJson
+AS
+SELECT
+    [CallObservationId],
+    [SnapshotId],
+    [ResultId],
+    [ResultOrdinal],
+    [EventOrdinal],
+    [CallScope],
+    [CallOrdinal],
+    [SourcePath],
+    [CallAtStopSourcePath],
+    [StopPointRef],
+    [StopDisplayText],
+    [StopSeqNumber],
+    [PlannedBay],
+    [EstimatedBay],
+    [UnplannedStop],
+    [NotServicedStop],
+    [NoBoardingAtStop],
+    [NoAlightingAtStop],
+    [Cancelled],
+    [Deviation],
+    [OperatingDayRef],
+    [JourneyRef],
+    [VehicleJourneyRef],
+    [DatedVehicleJourneyRef],
+    [LineRef],
+    [DirectionRef],
+    [OperatorRef],
+    [PtMode],
+    [Submode],
+    [OriginStopPointRef],
+    [OriginText],
+    [DestinationStopPointRef],
+    [DestinationText],
+    COALESCE([SourcePathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourcePathsJsonGzip]))) AS [SourcePathsJson],
+    COALESCE([SourceEventJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceEventJsonGzip]))) AS [SourceEventJson]
+FROM stg.MddMacCallObservation;
+GO
+
+-- V2 read accessor for legacy plaintext and new compressed normalized evidence.
+-- Queries needing large JSON must use this view rather than the physical JSON column.
+CREATE OR ALTER VIEW stg.vMddMacTimingObservationJson
+AS
+SELECT
+    [TimingObservationId],
+    [SnapshotId],
+    [ResultId],
+    [ResultOrdinal],
+    [EventOrdinal],
+    [CallScope],
+    [CallOrdinal],
+    [TimingContext],
+    [OperatingDayRef],
+    [JourneyRef],
+    [VehicleJourneyRef],
+    [DatedVehicleJourneyRef],
+    [LineRef],
+    [DirectionRef],
+    [OperatorRef],
+    [StopPointRef],
+    [StopSeqNumber],
+    [TimetabledTimeSourceText],
+    [EstimatedTimeSourceText],
+    [EstimatedTimeLowSourceText],
+    [EstimatedTimeHighSourceText],
+    [RecordedAtTimeSourceText],
+    [TimingSourcePath],
+    [TimetabledTimeSourcePath],
+    [EstimatedTimeSourcePath],
+    [EstimatedTimeLowSourcePath],
+    [EstimatedTimeHighSourcePath],
+    [RecordedAtTimeSourcePath],
+    [StopPointRefSourcePath],
+    [StopSeqNumberSourcePath],
+    [SourceEventIdentity],
+    [SourceEventIdentityVersion],
+    [SourceEventIdentityStatus],
+    COALESCE([SourceEventIdentityBasisJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceEventIdentityBasisJsonGzip]))) AS [SourceEventIdentityBasisJson],
+    COALESCE([SourceEventIdentityMissingFieldsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceEventIdentityMissingFieldsJsonGzip]))) AS [SourceEventIdentityMissingFieldsJson],
+    COALESCE([SourceEventIdentityAmbiguityJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceEventIdentityAmbiguityJsonGzip]))) AS [SourceEventIdentityAmbiguityJson],
+    COALESCE([SourcePathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourcePathsJsonGzip]))) AS [SourcePathsJson]
+FROM stg.MddMacTimingObservation;
+GO
+
+-- V3 read accessors expose the same logical text columns for legacy plaintext
+-- rows and future trigger-compressed rows.  Power BI and other consumers must
+-- use these views for the affected evidence fields.
+CREATE OR ALTER VIEW stg.vMddMacSituationEvidenceJson
+AS
+SELECT
+    [SituationEvidenceId], [SnapshotId], [ResultId], [ResultOrdinal],
+    [EventOrdinal], [EvidenceType], [SituationType], [ReferenceType],
+    [ReferenceValue], [ParticipantRef], [SituationNumber],
+    [VersionSourceText], [Identifier], [Summary],
+    COALESCE([Description], CONVERT(NVARCHAR(MAX), DECOMPRESS([DescriptionGzip]))) AS [Description],
+    COALESCE([Detail], CONVERT(NVARCHAR(MAX), DECOMPRESS([DetailGzip]))) AS [Detail],
+    [CreationTimeSourceText], [ValidFromSourceText], [ValidToSourceText],
+    [ProviderSource], [ProviderSourceType], [PrioritySourceText],
+    COALESCE([AffectsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([AffectsJsonGzip]))) AS [AffectsJson],
+    COALESCE([AffectedEntityJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([AffectedEntityJsonGzip]))) AS [AffectedEntityJson],
+    COALESCE([AffectedJourneyJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([AffectedJourneyJsonGzip]))) AS [AffectedJourneyJson],
+    COALESCE([AffectedLineJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([AffectedLineJsonGzip]))) AS [AffectedLineJson],
+    [IdentityKey], [AssociationScope], [CallScope], [SourcePath],
+    COALESCE([FieldPathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([FieldPathsJsonGzip]))) AS [FieldPathsJson],
+    COALESCE([AffectedEntityFieldPathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([AffectedEntityFieldPathsJsonGzip]))) AS [AffectedEntityFieldPathsJson],
+    COALESCE([SourceRepresentationJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceRepresentationJsonGzip]))) AS [SourceRepresentationJson]
+FROM stg.MddMacSituationEvidence;
+GO
+
+CREATE OR ALTER VIEW stg.vMddMacServiceSectionEvidenceJson
+AS
+SELECT
+    [ServiceSectionEvidenceId], [SnapshotId], [ResultId], [ResultOrdinal],
+    [EventOrdinal], [SectionOrdinal], [SourcePath], [LineRef],
+    [DirectionRef], [OperatorRef], [PtMode], [RailSubmode], [BusSubmode],
+    [TramSubmode], [Name], [ShortName],
+    COALESCE([Description], CONVERT(NVARCHAR(MAX), DECOMPRESS([DescriptionGzip]))) AS [Description],
+    COALESCE([RouteDescription], CONVERT(NVARCHAR(MAX), DECOMPRESS([RouteDescriptionGzip]))) AS [RouteDescription],
+    COALESCE([Via], CONVERT(NVARCHAR(MAX), DECOMPRESS([ViaGzip]))) AS [Via],
+    [PublishedLineName],
+    COALESCE([ModeSourceJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([ModeSourceJsonGzip]))) AS [ModeSourceJson],
+    COALESCE([SourcePathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourcePathsJsonGzip]))) AS [SourcePathsJson],
+    COALESCE([SourceRepresentationJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceRepresentationJsonGzip]))) AS [SourceRepresentationJson],
+    [SemanticRole]
+FROM stg.MddMacServiceSectionEvidence;
+GO
+
+CREATE OR ALTER VIEW stg.vMddMacAttributeEvidenceJson
+AS
+SELECT
+    [AttributeEvidenceId], [SnapshotId], [ResultId], [ResultOrdinal],
+    [EventOrdinal], [AttributeOrdinal], [AttributeType], [SourcePath],
+    [AssociationContextPath], [AssociationScope], [CallScope],
+    [CodeSourceText],
+    COALESCE([TextSourceText], CONVERT(NVARCHAR(MAX), DECOMPRESS([TextSourceTextGzip]))) AS [TextSourceText],
+    [IncidentCallSourcePath], [InfoCallSourcePath],
+    COALESCE([CodeSourcePathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([CodeSourcePathsJsonGzip]))) AS [CodeSourcePathsJson],
+    COALESCE([TextSourcePathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([TextSourcePathsJsonGzip]))) AS [TextSourcePathsJson],
+    COALESCE([SourceFieldPathsJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceFieldPathsJsonGzip]))) AS [SourceFieldPathsJson],
+    COALESCE([SourceRepresentationJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceRepresentationJsonGzip]))) AS [SourceRepresentationJson],
+    [SemanticRole]
+FROM stg.MddMacAttributeEvidence;
+GO
+
+CREATE OR ALTER VIEW stg.vMddMacParserGapJson
+AS
+SELECT
+    [ParserGapId], [SnapshotId], [ResultId], [ResultOrdinal],
+    [EventOrdinal], [FieldName], [NormalizedFieldName], [SourcePath],
+    [ValueType], [SourceValue],
+    COALESCE([SourceRepresentationJson], CONVERT(NVARCHAR(MAX), DECOMPRESS([SourceRepresentationJsonGzip]))) AS [SourceRepresentationJson],
+    [ValueExcerpt], [MappingStatus], [SemanticHint], [EventContext],
+    [AssociationScope], [CallScope]
+FROM stg.MddMacParserGap;
+GO
+
 
 CREATE OR ALTER VIEW analytics.vwMddMacRecordedAtTimeHistory
 AS
