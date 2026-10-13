@@ -342,10 +342,36 @@ BEGIN TRY
     CREATE VIEW analytics.vwMddMacSourceFieldCoverage AS
     SELECT * FROM analytics.vwMddMacCompactSourceFieldCoverage;');
 
+    /* Verify the replacement object surface before the destructive transaction
+       can commit.  A post-commit client check is useful evidence, but cannot
+       protect the legacy tables if a compatibility view is malformed. */
+    IF OBJECT_ID(N'stg.MddMacSourceSnapshot', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacCallObservation', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacTimingObservation', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacSituationEvidence', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacServiceSectionEvidence', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacAttributeEvidence', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacResponseError', N'V') IS NULL
+       OR OBJECT_ID(N'stg.MddMacParserGap', N'V') IS NULL
+       OR OBJECT_ID(N'analytics.vwMddMacRecordedAtTimeHistory', N'V') IS NULL
+       OR OBJECT_ID(N'analytics.vwMddMacSourceFieldCoverage', N'V') IS NULL
+        THROW 51310, 'Replacement compatibility views were not installed completely.', 1;
+
+    IF @OldSnapshots <> (SELECT COUNT_BIG(*) FROM stg.MddMacSourceSnapshot)
+       OR @OldCalls <> (SELECT COUNT_BIG(*) FROM stg.MddMacCallObservation)
+       OR @OldTimings <> (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation)
+       OR @OldSituations <> (SELECT COUNT_BIG(*) FROM stg.MddMacSituationEvidence)
+       OR @OldSections <> (SELECT COUNT_BIG(*) FROM stg.MddMacServiceSectionEvidence)
+       OR @OldAttributes <> (SELECT COUNT_BIG(*) FROM stg.MddMacAttributeEvidence)
+       OR @OldErrors <> (SELECT COUNT_BIG(*) FROM stg.MddMacResponseError)
+       OR @OldGaps <> (SELECT COUNT_BIG(*) FROM stg.MddMacParserGap)
+        THROW 51311, 'Replacement compatibility-view counts do not reconcile before commit.', 1;
+
     /* Reapply only the old table-level SELECT/VIEW DEFINITION contract. */
     DECLARE @GrantSql NVARCHAR(MAX) = N'';
     SELECT @GrantSql = @GrantSql +
-        N'GRANT ' + PermissionName + N' ON OBJECT::' + QUOTENAME(SchemaName) + N'.' + QUOTENAME(ObjectName)
+        CASE WHEN StateDesc = N'DENY' THEN N'DENY ' ELSE N'GRANT ' END
+        + PermissionName + N' ON OBJECT::' + QUOTENAME(SchemaName) + N'.' + QUOTENAME(ObjectName)
         + N' TO ' + QUOTENAME(PrincipalName)
         + CASE WHEN StateDesc = N'GRANT_WITH_GRANT_OPTION' THEN N' WITH GRANT OPTION' ELSE N'' END + N';'
     FROM @ObjectPermissions;

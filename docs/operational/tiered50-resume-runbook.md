@@ -87,6 +87,31 @@ transport. It records the live SQL session encryption result, Windows
 authentication scheme, and certificate-validation method, and rejects a
 connection whose actual transport is not encrypted.
 
+The read-only evidence command above cannot create the current recovery point
+required before storage changes. After measuring an approved SQL-visible
+off-C destination, the same interactive Windows identity can run the narrowly
+scoped backup command below. It uses Windows Authentication, requires no
+password argument, rejects C:, does not use `INIT`, performs no schema/data
+change, and runs `RESTORE VERIFYONLY` against the exact new backup set. The
+resulting JSON is sanitized and is the only backup artifact accepted by the
+reclamation and migration gates:
+
+```powershell
+$ErrorActionPreference = "Stop"
+& .\scripts\execute_windows_sql_backup.ps1 `
+  -SqlInstance "DataAnalyst-VM" `
+  -Database "CologneTransitIntelligence" `
+  -BackupPath "\\approved-server\CologneTransitIntelligence\CTI-current.bak" `
+  -DestinationFreeGiB 20 `
+  -Apply `
+  -EvidencePath "$env:LOCALAPPDATA\CologneTransitIntelligence\tiered50-fresh-backup.json"
+```
+
+The `20` value is an example placeholder: replace it only with a fresh
+measured free-space value for the approved destination. This command does not
+apply the compact schema or historical migration; those remain separate,
+bounded, approval-gated operations.
+
 The Windows payload is written with explicit UTF-8 without a BOM. The Mac
 parser also accepts a valid UTF-8 BOM for compatibility with older Windows
 PowerShell 5.1 output while retaining normal JSON and evidence-schema
@@ -119,8 +144,8 @@ signature is applied after the merged payload and current status are complete;
 the Windows envelope is only an authenticated intermediate input.
 
 The public-key verification happens before the merge; the final signature
-binds the SQL and Mac evidence together. This Windows workflow does not and
-must not perform the SQL lifecycle write. If no separate Mac administrator
+binds the SQL and Mac evidence together. The Windows evidence workflow does
+not and must not perform the SQL schema or historical lifecycle write. If no separate Mac administrator
 Keychain item or one-process authorized credential is available, stop here and
 leave Tiered50 stopped with `MISSING_ADMIN_CREDENTIALS_OR_PERMISSIONS`.
 The final artifact must also contain a fresh Windows VM disk-capacity check;

@@ -10,9 +10,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "capture_windows_sql_admin_evidence.ps1"
+WINDOWS_BACKUP_SCRIPT = ROOT / "scripts" / "execute_windows_sql_backup.ps1"
 
 
 class WindowsSqlBackupValidationTests(unittest.TestCase):
+    def test_windows_integrated_backup_runner_is_narrow_and_fail_closed(self) -> None:
+        script = WINDOWS_BACKUP_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Windows Authentication", script)
+        self.assertIn("Encrypt = $EncryptMode", script)
+        self.assertIn("TrustServerCertificate = $false", script)
+        self.assertIn("COPY_ONLY, COMPRESSION, CHECKSUM", script)
+        self.assertIn("RESTORE VERIFYONLY", script)
+        self.assertIn("$Apply", script)
+        self.assertIn("Test-OffCPath", script)
+        self.assertNotIn("-Username", script)
+        self.assertNotIn("-Password", script)
+        self.assertNotIn("WITH INIT", script)
+        self.assertNotIn("DROP TABLE", script)
+        self.assertNotIn("DBCC SHRINK", script)
+
     def test_capture_script_has_explicit_backup_boundaries(self) -> None:
         script = SCRIPT.read_text(encoding="utf-8")
 

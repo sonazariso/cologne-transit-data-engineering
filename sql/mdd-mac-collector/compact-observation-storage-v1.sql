@@ -3,11 +3,11 @@
 
     This is a source-controlled, additive migration.  It installs the
     immutable per-snapshot envelope and its readback contract, but it is
-    fail-closed by default in the supported runner.  Because SQL Server GO
-    separators create separate batches, do not paste this file directly into
-    SSMS: use scripts/apply_compact_storage_migration.py --apply, which checks
-    the stopped/disabled collector gate and changes the marker only for the
-    explicitly authorized deployment.
+    fail-closed by default.  It contains SQL Server GO separators and can be
+    executed as a file in SSMS after the operator has completed the separate
+    backup/preflight gates and changes only the apply marker below to 1 in a
+    reviewed working copy.  The existing Python runner remains an alternate
+    guarded path; it is not required for the additive DDL itself.
 
     Historical migration is performed by the bounded Python runner.  The
     runner reads one SnapshotId at a time, serializes every current SQL row
@@ -38,6 +38,11 @@ IF DB_NAME() <> N'CologneTransitIntelligence'
 IF OBJECT_ID(N'stg.MddMacSourceSnapshot', N'U') IS NULL
    OR OBJECT_ID(N'stg.MddMacCallObservation', N'U') IS NULL
    OR OBJECT_ID(N'stg.MddMacTimingObservation', N'U') IS NULL
+   OR OBJECT_ID(N'stg.MddMacSituationEvidence', N'U') IS NULL
+   OR OBJECT_ID(N'stg.MddMacServiceSectionEvidence', N'U') IS NULL
+   OR OBJECT_ID(N'stg.MddMacAttributeEvidence', N'U') IS NULL
+   OR OBJECT_ID(N'stg.MddMacResponseError', N'U') IS NULL
+   OR OBJECT_ID(N'stg.MddMacParserGap', N'U') IS NULL
     THROW 51201, 'The legacy source-faithful observation tables are required before compact storage.', 1;
 
 IF OBJECT_ID(N'stg.MddMacCompactStorageState', N'U') IS NULL
@@ -238,6 +243,55 @@ BEGIN
 END;
 GO
 
+/*
+    Do not silently accept an incompatible pre-existing compact schema.  The
+    CREATE TABLE branches above are additive, so this contract check is the
+    fail-closed upgrade boundary for databases where one or more compact
+    objects already exist.  It runs before allocator rows are initialized.
+*/
+DECLARE @CompactColumnContract TABLE
+(
+    ObjectId INT NULL,
+    ColumnName SYSNAME NOT NULL,
+    TypeName SYSNAME NOT NULL,
+    MaxLength SMALLINT NOT NULL,
+    IsNullable BIT NOT NULL
+);
+INSERT INTO @CompactColumnContract (ObjectId, ColumnName, TypeName, MaxLength, IsNullable)
+VALUES
+    (OBJECT_ID(N'stg.MddMacCompactStorageState'), N'StateId', N'tinyint', 1, 0),
+    (OBJECT_ID(N'stg.MddMacCompactStorageState'), N'StorageFormatVersion', N'smallint', 2, 0),
+    (OBJECT_ID(N'stg.MddMacCompactStorageState'), N'FutureWriteEnabled', N'bit', 1, 0),
+    (OBJECT_ID(N'stg.MddMacCompactObservationEnvelope'), N'SnapshotId', N'bigint', 8, 0),
+    (OBJECT_ID(N'stg.MddMacCompactObservationEnvelope'), N'EnvelopeJsonGzip', N'varbinary', -1, 0),
+    (OBJECT_ID(N'stg.MddMacCompactObservationEnvelope'), N'EnvelopeSha256', N'char', 64, 0),
+    (OBJECT_ID(N'stg.MddMacCompactObservationEnvelope'), N'VerificationStatus', N'varchar', 20, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigration'), N'MigrationId', N'uniqueidentifier', 16, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigration'), N'MigrationKind', N'varchar', 30, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigration'), N'Status', N'varchar', 30, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigrationUnit'), N'MigrationId', N'uniqueidentifier', 16, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigrationUnit'), N'SnapshotId', N'bigint', 8, 0),
+    (OBJECT_ID(N'stg.MddMacCompactMigrationUnit'), N'Status', N'varchar', 20, 0),
+    (OBJECT_ID(N'stg.MddMacCompactIdentityAllocator'), N'FamilyCode', N'varchar', 40, 0),
+    (OBJECT_ID(N'stg.MddMacCompactIdentityAllocator'), N'NextIdentity', N'bigint', 8, 0);
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @CompactColumnContract AS expected
+    LEFT JOIN sys.columns AS c
+        ON c.object_id = expected.ObjectId
+       AND c.name = expected.ColumnName
+    LEFT JOIN sys.types AS t
+        ON t.user_type_id = c.user_type_id
+    WHERE c.column_id IS NULL
+       OR t.name <> expected.TypeName
+       OR c.max_length <> expected.MaxLength
+       OR c.is_nullable <> expected.IsNullable
+)
+    THROW 51202, 'An existing compact storage object has an incompatible column contract; no allocator rows or procedures were changed.', 1;
+GO
+
 /* Initialize durable identity ranges above the current legacy identities. */
 IF NOT EXISTS (SELECT 1 FROM stg.MddMacCompactIdentityAllocator WHERE FamilyCode = 'Snapshot')
     INSERT INTO stg.MddMacCompactIdentityAllocator (FamilyCode, NextIdentity)
@@ -311,6 +365,8 @@ BEGIN
         THROW 51210, 'Historical compact unit identity is invalid.', 1;
     IF ISJSON(@EnvelopeJson) <> 1
         THROW 51211, 'Historical compact envelope JSON is invalid.', 1;
+    IF @EnvelopeSha256 IS NULL OR LEN(@EnvelopeSha256) <> 64
+        THROW 51211, 'Historical compact envelope hash metadata is invalid.', 1;
     IF @SourceSnapshotRowCount <> 1
         THROW 51212, 'Exactly one source snapshot row is required per compact unit.', 1;
     IF LOWER(CONVERT(CHAR(64), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), @EnvelopeJson)), 2))
@@ -321,6 +377,33 @@ BEGIN
        OR JSON_VALUE(@EnvelopeJson, '$.serialization') <> 'CTI_CANONICAL_JSON_UTF16LE_V1'
        OR JSON_VALUE(@EnvelopeJson, '$.hash_algorithm') <> 'SHA2_256_UTF16LE'
         THROW 51218, 'Historical compact envelope type or version is unsupported.', 1;
+    IF JSON_QUERY(@EnvelopeJson, '$.source_snapshot') IS NULL
+       OR TRY_CONVERT(BIGINT, JSON_VALUE(@EnvelopeJson, '$.source_snapshot.snapshot_id')) IS NULL
+       OR TRY_CONVERT(BIGINT, JSON_VALUE(@EnvelopeJson, '$.source_snapshot.snapshot_id')) <> @SnapshotId
+       OR JSON_QUERY(@EnvelopeJson, '$.calls') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.timings') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.situations') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.service_sections') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.attributes') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.response_errors') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.parser_gaps') IS NULL
+        THROW 51222, 'Historical compact envelope is missing its complete row-family shape.', 1;
+
+    DECLARE @EnvelopeCallCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.calls'));
+    DECLARE @EnvelopeTimingCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.timings'));
+    DECLARE @EnvelopeSituationCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.situations'));
+    DECLARE @EnvelopeSectionCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.service_sections'));
+    DECLARE @EnvelopeAttributeCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.attributes'));
+    DECLARE @EnvelopeErrorCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.response_errors'));
+    DECLARE @EnvelopeGapCount BIGINT = (SELECT COUNT_BIG(*) FROM OPENJSON(@EnvelopeJson, '$.parser_gaps'));
+    IF @EnvelopeCallCount <> @CallRowCount
+       OR @EnvelopeTimingCount <> @TimingRowCount
+       OR @EnvelopeSituationCount <> @SituationRowCount
+       OR @EnvelopeSectionCount <> @ServiceSectionRowCount
+       OR @EnvelopeAttributeCount <> @AttributeRowCount
+       OR @EnvelopeErrorCount <> @ResponseErrorRowCount
+       OR @EnvelopeGapCount <> @ParserGapRowCount
+        THROW 51223, 'Historical compact envelope row counts do not match metadata.', 1;
     IF DATALENGTH(@EnvelopeJson) > 536870912
         THROW 51214, 'Historical compact envelope exceeds the 512 MiB logical safety bound.', 1;
 
@@ -334,24 +417,60 @@ BEGIN
         )
             THROW 51215, 'Historical compact migration is not RUNNING.', 1;
 
+        DECLARE @SourceRunId NVARCHAR(100);
+        DECLARE @SourceAuditId BIGINT;
+        DECLARE @SourceTargetIdentity NVARCHAR(200);
+        DECLARE @SourceLogicalDueBucket BIGINT;
+        DECLARE @SourceObservedAtUtc DATETIME2(7);
+        SELECT @SourceRunId = RunId,
+               @SourceAuditId = AuditId,
+               @SourceTargetIdentity = TargetIdentity,
+               @SourceLogicalDueBucket = LogicalDueBucket,
+               @SourceObservedAtUtc = ObservedAtUtc
+        FROM stg.MddMacSourceSnapshot WITH (UPDLOCK, HOLDLOCK)
+        WHERE SnapshotId = @SnapshotId;
+        IF @SourceRunId IS NULL OR @SourceAuditId IS NULL
+            THROW 51224, 'Historical compact source snapshot does not exist or is incomplete.', 1;
+        IF @RunId IS NULL OR @AuditId IS NULL
+           OR @RunId <> @SourceRunId
+           OR @AuditId <> @SourceAuditId
+           OR ISNULL(@TargetIdentity, N'') <> ISNULL(@SourceTargetIdentity, N'')
+           OR @LogicalDueBucket <> @SourceLogicalDueBucket
+           OR @ObservedAtUtc <> @SourceObservedAtUtc
+            THROW 51225, 'Historical compact metadata does not match the source snapshot.', 1;
+
+        DECLARE @ActualCallCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacCallObservation WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualTimingCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualSituationCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacSituationEvidence WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualSectionCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacServiceSectionEvidence WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualAttributeCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacAttributeEvidence WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualErrorCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacResponseError WHERE SnapshotId = @SnapshotId);
+        DECLARE @ActualGapCount BIGINT = (SELECT COUNT_BIG(*) FROM stg.MddMacParserGap WHERE SnapshotId = @SnapshotId);
+        IF @ActualCallCount <> @CallRowCount
+           OR @ActualTimingCount <> @TimingRowCount
+           OR @ActualSituationCount <> @SituationRowCount
+           OR @ActualSectionCount <> @ServiceSectionRowCount
+           OR @ActualAttributeCount <> @AttributeRowCount
+           OR @ActualErrorCount <> @ResponseErrorRowCount
+           OR @ActualGapCount <> @ParserGapRowCount
+            THROW 51226, 'Historical compact row counts do not match source tables.', 1;
+
         DECLARE @ExistingStatus VARCHAR(20);
         DECLARE @ExistingMigrationId UNIQUEIDENTIFIER;
+        DECLARE @ExistingHash CHAR(64);
         SELECT @ExistingStatus = VerificationStatus,
-               @ExistingMigrationId = MigrationId
+               @ExistingMigrationId = MigrationId,
+               @ExistingHash = EnvelopeSha256
         FROM stg.MddMacCompactObservationEnvelope WITH (UPDLOCK, HOLDLOCK)
         WHERE SnapshotId = @SnapshotId;
         IF @ExistingStatus IS NOT NULL
            AND (@ExistingMigrationId IS NULL OR @ExistingMigrationId <> @MigrationId)
             THROW 51219, 'The compact snapshot is already owned by another migration.', 1;
+        IF @ExistingStatus IS NOT NULL AND @ExistingHash <> @EnvelopeSha256
+            THROW 51216, 'An existing compact snapshot has a different hash.', 1;
 
         IF @ExistingStatus = 'VERIFIED'
         BEGIN
-            IF EXISTS
-            (
-                SELECT 1 FROM stg.MddMacCompactObservationEnvelope
-                WHERE SnapshotId = @SnapshotId AND EnvelopeSha256 <> @EnvelopeSha256
-            )
-                THROW 51216, 'A verified compact snapshot already exists with a different hash.', 1;
             IF NOT EXISTS
             (
                 SELECT 1 FROM stg.MddMacCompactMigrationUnit
@@ -446,15 +565,94 @@ BEGIN
     SET XACT_ABORT ON;
     IF @Status NOT IN ('VERIFIED', 'QUARANTINED')
         THROW 51220, 'A compact unit can only be marked VERIFIED or QUARANTINED.', 1;
+    IF @Status = 'QUARANTINED'
+       AND (NULLIF(LTRIM(RTRIM(@FailureCode)), '') IS NULL
+            OR NULLIF(LTRIM(RTRIM(@FailureMessage)), '') IS NULL)
+        THROW 51222, 'A quarantined compact unit requires a failure code and message.', 1;
+    IF @Status = 'VERIFIED' AND (@FailureCode IS NOT NULL OR @FailureMessage IS NOT NULL)
+        THROW 51223, 'A VERIFIED compact unit cannot carry failure details.', 1;
 
     BEGIN TRY
         BEGIN TRANSACTION;
-        IF NOT EXISTS
-        (
-            SELECT 1 FROM stg.MddMacCompactMigrationUnit WITH (UPDLOCK, HOLDLOCK)
-            WHERE MigrationId = @MigrationId AND SnapshotId = @SnapshotId
-        )
+        DECLARE @UnitStatus VARCHAR(20);
+        DECLARE @UnitHash CHAR(64);
+        DECLARE @MigrationStatus VARCHAR(30);
+        DECLARE @UnitSourceCount BIGINT;
+        DECLARE @UnitCallCount BIGINT;
+        DECLARE @UnitTimingCount BIGINT;
+        DECLARE @UnitSituationCount BIGINT;
+        DECLARE @UnitSectionCount BIGINT;
+        DECLARE @UnitAttributeCount BIGINT;
+        DECLARE @UnitErrorCount BIGINT;
+        DECLARE @UnitGapCount BIGINT;
+        SELECT @UnitStatus = Status, @UnitHash = EnvelopeSha256
+             , @UnitSourceCount = SourceSnapshotRowCount
+             , @UnitCallCount = CallRowCount
+             , @UnitTimingCount = TimingRowCount
+             , @UnitSituationCount = SituationRowCount
+             , @UnitSectionCount = ServiceSectionRowCount
+             , @UnitAttributeCount = AttributeRowCount
+             , @UnitErrorCount = ResponseErrorRowCount
+             , @UnitGapCount = ParserGapRowCount
+        FROM stg.MddMacCompactMigrationUnit WITH (UPDLOCK, HOLDLOCK)
+        WHERE MigrationId = @MigrationId AND SnapshotId = @SnapshotId;
+        IF @UnitStatus IS NULL
             THROW 51221, 'Compact migration unit does not exist.', 1;
+        SELECT @MigrationStatus = Status
+        FROM stg.MddMacCompactMigration WITH (UPDLOCK, HOLDLOCK)
+        WHERE MigrationId = @MigrationId;
+        IF @MigrationStatus IS NULL OR @MigrationStatus <> 'RUNNING'
+            THROW 51240, 'Compact migration unit status changes require a RUNNING migration.', 1;
+
+        DECLARE @EnvelopeMigrationId UNIQUEIDENTIFIER;
+        DECLARE @EnvelopeStatus VARCHAR(20);
+        DECLARE @EnvelopeHash CHAR(64);
+        DECLARE @EnvelopeSourceCount BIGINT;
+        DECLARE @EnvelopeCallCount BIGINT;
+        DECLARE @EnvelopeTimingCount BIGINT;
+        DECLARE @EnvelopeSituationCount BIGINT;
+        DECLARE @EnvelopeSectionCount BIGINT;
+        DECLARE @EnvelopeAttributeCount BIGINT;
+        DECLARE @EnvelopeErrorCount BIGINT;
+        DECLARE @EnvelopeGapCount BIGINT;
+        SELECT @EnvelopeMigrationId = MigrationId,
+               @EnvelopeStatus = VerificationStatus,
+               @EnvelopeHash = EnvelopeSha256,
+               @EnvelopeSourceCount = SourceSnapshotRowCount,
+               @EnvelopeCallCount = CallRowCount,
+               @EnvelopeTimingCount = TimingRowCount,
+               @EnvelopeSituationCount = SituationRowCount,
+               @EnvelopeSectionCount = ServiceSectionRowCount,
+               @EnvelopeAttributeCount = AttributeRowCount,
+               @EnvelopeErrorCount = ResponseErrorRowCount,
+               @EnvelopeGapCount = ParserGapRowCount
+        FROM stg.MddMacCompactObservationEnvelope WITH (UPDLOCK, HOLDLOCK)
+        WHERE SnapshotId = @SnapshotId;
+        IF @EnvelopeStatus IS NULL
+            THROW 51224, 'Compact envelope does not exist for the migration unit.', 1;
+        IF @EnvelopeMigrationId IS NULL OR @EnvelopeMigrationId <> @MigrationId
+           OR @EnvelopeHash IS NULL OR @UnitHash IS NULL OR @EnvelopeHash <> @UnitHash
+            THROW 51225, 'Compact envelope identity or hash does not match the migration unit.', 1;
+        IF @UnitSourceCount IS NULL OR @UnitCallCount IS NULL OR @UnitTimingCount IS NULL
+           OR @UnitSituationCount IS NULL OR @UnitSectionCount IS NULL
+           OR @UnitAttributeCount IS NULL OR @UnitErrorCount IS NULL OR @UnitGapCount IS NULL
+           OR @UnitSourceCount <> @EnvelopeSourceCount
+           OR @UnitCallCount <> @EnvelopeCallCount
+           OR @UnitTimingCount <> @EnvelopeTimingCount
+           OR @UnitSituationCount <> @EnvelopeSituationCount
+           OR @UnitSectionCount <> @EnvelopeSectionCount
+           OR @UnitAttributeCount <> @EnvelopeAttributeCount
+           OR @UnitErrorCount <> @EnvelopeErrorCount
+           OR @UnitGapCount <> @EnvelopeGapCount
+            THROW 51241, 'Compact envelope counts do not match the migration unit.', 1;
+        IF @Status = 'VERIFIED' AND @EnvelopeStatus NOT IN ('BUILT', 'VERIFIED')
+            THROW 51226, 'Only a BUILT or already VERIFIED envelope can be marked VERIFIED.', 1;
+        IF @Status = 'QUARANTINED' AND @EnvelopeStatus NOT IN ('BUILT', 'QUARANTINED')
+            THROW 51227, 'Only a BUILT or already QUARANTINED envelope can be quarantined.', 1;
+        IF @Status = 'VERIFIED' AND @UnitStatus NOT IN ('BUILT', 'VERIFIED')
+            THROW 51228, 'A quarantined compact unit cannot be promoted without a new migration unit.', 1;
+        IF @Status = 'QUARANTINED' AND @UnitStatus NOT IN ('BUILT', 'QUARANTINED')
+            THROW 51229, 'A verified compact unit cannot be changed to quarantined.', 1;
 
         UPDATE stg.MddMacCompactMigrationUnit
         SET Status = @Status,
@@ -520,6 +718,8 @@ BEGIN
     BEGIN
         IF @RunId IS NULL OR @CompletedAtUtc IS NULL OR ISJSON(@RunSummaryJson) <> 1
             THROW 51230, 'Compact MDD Mac run finalization arguments are invalid.', 1;
+        IF NOT EXISTS (SELECT 1 FROM ctl.MddMacCollectorRun WHERE RunId = @RunId)
+            THROW 51230, 'Compact MDD Mac run finalization references an unknown RunId.', 1;
         BEGIN TRY
             BEGIN TRANSACTION;
             UPDATE ctl.MddMacCollectorRun
@@ -541,7 +741,15 @@ BEGIN
         END CATCH;
     END;
 
-    IF ISJSON(@EnvelopeJson) <> 1 OR @EnvelopeSha256 IS NULL
+    IF @RunId IS NULL OR @AuditId IS NULL
+        THROW 51231, 'Compact future-write RunId and AuditId are required.', 1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM ctl.MddMacTargetAudit
+        WHERE AuditId = @AuditId AND RunId = @RunId
+    )
+        THROW 51231, 'Compact future-write audit identity does not match the RunId.', 1;
+    IF ISJSON(@EnvelopeJson) <> 1 OR @EnvelopeSha256 IS NULL OR LEN(@EnvelopeSha256) <> 64
         THROW 51231, 'Compact envelope arguments are invalid.', 1;
     IF LOWER(CONVERT(CHAR(64), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), @EnvelopeJson)), 2))
         <> LOWER(@EnvelopeSha256)
@@ -551,6 +759,17 @@ BEGIN
        OR JSON_VALUE(@EnvelopeJson, '$.serialization') <> 'CTI_CANONICAL_JSON_UTF16LE_V1'
        OR JSON_VALUE(@EnvelopeJson, '$.hash_algorithm') <> 'SHA2_256_UTF16LE'
         THROW 51237, 'Compact future-write envelope type or version is unsupported.', 1;
+    IF JSON_QUERY(@EnvelopeJson, '$.source_snapshot') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.calls') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.timings') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.situations') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.service_sections') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.attributes') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.response_errors') IS NULL
+       OR JSON_QUERY(@EnvelopeJson, '$.parser_gaps') IS NULL
+       OR JSON_VALUE(@EnvelopeJson, '$.source_snapshot.run_id') <> @RunId
+       OR TRY_CONVERT(BIGINT, JSON_VALUE(@EnvelopeJson, '$.source_snapshot.audit_id')) <> @AuditId
+        THROW 51238, 'Compact future-write envelope is missing complete lineage or audit identity.', 1;
 
     IF NOT EXISTS
     (
@@ -603,6 +822,8 @@ BEGIN
         FROM stg.MddMacCompactIdentityAllocator WITH (UPDLOCK, HOLDLOCK)
         WHERE FamilyCode = 'Snapshot';
         IF @NextIdentity IS NULL THROW 51235, 'Compact Snapshot identity allocator is missing.', 1;
+        IF @NextIdentity >= CONVERT(BIGINT, 9223372036854775807)
+            THROW 51239, 'Compact Snapshot identity allocator is exhausted.', 1;
         SET @SnapshotId = @NextIdentity;
         UPDATE stg.MddMacCompactIdentityAllocator
         SET NextIdentity = NextIdentity + 1, UpdatedAtUtc = SYSUTCDATETIME()
@@ -632,6 +853,8 @@ BEGIN
                 FROM stg.MddMacCompactIdentityAllocator WITH (UPDLOCK, HOLDLOCK)
                 WHERE FamilyCode = @FamilyCode;
                 IF @FamilyStart IS NULL THROW 51236, 'Compact family identity allocator is missing.', 1;
+                IF @FamilyStart > CONVERT(BIGINT, 9223372036854775807) - @FamilyCount
+                    THROW 51239, 'Compact family identity allocator would overflow.', 1;
                 UPDATE stg.MddMacCompactIdentityAllocator
                 SET NextIdentity = NextIdentity + @FamilyCount,
                     UpdatedAtUtc = SYSUTCDATETIME()

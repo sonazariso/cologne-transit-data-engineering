@@ -34,7 +34,6 @@ def verify() -> None:
     assert proc(ddl).count('COMPRESS(@SnapshotJson)') == 1
     assert proc(migration).count('COMPRESS(@SnapshotJson)') == 1
     assert ddl.count('COMPRESS(@SnapshotJson)') == 1
-    assert proc(migration).count('COMPRESS(@SnapshotJson)') == 1
     assert '@CompletedRunStatus' in proc(ddl), 'Run finalization must still work'
     assert "StopEventResultCount = JSON_VALUE(@SnapshotJson, '$.result_count')" in proc(ddl)
     assert 'PERSISTED_PARSED_SNAPSHOT' in proc(ddl)
@@ -50,8 +49,9 @@ def verify() -> None:
     assert 'sp_getapplock' in backfill
     assert estimate.count('sp_estimate_data_compression_savings') == 2
     assert 'DATA_COMPRESSION = PAGE' not in estimate  # no rebuild
-    assert 'ISJSON(v.SnapshotJson)' in readback
+    assert 'ISJSON(d.RestoredText)' in readback
     assert 'DATALENGTH(v.SnapshotJson)' in readback
+    assert "HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), v.SnapshotJson))" in readback
 
     # The SQL Server COMPRESS(NVARCHAR(MAX)) payload uses gzip on UTF-16LE;
     # distinct from the existing Python SHA-256 over UTF-8 JSON text.

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from cologne_transit_collector.mssql_persistence import build_mssql_snapshot_rows
+from cologne_transit_collector.compact_observation import nested_gzip_hex_benchmark
 from cologne_transit_collector.trias import parse_trias_response
 
 
@@ -353,6 +354,10 @@ def _assert_grain_and_null_contract() -> dict[str, Any]:
 def validate() -> dict[str, Any]:
     _assert_static_contract()
     parity = _assert_grain_and_null_contract()
+    nested_gzip_hex = nested_gzip_hex_benchmark(
+        '{"source_event":"TRIAS","stop":"Köln Stammheim – Bf.","emoji":"🚌",'
+        '"repeated":"' + ('historical evidence ' * 180) + '"}'
+    )
     started = time.perf_counter()
     fixtures = [_benchmark_fixture(path) for path in FIXTURES]
     elapsed = time.perf_counter() - started
@@ -365,6 +370,7 @@ def validate() -> dict[str, Any]:
         "round_trip_and_grain": parity,
         "fixture_count": len(fixtures),
         "offline_benchmark_elapsed_seconds": round(elapsed, 6),
+        "nested_gzip_hex_benchmark": nested_gzip_hex,
         "sql_row_compression": "NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED",
         "sql_page_compression": "NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED",
         "delta_encoding": "NOT_SELECTED_NO_SEQUENCE_PROOF_IN_SANITIZED_FIXTURES",
@@ -386,6 +392,11 @@ def main() -> int:
         print("SQL_ROW_PAGE_COMPRESSION: NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED")
         print("DELTA_ENCODING: NOT_SELECTED_NO_SEQUENCE_PROOF")
         print("SHARED_DICTIONARY: LOGICAL_ESTIMATE_ONLY")
+        print(
+            "NESTED_GZIP_HEX_BENCHMARK: "
+            f"{'PASS' if result['nested_gzip_hex_benchmark']['nested_representation_is_smaller'] else 'OVERHEAD_PRESENT'} "
+            f"delta_bytes={result['nested_gzip_hex_benchmark']['nested_overhead_bytes']}"
+        )
         print("ROUND_TRIP_GRAIN_NULL_TIME_CONTRACT: PASS")
         print("SQL_CONNECTIONS=0 MDD_REQUESTS=0 PRODUCTION_WRITES=0")
     return 0

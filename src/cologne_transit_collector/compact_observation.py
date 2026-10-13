@@ -20,7 +20,11 @@ import gzip
 import hashlib
 import json
 import math
+import os
+import platform
 import re
+import subprocess
+import zlib
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -54,9 +58,124 @@ ROW_SET_FAMILY_NAMES = (
     "parser_gaps",
 )
 
+COLLECTOR_LAUNCHD_LABELS = (
+    "com.cologne-transit-intelligence.mdd-collector",
+    "com.cologne-transit-intelligence.mdd-tiered50-collector",
+)
+
+# These markers are intentionally narrow.  The safety gate must detect a
+# collector that is still running outside launchd, without echoing complete
+# command lines (which could contain credentials or payloads).
+COLLECTOR_PROCESS_MARKERS = (
+    "stage_14_collector.py",
+    "cologne_transit_collector.cli",
+    "com.cologne-transit-intelligence.mdd-collector",
+    "com.cologne-transit-intelligence.mdd-tiered50-collector",
+)
+
+STORAGE_OPERATION_PROCESS_MARKERS = (
+    "apply_compact_storage_migration.py",
+    "migrate_historical_compact_observations.py",
+    "verify_current_sql_backup.py",
+    "reclaim_sql_datafile_space.py",
+)
+
 
 class CompactEnvelopeError(ValueError):
     """Raised when a compact envelope is malformed or fails integrity checks."""
+
+
+def _process_gate(markers: Sequence[str], *, exclude_pid: int | None = None) -> dict[str, Any]:
+    """Return a secret-free process gate for the local safety checks."""
+
+    try:
+        completed = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {"status": "NOT_PROVEN", "reason": f"process listing unavailable: {type(exc).__name__}"}
+
+    ignored = {os.getpid()}
+    if exclude_pid is not None:
+        ignored.add(int(exclude_pid))
+    active_pids: list[int] = []
+    for line in completed.stdout.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        parts = text.split(None, 1)
+        try:
+            pid = int(parts[0])
+        except (IndexError, ValueError):
+            continue
+        if pid in ignored:
+            continue
+        command = parts[1] if len(parts) > 1 else ""
+        executable = command.split(None, 1)[0].rsplit("/", 1)[-1].casefold() if command else ""
+        # A shell command used to launch this check can contain the script
+        # name in its arguments. Only inspect the actual interpreter/process,
+        # while the child Python process remains visible to the gate.
+        if executable in {"sh", "bash", "zsh", "-zsh", "fish", "dash", "sudo"}:
+            continue
+        if any(marker in command for marker in markers):
+            active_pids.append(pid)
+    return {
+        "status": "PASS" if not active_pids else "BLOCKED",
+        "active_process_count": len(active_pids),
+        "active_process_pids": sorted(active_pids),
+    }
+
+
+def local_collector_safety_gate() -> dict[str, Any]:
+    """Verify launchd state and unmanaged collector processes read-only."""
+
+    if platform.system() != "Darwin":
+        return {"status": "NOT_PROVEN", "reason": "launchd state is only inspectable on macOS"}
+    try:
+        disabled_result = subprocess.run(
+            ["/bin/launchctl", "print-disabled", f"user/{os.getuid()}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        disabled_text = disabled_result.stdout + disabled_result.stderr
+        disabled = all(
+            f'"{label}" => disabled' in disabled_text
+            for label in COLLECTOR_LAUNCHD_LABELS
+        )
+        loaded_exit_codes = {
+            label: subprocess.run(
+                ["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).returncode
+            for label in COLLECTOR_LAUNCHD_LABELS
+        }
+        unloaded = all(code != 0 for code in loaded_exit_codes.values())
+        process_gate = _process_gate(COLLECTOR_PROCESS_MARKERS)
+        passed = disabled and unloaded and process_gate.get("status") == "PASS"
+        return {
+            "status": "PASS" if passed else "NOT_PROVEN",
+            "disabled": disabled,
+            "loaded_exit_codes": loaded_exit_codes,
+            "process_gate": process_gate,
+        }
+    except OSError as exc:
+        return {"status": "NOT_PROVEN", "reason": str(exc)[:300]}
+
+
+def local_storage_operation_gate() -> dict[str, Any]:
+    """Detect another compact-schema or historical-migration process."""
+
+    process_gate = _process_gate(STORAGE_OPERATION_PROCESS_MARKERS)
+    return {
+        "status": "PASS" if process_gate.get("status") == "PASS" else "NOT_PROVEN",
+        **process_gate,
+    }
 
 
 def _reject_non_finite(value: Any) -> None:
@@ -103,7 +222,9 @@ def _json_safe(value: Any) -> Any:
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
-    return str(value)
+    raise CompactEnvelopeError(
+        "unsupported envelope scalar type: " + type(value).__name__
+    )
 
 
 def _copy_row(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -127,7 +248,11 @@ def build_compact_envelope(
     the original identity values verbatim.
     """
 
-    if int(storage_format_version) != COMPACT_STORAGE_FORMAT_VERSION:
+    if (
+        isinstance(storage_format_version, bool)
+        or not isinstance(storage_format_version, int)
+        or storage_format_version != COMPACT_STORAGE_FORMAT_VERSION
+    ):
         raise CompactEnvelopeError("unsupported compact storage format version")
     missing = [name for name in ROW_SET_FAMILY_NAMES if name not in row_sets]
     if missing:
@@ -145,7 +270,9 @@ def build_compact_envelope(
             raise CompactEnvelopeError(f"row-set {family} must be a sequence")
         envelope[family] = [_copy_row(row) for row in values]
     # Force validation before the caller persists the object.  This catches
-    # non-finite numbers and unsupported values before a SQL transaction.
+    # non-finite numbers, unsupported values, and incomplete envelopes before
+    # a SQL transaction.
+    _validate_envelope_structure(envelope)
     _canonical_json(envelope)
     return envelope
 
@@ -170,7 +297,9 @@ class EncodedCompactEnvelope:
 
 
 def encode_compact_envelope(envelope: Mapping[str, Any]) -> EncodedCompactEnvelope:
-    canonical = _canonical_json(_json_safe(envelope))
+    safe_envelope = _json_safe(envelope)
+    _validate_envelope_structure(safe_envelope)
+    canonical = _canonical_json(safe_envelope)
     raw = canonical.encode("utf-16le")
     packed = gzip.compress(raw, mtime=0)
     return EncodedCompactEnvelope(
@@ -180,6 +309,33 @@ def encode_compact_envelope(envelope: Mapping[str, Any]) -> EncodedCompactEnvelo
         gzip_bytes=packed,
         sha256=hashlib.sha256(raw).hexdigest(),
     )
+
+
+def nested_gzip_hex_benchmark(value: str) -> dict[str, int | float | bool]:
+    """Measure the representation cost of nesting an existing GZIP as hex.
+
+    This is deliberately a logical-byte benchmark, not SQL Server allocation
+    evidence.  It compares the outer GZIP size of a normal text field with an
+    outer GZIP containing the inner GZIP bytes serialized as hexadecimal.  A
+    caller must still measure row/page/LOB allocation on the target SQL Server.
+    """
+
+    if not isinstance(value, str):
+        raise TypeError("nested GZIP benchmark input must be text")
+    inner_gzip = gzip.compress(value.encode("utf-16le"), mtime=0)
+    plain_wrapper = _canonical_json({"value": value}).encode("utf-16le")
+    nested_wrapper = _canonical_json({"value_gzip_hex": inner_gzip.hex()}).encode("utf-16le")
+    plain_outer = gzip.compress(plain_wrapper, mtime=0)
+    nested_outer = gzip.compress(nested_wrapper, mtime=0)
+    return {
+        "plain_wrapper_utf16le_bytes": len(plain_wrapper),
+        "inner_gzip_bytes": len(inner_gzip),
+        "nested_hex_wrapper_utf16le_bytes": len(nested_wrapper),
+        "plain_outer_gzip_bytes": len(plain_outer),
+        "nested_outer_gzip_bytes": len(nested_outer),
+        "nested_overhead_bytes": len(nested_outer) - len(plain_outer),
+        "nested_representation_is_smaller": len(nested_outer) < len(plain_outer),
+    }
 
 
 def decode_compact_envelope(
@@ -192,7 +348,7 @@ def decode_compact_envelope(
 
     try:
         raw = gzip.decompress(bytes(compressed_bytes))
-    except (OSError, EOFError) as exc:
+    except (OSError, EOFError, TypeError, ValueError, zlib.error) as exc:
         raise CompactEnvelopeError("compact envelope is not valid GZIP") from exc
     if len(raw) > max_logical_bytes:
         raise CompactEnvelopeError("compact envelope exceeds the bounded readback limit")
@@ -201,14 +357,26 @@ def decode_compact_envelope(
         raise CompactEnvelopeError("compact envelope SHA-256 does not match metadata")
     try:
         value = json.loads(raw.decode("utf-16le"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
         raise CompactEnvelopeError("compact envelope JSON is invalid") from exc
+    _validate_envelope_structure(value)
+    return value
+
+
+def _validate_envelope_structure(value: Any) -> None:
+    """Validate the complete versioned envelope shape before persistence/readback."""
+
     if not isinstance(value, dict):
         raise CompactEnvelopeError("compact envelope root must be an object")
     if value.get("envelope_type") != COMPACT_ENVELOPE_TYPE:
         raise CompactEnvelopeError("compact envelope type is not recognized")
-    if int(value.get("storage_format_version", -1)) != COMPACT_STORAGE_FORMAT_VERSION:
+    version = value.get("storage_format_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version != COMPACT_STORAGE_FORMAT_VERSION:
         raise CompactEnvelopeError("compact envelope version is not recognized")
+    if value.get("serialization") != COMPACT_SERIALIZATION:
+        raise CompactEnvelopeError("compact envelope serialization is not recognized")
+    if value.get("hash_algorithm") != COMPACT_HASH_ALGORITHM:
+        raise CompactEnvelopeError("compact envelope hash algorithm is not recognized")
     missing = [name for name in FAMILY_NAMES if name not in value]
     if missing:
         raise CompactEnvelopeError("compact envelope families are missing: " + ", ".join(missing))
@@ -217,7 +385,6 @@ def decode_compact_envelope(
     for family in ROW_SET_FAMILY_NAMES:
         if not isinstance(value[family], list) or any(not isinstance(row, dict) for row in value[family]):
             raise CompactEnvelopeError(f"compact envelope family {family} is not an object array")
-    return value
 
 
 def canonical_row(row: Mapping[str, Any]) -> str:
@@ -400,11 +567,34 @@ def capacity_projection(
     weekly_budget_gib: float,
     windows_free_gib: float,
     windows_reserve_gib: float,
+    operational_floor_gib: float = 12.0,
 ) -> dict[str, float | int | bool]:
     """Calculate bounded storage projections without making policy changes."""
 
-    requests = int(requests_per_hour) * int(hours)
-    growth_bytes = requests * int(bytes_per_snapshot)
+    integer_inputs = {
+        "requests_per_hour": requests_per_hour,
+        "hours": hours,
+        "bytes_per_snapshot": bytes_per_snapshot,
+    }
+    for name, value in integer_inputs.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+    if requests_per_hour <= 0 or hours <= 0:
+        raise ValueError("requests_per_hour and hours must be positive")
+    if bytes_per_snapshot < 0:
+        raise ValueError("bytes_per_snapshot cannot be negative")
+    numeric_inputs = {
+        "weekly_budget_gib": weekly_budget_gib,
+        "windows_free_gib": windows_free_gib,
+        "windows_reserve_gib": windows_reserve_gib,
+        "operational_floor_gib": operational_floor_gib,
+    }
+    if any(not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in numeric_inputs.values()):
+        raise ValueError("capacity thresholds must be finite numbers")
+    if any(float(value) < 0 for value in numeric_inputs.values()):
+        raise ValueError("capacity thresholds cannot be negative")
+    requests = requests_per_hour * hours
+    growth_bytes = requests * bytes_per_snapshot
     gib = 1024**3
     growth_gib = growth_bytes / gib
     budget_bytes = float(weekly_budget_gib) * gib
@@ -413,12 +603,14 @@ def capacity_projection(
         "requests": requests,
         "growth_bytes": growth_bytes,
         "growth_gib": growth_gib,
-        "bytes_per_request": int(bytes_per_snapshot),
+        "bytes_per_request": bytes_per_snapshot,
         "per_request_budget_bytes": per_request_budget,
         "weekly_budget_gib": float(weekly_budget_gib),
         "windows_free_after_gib": float(windows_free_gib) - growth_gib,
         "windows_reserve_gib": float(windows_reserve_gib),
+        "operational_floor_gib": float(operational_floor_gib),
         "weekly_budget_pass": growth_gib <= float(weekly_budget_gib),
         "windows_reserve_pass": float(windows_free_gib) - growth_gib >= float(windows_reserve_gib),
+        "operational_floor_pass": float(windows_free_gib) - growth_gib >= float(operational_floor_gib),
     }
 

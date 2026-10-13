@@ -14,10 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
-import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +27,15 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlPersistence,
     connect_mssql,
 )
+from cologne_transit_collector.compact_observation import (  # noqa: E402
+    local_collector_safety_gate,
+    local_storage_operation_gate,
+)
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     MacOSKeychainSecretProvider,
     resolve_administrator_connection_settings,
 )
+from reclaim_sql_datafile_space import _backup_gate  # noqa: E402
 from validate_mssql_migration import split_batches  # noqa: E402
 
 
@@ -45,41 +48,12 @@ REQUIRED_MARKERS = (
     "stg.uspMddMacCompactMarkUnit",
     "stg.uspPersistMddMacSnapshotCompact",
 )
-COLLECTOR_LABELS = (
-    "com.cologne-transit-intelligence.mdd-collector",
-    "com.cologne-transit-intelligence.mdd-tiered50-collector",
-)
+SAFETY_FLOOR_GIB = 12.0
+MAX_LOG_USED_PERCENT = 70.0
 
 
 def _collector_gate() -> dict[str, Any]:
-    if platform.system() != "Darwin":
-        return {"status": "NOT_PROVEN", "reason": "launchd state is only inspectable on macOS"}
-    try:
-        disabled_result = subprocess.run(
-            ["/bin/launchctl", "print-disabled", f"user/{os.getuid()}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        disabled_text = disabled_result.stdout + disabled_result.stderr
-        disabled = all(f'"{label}" => disabled' in disabled_text for label in COLLECTOR_LABELS)
-        loaded_exit_codes = {
-            label: subprocess.run(
-                ["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).returncode
-            for label in COLLECTOR_LABELS
-        }
-        unloaded = all(code != 0 for code in loaded_exit_codes.values())
-        return {
-            "status": "PASS" if disabled and unloaded else "NOT_PROVEN",
-            "disabled": disabled,
-            "loaded_exit_codes": loaded_exit_codes,
-        }
-    except OSError as exc:
-        return {"status": "NOT_PROVEN", "reason": str(exc)[:300]}
+    return local_collector_safety_gate()
 
 
 def _drain(cursor: Any) -> None:
@@ -103,6 +77,144 @@ def _drain(cursor: Any) -> None:
                     fetchall()
                 except Exception:
                     pass
+
+
+def _row_value(row: Any, name: str, index: int = 0) -> Any:
+    if isinstance(row, Mapping):
+        lowered = {str(key).casefold(): value for key, value in row.items()}
+        return lowered.get(name.casefold())
+    if row is None:
+        return None
+    try:
+        return row[index]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _production_preflight(cursor: Any) -> dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT DB_NAME() AS database_name,
+               CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)) AS server_name,
+               CAST(SERVERPROPERTY('InstanceName') AS NVARCHAR(128)) AS instance_name,
+               DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status,
+               DATABASEPROPERTYEX(DB_NAME(), 'Recovery') AS recovery_model
+        """
+    )
+    identity = cursor.fetchone()
+    cursor.execute(
+        """
+        SELECT df.file_id, df.name, df.type_desc,
+               df.size * 8192 AS allocated_bytes,
+               FILEPROPERTY(df.name, 'SpaceUsed') * 8192 AS used_bytes,
+               vs.volume_mount_point, vs.available_bytes
+        FROM sys.database_files AS df
+        CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+        ORDER BY df.file_id
+        """
+    )
+    files = []
+    for row in cursor.fetchall():
+        raw_values = (
+            _row_value(row, "file_id", 0),
+            _row_value(row, "name", 1),
+            _row_value(row, "type_desc", 2),
+            _row_value(row, "allocated_bytes", 3),
+            _row_value(row, "used_bytes", 4),
+            _row_value(row, "volume_mount_point", 5),
+            _row_value(row, "available_bytes", 6),
+        )
+        if any(value is None for value in raw_values):
+            raise RuntimeError("SQL file-space measurement is incomplete")
+        allocated = int(raw_values[3])
+        used = int(raw_values[4])
+        available = int(raw_values[6])
+        files.append(
+            {
+                "file_id": int(raw_values[0]),
+                "name": str(raw_values[1]),
+                "type": str(raw_values[2]),
+                "allocated_bytes": allocated,
+                "used_bytes": used,
+                "internal_free_bytes": max(0, allocated - used),
+                "volume": str(raw_values[5]),
+                "available_bytes": available,
+                "windows_free_gib": available / (1024**3),
+            }
+        )
+    cursor.execute(
+        """
+        SELECT total_log_size_in_bytes, used_log_space_in_bytes,
+               used_log_space_in_percent
+        FROM sys.dm_db_log_space_usage
+        WHERE database_id = DB_ID()
+        """
+    )
+    log = cursor.fetchone()
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_runs
+        FROM ctl.MddMacCollectorRun
+        WHERE Status IN ('RUNNING', 'CLAIMED')
+          AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+        """
+    )
+    active_runs = int(_row_value(cursor.fetchone(), "active_runs", 0) or 0)
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_leases
+        FROM ctl.MddMacProductionLease
+        WHERE LeaseName = 'MDD_MAC_PRODUCTION' AND Status = 'ACTIVE'
+        """
+    )
+    active_leases = int(_row_value(cursor.fetchone(), "active_leases", 0) or 0)
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_user_transactions
+        FROM sys.dm_tran_session_transactions AS st
+        INNER JOIN sys.dm_exec_sessions AS es ON es.session_id = st.session_id
+        WHERE st.session_id <> @@SPID AND es.is_user_process = 1
+        """
+    )
+    active_user_transactions = int(_row_value(cursor.fetchone(), "active_user_transactions", 0) or 0)
+    data_files = [item for item in files if item["type"].casefold() == "rows"]
+    c_files = [item for item in data_files if item["volume"].casefold().startswith("c:")]
+    free_gib = min((item["windows_free_gib"] for item in c_files), default=0.0)
+    log_used = float(_row_value(log, "used_log_space_in_percent", 2) or 100.0)
+    database_name = str(_row_value(identity, "database_name", 0) or "")
+    database_status = str(_row_value(identity, "database_status", 3) or "")
+    status = (
+        "PASS"
+        if database_name == "CologneTransitIntelligence"
+        and database_status.casefold() == "online"
+        and c_files
+        and free_gib >= SAFETY_FLOOR_GIB
+        and log_used <= MAX_LOG_USED_PERCENT
+        and active_runs == 0
+        and active_leases == 0
+        and active_user_transactions == 0
+        else "BLOCKED"
+    )
+    return {
+        "status": status,
+        "database_name": database_name,
+        "server_name": str(_row_value(identity, "server_name", 1) or ""),
+        "instance_name": str(_row_value(identity, "instance_name", 2) or ""),
+        "database_status": database_status,
+        "recovery_model": str(_row_value(identity, "recovery_model", 4) or ""),
+        "data_files": data_files,
+        "windows_free_gib": free_gib,
+        "required_windows_free_gib": SAFETY_FLOOR_GIB,
+        "log": {
+            "total_bytes": int(_row_value(log, "total_log_size_in_bytes", 0) or 0),
+            "used_bytes": int(_row_value(log, "used_log_space_in_bytes", 1) or 0),
+            "used_percent": log_used,
+            "max_used_percent": MAX_LOG_USED_PERCENT,
+        },
+        "active_runs": active_runs,
+        "active_leases": active_leases,
+        "active_user_transactions": active_user_transactions,
+    }
 
 
 def _source_text() -> str:
@@ -133,10 +245,16 @@ def _static_result() -> dict[str, Any]:
     }
 
 
-def _apply() -> dict[str, Any]:
+def _apply(backup_evidence: Path) -> dict[str, Any]:
+    backup_gate = _backup_gate(backup_evidence)
+    if backup_gate.get("status") != "PASS":
+        raise RuntimeError("fresh checksum-verified off-drive backup gate is not proven")
     collector_gate = _collector_gate()
     if collector_gate.get("status") != "PASS":
         raise RuntimeError("collector stopped/disabled gate is not proven")
+    operation_gate = local_storage_operation_gate()
+    if operation_gate.get("status") != "PASS":
+        raise RuntimeError("another compact-storage operation is active")
     settings, role_source = resolve_administrator_connection_settings(
         os.environ,
         secret_provider=MacOSKeychainSecretProvider(),
@@ -146,6 +264,9 @@ def _apply() -> dict[str, Any]:
     executed = 0
     try:
         cursor = connection.cursor()
+        preflight = _production_preflight(cursor)
+        if preflight.get("status") != "PASS":
+            raise RuntimeError("SQL identity, active-writer, log, or disk-capacity preflight failed")
         cursor.execute("SET XACT_ABORT ON;")
         _drain(cursor)
         for batch in _batches(apply=True):
@@ -163,7 +284,10 @@ def _apply() -> dict[str, Any]:
     schema = adapter.validate_compact_storage_schema()
     return {
         "status": "PASS",
+        "backup_gate": backup_gate,
         "collector_gate": collector_gate,
+        "storage_operation_gate": operation_gate,
+        "production_preflight": preflight,
         "admin_role_source": role_source,
         "executed_batches": executed,
         "schema": schema,
@@ -173,9 +297,16 @@ def _apply() -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="execute the additive migration")
+    parser.add_argument(
+        "--backup-evidence",
+        type=Path,
+        help="fresh off-C COPY_ONLY/CHECKSUM/VERIFYONLY evidence required for --apply",
+    )
     args = parser.parse_args(argv)
     try:
-        result = _apply() if args.apply else _static_result()
+        if args.apply and args.backup_evidence is None:
+            raise RuntimeError("--backup-evidence is required for additive production apply")
+        result = _apply(args.backup_evidence) if args.apply else _static_result()
         if not args.apply:
             result["collector_gate"] = _collector_gate()
     except Exception as exc:

@@ -34,6 +34,9 @@ IF DB_NAME() <> N'CologneTransitIntelligence'
 IF @EnableFutureWrites = 1 AND @PowerBICompatibilityConfirmed <> 1
     THROW 51341, 'Future writes require explicit Power BI/warehouse compatibility confirmation.', 1;
 
+IF @ApproveLegacyRetirement = 1 AND @PowerBICompatibilityConfirmed <> 1
+    THROW 51349, 'Legacy retirement requires explicit Power BI/warehouse compatibility confirmation.', 1;
+
 IF @ApproveLegacyRetirement = 1 AND @EnableFutureWrites = 1
     THROW 51342, 'Retire legacy storage before enabling future writes.', 1;
 
@@ -86,7 +89,7 @@ BEGIN TRY
     SET CompatibilityVerified = CASE WHEN @PowerBICompatibilityConfirmed = 1 THEN 1 ELSE CompatibilityVerified END,
         HistoricalReadbackVerified = CASE WHEN @EnableFutureWrites = 1 OR @ApproveLegacyRetirement = 1 THEN 1 ELSE HistoricalReadbackVerified END,
         FutureWriteEnabled = CASE WHEN @EnableFutureWrites = 1 THEN 1 ELSE 0 END,
-        LegacyRetirementApproved = CASE WHEN @ApproveLegacyRetirement = 1 THEN 1 ELSE 0 END,
+        LegacyRetirementApproved = CASE WHEN @ApproveLegacyRetirement = 1 THEN 1 ELSE LegacyRetirementApproved END,
         UpdatedAtUtc = SYSUTCDATETIME(),
         UpdatedBy = SUSER_SNAME()
     WHERE StateId = 1;

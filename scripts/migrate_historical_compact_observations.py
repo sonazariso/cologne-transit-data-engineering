@@ -19,9 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
 import re
-import subprocess
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -31,6 +29,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from cologne_transit_collector.compact_observation import (  # noqa: E402
     CompactEnvelopeError,
@@ -38,6 +37,8 @@ from cologne_transit_collector.compact_observation import (  # noqa: E402
     compare_row_family,
     decode_compact_envelope,
     encode_compact_envelope,
+    local_collector_safety_gate,
+    local_storage_operation_gate,
     normalize_sql_row,
 )
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
@@ -48,6 +49,7 @@ from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     MacOSKeychainSecretProvider,
     resolve_administrator_connection_settings,
 )
+from reclaim_sql_datafile_space import _backup_gate  # noqa: E402
 
 
 FAMILIES: tuple[tuple[str, str], ...] = (
@@ -59,12 +61,18 @@ FAMILIES: tuple[tuple[str, str], ...] = (
     ("response_errors", "stg.MddMacResponseError"),
     ("parser_gaps", "stg.MddMacParserGap"),
 )
-COLLECTOR_LABELS = (
-    "com.cologne-transit-intelligence.mdd-collector",
-    "com.cologne-transit-intelligence.mdd-tiered50-collector",
-)
 SAFETY_FLOOR_GIB = 12.0
 DEFAULT_MAX_LOG_USED_PERCENT = 70.0
+CAPACITY_PLAN_SCOPE = "FULL_HISTORY_MIGRATION_PEAK"
+CAPACITY_PLAN_FIELDS = (
+    "sample_snapshots",
+    "envelope_allocation_bytes",
+    "index_overhead_bytes",
+    "transaction_log_bytes",
+    "tempdb_bytes",
+    "rollback_bytes",
+    "peak_temporary_duplication_bytes",
+)
 
 
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
@@ -92,37 +100,7 @@ def _utc_now() -> datetime:
 
 def _launchd_gate() -> dict[str, Any]:
     """Read collector state without changing it."""
-
-    if platform.system() != "Darwin":
-        return {"status": "NOT_PROVEN", "reason": "launchd is only inspectable on macOS"}
-    try:
-        disabled = subprocess.run(
-            ["/bin/launchctl", "print-disabled", f"user/{os.getuid()}"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        disabled_text = disabled.stdout + disabled.stderr
-        disabled_ok = all(
-            f'"{label}" => disabled' in disabled_text for label in COLLECTOR_LABELS
-        )
-        loaded: dict[str, int] = {}
-        for label in COLLECTOR_LABELS:
-            result = subprocess.run(
-                ["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            loaded[label] = result.returncode
-        loaded_ok = all(code != 0 for code in loaded.values())
-        return {
-            "status": "PASS" if disabled_ok and loaded_ok else "NOT_PROVEN",
-            "disabled": disabled_ok,
-            "loaded_exit_codes": loaded,
-        }
-    except OSError as exc:
-        return {"status": "NOT_PROVEN", "reason": _safe_error(exc)}
+    return local_collector_safety_gate()
 
 
 def _read_capacity(cursor: Any) -> dict[str, Any]:
@@ -134,14 +112,20 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         ORDER BY vs.volume_mount_point
         """
     )
-    volumes = [
-        {
-            "volume": str(_row_value(row, "volume_mount_point", 0) or ""),
-            "total_bytes": int(_row_value(row, "total_bytes", 1) or 0),
-            "available_bytes": int(_row_value(row, "available_bytes", 2) or 0),
-        }
-        for row in cursor.fetchall()
-    ]
+    volumes = []
+    for row in cursor.fetchall():
+        volume = _row_value(row, "volume_mount_point", 0)
+        total_bytes = _row_value(row, "total_bytes", 1)
+        available_bytes = _row_value(row, "available_bytes", 2)
+        if any(value is None for value in (volume, total_bytes, available_bytes)):
+            raise MssqlSafetyError("SQL volume-capacity measurement is incomplete")
+        volumes.append(
+            {
+                "volume": str(volume),
+                "total_bytes": int(total_bytes),
+                "available_bytes": int(available_bytes),
+            }
+        )
     cursor.execute(
         """
         SELECT total_log_size_in_bytes, used_log_space_in_bytes,
@@ -151,31 +135,173 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         """
     )
     log_row = cursor.fetchone()
+    if log_row is None or any(
+        _row_value(log_row, name, index) is None
+        for index, name in enumerate(
+            ("total_log_size_in_bytes", "used_log_space_in_bytes", "used_log_space_in_percent")
+        )
+    ):
+        raise MssqlSafetyError("SQL log-space measurement is incomplete")
     log = {
         "total_bytes": int(_row_value(log_row, "total_log_size_in_bytes", 0) or 0),
         "used_bytes": int(_row_value(log_row, "used_log_space_in_bytes", 1) or 0),
         "used_percent": float(_row_value(log_row, "used_log_space_in_percent", 2) or 0),
     }
-    return {"volumes": volumes, "log": log}
+    cursor.execute(
+        """
+        SELECT file_id, name, type_desc,
+               size * 8192 AS allocated_bytes,
+               FILEPROPERTY(name, 'SpaceUsed') * 8192 AS used_bytes
+        FROM sys.database_files
+        ORDER BY file_id
+        """
+    )
+    files = []
+    for row in cursor.fetchall():
+        values = (
+            _row_value(row, "file_id", 0),
+            _row_value(row, "name", 1),
+            _row_value(row, "type_desc", 2),
+            _row_value(row, "allocated_bytes", 3),
+            _row_value(row, "used_bytes", 4),
+        )
+        if any(value is None for value in values):
+            raise MssqlSafetyError("SQL data-file allocation measurement is incomplete")
+        files.append(
+            {
+                "file_id": int(values[0]),
+                "name": str(values[1]),
+                "type": str(values[2]),
+                "allocated_bytes": int(values[3]),
+                "used_bytes": int(values[4]),
+            }
+        )
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_user_transactions
+        FROM sys.dm_tran_session_transactions AS st
+        INNER JOIN sys.dm_exec_sessions AS es ON es.session_id = st.session_id
+        WHERE st.session_id <> @@SPID AND es.is_user_process = 1
+        """
+    )
+    active_user_transactions = int(_row_value(cursor.fetchone(), "active_user_transactions", 0) or 0)
+    return {
+        "volumes": volumes,
+        "log": log,
+        "files": files,
+        "active_user_transactions": active_user_transactions,
+    }
 
 
-def _capacity_gate(capacity: Mapping[str, Any], *, log_limit: float) -> dict[str, Any]:
+def _capacity_gate(
+    capacity: Mapping[str, Any],
+    *,
+    log_limit: float,
+    required_extra_bytes: int = 0,
+) -> dict[str, Any]:
     volumes = list(capacity.get("volumes", ()))
-    rows_volume = next(
-        (item for item in volumes if str(item.get("volume", "")).casefold().startswith("c:")),
-        None,
+    c_volumes = [
+        item for item in volumes
+        if str(item.get("volume", "")).casefold().startswith("c:")
+    ]
+    rows_volume = min(
+        c_volumes,
+        key=lambda item: int(item.get("available_bytes", 0) or 0),
+        default=None,
     )
     available = int(rows_volume.get("available_bytes", 0)) if rows_volume else 0
+    if isinstance(required_extra_bytes, bool) or not isinstance(required_extra_bytes, int):
+        raise ValueError("required_extra_bytes must be an integer")
+    if required_extra_bytes < 0:
+        raise ValueError("required_extra_bytes cannot be negative")
+    projected_free_gib = (available - required_extra_bytes) / (1024**3)
     free_gib = available / (1024**3)
     log_used = float((capacity.get("log") or {}).get("used_percent", 100.0))
+    active_user_transactions = int(capacity.get("active_user_transactions", 0) or 0)
     return {
-        "status": "PASS" if rows_volume and free_gib >= SAFETY_FLOOR_GIB and log_used <= log_limit else "BLOCKED",
+        "status": "PASS"
+        if rows_volume
+        and projected_free_gib >= SAFETY_FLOOR_GIB
+        and log_used <= log_limit
+        and active_user_transactions == 0
+        else "BLOCKED",
         "windows_free_gib": round(free_gib, 3),
+        "required_extra_bytes": required_extra_bytes,
+        "projected_windows_free_gib": round(projected_free_gib, 3),
         "required_windows_free_gib": SAFETY_FLOOR_GIB,
         "log_used_percent": log_used,
         "max_log_used_percent": log_limit,
+        "active_user_transactions": active_user_transactions,
         "volume": rows_volume,
+        "c_volumes": c_volumes,
     }
+
+
+def _strict_nonnegative_integer(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"capacity plan field {name} must be a non-negative integer")
+    return value
+
+
+def _validate_capacity_plan(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = [name for name in CAPACITY_PLAN_FIELDS if name not in value]
+    for required_name in (
+        "planned_snapshot_count",
+        "measurement_basis",
+        "physical_allocation_measured",
+        "allocation_scope",
+        "peak_additional_bytes",
+    ):
+        if required_name not in value:
+            missing.append(required_name)
+    if missing:
+        raise ValueError("capacity plan is missing: " + ", ".join(missing))
+    sample_snapshots = _strict_nonnegative_integer(value["sample_snapshots"], "sample_snapshots")
+    planned_snapshot_count = _strict_nonnegative_integer(value["planned_snapshot_count"], "planned_snapshot_count")
+    if sample_snapshots <= 0 or planned_snapshot_count <= 0 or sample_snapshots > planned_snapshot_count:
+        raise ValueError("capacity plan snapshot counts are invalid")
+    components = {
+        name: _strict_nonnegative_integer(value[name], name)
+        for name in CAPACITY_PLAN_FIELDS
+        if name != "sample_snapshots"
+    }
+    measurement_basis = str(value.get("measurement_basis") or "").strip()
+    if (
+        "sql" not in measurement_basis.casefold()
+        or "physical" not in measurement_basis.casefold()
+        or "allocation" not in measurement_basis.casefold()
+    ):
+        raise ValueError("capacity plan measurement_basis must identify measured SQL physical allocation")
+    if value.get("physical_allocation_measured") is not True:
+        raise ValueError("capacity plan must set physical_allocation_measured=true")
+    allocation_scope = str(value.get("allocation_scope") or "").strip()
+    if allocation_scope != CAPACITY_PLAN_SCOPE:
+        raise ValueError(
+            "capacity plan must explicitly cover the full-history migration peak"
+        )
+    peak = sum(components.values())
+    declared_peak = _strict_nonnegative_integer(value["peak_additional_bytes"], "peak_additional_bytes")
+    if declared_peak != peak:
+        raise ValueError("capacity plan peak_additional_bytes does not equal its measured components")
+    if declared_peak <= 0:
+        raise ValueError("capacity plan peak_additional_bytes must be positive")
+    return {
+        "status": "PASS",
+        "measurement_basis": str(value.get("measurement_basis", "")),
+        "allocation_scope": allocation_scope,
+        "sample_snapshots": sample_snapshots,
+        "planned_snapshot_count": planned_snapshot_count,
+        "physical_allocation_measured": True,
+        **components,
+        "peak_additional_bytes": peak,
+    }
+
+
+def _load_capacity_plan(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, Mapping):
+        raise ValueError("capacity plan must be a JSON object")
+    return _validate_capacity_plan(value)
 
 
 def _dict_row(row: Any, cursor: Any) -> dict[str, Any]:
@@ -223,12 +349,44 @@ def _make_migration(cursor: Any, migration_id: uuid.UUID, *, apply: bool) -> Non
         return
     cursor.execute(
         """
+        IF EXISTS
+        (
+            SELECT 1 FROM stg.MddMacCompactMigration
+            WHERE MigrationId = %s AND Status IN ('BLOCKED', 'FAILED')
+        )
+            UPDATE stg.MddMacCompactMigration
+            SET Status = 'RUNNING', CompletedAtUtc = NULL,
+                FailureCode = NULL, FailureMessage = NULL
+            WHERE MigrationId = %s;
         IF NOT EXISTS (SELECT 1 FROM stg.MddMacCompactMigration WHERE MigrationId = %s)
         INSERT INTO stg.MddMacCompactMigration
             (MigrationId, StorageFormatVersion, MigrationKind, Status)
         VALUES (%s, 1, 'HISTORICAL', 'RUNNING')
         """,
-        (str(migration_id), str(migration_id)),
+        (
+            str(migration_id), str(migration_id), str(migration_id), str(migration_id),
+        ),
+    )
+
+
+def _set_migration_status(
+    cursor: Any,
+    migration_id: uuid.UUID,
+    status: str,
+    message: str | None = None,
+) -> None:
+    if status not in {"BLOCKED", "FAILED", "COMPLETE"}:
+        raise ValueError("invalid compact migration terminal status")
+    cursor.execute(
+        """
+        UPDATE stg.MddMacCompactMigration
+        SET Status = %s,
+            CompletedAtUtc = CASE WHEN %s = 'COMPLETE' THEN SYSUTCDATETIME() ELSE NULL END,
+            FailureCode = CASE WHEN %s = 'COMPLETE' THEN NULL ELSE 'PYTHON_RUNNER_BLOCKED' END,
+            FailureMessage = CASE WHEN %s = 'COMPLETE' THEN NULL ELSE %s END
+        WHERE MigrationId = %s
+        """,
+        (status, status, status, status, message, str(migration_id)),
     )
 
 
@@ -367,6 +525,62 @@ def _snapshot_ids(cursor: Any, args: argparse.Namespace) -> list[int]:
     return values[: args.max_snapshots] if args.max_snapshots is not None else values
 
 
+def _batch_reconciliation(cursor: Any, snapshot_ids: Sequence[int]) -> dict[str, Any]:
+    """Reconcile source and verified-envelope counts for one bounded batch."""
+
+    if not snapshot_ids:
+        return {"status": "PASS", "snapshot_count": 0, "source": {}, "compact": {}}
+    placeholders = ", ".join("%s" for _ in snapshot_ids)
+    params = tuple(int(value) for value in snapshot_ids)
+    source: dict[str, int] = {}
+    cursor.execute(
+        f"SELECT COUNT_BIG(*) AS row_count FROM stg.MddMacSourceSnapshot WHERE SnapshotId IN ({placeholders})",
+        params,
+    )
+    source["source_snapshot"] = int(_row_value(cursor.fetchone(), "row_count", 0) or 0)
+    for family, table in FAMILIES:
+        cursor.execute(
+            f"SELECT COUNT_BIG(*) AS row_count FROM {table} WHERE SnapshotId IN ({placeholders})",
+            params,
+        )
+        source[family] = int(_row_value(cursor.fetchone(), "row_count", 0) or 0)
+    cursor.execute(
+        f"""
+        SELECT COUNT_BIG(*) AS source_snapshot_count,
+               COALESCE(SUM(CallRowCount), 0) AS calls,
+               COALESCE(SUM(TimingRowCount), 0) AS timings,
+               COALESCE(SUM(SituationRowCount), 0) AS situations,
+               COALESCE(SUM(ServiceSectionRowCount), 0) AS service_sections,
+               COALESCE(SUM(AttributeRowCount), 0) AS attributes,
+               COALESCE(SUM(ResponseErrorRowCount), 0) AS response_errors,
+               COALESCE(SUM(ParserGapRowCount), 0) AS parser_gaps
+        FROM stg.MddMacCompactObservationEnvelope
+        WHERE VerificationStatus = 'VERIFIED'
+          AND SnapshotId IN ({placeholders})
+        """,
+        params,
+    )
+    row = cursor.fetchone()
+    compact = {
+        "source_snapshot": int(_row_value(row, "source_snapshot_count", 0) or 0),
+        "calls": int(_row_value(row, "calls", 1) or 0),
+        "timings": int(_row_value(row, "timings", 2) or 0),
+        "situations": int(_row_value(row, "situations", 3) or 0),
+        "service_sections": int(_row_value(row, "service_sections", 4) or 0),
+        "attributes": int(_row_value(row, "attributes", 5) or 0),
+        "response_errors": int(_row_value(row, "response_errors", 6) or 0),
+        "parser_gaps": int(_row_value(row, "parser_gaps", 7) or 0),
+    }
+    return {
+        "status": "PASS" if source == compact else "FAIL",
+        "snapshot_count": len(snapshot_ids),
+        "first_snapshot_id": int(snapshot_ids[0]),
+        "last_snapshot_id": int(snapshot_ids[-1]),
+        "source": source,
+        "compact": compact,
+    }
+
+
 def _process(
     *,
     connection: Any,
@@ -375,6 +589,7 @@ def _process(
     apply: bool,
     log_limit: float,
     batch_size: int,
+    capacity_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     cursor = connection.cursor()
     summary: dict[str, Any] = {
@@ -387,20 +602,53 @@ def _process(
         "quarantined": 0,
         "planned": 0,
         "units": [],
+        "batch_checkpoints": [],
     }
     cursor.execute("SELECT COUNT_BIG(*) AS source_snapshot_count FROM stg.MddMacSourceSnapshot")
     total_source_snapshots = int(_row_value(cursor.fetchone(), "source_snapshot_count", 0) or 0)
     summary["total_source_snapshot_count"] = total_source_snapshots
     summary["selected_is_full_history"] = len(snapshot_ids) == total_source_snapshots
+    required_extra_bytes = 0
+    if capacity_plan is not None:
+        if not isinstance(capacity_plan, Mapping):
+            raise MssqlSafetyError("capacity plan must be an object")
+        capacity_plan = _validate_capacity_plan(capacity_plan)
+        required_extra_bytes = capacity_plan["peak_additional_bytes"]
+    summary["capacity_plan"] = dict(capacity_plan) if capacity_plan else None
+    if apply and capacity_plan is None:
+        summary["status"] = "BLOCKED"
+        summary["stop_reason"] = "a measured bounded SQL capacity plan is required for apply"
+        return summary
+    if apply and capacity_plan is not None:
+        planned_count = int(capacity_plan.get("planned_snapshot_count", 0) or 0)
+        if planned_count < len(snapshot_ids):
+            summary["status"] = "BLOCKED"
+            summary["stop_reason"] = "capacity plan covers fewer snapshots than the selected migration"
+            return summary
+        if summary["selected_is_full_history"] and planned_count != total_source_snapshots:
+            summary["status"] = "BLOCKED"
+            summary["stop_reason"] = "full-history migration requires a capacity plan for the current source count"
+            return summary
+    if apply and not summary["selected_is_full_history"] and capacity_plan is not None:
+        # A full-history plan is intentionally conservative for a subset; it
+        # may be reused, but the runner records that it was not an extrapolated
+        # subset estimate.
+        summary["capacity_plan_scope"] = "FULL_HISTORY_PLAN_USED_FOR_SELECTED_SUBSET"
     if apply:
         _make_migration(cursor, migration_id, apply=True)
         connection.commit()
 
+    batch_start = 0
     for index, snapshot_id in enumerate(snapshot_ids):
         unit: dict[str, Any] = {"snapshot_id": snapshot_id}
+        stop_after_unit = False
         try:
             capacity = _read_capacity(cursor)
-            gate = _capacity_gate(capacity, log_limit=log_limit)
+            gate = _capacity_gate(
+                capacity,
+                log_limit=log_limit,
+                required_extra_bytes=required_extra_bytes,
+            )
             unit["preflight_capacity"] = gate
             if gate["status"] != "PASS":
                 raise MssqlSafetyError("capacity gate failed before compact unit")
@@ -451,17 +699,33 @@ def _process(
                     unit["status"] = "QUARANTINED"
                     summary["quarantined"] += 1
                     summary["status"] = "BLOCKED"
+                    stop_after_unit = True
                 else:
                     _mark_unit(cursor, migration_id, snapshot_id, "VERIFIED")
                     connection.commit()
                     unit["status"] = "VERIFIED"
                     summary["verified"] += 1
-                post_gate = _capacity_gate(_read_capacity(cursor), log_limit=log_limit)
+                post_gate = _capacity_gate(
+                    _read_capacity(cursor),
+                    log_limit=log_limit,
+                    required_extra_bytes=required_extra_bytes,
+                )
                 unit["postflight_capacity"] = post_gate
                 if post_gate["status"] != "PASS":
                     summary["status"] = "BLOCKED"
-                    unit["status"] = "BLOCKED_AFTER_COMMIT"
-                    break
+                    unit["status"] = (
+                        "BLOCKED_AFTER_QUARANTINE"
+                        if unit.get("status") == "QUARANTINED"
+                        else "BLOCKED_AFTER_COMMIT"
+                    )
+                    stop_after_unit = True
+                    _set_migration_status(
+                        cursor,
+                        migration_id,
+                        "BLOCKED",
+                        "capacity gate failed after compact unit commit",
+                    )
+                    connection.commit()
             summary["processed"] += 1
         except Exception as exc:
             try:
@@ -479,15 +743,54 @@ def _process(
                     summary["quarantined"] += 1
                 except Exception:
                     connection.rollback()
+                try:
+                    _set_migration_status(cursor, migration_id, "BLOCKED", unit["error"])
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
             summary["units"].append(unit)
             break
         summary["units"].append(unit)
-        if (index + 1) % max(batch_size, 1) == 0:
-            gate = _capacity_gate(_read_capacity(cursor), log_limit=log_limit)
+        if stop_after_unit:
+            break
+        if (index + 1) % max(batch_size, 1) == 0 or index + 1 == len(snapshot_ids):
+            batch_ids = snapshot_ids[batch_start : index + 1]
+            # The SQL ledger already checkpoints every verified unit.  This
+            # aggregate reconciliation makes the batch boundary explicit and
+            # proves source/compact counts before proceeding to the next one.
+            checkpoint = _batch_reconciliation(cursor, batch_ids) if apply else {
+                "status": "NOT_APPLICABLE_PLAN",
+                "snapshot_count": len(batch_ids),
+            }
+            summary["batch_checkpoints"].append(checkpoint)
+            if apply and checkpoint.get("status") != "PASS":
+                summary["status"] = "BLOCKED"
+                summary["stop_reason"] = "batch row-count reconciliation failed"
+                _set_migration_status(
+                    cursor,
+                    migration_id,
+                    "BLOCKED",
+                    "batch row-count reconciliation failed",
+                )
+                connection.commit()
+                break
+            gate = _capacity_gate(
+                _read_capacity(cursor),
+                log_limit=log_limit,
+                required_extra_bytes=required_extra_bytes,
+            )
             if gate["status"] != "PASS":
                 summary["status"] = "BLOCKED"
                 summary["stop_reason"] = "capacity gate failed between bounded batches"
+                _set_migration_status(
+                    cursor,
+                    migration_id,
+                    "BLOCKED",
+                    "capacity gate failed between bounded batches",
+                )
+                connection.commit()
                 break
+            batch_start = index + 1
     if (
         apply
         and summary["status"] == "PASS"
@@ -497,12 +800,12 @@ def _process(
         cursor.execute(
             """
             UPDATE stg.MddMacCompactMigration
-            SET Status = 'COMPLETE', CompletedAtUtc = SYSUTCDATETIME(),
-                LastSnapshotId = %s
+            SET LastSnapshotId = %s
             WHERE MigrationId = %s
             """,
             (snapshot_ids[-1] if snapshot_ids else None, str(migration_id)),
         )
+        _set_migration_status(cursor, migration_id, "COMPLETE")
         connection.commit()
     elif apply and summary["status"] == "PASS" and summary["verified"] == len(snapshot_ids):
         summary["status"] = "PARTIAL"
@@ -519,6 +822,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-snapshots", type=int)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--max-log-used-percent", type=float, default=DEFAULT_MAX_LOG_USED_PERCENT)
+    parser.add_argument(
+        "--capacity-plan",
+        type=Path,
+        help="measured bounded SQL allocation plan required for --apply",
+    )
+    parser.add_argument(
+        "--backup-evidence",
+        type=Path,
+        help="fresh off-C COPY_ONLY/CHECKSUM/VERIFYONLY evidence required for --apply",
+    )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
     result: dict[str, Any] = {
@@ -526,10 +839,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "operation": "historical_compact_migration",
         "safety_floor_gib": SAFETY_FLOOR_GIB,
         "collector_gate": _launchd_gate(),
+        "storage_operation_gate": local_storage_operation_gate(),
     }
     try:
+        capacity_plan = None
+        if args.apply:
+            if args.capacity_plan is None:
+                raise MssqlSafetyError("--capacity-plan is required for historical migration apply")
+            if args.backup_evidence is None:
+                raise MssqlSafetyError("--backup-evidence is required for historical migration apply")
+            result["backup_gate"] = _backup_gate(args.backup_evidence)
+            if result["backup_gate"].get("status") != "PASS":
+                raise MssqlSafetyError("fresh checksum-verified off-drive backup gate is not proven")
+            capacity_plan = _load_capacity_plan(args.capacity_plan)
+            result["capacity_plan"] = capacity_plan
         if result["collector_gate"].get("status") != "PASS":
             raise MssqlSafetyError("collector stopped/disabled gate is not proven")
+        if result["storage_operation_gate"].get("status") != "PASS":
+            raise MssqlSafetyError("another compact-storage operation is active")
         settings, _role_source = resolve_administrator_connection_settings(
             os.environ,
             secret_provider=MacOSKeychainSecretProvider(),
@@ -549,6 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 apply=args.apply,
                 log_limit=args.max_log_used_percent,
                 batch_size=max(1, args.batch_size),
+                capacity_plan=capacity_plan,
             )
             result["status"] = result["run"].get("status", "BLOCKED")
         finally:

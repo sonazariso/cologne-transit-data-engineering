@@ -19,6 +19,8 @@ DECLARE @Migrated INT = 0;
 IF OBJECT_ID(N'stg.MddMacSourceSnapshot', 'U') IS NULL
    OR COL_LENGTH(N'stg.MddMacSourceSnapshot', 'SnapshotJsonGzip') IS NULL
     THROW 51100, 'Snapshot GZIP migration not installed.', 1;
+IF OBJECT_ID(N'stg.vMddMacSourceSnapshotJson', 'V') IS NULL
+    THROW 51105, 'Lossless SnapshotJson readback view is not installed.', 1;
 
 IF @MaxRows NOT BETWEEN 1 AND 5
     THROW 51101, 'MaxRows must be between 1 and 5.', 1;
@@ -26,6 +28,12 @@ IF @MaxRows NOT BETWEEN 1 AND 5
 SELECT
     SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) AS PlainRows,
     SUM(CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS GzipRows,
+    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL THEN DATALENGTH(SnapshotJson) ELSE 0 END) AS PlaintextBytes,
+    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL THEN DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS EstimatedGzipBytes,
+    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS EstimatedPayloadSavingsBytes,
+    CONVERT(DECIMAL(19,3), SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) / 1073741824.0) AS EstimatedPayloadSavingsGiB,
     COUNT_BIG(*) AS TotalRows
 FROM stg.MddMacSourceSnapshot;
 
@@ -41,6 +49,24 @@ IF EXISTS (
     WHERE Status = 'ACTIVE'
 )
     THROW 51102, 'Active production lease - stop collector first.', 1;
+
+IF EXISTS (
+    SELECT 1 FROM ctl.MddMacCollectorRun
+    WHERE Status IN ('RUNNING', 'CLAIMED')
+      AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
+)
+    THROW 51106, 'A production collector run is active - stop the collector first.', 1;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.dm_exec_sessions AS s
+    INNER JOIN sys.dm_exec_requests AS r ON r.session_id = s.session_id
+    WHERE s.session_id <> @@SPID
+      AND r.database_id = DB_ID()
+      AND r.open_transaction_count > 0
+)
+    THROW 51107, 'Another SQL session has an active transaction in the target database.', 1;
 
 DECLARE @Batch TABLE (
     SnapshotId BIGINT NOT NULL PRIMARY KEY,

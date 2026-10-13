@@ -50,9 +50,26 @@ def calculate(args: argparse.Namespace) -> dict[str, Any]:
         bytes_per_snapshot = measurement.get("bytes_per_successful_snapshot")
     if bytes_per_snapshot is None:
         raise ValueError("measured physical bytes per successful snapshot are required")
-    bytes_per_snapshot = int(bytes_per_snapshot)
-    if bytes_per_snapshot < 0:
-        raise ValueError("bytes per snapshot cannot be negative")
+    if isinstance(bytes_per_snapshot, bool) or not isinstance(bytes_per_snapshot, int):
+        raise ValueError("bytes per snapshot must be an integer")
+    if bytes_per_snapshot <= 0:
+        raise ValueError("bytes per snapshot must be positive")
+    measurement_basis = str(
+        getattr(args, "measurement_basis", None)
+        or measurement.get("measurement_basis")
+        or ""
+    ).strip()
+    physical_allocation_measured = (
+        measurement.get("physical_allocation_measured") is True
+        if args.measurement_json
+        else bool(getattr(args, "measurement_basis", None))
+    )
+    physical_allocation_gate = (
+        physical_allocation_measured
+        and "sql" in measurement_basis.casefold()
+        and "physical" in measurement_basis.casefold()
+        and "allocation" in measurement_basis.casefold()
+    )
     projection = capacity_projection(
         requests_per_hour=REQUESTS_PER_HOUR,
         hours=HOURS_PER_DAY * DAYS_PER_WEEK,
@@ -60,6 +77,7 @@ def calculate(args: argparse.Namespace) -> dict[str, Any]:
         weekly_budget_gib=WEEKLY_BUDGET_GIB,
         windows_free_gib=float(args.windows_free_gib),
         windows_reserve_gib=WINDOWS_RESERVE_GIB,
+        operational_floor_gib=SAFETY_FLOOR_GIB,
     )
     weekly_requests = int(projection["requests"])
     day = capacity_projection(
@@ -69,16 +87,26 @@ def calculate(args: argparse.Namespace) -> dict[str, Any]:
         weekly_budget_gib=WEEKLY_BUDGET_GIB,
         windows_free_gib=float(args.windows_free_gib),
         windows_reserve_gib=WINDOWS_RESERVE_GIB,
+        operational_floor_gib=SAFETY_FLOOR_GIB,
     )
     guard_remaining = None
     if args.current_allocation_gib is not None:
-        guard_remaining = max(
-            0.0,
-            float(args.guard_max_cumulative_growth_gib)
-            - max(0.0, float(args.current_allocation_gib) - float(args.guard_baseline_gib)),
+        # Keep a negative allowance visible. Clamping it to zero would hide
+        # that the existing seven-day guard has already been exceeded.
+        guard_remaining = float(args.guard_max_cumulative_growth_gib) - (
+            float(args.current_allocation_gib) - float(args.guard_baseline_gib)
         )
+    guard_gate = guard_remaining is None or projection["growth_gib"] <= guard_remaining
     return {
-        "status": "PASS" if projection["weekly_budget_pass"] and projection["windows_reserve_pass"] else "NO_GO",
+        "status": "PASS"
+        if (
+            physical_allocation_gate
+            and projection["weekly_budget_pass"]
+            and projection["windows_reserve_pass"]
+            and projection["operational_floor_pass"]
+            and guard_gate
+        )
+        else "NO_GO",
         "requests_per_hour": REQUESTS_PER_HOUR,
         "requests_per_day": REQUESTS_PER_HOUR * HOURS_PER_DAY,
         "requests_per_seven_days": weekly_requests,
@@ -92,13 +120,17 @@ def calculate(args: argparse.Namespace) -> dict[str, Any]:
         "windows_free_after_seven_days_gib": projection["windows_free_after_gib"],
         "windows_reserve_gib": WINDOWS_RESERVE_GIB,
         "conservative_operational_floor_gib": SAFETY_FLOOR_GIB,
+        "operational_floor_gate": projection["operational_floor_pass"],
         "weekly_budget_gate": projection["weekly_budget_pass"],
         "windows_reserve_gate": projection["windows_reserve_pass"],
+        "physical_allocation_gate": physical_allocation_gate,
+        "original_guard_remaining_gib": guard_remaining,
+        "original_guard_allowance_gate": guard_gate,
         "guard_baseline_gib": float(args.guard_baseline_gib),
         "guard_max_cumulative_growth_gib": float(args.guard_max_cumulative_growth_gib),
         "guard_remaining_gib": guard_remaining,
-        "measurement_basis": measurement.get("measurement_basis", "CLI physical allocation input"),
-        "physical_allocation_measured": bool(measurement.get("physical_allocation_measured", True)),
+        "measurement_basis": measurement_basis or "NOT_PROVEN",
+        "physical_allocation_measured": physical_allocation_measured,
     }
 
 
@@ -106,6 +138,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bytes-per-snapshot", type=int)
     parser.add_argument("--measurement-json", type=Path)
+    parser.add_argument(
+        "--measurement-basis",
+        help="explicit SQL physical-allocation evidence basis for direct byte input",
+    )
     parser.add_argument("--windows-free-gib", type=float, required=True)
     parser.add_argument("--current-allocation-gib", type=float)
     parser.add_argument("--guard-baseline-gib", type=float, default=DEFAULT_GUARD_BASELINE_GIB)

@@ -93,6 +93,26 @@ WHERE referenced_schema_name IN (N'stg', N'analytics', N'ctl')
        OR referenced_entity_name LIKE N'vwMddMac%')
 ORDER BY referencing_schema_name, referencing_entity_name;
 
+/* SQL-module consumers that mention the physical plaintext column directly.
+   External Power BI/native queries are not visible to this catalog query and
+   must be checked through their real consumer; this result only identifies
+   server-side dependencies without returning payload text. */
+SELECT
+    s.name AS schema_name,
+    o.name AS object_name,
+    o.type_desc,
+    CONVERT(CHAR(64), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), sm.definition)), 2)
+        AS definition_sha256,
+    CASE WHEN sm.definition LIKE N'%SnapshotJsonGzip%'
+         THEN 1 ELSE 0 END AS mentions_gzip_representation,
+    CASE WHEN sm.definition LIKE N'%SnapshotJson%'
+         THEN 1 ELSE 0 END AS mentions_snapshot_json
+FROM sys.sql_modules AS sm
+INNER JOIN sys.objects AS o ON o.object_id = sm.object_id
+INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+WHERE sm.definition LIKE N'%SnapshotJson%'
+ORDER BY s.name, o.name;
+
 SELECT
     s.name AS schema_name, o.name AS object_name, o.type_desc,
     CONVERT(CHAR(64), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), OBJECT_DEFINITION(o.object_id))), 2)
@@ -112,7 +132,11 @@ SELECT
     SUM(CASE WHEN SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS gzip_payload_rows,
     SUM(CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) AS missing_payload_rows,
     SUM(CASE WHEN SnapshotJson IS NOT NULL THEN DATALENGTH(SnapshotJson) ELSE 0 END) AS plaintext_bytes,
-    SUM(CASE WHEN SnapshotJsonGzip IS NOT NULL THEN DATALENGTH(SnapshotJsonGzip) ELSE 0 END) AS gzip_bytes
+    SUM(CASE WHEN SnapshotJsonGzip IS NOT NULL THEN DATALENGTH(SnapshotJsonGzip) ELSE 0 END) AS gzip_bytes,
+    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS estimated_candidate_gzip_bytes,
+    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS estimated_candidate_payload_savings_bytes
 FROM stg.MddMacSourceSnapshot;
 
 IF COL_LENGTH(N'stg.MddMacCallObservation', N'SourcePathsJsonGzip') IS NOT NULL
