@@ -13,12 +13,17 @@ import gzip
 import hashlib
 import json
 import re
+import struct
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from cologne_transit_collector.mssql_persistence import build_mssql_snapshot_rows
-from cologne_transit_collector.compact_observation import nested_gzip_hex_benchmark
+from cologne_transit_collector.compact_observation import (
+    build_compact_envelope,
+    encode_compact_envelope,
+    nested_gzip_hex_benchmark,
+)
 from cologne_transit_collector.trias import parse_trias_response
 
 
@@ -162,6 +167,169 @@ def _dictionary_candidate(rows: Iterable[Mapping[str, Any]]) -> dict[str, int | 
     }
 
 
+def _binary_field_payload(field_name: str, value: Any) -> tuple[int, bytes]:
+    """Encode one field without turning an existing GZIP into hexadecimal."""
+
+    if value is None:
+        return 0, b""
+    if field_name.casefold().endswith("_gzip_hex"):
+        if not isinstance(value, str):
+            raise ValueError(f"{field_name} is not hexadecimal text")
+        return 6, bytes.fromhex(value)
+    if isinstance(value, bool):
+        return 3, json.dumps(value).encode("utf-8")
+    if isinstance(value, (int, float)):
+        return 2, json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    if isinstance(value, (list, Mapping)):
+        return 4 if isinstance(value, list) else 5, json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    return 1, str(value).encode("utf-8")
+
+
+def _field_records(
+    snapshot: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> list[tuple[str, int, str, Any, int, bytes]]:
+    families: list[tuple[str, Sequence[Mapping[str, Any]]]] = [("source_snapshot", [snapshot])]
+    families.extend((family, values) for family, values in rows.items())
+    records: list[tuple[str, int, str, Any, int, bytes]] = []
+    for family, family_rows in families:
+        for row_ordinal, row in enumerate(family_rows):
+            for field_name in sorted(row):
+                value = row[field_name]
+                field_type, payload = _binary_field_payload(field_name, value)
+                records.append((family, row_ordinal, field_name, value, field_type, payload))
+    return records
+
+
+def _field_record_bytes(
+    family: str,
+    row_ordinal: int,
+    field_name: str,
+    field_type: int,
+    payload: bytes,
+) -> bytes:
+    metadata = json.dumps(
+        {
+            "family": family,
+            "row_ordinal": row_ordinal,
+            "field_name": field_name,
+            "field_type": field_type,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return (
+        struct.pack(">I", len(metadata))
+        + metadata
+        + struct.pack(">I", len(payload))
+        + payload
+    )
+
+
+def _is_dictionary_field(field_name: str) -> bool:
+    normalized = field_name.casefold()
+    return (
+        "source_path" in normalized
+        or normalized in {
+            "timing_context",
+            "source_event_identity_basis_json",
+            "source_event_identity_missing_fields_json",
+            "source_event_identity_ambiguity_json",
+        }
+    )
+
+
+def _compact_storage_candidates(parsed: Mapping[str, Any], rows: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
+    """Compare lossless logical candidates before any SQL allocation claim."""
+
+    snapshot_text = json.dumps(parsed, ensure_ascii=False, sort_keys=True, allow_nan=False, default=str)
+    benchmark_snapshot = {"snapshot_id": 1, "snapshot_json": snapshot_text}
+    envelope = build_compact_envelope(
+        source_snapshot=benchmark_snapshot,
+        row_sets=rows,
+    )
+    current = encode_compact_envelope(envelope)
+    records = _field_records(benchmark_snapshot, rows)
+    binary_raw = b"".join(
+        _field_record_bytes(family, ordinal, field_name, field_type, payload)
+        for family, ordinal, field_name, _value, field_type, payload in records
+    )
+    binary_gzip = gzip.compress(binary_raw, mtime=0)
+
+    dictionary_values = sorted(
+        {
+            payload
+            for _family, _ordinal, field_name, value, _field_type, payload in records
+            if value is not None and _is_dictionary_field(field_name)
+        }
+    )
+    dictionary_ids = {payload: index for index, payload in enumerate(dictionary_values, start=1)}
+    dictionary_raw = b"".join(
+        struct.pack(">I", index) + struct.pack(">I", len(payload)) + payload
+        for index, payload in enumerate(dictionary_values, start=1)
+    )
+    dictionary_refs = []
+    residual = []
+    reconstructed: list[bytes] = []
+    for family, ordinal, field_name, value, field_type, payload in records:
+        if value is not None and _is_dictionary_field(field_name):
+            dictionary_id = dictionary_ids[payload]
+            metadata = json.dumps(
+                {
+                    "family": family,
+                    "row_ordinal": ordinal,
+                    "field_name": field_name,
+                    "field_type": field_type,
+                    "dictionary_id": dictionary_id,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            dictionary_refs.append(
+                struct.pack(">I", len(metadata)) + metadata + struct.pack(">I", dictionary_id)
+            )
+            reconstructed.append(dictionary_values[dictionary_id - 1])
+        else:
+            residual.append(_field_record_bytes(family, ordinal, field_name, field_type, payload))
+            reconstructed.append(payload)
+    assert reconstructed == [record[-1] for record in records]
+    dictionary_raw_total = dictionary_raw + b"".join(dictionary_refs) + b"".join(residual)
+    dictionary_gzip = gzip.compress(dictionary_raw_total, mtime=0)
+
+    return {
+        "lossless": True,
+        "field_count": len(records),
+        "current_complete_envelope": {
+            "logical_utf16le_bytes": current.logical_bytes,
+            "gzip_bytes": current.compressed_bytes,
+        },
+        "optimized_binary_representation": {
+            "raw_binary_bytes": len(binary_raw),
+            "gzip_bytes": len(binary_gzip),
+            "hex_payloads_removed": True,
+        },
+        "dictionary_encoding": {
+            "dictionary_value_count": len(dictionary_values),
+            "raw_binary_bytes": len(dictionary_raw_total),
+            "gzip_bytes": len(dictionary_gzip),
+            "repeated_field_refs": len(dictionary_refs),
+        },
+        "existing_compressed_snapshot_payload": {
+            "gzip_bytes": len(_sql_compress_model(snapshot_text) or b""),
+            "source": "fixture_snapshot_json_equivalent",
+        },
+        "sql_physical_allocation": "REQUIRES_ISOLATED_SQL_SERVER_LAB",
+    }
+
+
 def _assert_static_contract() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
     migration = MIGRATION.read_text(encoding="utf-8")
@@ -235,6 +403,15 @@ def _assert_static_contract() -> None:
     assert "sp_estimate_data_compression_savings" in compression_lab
     assert "N'ROW'" in compression_lab and "N'PAGE'" in compression_lab
     assert "NOT LIKE N'%_STORAGE_V3_LAB'" in compression_lab
+    for candidate_marker in (
+        "#CompactCurrentEnvelope",
+        "#CompactOptimizedBinary",
+        "#CompactDictionaryReference",
+        "existing_compressed_snapshot_payload",
+        "measured_peak_temporary_duplication_bytes",
+        "SUM(CONVERT(bigint, reserved_page_count))",
+    ):
+        assert candidate_marker in compression_lab, candidate_marker
     assert "HASHBYTES" in verify_lab
     assert "sys.dm_db_partition_stats" in audit
     assert "OBJECT_DEFINITION" in audit
@@ -291,6 +468,7 @@ def _benchmark_fixture(path: Path) -> dict[str, Any]:
         },
         "row_counts": {family: len(family_rows) for family, family_rows in rows.items()},
         "field_benchmarks": field_benchmarks,
+        "compact_storage_candidates": _compact_storage_candidates(parsed, rows),
         "dictionary_candidate": _dictionary_candidate(
             list(rows["calls"]) + list(rows["timings"])
         ),
@@ -371,6 +549,15 @@ def validate() -> dict[str, Any]:
         "fixture_count": len(fixtures),
         "offline_benchmark_elapsed_seconds": round(elapsed, 6),
         "nested_gzip_hex_benchmark": nested_gzip_hex,
+        "historical_compression_efficiency": {
+            "status": "OFFLINE_LOGICAL_PASS_SQL_PHYSICAL_LAB_REQUIRED",
+            "candidate_contract": (
+                "current_complete_envelope_vs_optimized_binary_vs_lossless_dictionary "
+                "vs_existing_compressed_snapshot_payload"
+            ),
+            "bounded_real_fixture_samples": len(fixtures),
+            "physical_allocation_measurement": str(LAB_COMPRESSION.relative_to(ROOT)),
+        },
         "sql_row_compression": "NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED",
         "sql_page_compression": "NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED",
         "delta_encoding": "NOT_SELECTED_NO_SEQUENCE_PROOF_IN_SANITIZED_FIXTURES",
@@ -390,6 +577,7 @@ def main() -> int:
         print("STORAGE_V3_OFFLINE_CONTRACT: PASS")
         print(f"STORAGE_V3_FIXTURES: {result['fixture_count']}")
         print("SQL_ROW_PAGE_COMPRESSION: NOT_MEASURED_ISOLATED_SQL_SERVER_REQUIRED")
+        print("HISTORICAL_COMPRESSION_EFFICIENCY: OFFLINE_LOGICAL_PASS_SQL_PHYSICAL_LAB_REQUIRED")
         print("DELTA_ENCODING: NOT_SELECTED_NO_SEQUENCE_PROOF")
         print("SHARED_DICTIONARY: LOGICAL_ESTIMATE_ONLY")
         print(

@@ -1,6 +1,6 @@
-# Tiered50 historical and future storage recovery — S144 continuation
+# Tiered50 historical and future storage recovery — S145 correction
 
-Date: 2026-10-13 (Europe/Berlin)
+Date: 2026-10-14 (Europe/Berlin)
 
 This document continues the existing compact-observation implementation. It
 does not create another numbered stage, change the sampling guard, start the
@@ -8,40 +8,47 @@ collector, or introduce a replacement architecture.
 
 ## Current result
 
-The code review and offline fixes are complete. No production SQL connection,
-backup, DDL, data migration, legacy-table retirement, MDF shrink, Power BI
-refresh, collector start, or MDD request was performed.
+The requested implementation corrections are applied and offline-tested. No
+production SQL connection, backup, DDL, data migration, legacy-table
+retirement, MDF shrink, Power BI refresh, collector start, or MDD request was
+performed.
 
 The collector remains disabled and unloaded. Do not use the archived Windows
 capture as a current recovery point: its latest verified full backup finished
-on 2026-10-12. The archived capture is useful only as evidence that the
-Windows-integrated administrative path exists for `DATAANALYST-VM\Somaye` on
-`DataAnalyst-VM` / `CologneTransitIntelligence`; every operation below still
-requires fresh SSMS results.
+on 2026-10-12. The operator reports that a fresh manual COPY_ONLY,
+COMPRESSION, CHECKSUM backup completed on 2026-10-14 at approximately
+3854.35 MiB, with SQL backup history showing completion. That report is not
+repository evidence and does not prove RESTORE VERIFYONLY; the existing
+backup must be verified through the read-only procedure below before it can
+satisfy the Python evidence gate.
 
 The confirmed SQL-visible backup root is
 `\\vmware-host\Shared Folders\CologneTransitData`. The SQL Server service
 must be able to see and write that UNC path; this is not a Mac filesystem
-path. The latest Windows measurement reports 17.31 GiB free on C:. That is
-above the 12 GiB operational floor for the backup gate, but it leaves only
-5.31 GiB before that floor. It does not currently prove that a full-history
-migration peak is safe, and it cannot satisfy the future target of 10 GiB
-growth while retaining a 12 GiB floor (that target needs at least 22 GiB free
-before growth).
+path. The latest supplied Windows measurement reports approximately 13.86 GiB
+free on C:. That is only 1.86 GiB above the 12 GiB operational floor. It does
+not currently prove that a full-history migration peak is safe, and it cannot
+satisfy the future target of 10 GiB growth while retaining a 12 GiB floor
+(that target needs at least 22 GiB free before growth).
 
-`FINAL_RESULT: BLOCKED_WITH_EXACT_OPERATOR_ACTION`
+`FINAL_RESULT: BLOCKED_PENDING_EXISTING_BACKUP_VERIFYONLY_AND_CAPACITY_PLAN`
 
-The blocker is the deliberate handoff of privileged Windows SSMS operations.
-The exact sequence, parameters, files, prerequisites, and expected results are
-below. If a fresh physical-capacity measurement fails its stated thresholds,
-the result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable
-future writes in that case.
+The blockers are missing SQL Server validation evidence, missing exact
+full-history physical capacity measurements, and missing RESTORE VERIFYONLY
+evidence for the reported existing backup. The implementation now has a
+safe, read-only verification path for that existing file and a lab-only
+physical candidate measurement path; neither was executed from this Mac.
+If a fresh physical-capacity measurement fails its stated thresholds, the
+result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable future
+writes in that case.
 
-The first safe production operation after this run finishes is manual
-execution of `sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql` in
-Windows SSMS, after changing only `@ApplyBackup` from `0` to `1`. It creates
-and verifies one off-C COPY_ONLY backup; it does not install schema, write
-historical envelopes, retire tables, shrink MDF, or start the collector.
+The first safe operator action is read-only verification of the existing
+2026-10-14 backup: use --verify-existing in
+scripts/verify_current_sql_backup.py, -VerifyExisting in the Windows helper,
+or set @VerifyExistingBackup = 1 and the actual path in a reviewed SSMS
+working copy. These branches do not execute BACKUP DATABASE. They produce the
+existing _backup_gate JSON shape only after real SQL metadata, RESTORE
+HEADERONLY, and RESTORE VERIFYONLY WITH CHECKSUM pass.
 
 ## Implementation defects fixed
 
@@ -51,6 +58,29 @@ The existing implementation was corrected in place:
   eight source tables, rejects incompatible pre-existing compact column
   contracts before allocator initialization, validates migration-unit hashes
   and counts, and permits unit marking only while the migration is `RUNNING`.
+  Its apply marker is now session-context guarded across every GO batch;
+  guarded batches execute inside one deployment transaction and a failed
+  batch poisons the remaining batches. The Python apply runner first executes
+  the complete guarded script in an outer rollback validation transaction.
+- `scripts/migrate_historical_compact_observations.py` now casts SQL page
+  counts to BIGINT before byte multiplication, measures active collector SQL
+  sessions, and performs capacity/log/conflict preflight before the first
+  migration-ledger write. The measured plan must explicitly cover the exact
+  full-history peak sum.
+- Historical verification now checks the actual SQL compatibility views and a
+  separate physical-field readback view. It compares normalized decoded rows,
+  exact columns, raw JSON types/values, NULL versus empty values, original
+  GZIP bytes, identities, timestamps, paths, JSON, duplicates, and Unicode
+  before promotion.
+- BUILT units are restartable and returned explicitly by the store procedure;
+  VERIFIED units are immutable, quarantined units cannot be promoted, and
+  network/readback failures leave the migration BLOCKED with a retryable
+  BUILT unit rather than falsely completing it.
+- `sql/mdd-mac-collector/estimate-storage-v3-compression.sql` now contains a
+  disabled-by-default isolated-lab measurement for current complete
+  envelopes, raw-binary field storage, lossless dictionary references, and
+  existing compressed snapshot payloads, including tempdb physical page
+  allocation and a field-count losslessness check.
 - `sql/mdd-mac-collector/approve-compact-observation-gates-v1.sql` now requires
   Power BI confirmation before either future writes or retirement approval and
   no longer clears a previously recorded retirement approval on a later gate
@@ -84,7 +114,7 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 | `<WINDOWS_LOGIN>` | `DATAANALYST-VM\Somaye` | The backup batch fails closed if `SUSER_SNAME()` differs |
 | `<DATABASE>` | `CologneTransitIntelligence` | Fixed by every supplied SQL file |
 | `<SQL_VISIBLE_BACKUP_PATH>` | Generated below `\\vmware-host\Shared Folders\CologneTransitData` by the backup batch | The SQL Server service must be able to write it; the Mac filesystem is irrelevant |
-| `<WINDOWS_C_FREE_GIB>` | `17.31` GiB at the latest Windows check | Re-measure in SSMS; the backup floor is 12 GiB |
+| `<WINDOWS_C_FREE_GIB>` | `13.86` GiB supplied latest Windows estimate | Re-measure in SSMS; only 1.86 GiB is above the 12 GiB floor |
 | `<BACKUP_DEST_FREE_GIB>` | Fresh Windows measurement of the confirmed UNC destination | Must cover the expected backup size plus the operator-approved reserve; `xp_fileexist` proves reachability, not free capacity |
 | `<MIGRATION_ID>` | New UUID recorded by the operator, or the existing failed/blocked UUID being intentionally resumed | Never reuse a UUID for unrelated history |
 | `<CAPACITY_PLAN_FILE>` | JSON file made from measured SQL allocation, log, tempdb, rollback, and duplication peaks | Must cover `FULL_HISTORY_MIGRATION_PEAK` |
@@ -94,7 +124,7 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 
 ## Execution order
 
-### 1. Fresh verified off-C backup
+### 1. Verify the reported existing off-C backup
 
 Prerequisites:
 
@@ -103,38 +133,40 @@ Prerequisites:
 - Confirm the database identity, `ONLINE`/`MULTI_USER` state, no active
   collector run, no active production lease, and no unrelated user
   transaction. The collector must remain disabled.
-- Confirm the existing SQL-visible destination is reachable from the SQL
-  Server service and has enough free space for the expected backup plus the
-  approved reserve. The batch below also performs `xp_fileexist`; that check
-  is not a free-space measurement.
+- Confirm the exact SQL-visible path of the reported 2026-10-14 backup. The
+  existing backup metadata query and `RESTORE HEADERONLY`/`VERIFYONLY` must
+  run from SQL Server; a Mac path or a screenshot is not sufficient.
 
-In SSMS, open
-`sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql`, confirm the
-connection is `DataAnalyst-VM` / `CologneTransitIntelligence` as
-`DATAANALYST-VM\Somaye`, and change only:
+In SSMS, open the reviewed backup script, confirm the authorized SQL
+identity and database, set the actual existing path, and change only:
 
 ```sql
-DECLARE @ApplyBackup BIT = 1;
+DECLARE @VerifyExistingBackup BIT = 1;
 ```
 
-Execute the whole file. It generates a new filename below
-`\\vmware-host\Shared Folders\CologneTransitData`, so no path replacement is
-needed. The source-controlled default remains `0`.
+Execute the whole file. This branch does not execute `BACKUP DATABASE` and
+does not create or overwrite a file. The source-controlled defaults remain
+`@ApplyBackup = 0`, `@VerifyExistingBackup = 0`.
 
-Expected result: the preflight row has `preflight_status = PREFLIGHT_PASS` and
-at least 12 GiB measured on C:, the backup completes, `RESTORE VERIFYONLY`
-returns without error, the metadata row has exactly one disk media file with
-`copy_only = 1`, `checksum_enabled = 1`, `compressed_backup_size > 0`, and the
-final `verifyonly_status = PASS`. The last result set is also a JSON evidence
-value. Save that value alone as `fresh-backup-evidence.json`; later Python
-gates consume this existing evidence shape. Save the SSMS messages as well.
-The archived 2026-10-12 backup is not sufficient.
+The equivalent Windows-integrated helper is
+`scripts/execute_windows_sql_backup.ps1 -SqlInstance DataAnalyst-VM
+-BackupPath <SQL-visible-existing-file> -VerifyExisting
+-EvidencePath existing-backup-evidence.json`.
+
+Expected result: SQL backup history identifies exactly one full backup set for
+the path, `copy_only = 1`, `checksum = 1`, `compressed_backup_size > 0`, the
+header matches the database and backup position, and `RESTORE VERIFYONLY WITH
+CHECKSUM` returns without error. Save only the final JSON object as
+`fresh-backup-evidence.json`; later Python gates consume this existing
+evidence shape. The reported 3854.35 MiB size may be recorded as operator
+context, but it is not substituted for the actual SQL metadata. The archived
+2026-10-12 backup is not sufficient.
 
 ### 2. Additive compact schema installation
 
 Prerequisites:
 
-- Step 1 is complete and its evidence is saved.
+- Step 1 must be complete and its evidence must be saved before proceeding.
 - The collector is still disabled/unloaded; no production run or lease is
   active; current C: free space is at least 12 GiB and log use is within the
   operator’s approved bound.
@@ -496,8 +528,10 @@ SET @Sql = N'DBCC SHRINKFILE (' + QUOTENAME(@LogicalFileName) + N', '
          + CONVERT(nvarchar(30), @TargetSizeMB) + N') WITH NO_INFOMSGS;';
 EXEC sys.sp_executesql @Sql;
 
-SELECT df.name AS logical_file_name, df.size * 8192.0 / 1073741824.0 AS allocated_gib,
-       FILEPROPERTY(df.name, 'SpaceUsed') * 8192.0 / 1073741824.0 AS used_gib,
+SELECT df.name AS logical_file_name,
+       CONVERT(BIGINT, df.size) * CONVERT(BIGINT, 8192) / 1073741824.0 AS allocated_gib,
+       CONVERT(BIGINT, FILEPROPERTY(df.name, 'SpaceUsed'))
+           * CONVERT(BIGINT, 8192) / 1073741824.0 AS used_gib,
        vs.available_bytes / 1073741824.0 AS windows_free_gib
 FROM sys.database_files AS df
 CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
@@ -544,8 +578,10 @@ SELECT total_log_size_in_bytes, used_log_space_in_bytes,
 FROM sys.dm_db_log_space_usage
 WHERE database_id = DB_ID();
 
-SELECT name, size * 8192 AS allocated_bytes,
-       FILEPROPERTY(name, 'SpaceUsed') * 8192 AS used_bytes
+SELECT name,
+       CONVERT(BIGINT, size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+       CONVERT(BIGINT, FILEPROPERTY(name, 'SpaceUsed'))
+           * CONVERT(BIGINT, 8192) AS used_bytes
 FROM tempdb.sys.database_files;
 
 SELECT FutureWriteEnabled, CompatibilityVerified,
@@ -603,11 +639,12 @@ The operator-facing files are:
 - Existing exact parity validator: `scripts/validate_compact_observation_parity.py`.
 - Existing capacity calculator: `scripts/calculate_tiered50_storage_capacity.py`.
 
-Do not run `scripts/verify_current_sql_backup.py` from this Mac session and do
-not retry unavailable Mac SQL administrator authentication. The SSMS batch in
-Step 1 is the required manual backup action. The existing PowerShell helper
-is an optional Windows-integrated alternative, not a reason to assume that a
-Mac path is visible to SQL Server.
+Do not run the SQL verifier from this Mac session when administrator
+authentication or SQL Server visibility is unavailable. Run its
+`--verify-existing` mode only from an authorized host with the real SQL
+connection and SQL-visible backup path; it performs no new backup. The
+Windows helper and SSMS script provide the same read-only existing-file
+procedure. Never fabricate the JSON artifact from the operator report.
 
 ## Local validation completed
 
@@ -618,10 +655,10 @@ python3 -m compileall -q src scripts tests                                  PASS
 PYTHONPATH=src python3 -m unittest tests.test_compact_observation_storage \
   tests.test_windows_sql_backup_validation tests.test_windows_sql_result_shape \
   tests.test_windows_sql_dbnull tests.test_production_repairs \
-  tests.test_tiered50_timing_capacity -q                                    47 PASS, 3 skipped
+  tests.test_tiered50_timing_capacity -q                                    52 PASS, 3 skipped
 python3 scripts/validate_snapshot_gzip_storage_v1.py                         PASS
 PYTHONPATH=src python3 scripts/validate_mssql_migration.py                   PASS
-PYTHONPATH=src python3 -m unittest discover -s tests -q                      411 run; PASS, 3 skipped
+PYTHONPATH=src python3 -m unittest discover -s tests -q                      416 run; PASS, 3 skipped
 git diff --check                                                             PASS
 ```
 
@@ -636,15 +673,16 @@ Server or Power BI results. No production mutation was executed.
 SOURCE_CODE_REVIEW: PASS
 IMPLEMENTATION_DEFECTS: FIXED_AND_OFFLINE_TESTED
 SQL_SERVER_PRODUCTION_VALIDATION: NOT_EXECUTED
-FRESH_VERIFIED_OFF_C_BACKUP: READY_FOR_MANUAL_WINDOWS_SSMS; NOT_EXECUTED
-WINDOWS_C_FREE_AT_LAST_CHECK: 17.31_GIB; 12_GIB_FLOOR_PASSES_BACKUP_ONLY
+FRESH_VERIFIED_OFF_C_BACKUP: EXISTING_BACKUP_VERIFYONLY_REQUIRED; NOT_EXECUTED
+WINDOWS_C_FREE_AT_LAST_CHECK: 13.86_GIB_SUPPLIED_ESTIMATE; 12_GIB_FLOOR_LEAVES_1.86_GIB_HEADROOM
 COMPACT_SCHEMA_INSTALLATION: NOT_EXECUTED
 BOUNDED_HISTORICAL_MIGRATION: NOT_EXECUTED
 EXACT_FULL_HISTORICAL_PARITY: NOT_EXECUTED
+HISTORICAL_COMPRESSION_EFFICIENCY: OFFLINE_LOGICAL_CANDIDATES_PASS; SQL_PHYSICAL_LAB_NOT_EXECUTED
 POWER_BI_COMPATIBILITY: NOT_VERIFIED
 LEGACY_RETIREMENT: NOT_EXECUTED
 PHYSICAL_MDF_RECLAMATION: NOT_EXECUTED
-FUTURE_STORAGE_CAPACITY: NOT_MEASURED; 22_GIB_PRE_GROWTH_FREE_REQUIRED_FOR_CURRENT_TARGET
+PEAK_MIGRATION_SPACE: NOT_MEASURED; FULL_HISTORY_BLOCKED
 COLLECTOR_STATUS: DISABLED_AND_UNLOADED; NOT_RESTARTED
-FINAL_RESULT: BLOCKED_WITH_EXACT_OPERATOR_ACTION
+FINAL_RESULT: BLOCKED_PENDING_EXISTING_BACKUP_VERIFYONLY_AND_CAPACITY_PLAN
 ```

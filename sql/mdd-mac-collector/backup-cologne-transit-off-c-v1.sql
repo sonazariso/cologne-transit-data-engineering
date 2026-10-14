@@ -4,7 +4,9 @@
     This SSMS batch is deliberately fail-closed.  It is the first manual
     production operation in the S144 continuation: it creates one COPY_ONLY,
     COMPRESSION, CHECKSUM full backup on the already-approved SQL-visible UNC
-    destination and verifies that backup with RESTORE VERIFYONLY.
+    destination and verifies that backup with RESTORE VERIFYONLY.  Set
+    @VerifyExistingBackup to 1 in a reviewed working copy to verify an
+    already-created backup instead; that branch never executes BACKUP DATABASE.
 
     The source-controlled default does not execute a backup.  In the reviewed
     SSMS working copy, change only @ApplyBackup from 0 to 1 after the operator
@@ -19,6 +21,9 @@ SET XACT_ABORT ON;
 SET LOCK_TIMEOUT 5000;
 
 DECLARE @ApplyBackup BIT = 0;
+DECLARE @VerifyExistingBackup BIT = 0;
+DECLARE @ExistingBackupPath nvarchar(4000) =
+    N'\\vmware-host\Shared Folders\CologneTransitData\REPLACE_WITH_EXISTING_BACKUP.bak';
 DECLARE @ExpectedServer sysname = N'DataAnalyst-VM';
 DECLARE @ExpectedLogin nvarchar(256) = N'DATAANALYST-VM\Somaye';
 DECLARE @BackupRoot nvarchar(4000) =
@@ -83,6 +88,106 @@ IF @CFreeBytes IS NULL
     THROW 51410, 'SQL Server could not measure Windows C: free space.', 1;
 IF @CFreeBytes < CONVERT(bigint, 12.000 * 1073741824.0)
     THROW 51411, 'Windows C: free space is below the 12 GiB operational floor.', 1;
+
+IF @VerifyExistingBackup = 1 AND @ApplyBackup = 1
+    THROW 51420, 'Choose either existing-backup verification or new-backup creation, not both.', 1;
+IF @VerifyExistingBackup = 1
+BEGIN
+    IF @ExistingBackupPath LIKE N'%REPLACE_WITH_EXISTING_BACKUP%'
+        THROW 51422, 'Set the existing SQL-visible backup path in the reviewed working copy.', 1;
+    IF @ExistingBackupPath NOT LIKE @BackupRoot + N'\%'
+        THROW 51421, 'The existing backup path is outside the approved SQL-visible root.', 1;
+
+    DECLARE @Existing TABLE
+    (
+        backup_set_id int NOT NULL,
+        media_set_id int NOT NULL,
+        backup_position int NOT NULL,
+        database_name sysname NOT NULL,
+        backup_start_date datetime NOT NULL,
+        backup_finish_date datetime NOT NULL,
+        copy_only bit NOT NULL,
+        checksum_enabled bit NOT NULL,
+        compressed_backup_size bigint NOT NULL,
+        media_count bigint NOT NULL
+    );
+
+    INSERT @Existing
+    SELECT DISTINCT
+        bs.backup_set_id,
+        bs.media_set_id,
+        bs.position,
+        bs.database_name,
+        bs.backup_start_date,
+        bs.backup_finish_date,
+        bs.is_copy_only,
+        bs.has_backup_checksums,
+        bs.compressed_backup_size,
+        (
+            SELECT COUNT_BIG(*)
+            FROM msdb.dbo.backupmediafamily AS bmf_count
+            WHERE bmf_count.media_set_id = bs.media_set_id
+        )
+    FROM msdb.dbo.backupset AS bs
+    WHERE bs.database_name = N'CologneTransitIntelligence'
+      AND bs.type = 'D'
+      AND EXISTS
+      (
+          SELECT 1
+          FROM msdb.dbo.backupmediafamily AS bmf
+          WHERE bmf.media_set_id = bs.media_set_id
+            AND bmf.device_type = 2
+            AND bmf.physical_device_name = @ExistingBackupPath
+      );
+
+    IF (SELECT COUNT(*) FROM @Existing) <> 1
+        THROW 51423, 'The existing path did not identify exactly one full backup set.', 1;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM @Existing
+        WHERE database_name <> N'CologneTransitIntelligence'
+           OR copy_only <> 1
+           OR checksum_enabled <> 1
+           OR compressed_backup_size <= 0
+           OR backup_position <= 0
+           OR media_count <> 1
+    )
+        THROW 51424, 'Existing backup metadata failed the COPY_ONLY/compression/checksum/single-media gate.', 1;
+    DECLARE @ExistingPosition int = (SELECT backup_position FROM @Existing);
+
+    RESTORE HEADERONLY FROM DISK = @ExistingBackupPath
+        WITH FILE = @ExistingPosition;
+    RESTORE VERIFYONLY FROM DISK = @ExistingBackupPath
+        WITH FILE = @ExistingPosition, CHECKSUM;
+
+    SELECT
+        N'PASS' AS [status],
+        JSON_QUERY
+        (
+            (
+                SELECT N'PASS' AS [status],
+                       database_name,
+                       backup_set_id,
+                       media_set_id,
+                       backup_position,
+                       backup_start_date,
+                       backup_finish_date,
+                       copy_only,
+                       checksum_enabled AS [checksum],
+                       compressed_backup_size,
+                       media_count,
+                       @ExistingBackupPath AS [backup_path],
+                       N'PASS' AS [destination_accessibility],
+                       JSON_QUERY(N'{"status":"PASS","source":"RESTORE VERIFYONLY","checksum":true}') AS [verifyonly]
+                FROM @Existing
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+            )
+        ) AS [backup],
+        N'VERIFY_EXISTING' AS [mode]
+    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER;
+    RETURN;
+END;
 
 SET @StartedAt = SYSDATETIME();
 SET @BackupPath = @BackupRoot

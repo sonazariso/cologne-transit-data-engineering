@@ -20,8 +20,8 @@ SELECT
 SELECT
     name,
     type_desc,
-    CONVERT(bigint, size) * 8192 AS allocated_bytes,
-    CONVERT(bigint, FILEPROPERTY(name, N'SpaceUsed')) * 8192 AS used_bytes,
+    CONVERT(bigint, size) * CONVERT(bigint, 8192) AS allocated_bytes,
+    CONVERT(bigint, FILEPROPERTY(name, N'SpaceUsed')) * CONVERT(bigint, 8192) AS used_bytes,
     growth,
     is_percent_growth,
     max_size
@@ -44,11 +44,11 @@ SELECT
     i.type_desc,
     p.data_compression_desc,
     SUM(CONVERT(bigint, d.row_count)) AS row_count,
-    SUM(CONVERT(bigint, d.reserved_page_count)) * 8192 AS reserved_bytes,
-    SUM(CONVERT(bigint, d.used_page_count)) * 8192 AS used_bytes,
-    SUM(CONVERT(bigint, d.in_row_data_page_count)) * 8192 AS in_row_bytes,
-    SUM(CONVERT(bigint, d.lob_reserved_page_count)) * 8192 AS lob_reserved_bytes,
-    SUM(CONVERT(bigint, d.row_overflow_reserved_page_count)) * 8192 AS row_overflow_reserved_bytes
+    SUM(CONVERT(bigint, d.reserved_page_count)) * CONVERT(bigint, 8192) AS reserved_bytes,
+    SUM(CONVERT(bigint, d.used_page_count)) * CONVERT(bigint, 8192) AS used_bytes,
+    SUM(CONVERT(bigint, d.in_row_data_page_count)) * CONVERT(bigint, 8192) AS in_row_bytes,
+    SUM(CONVERT(bigint, d.lob_reserved_page_count)) * CONVERT(bigint, 8192) AS lob_reserved_bytes,
+    SUM(CONVERT(bigint, d.row_overflow_reserved_page_count)) * CONVERT(bigint, 8192) AS row_overflow_reserved_bytes
 FROM sys.objects AS o
 INNER JOIN sys.indexes AS i ON i.object_id = o.object_id
 INNER JOIN sys.dm_db_partition_stats AS d

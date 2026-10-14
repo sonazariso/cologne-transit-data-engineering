@@ -230,7 +230,7 @@ def database_snapshot(master: Any) -> dict[str, Any]:
         SELECT mf.database_id, DB_NAME(mf.database_id) AS database_name,
                mf.file_id, mf.name AS logical_name, mf.type_desc, mf.physical_name,
                CAST(mf.size AS bigint) * 8192 AS allocated_bytes,
-               mf.size * 8.0 / 1024 AS allocated_mb,
+               CAST(mf.size AS bigint) * 8.0 / 1024 AS allocated_mb,
                mf.growth, mf.is_percent_growth,
                CASE WHEN mf.max_size = -1 THEN NULL ELSE CAST(mf.max_size AS bigint) * 8192 END AS max_size_bytes
         FROM sys.master_files AS mf

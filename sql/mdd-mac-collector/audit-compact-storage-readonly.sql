@@ -23,9 +23,10 @@ WHERE d.database_id = DB_ID();
 
 SELECT
     df.file_id, df.name AS logical_file_name, df.type_desc, df.physical_name,
-    df.size * 8192 AS allocated_bytes,
-    FILEPROPERTY(df.name, 'SpaceUsed') * 8192 AS used_bytes,
-    (df.size - FILEPROPERTY(df.name, 'SpaceUsed')) * 8192 AS internally_unallocated_bytes,
+    CONVERT(BIGINT, df.size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+    CONVERT(BIGINT, FILEPROPERTY(df.name, 'SpaceUsed')) * CONVERT(BIGINT, 8192) AS used_bytes,
+    (CONVERT(BIGINT, df.size) - CONVERT(BIGINT, FILEPROPERTY(df.name, 'SpaceUsed')))
+        * CONVERT(BIGINT, 8192) AS internally_unallocated_bytes,
     df.growth, df.is_percent_growth, df.max_size,
     vs.volume_mount_point, vs.total_bytes AS volume_total_bytes,
     vs.available_bytes AS volume_available_bytes
@@ -128,15 +129,15 @@ WHERE s.name IN (N'stg', N'analytics')
 SELECT
     'MddMacSourceSnapshot' AS table_name,
     COUNT_BIG(*) AS row_count,
-    SUM(CASE WHEN SnapshotJson IS NOT NULL THEN 1 ELSE 0 END) AS plaintext_payload_rows,
-    SUM(CASE WHEN SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS gzip_payload_rows,
-    SUM(CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) AS missing_payload_rows,
-    SUM(CASE WHEN SnapshotJson IS NOT NULL THEN DATALENGTH(SnapshotJson) ELSE 0 END) AS plaintext_bytes,
-    SUM(CASE WHEN SnapshotJsonGzip IS NOT NULL THEN DATALENGTH(SnapshotJsonGzip) ELSE 0 END) AS gzip_bytes,
-    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
-             THEN DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS estimated_candidate_gzip_bytes,
-    SUM(CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
-             THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END) AS estimated_candidate_payload_savings_bytes
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NOT NULL THEN 1 ELSE 0 END)) AS plaintext_payload_rows,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS gzip_payload_rows,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END)) AS missing_payload_rows,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NOT NULL THEN DATALENGTH(SnapshotJson) ELSE 0 END)) AS plaintext_bytes,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJsonGzip IS NOT NULL THEN DATALENGTH(SnapshotJsonGzip) ELSE 0 END)) AS gzip_bytes,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END)) AS estimated_candidate_gzip_bytes,
+    SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NOT NULL AND SnapshotJsonGzip IS NULL
+             THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END)) AS estimated_candidate_payload_savings_bytes
 FROM stg.MddMacSourceSnapshot;
 
 IF COL_LENGTH(N'stg.MddMacCallObservation', N'SourcePathsJsonGzip') IS NOT NULL
@@ -145,10 +146,10 @@ BEGIN
     EXEC sys.sp_executesql N'
         SELECT
             ''MddMacCallObservation'' AS table_name, COUNT_BIG(*) AS row_count,
-            SUM(CASE WHEN SourcePathsJson IS NOT NULL THEN 1 ELSE 0 END) AS paths_plaintext_rows,
-            SUM(CASE WHEN SourcePathsJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS paths_gzip_rows,
-            SUM(CASE WHEN SourceEventJson IS NOT NULL THEN 1 ELSE 0 END) AS event_plaintext_rows,
-            SUM(CASE WHEN SourceEventJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS event_gzip_rows
+            SUM(CONVERT(BIGINT, CASE WHEN SourcePathsJson IS NOT NULL THEN 1 ELSE 0 END)) AS paths_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourcePathsJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS paths_gzip_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventJson IS NOT NULL THEN 1 ELSE 0 END)) AS event_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS event_gzip_rows
         FROM stg.MddMacCallObservation;';
 END
 ELSE
@@ -163,14 +164,14 @@ BEGIN
     EXEC sys.sp_executesql N'
         SELECT
             ''MddMacTimingObservation'' AS table_name, COUNT_BIG(*) AS row_count,
-            SUM(CASE WHEN SourcePathsJson IS NOT NULL THEN 1 ELSE 0 END) AS paths_plaintext_rows,
-            SUM(CASE WHEN SourcePathsJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS paths_gzip_rows,
-            SUM(CASE WHEN SourceEventIdentityBasisJson IS NOT NULL THEN 1 ELSE 0 END) AS basis_plaintext_rows,
-            SUM(CASE WHEN SourceEventIdentityBasisJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS basis_gzip_rows,
-            SUM(CASE WHEN SourceEventIdentityMissingFieldsJson IS NOT NULL THEN 1 ELSE 0 END) AS missing_plaintext_rows,
-            SUM(CASE WHEN SourceEventIdentityMissingFieldsJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS missing_gzip_rows,
-            SUM(CASE WHEN SourceEventIdentityAmbiguityJson IS NOT NULL THEN 1 ELSE 0 END) AS ambiguity_plaintext_rows,
-            SUM(CASE WHEN SourceEventIdentityAmbiguityJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS ambiguity_gzip_rows
+            SUM(CONVERT(BIGINT, CASE WHEN SourcePathsJson IS NOT NULL THEN 1 ELSE 0 END)) AS paths_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourcePathsJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS paths_gzip_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityBasisJson IS NOT NULL THEN 1 ELSE 0 END)) AS basis_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityBasisJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS basis_gzip_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityMissingFieldsJson IS NOT NULL THEN 1 ELSE 0 END)) AS missing_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityMissingFieldsJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS missing_gzip_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityAmbiguityJson IS NOT NULL THEN 1 ELSE 0 END)) AS ambiguity_plaintext_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SourceEventIdentityAmbiguityJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS ambiguity_gzip_rows
         FROM stg.MddMacTimingObservation;';
 END
 ELSE

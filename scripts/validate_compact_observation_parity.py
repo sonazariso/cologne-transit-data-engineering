@@ -42,6 +42,7 @@ from migrate_historical_compact_observations import (  # noqa: E402
     _launchd_gate,
     _normalized_unit,
     _read_unit,
+    _sql_readback_parity,
 )
 
 
@@ -145,7 +146,17 @@ def _validate_online(args: argparse.Namespace) -> dict[str, Any]:
                 actual,
             )
             status = str(row[2] if not isinstance(row, Mapping) else row["VerificationStatus"])
-            unit_status = "PASS" if comparison["status"] == "PASS" and status == "VERIFIED" else "FAIL"
+            sql_readback = _sql_readback_parity(
+                cursor,
+                snapshot=expected_snapshot,
+                rows=expected_rows,
+                stored_envelope_parity=comparison,
+            )
+            unit_status = (
+                "PASS"
+                if sql_readback["status"] == "PASS" and status == "VERIFIED"
+                else "FAIL"
+            )
             overall = "PASS" if overall == "PASS" and unit_status == "PASS" else "FAIL"
             units.append(
                 {
@@ -154,6 +165,7 @@ def _validate_online(args: argparse.Namespace) -> dict[str, Any]:
                     "stored_logical_bytes": int(row[3] if not isinstance(row, Mapping) else row["EnvelopeLogicalBytes"]),
                     "stored_compressed_bytes": int(row[4] if not isinstance(row, Mapping) else row["EnvelopeCompressedBytes"]),
                     "comparison": comparison,
+                    "sql_readback_parity": sql_readback,
                     "status": unit_status,
                 }
             )

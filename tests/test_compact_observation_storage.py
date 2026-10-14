@@ -32,12 +32,110 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from migrate_historical_compact_observations import _load_capacity_plan  # noqa: E402
+from migrate_historical_compact_observations import (  # noqa: E402
+    _capacity_gate,
+    _expected_physical_field_records,
+    _load_capacity_plan,
+    _read_capacity,
+    _recovery_decision,
+)
+from apply_compact_storage_migration import _batches  # noqa: E402
 from reclaim_sql_datafile_space import _approval_gate, _parity_gate  # noqa: E402
 from calculate_tiered50_storage_capacity import calculate as calculate_tiered50  # noqa: E402
 
 
 class CompactObservationStorageTests(unittest.TestCase):
+    def test_compact_sql_guard_covers_every_go_batch_and_never_uses_noexec(self) -> None:
+        compact = (ROOT / "sql/mdd-mac-collector/compact-observation-storage-v1.sql").read_text(encoding="utf-8")
+        batches = _batches(apply=False)
+        self.assertGreaterEqual(len(batches), 20)
+        self.assertEqual(compact.count("DECLARE @ApplyCompactStorage BIT = 0;"), 1)
+        self.assertNotIn("NOEXEC", compact.upper())
+        self.assertIn("BEGIN TRY", batches[0])
+        self.assertIn("BEGIN CATCH", batches[0])
+        for batch in batches[1:]:
+            self.assertIn("COALESCE(TRY_CONVERT(INT, SESSION_CONTEXT", batch)
+            self.assertIn("EXEC sys.sp_executesql", batch)
+            self.assertIn("BEGIN TRY", batch)
+            self.assertIn("BEGIN CATCH", batch)
+        self.assertIn("CTI.CompactStorage.Committed", batches[-1])
+
+    def test_capacity_readback_uses_bigint_for_a_29_gib_file(self) -> None:
+        class CapacityCursor:
+            def __init__(self) -> None:
+                self.queries: list[str] = []
+
+            def execute(self, query: str, params: object = ()) -> None:
+                self.queries.append(query)
+
+            def fetchall(self) -> list[dict[str, object]]:
+                query = self.queries[-1]
+                if "volume_mount_point" in query:
+                    return [{"volume_mount_point": "C:", "total_bytes": 64 * 1024**3, "available_bytes": 14 * 1024**3}]
+                if "file_id, name, type_desc" in query:
+                    return [{
+                        "file_id": 1,
+                        "name": "CologneTransitIntelligence",
+                        "type_desc": "ROWS",
+                        "allocated_bytes": 29 * 1024**3,
+                        "used_bytes": 28 * 1024**3,
+                    }]
+                return []
+
+            def fetchone(self) -> dict[str, object]:
+                query = self.queries[-1]
+                if "dm_db_log_space_usage" in query:
+                    return {
+                        "total_log_size_in_bytes": 8 * 1024**3,
+                        "used_log_space_in_bytes": 2 * 1024**3,
+                        "used_log_space_in_percent": 25.0,
+                    }
+                if "active_user_transactions" in query:
+                    return {"active_user_transactions": 0}
+                return {"active_collector_sessions": 0}
+
+        cursor = CapacityCursor()
+        capacity = _read_capacity(cursor)
+        self.assertEqual(capacity["files"][0]["allocated_bytes"], 29 * 1024**3)
+        file_query = next(query for query in cursor.queries if "file_id, name, type_desc" in query)
+        self.assertIn("CONVERT(BIGINT, size)", file_query)
+        self.assertIn("CONVERT(BIGINT, FILEPROPERTY", file_query)
+
+    def test_capacity_gate_blocks_13_86_gib_when_peak_needs_two_gib(self) -> None:
+        available = int(13.86 * 1024**3)
+        result = _capacity_gate(
+            {
+                "volumes": [{"volume": "C:", "available_bytes": available}],
+                "log": {"used_percent": 25.0},
+                "active_user_transactions": 0,
+                "active_collector_sessions": 0,
+            },
+            log_limit=70.0,
+            required_extra_bytes=2 * 1024**3,
+        )
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertAlmostEqual(result["peak_migration_space_gib"], 2.0, places=5)
+
+    def test_sql_physical_field_contract_preserves_null_empty_binary_and_duplicates(self) -> None:
+        records = _expected_physical_field_records(
+            {"snapshot_id": 7, "empty": "", "null": None, "payload_gzip_hex": "00ff"},
+            {"calls": [{"call_id": 1, "value": "same"}, {"call_id": 2, "value": "same"}],
+             "timings": [], "situations": [], "service_sections": [], "attributes": [],
+             "response_errors": [], "parser_gaps": []},
+        )
+        self.assertIn(("source_snapshot", 0, "empty", 1, "", None), records)
+        self.assertIn(("source_snapshot", 0, "null", 0, None, None), records)
+        self.assertIn(("source_snapshot", 0, "payload_gzip_hex", 1, "00ff", "00ff"), records)
+        self.assertEqual(sum(1 for record in records if record[0] == "calls"), 4)
+
+    def test_failure_injection_keeps_built_unit_retryable_and_quarantines_only_corruption(self) -> None:
+        network = _recovery_decision("BUILT", ConnectionError("socket closed"))
+        self.assertEqual(network["status"], "BLOCKED")
+        self.assertEqual(network["recovery"], "RETRY_BUILT_UNIT")
+        corruption = _recovery_decision("ALREADY_BUILT", CompactEnvelopeError("bad gzip"))
+        self.assertEqual(corruption["status"], "QUARANTINED")
+        self.assertIsNone(_recovery_decision("ALREADY_VERIFIED", ConnectionError("late failure"))["recovery"])
+
     def test_envelope_round_trip_preserves_unicode_nulls_and_duplicates(self) -> None:
         source = {
             "snapshot_id": 41,

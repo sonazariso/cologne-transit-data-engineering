@@ -11,12 +11,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "capture_windows_sql_admin_evidence.ps1"
 WINDOWS_BACKUP_SCRIPT = ROOT / "scripts" / "execute_windows_sql_backup.ps1"
+PYTHON_BACKUP_SCRIPT = ROOT / "scripts" / "verify_current_sql_backup.py"
 SSMS_BACKUP_SCRIPT = ROOT / "sql" / "mdd-mac-collector" / "backup-cologne-transit-off-c-v1.sql"
 
 
 class WindowsSqlBackupValidationTests(unittest.TestCase):
     def test_windows_integrated_backup_runner_is_narrow_and_fail_closed(self) -> None:
         script = WINDOWS_BACKUP_SCRIPT.read_text(encoding="utf-8")
+        python_script = PYTHON_BACKUP_SCRIPT.read_text(encoding="utf-8")
         ssms_script = SSMS_BACKUP_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn("Windows Authentication", script)
@@ -25,6 +27,8 @@ class WindowsSqlBackupValidationTests(unittest.TestCase):
         self.assertIn("COPY_ONLY, COMPRESSION, CHECKSUM", script)
         self.assertIn("RESTORE VERIFYONLY", script)
         self.assertIn("$Apply", script)
+        self.assertIn("$VerifyExisting", script)
+        self.assertIn("RESTORE HEADERONLY", script)
         self.assertIn("Test-OffCPath", script)
         self.assertNotIn("-Username", script)
         self.assertNotIn("-Password", script)
@@ -44,6 +48,15 @@ class WindowsSqlBackupValidationTests(unittest.TestCase):
         self.assertNotIn("WITH INIT", ssms_script.upper())
         self.assertNotIn("DROP TABLE", script)
         self.assertNotIn("DBCC SHRINK", script)
+        self.assertIn("--verify-existing", python_script)
+        self.assertIn("RESTORE HEADERONLY", python_script)
+        self.assertIn("_existing_backup_metadata", python_script)
+        self.assertNotIn(
+            "BACKUP DATABASE",
+            python_script.split("def _existing_backup_metadata", 1)[1].split("def _existing_backup_header", 1)[0],
+        )
+        self.assertIn("DECLARE @VerifyExistingBackup BIT = 0;", ssms_script)
+        self.assertIn("@VerifyExistingBackup = 1", ssms_script)
 
     def test_capture_script_has_explicit_backup_boundaries(self) -> None:
         script = SCRIPT.read_text(encoding="utf-8")

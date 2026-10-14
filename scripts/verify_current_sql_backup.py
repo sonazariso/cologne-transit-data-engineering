@@ -3,9 +3,12 @@
 
 The default is a read-only preflight.  ``--apply`` is required to issue the
 native ``COPY_ONLY, COMPRESSION, CHECKSUM`` FULL backup and
-``RESTORE VERIFYONLY``.  A destination-free-space measurement is also
-required for apply; this prevents a large backup from silently landing on the
-capacity-constrained Windows C: volume.
+``RESTORE VERIFYONLY``.  ``--verify-existing`` reads the selected backup's
+real ``msdb`` metadata and performs ``RESTORE HEADERONLY`` plus
+``RESTORE VERIFYONLY`` without creating or overwriting a backup.  A
+destination-free-space measurement is required only for apply; this prevents
+a large backup from silently landing on the capacity-constrained Windows C:
+volume.
 """
 
 from __future__ import annotations
@@ -231,16 +234,152 @@ def _fresh_backup_metadata(cursor: Any, *, started_at: Any, destination: str) ->
     }
 
 
+def _existing_backup_metadata(cursor: Any, *, destination: str) -> dict[str, Any]:
+    """Read the named backup's real msdb metadata without creating a backup."""
+
+    cursor.execute(
+        """
+        SELECT
+            bs.backup_set_id,
+            bs.media_set_id,
+            bs.database_name,
+            bs.backup_start_date,
+            bs.backup_finish_date,
+            bs.type,
+            bs.is_copy_only,
+            bs.has_backup_checksums,
+            bs.compressed_backup_size,
+            bs.position,
+            bmf.family_sequence_number,
+            bmf.physical_device_name,
+            bmf.device_type
+        FROM msdb.dbo.backupset AS bs
+        INNER JOIN msdb.dbo.backupmediafamily AS bmf
+            ON bmf.media_set_id = bs.media_set_id
+        WHERE bs.database_name = DB_NAME()
+          AND bs.type = 'D'
+          AND bmf.physical_device_name = %s
+        ORDER BY bs.backup_finish_date DESC,
+                 bs.backup_set_id DESC,
+                 bmf.family_sequence_number
+        """,
+        (destination,),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        raise RuntimeError("the requested existing backup path has no matching full-backup history")
+    backup_set_ids = {
+        int(_row_value(row, "backup_set_id", 0) or 0)
+        for row in rows
+    }
+    backup_set_ids.discard(0)
+    if len(backup_set_ids) != 1:
+        raise RuntimeError(
+            "the requested backup path maps to zero or multiple backup sets; refusing ambiguous evidence"
+        )
+    backup_set_id = next(iter(backup_set_ids))
+    selected = [row for row in rows if int(_row_value(row, "backup_set_id", 0) or 0) == backup_set_id]
+    backup = selected[0]
+    media_set_id = int(_row_value(backup, "media_set_id", 1) or 0)
+    database_name = str(_row_value(backup, "database_name", 2) or "")
+    backup_type = str(_row_value(backup, "type", 5) or "")
+    copy_only = bool(_row_value(backup, "is_copy_only", 6))
+    checksum = bool(_row_value(backup, "has_backup_checksums", 7))
+    compressed_size = int(_row_value(backup, "compressed_backup_size", 8) or 0)
+    backup_position = int(_row_value(backup, "position", 9) or 0)
+    if database_name != "CologneTransitIntelligence" or backup_type != "D":
+        raise RuntimeError("existing backup metadata is not a CologneTransitIntelligence full backup")
+    if not copy_only:
+        raise RuntimeError("existing backup metadata is not COPY_ONLY")
+    if not checksum:
+        raise RuntimeError("existing backup metadata has no backup checksum")
+    if compressed_size <= 0 or backup_position <= 0 or media_set_id <= 0:
+        raise RuntimeError("existing backup metadata has no compressed payload, media set, or position")
+    cursor.execute(
+        """
+        SELECT family_sequence_number, physical_device_name, device_type
+        FROM msdb.dbo.backupmediafamily
+        WHERE media_set_id = %s
+        ORDER BY family_sequence_number
+        """,
+        (media_set_id,),
+    )
+    media_rows = cursor.fetchall()
+    if len(media_rows) != 1 or any(int(_row_value(row, "device_type", 2) or 0) != 2 for row in media_rows):
+        raise RuntimeError("existing backup media is missing or is not disk media")
+    media_paths = [str(_row_value(row, "physical_device_name", 1) or "") for row in media_rows]
+    if not media_paths or any(path.casefold() != destination.casefold() for path in media_paths):
+        raise RuntimeError("existing backup media does not exactly match the requested SQL-visible path")
+    return {
+        "status": "PASS",
+        "database_name": database_name,
+        "backup_set_id": backup_set_id,
+        "media_set_id": media_set_id,
+        "backup_start_date": _row_value(backup, "backup_start_date", 3),
+        "backup_finish_date": _row_value(backup, "backup_finish_date", 4),
+        "copy_only": copy_only,
+        "checksum": checksum,
+        "compressed_backup_size": compressed_size,
+        "backup_position": backup_position,
+        "media_count": len(media_rows),
+        "backup_path": destination,
+        "destination_accessibility": "PASS",
+    }
+
+
+def _existing_backup_header(cursor: Any, *, destination: str, backup_position: int) -> dict[str, Any]:
+    """Read the file header through SQL Server before VERIFYONLY."""
+
+    cursor.execute(
+        """
+        DECLARE @BackupPath NVARCHAR(4000) = CAST(%s AS NVARCHAR(4000));
+        RESTORE HEADERONLY FROM DISK = @BackupPath
+            WITH FILE = %s;
+        """,
+        (destination, backup_position),
+    )
+    rows = cursor.fetchall()
+    _drain(cursor)
+    if len(rows) != 1:
+        raise RuntimeError("RESTORE HEADERONLY did not identify exactly one backup set")
+    row = rows[0]
+    header_database = str(_row_value(row, "DatabaseName", 0) or "")
+    header_position = int(_row_value(row, "Position", 0) or 0)
+    header_type = int(_row_value(row, "BackupType", 0) or 0)
+    header_copy_only = bool(_row_value(row, "IsCopyOnly", 0))
+    header_checksum = bool(_row_value(row, "HasBackupChecksums", 0))
+    if header_database != "CologneTransitIntelligence" or header_position != backup_position:
+        raise RuntimeError("RESTORE HEADERONLY does not match the selected backup history")
+    header_compressed = bool(_row_value(row, "Compressed", 0))
+    if header_type != 1 or not header_copy_only or not header_checksum or not header_compressed:
+        raise RuntimeError("RESTORE HEADERONLY failed the full/COPY_ONLY/checksum gate")
+    return {
+        "status": "PASS",
+        "database_name": header_database,
+        "backup_position": header_position,
+        "backup_type": header_type,
+        "copy_only": header_copy_only,
+        "checksum": header_checksum,
+        "compressed": header_compressed,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backup-path", required=True, help="SQL Server-visible UNC/share path; C: is rejected")
     parser.add_argument("--destination-free-gib", type=float, help="fresh measured free space at the off-C destination")
     parser.add_argument("--minimum-destination-free-gib", type=float, default=MIN_DESTINATION_FREE_GIB)
-    parser.add_argument("--apply", action="store_true", help="perform BACKUP DATABASE and RESTORE VERIFYONLY")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--apply", action="store_true", help="perform BACKUP DATABASE and RESTORE VERIFYONLY")
+    modes.add_argument(
+        "--verify-existing",
+        action="store_true",
+        help="read existing msdb metadata and run RESTORE HEADERONLY/VERIFYONLY without creating a backup",
+    )
     args = parser.parse_args(argv)
     result: dict[str, Any] = {
         "operation": "current_sql_backup_verification",
-        "mode": "APPLY" if args.apply else "PREFLIGHT",
+        "mode": "VERIFY_EXISTING" if args.verify_existing else ("APPLY" if args.apply else "PREFLIGHT"),
         "collector_gate": _collector_gate(),
         "storage_operation_gate": local_storage_operation_gate(),
         "destination": args.backup_path,
@@ -255,7 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise RuntimeError("another compact-storage operation is active")
         if not result["destination_is_off_c"]:
             raise RuntimeError("backup destination is on Windows C:; refusing to write a large backup")
-        if args.destination_free_gib is not None and args.destination_free_gib < args.minimum_destination_free_gib:
+        if args.apply and args.destination_free_gib is not None and args.destination_free_gib < args.minimum_destination_free_gib:
             raise RuntimeError("measured backup destination free space is below the safety threshold")
         if args.apply and args.destination_free_gib is None:
             raise RuntimeError("--destination-free-gib is required for an applied backup")
@@ -316,6 +455,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connection.commit()
                 result["backup"] = backup
                 result["backup"].update({"verifyonly": "PASS", "backup_path": args.backup_path})
+                result["status"] = "PASS"
+            elif args.verify_existing:
+                backup = _existing_backup_metadata(cursor, destination=args.backup_path)
+                header = _existing_backup_header(
+                    cursor,
+                    destination=args.backup_path,
+                    backup_position=backup["backup_position"],
+                )
+                cursor.execute(
+                    """
+                    DECLARE @BackupPath NVARCHAR(4000) = CAST(%s AS NVARCHAR(4000));
+                    DECLARE @BackupPosition INT = %s;
+                    RESTORE VERIFYONLY FROM DISK = @BackupPath
+                        WITH FILE = @BackupPosition, CHECKSUM;
+                    """,
+                    (args.backup_path, backup["backup_position"]),
+                )
+                _drain(cursor)
+                backup["headeronly"] = header
+                backup["verifyonly"] = {
+                    "status": "PASS",
+                    "checksum": True,
+                    "source": "RESTORE VERIFYONLY",
+                }
+                result["backup"] = backup
+                result["restore_verifyonly"] = "PASS"
                 result["status"] = "PASS"
             else:
                 result["status"] = "PASS"

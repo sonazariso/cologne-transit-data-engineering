@@ -291,6 +291,7 @@ COMPACT_SCHEMA_ROUTINES = (
     "stg.uspMddMacCompactMarkUnit",
     "stg.uspPersistMddMacSnapshotCompact",
     "stg.vMddMacCompactObservationEnvelopeJson",
+    "stg.vMddMacCompactPhysicalFieldReadback",
     "stg.vMddMacCompactSourceSnapshot",
     "stg.vMddMacCompactCallObservation",
     "stg.vMddMacCompactTimingObservation",

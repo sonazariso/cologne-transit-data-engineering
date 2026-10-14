@@ -17,6 +17,8 @@ the separate recovery-gated reclamation runner after a fresh verified backup.
 from __future__ import annotations
 
 import argparse
+import collections
+import gzip
 import json
 import os
 import re
@@ -73,6 +75,23 @@ CAPACITY_PLAN_FIELDS = (
     "rollback_bytes",
     "peak_temporary_duplication_bytes",
 )
+
+COMPATIBILITY_VIEWS: tuple[tuple[str, str], ...] = (
+    ("source_snapshot", "stg.vMddMacCompactSourceSnapshot"),
+    ("calls", "stg.vMddMacCompactCallObservation"),
+    ("timings", "stg.vMddMacCompactTimingObservation"),
+    ("situations", "stg.vMddMacCompactSituationEvidence"),
+    ("service_sections", "stg.vMddMacCompactServiceSectionEvidence"),
+    ("attributes", "stg.vMddMacCompactAttributeEvidence"),
+    ("response_errors", "stg.vMddMacCompactResponseError"),
+    ("parser_gaps", "stg.vMddMacCompactParserGap"),
+)
+SOURCE_TABLES: tuple[tuple[str, str], ...] = (
+    ("source_snapshot", "stg.MddMacSourceSnapshot"),
+    *FAMILIES,
+)
+PHYSICAL_FIELD_READBACK_VIEW = "stg.vMddMacCompactPhysicalFieldReadback"
+READBACK_SESSION_CONTEXT_KEY = "CTI.CompactStorageReadback"
 
 
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
@@ -150,8 +169,9 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
     cursor.execute(
         """
         SELECT file_id, name, type_desc,
-               size * 8192 AS allocated_bytes,
-               FILEPROPERTY(name, 'SpaceUsed') * 8192 AS used_bytes
+               CONVERT(BIGINT, size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+               CONVERT(BIGINT, FILEPROPERTY(name, 'SpaceUsed'))
+                   * CONVERT(BIGINT, 8192) AS used_bytes
         FROM sys.database_files
         ORDER BY file_id
         """
@@ -184,12 +204,37 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         WHERE st.session_id <> @@SPID AND es.is_user_process = 1
         """
     )
-    active_user_transactions = int(_row_value(cursor.fetchone(), "active_user_transactions", 0) or 0)
+    transaction_row = cursor.fetchone()
+    if transaction_row is None or _row_value(transaction_row, "active_user_transactions", 0) is None:
+        raise MssqlSafetyError("SQL active-transaction measurement is incomplete")
+    active_user_transactions = int(_row_value(transaction_row, "active_user_transactions", 0) or 0)
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_collector_sessions
+        FROM sys.dm_exec_sessions AS es
+        INNER JOIN sys.dm_exec_connections AS ec ON ec.session_id = es.session_id
+        WHERE es.session_id <> @@SPID
+          AND es.is_user_process = 1
+          AND es.database_id = DB_ID()
+          AND (
+              LOWER(COALESCE(es.program_name, N'')) LIKE N'%cologne%transit%'
+              OR LOWER(COALESCE(es.program_name, N'')) LIKE N'%mdd%collector%'
+              OR LOWER(COALESCE(es.host_name, N'')) LIKE N'%mdd%collector%'
+          )
+        """
+    )
+    collector_session_row = cursor.fetchone()
+    if collector_session_row is None or _row_value(collector_session_row, "active_collector_sessions", 0) is None:
+        raise MssqlSafetyError("SQL active-collector-session measurement is incomplete")
+    active_collector_sessions = int(
+        _row_value(collector_session_row, "active_collector_sessions", 0) or 0
+    )
     return {
         "volumes": volumes,
         "log": log,
         "files": files,
         "active_user_transactions": active_user_transactions,
+        "active_collector_sessions": active_collector_sessions,
     }
 
 
@@ -218,20 +263,25 @@ def _capacity_gate(
     free_gib = available / (1024**3)
     log_used = float((capacity.get("log") or {}).get("used_percent", 100.0))
     active_user_transactions = int(capacity.get("active_user_transactions", 0) or 0)
+    active_collector_sessions = int(capacity.get("active_collector_sessions", 0) or 0)
     return {
         "status": "PASS"
         if rows_volume
         and projected_free_gib >= SAFETY_FLOOR_GIB
         and log_used <= log_limit
         and active_user_transactions == 0
+        and active_collector_sessions == 0
         else "BLOCKED",
         "windows_free_gib": round(free_gib, 3),
         "required_extra_bytes": required_extra_bytes,
+        "peak_migration_space_gib": round(required_extra_bytes / (1024**3), 6),
+        "peak_capacity_plan_exact": required_extra_bytes > 0,
         "projected_windows_free_gib": round(projected_free_gib, 3),
         "required_windows_free_gib": SAFETY_FLOOR_GIB,
         "log_used_percent": log_used,
         "max_log_used_percent": log_limit,
         "active_user_transactions": active_user_transactions,
+        "active_collector_sessions": active_collector_sessions,
         "volume": rows_volume,
         "c_volumes": c_volumes,
     }
@@ -399,7 +449,7 @@ def _store_unit(
     normalized_snapshot: Mapping[str, Any],
     encoded: Any,
     counts: Mapping[str, int],
-) -> None:
+) -> str:
     cursor.execute(
         """
         EXEC stg.uspMddMacCompactStoreHistoricalEnvelope
@@ -437,10 +487,14 @@ def _store_unit(
             counts["service_sections"], counts["attributes"], counts["response_errors"], counts["parser_gaps"],
         ),
     )
+    outcome = "STORED"
     try:
-        cursor.fetchall()
+        result_rows = cursor.fetchall()
+        if result_rows:
+            outcome = str(_row_value(result_rows[0], "Outcome", 1) or outcome)
     except Exception:
         pass
+    return outcome
 
 
 def _read_stored_envelope(cursor: Any, snapshot_id: int) -> tuple[bytes, str]:
@@ -459,6 +513,250 @@ def _read_stored_envelope(cursor: Any, snapshot_id: int) -> tuple[bytes, str]:
     if isinstance(payload, memoryview):
         payload = payload.tobytes()
     return bytes(payload), str(_row_value(row, "EnvelopeSha256", 1))
+
+
+def _set_readback_context(cursor: Any, enabled: bool) -> None:
+    """Expose BUILT rows only to this bounded verifier session.
+
+    Public compact compatibility views remain VERIFIED-only.  The migration
+    must nevertheless inspect the real views before promotion, so the SQL
+    views accept this short-lived, explicit readback context for BUILT rows.
+    The context is session-local and never changes database state.
+    """
+
+    cursor.execute(
+        "EXEC sys.sp_set_session_context @key=%s, @value=%s",
+        (READBACK_SESSION_CONTEXT_KEY, 1 if enabled else 0),
+    )
+    try:
+        cursor.fetchall()
+    except Exception:
+        pass
+
+
+def _description_names(cursor: Any) -> set[str]:
+    description = getattr(cursor, "description", None) or ()
+    return {str(item[0]) for item in description if item}
+
+
+def _logical_view_row(row: Mapping[str, Any], *, family: str) -> dict[str, Any]:
+    """Build the separately validated decoded contract for a view row."""
+
+    normalized = normalize_sql_row(row, family=family)
+    for key, value in tuple(normalized.items()):
+        if not key.endswith("_gzip_hex") or value is None:
+            continue
+        logical_key = key[: -len("_gzip_hex")]
+        if normalized.get(logical_key) is not None:
+            continue
+        try:
+            normalized[logical_key] = gzip.decompress(bytes.fromhex(str(value))).decode("utf-16le")
+        except (ValueError, UnicodeDecodeError, OSError) as exc:
+            raise MssqlSafetyError(
+                f"SQL compatibility view returned an invalid compressed value for {family}.{key}"
+            ) from exc
+    return normalized
+
+
+def _json_field_type(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 3
+    if isinstance(value, (int, float)):
+        return 2
+    if isinstance(value, list):
+        return 4
+    if isinstance(value, Mapping):
+        return 5
+    return 1
+
+
+def _raw_json_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, Mapping)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _expected_physical_field_records(
+    snapshot: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> list[tuple[Any, ...]]:
+    records: list[tuple[Any, ...]] = []
+    families: list[tuple[str, Sequence[Mapping[str, Any]]]] = [("source_snapshot", [snapshot])]
+    families.extend((family, rows[family]) for family, _table in FAMILIES)
+    for family, family_rows in families:
+        for row_ordinal, row in enumerate(family_rows):
+            for field_name, value in row.items():
+                raw_binary = None
+                if field_name.endswith("_gzip_hex") and value is not None:
+                    try:
+                        raw_binary = bytes.fromhex(str(value))
+                    except ValueError as exc:
+                        raise MssqlSafetyError(
+                            f"source row contains invalid hexadecimal binary field {family}.{field_name}"
+                        ) from exc
+                records.append(
+                    (
+                        family,
+                        row_ordinal,
+                        field_name,
+                        _json_field_type(value),
+                        _raw_json_value(value),
+                        raw_binary.hex() if raw_binary is not None else None,
+                    )
+                )
+    return records
+
+
+def _read_compatibility_view_parity(
+    cursor: Any,
+    *,
+    snapshot: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    expected_by_family: dict[str, Sequence[Mapping[str, Any]]] = {
+        "source_snapshot": [snapshot],
+        **{family: values for family, values in rows.items()},
+    }
+    family_results: list[dict[str, Any]] = []
+    for family, view in COMPATIBILITY_VIEWS:
+        cursor.execute(f"SELECT * FROM {view} WHERE SnapshotId = %s", (snapshot["snapshot_id"],))
+        actual_description_names = _description_names(cursor)
+        actual_rows = [_dict_row(item, cursor) for item in cursor.fetchall()]
+        actual_columns = {
+            key
+            for name in actual_description_names
+            for key in normalize_sql_row({name: None}, family=family)
+        }
+        source_table = dict(SOURCE_TABLES)[family]
+        cursor.execute(f"SELECT TOP (0) * FROM {source_table}")
+        source_description_names = _description_names(cursor)
+        if not source_description_names:
+            raise MssqlSafetyError(f"SQL source-table schema measurement is incomplete for {family}")
+        expected_columns = {
+            key
+            for name in source_description_names
+            for key in normalize_sql_row({name: None}, family=family)
+        }
+        expected_rows = expected_by_family[family]
+        column_status = "PASS" if actual_columns == expected_columns else "FAIL"
+        decoded_expected = [_logical_view_row(item, family=family) for item in expected_rows]
+        decoded_actual = [_logical_view_row(item, family=family) for item in actual_rows]
+        comparison = compare_row_family(family, decoded_expected, decoded_actual)
+        family_results.append(
+            {
+                "family": family,
+                "view": view,
+                "column_status": column_status,
+                "expected_columns": sorted(expected_columns),
+                "actual_columns": sorted(actual_columns),
+                "comparison_status": "PASS" if comparison.passed else "FAIL",
+                "expected_count": comparison.expected_count,
+                "actual_count": comparison.actual_count,
+                "expected_digest": comparison.expected_digest,
+                "actual_digest": comparison.actual_digest,
+                "missing_rows": list(comparison.missing_rows),
+                "unexpected_rows": list(comparison.unexpected_rows),
+                "changed_rows": [
+                    {
+                        "identity": change.get("identity"),
+                        "expected_count": len(change.get("expected", ())),
+                        "actual_count": len(change.get("actual", ())),
+                    }
+                    for change in comparison.changed_rows
+                ],
+            }
+        )
+    return {
+        "status": "PASS"
+        if all(
+            item["column_status"] == "PASS" and item["comparison_status"] == "PASS"
+            for item in family_results
+        )
+        else "FAIL",
+        "families": family_results,
+    }
+
+
+def _read_physical_field_parity(
+    cursor: Any,
+    *,
+    snapshot: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    cursor.execute(
+        f"SELECT SnapshotId, FamilyName, RowOrdinal, FieldName, FieldType, RawJsonValue, RawBinaryValue "
+        f"FROM {PHYSICAL_FIELD_READBACK_VIEW} WHERE SnapshotId = %s",
+        (snapshot["snapshot_id"],),
+    )
+    actual: list[tuple[Any, ...]] = []
+    for item in cursor.fetchall():
+        row = _dict_row(item, cursor)
+        binary = _row_value(row, "RawBinaryValue", 6)
+        if isinstance(binary, memoryview):
+            binary = binary.tobytes()
+        if isinstance(binary, (bytes, bytearray)):
+            binary = bytes(binary).hex()
+        actual.append(
+            (
+                str(_row_value(row, "FamilyName", 1)),
+                int(_row_value(row, "RowOrdinal", 2)),
+                str(_row_value(row, "FieldName", 3)),
+                int(_row_value(row, "FieldType", 4)),
+                _row_value(row, "RawJsonValue", 5),
+                binary,
+            )
+        )
+    expected = _expected_physical_field_records(snapshot, rows)
+    expected_counter = collections.Counter(expected)
+    actual_counter = collections.Counter(actual)
+    missing = list((expected_counter - actual_counter).elements())[:20]
+    unexpected = list((actual_counter - expected_counter).elements())[:20]
+    return {
+        "status": "PASS" if not missing and not unexpected else "FAIL",
+        "expected_field_count": len(expected),
+        "actual_field_count": len(actual),
+        "missing_fields": [list(item) for item in missing],
+        "unexpected_fields": [list(item) for item in unexpected],
+    }
+
+
+def _sql_readback_parity(
+    cursor: Any,
+    *,
+    snapshot: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+    stored_envelope_parity: Mapping[str, Any],
+) -> dict[str, Any]:
+    _set_readback_context(cursor, True)
+    try:
+        compatibility = _read_compatibility_view_parity(
+            cursor,
+            snapshot=snapshot,
+            rows=rows,
+        )
+        physical = _read_physical_field_parity(
+            cursor,
+            snapshot=snapshot,
+            rows=rows,
+        )
+    finally:
+        _set_readback_context(cursor, False)
+    return {
+        "status": "PASS"
+        if stored_envelope_parity.get("status") == "PASS"
+        and compatibility.get("status") == "PASS"
+        and physical.get("status") == "PASS"
+        else "FAIL",
+        "stored_envelope": dict(stored_envelope_parity),
+        "compatibility_views": compatibility,
+        "physical_sql_fields": physical,
+    }
 
 
 def _mark_unit(cursor: Any, migration_id: uuid.UUID, snapshot_id: int, status: str, error: str | None = None) -> None:
@@ -581,6 +879,44 @@ def _batch_reconciliation(cursor: Any, snapshot_ids: Sequence[int]) -> dict[str,
     }
 
 
+def _migration_conflict_gate(cursor: Any, migration_id: uuid.UUID) -> dict[str, Any]:
+    """Reject a second historical operation before its first ledger write."""
+
+    cursor.execute(
+        """
+        SELECT MigrationId, Status, MigrationKind
+        FROM stg.MddMacCompactMigration
+        WHERE Status = 'RUNNING'
+          AND MigrationKind = 'HISTORICAL'
+          AND MigrationId <> %s
+        """,
+        (str(migration_id),),
+    )
+    rows = cursor.fetchall()
+    conflicts = [
+        {
+            "migration_id": str(_row_value(row, "MigrationId", 0)),
+            "status": str(_row_value(row, "Status", 1)),
+            "kind": str(_row_value(row, "MigrationKind", 2)),
+        }
+        for row in rows
+    ]
+    return {"status": "PASS" if not conflicts else "BLOCKED", "conflicts": conflicts}
+
+
+def _recovery_decision(store_outcome: str | None, exc: BaseException) -> dict[str, Any]:
+    """Classify a failed unit without turning a connection failure into success."""
+
+    retryable_built = store_outcome in {"BUILT", "ALREADY_BUILT", "STORED"}
+    quarantineable = retryable_built and isinstance(exc, CompactEnvelopeError)
+    return {
+        "retryable_built": retryable_built,
+        "quarantineable": quarantineable,
+        "status": "QUARANTINED" if quarantineable else "BLOCKED",
+        "recovery": "RETRY_BUILT_UNIT" if retryable_built and not quarantineable else None,
+    }
+
+
 def _process(
     *,
     connection: Any,
@@ -615,6 +951,12 @@ def _process(
         capacity_plan = _validate_capacity_plan(capacity_plan)
         required_extra_bytes = capacity_plan["peak_additional_bytes"]
     summary["capacity_plan"] = dict(capacity_plan) if capacity_plan else None
+    summary["peak_migration_space_gib"] = (
+        round(required_extra_bytes / (1024**3), 6)
+        if capacity_plan is not None
+        else None
+    )
+    summary["peak_capacity_plan_exact"] = capacity_plan is not None
     if apply and capacity_plan is None:
         summary["status"] = "BLOCKED"
         summary["stop_reason"] = "a measured bounded SQL capacity plan is required for apply"
@@ -635,8 +977,30 @@ def _process(
         # subset estimate.
         summary["capacity_plan_scope"] = "FULL_HISTORY_PLAN_USED_FOR_SELECTED_SUBSET"
     if apply:
+        # This is deliberately before _make_migration: a failed capacity,
+        # writer, or conflict check must leave the production database with no
+        # migration metadata write at all.
+        capacity = _read_capacity(cursor)
+        preflight_capacity = _capacity_gate(
+            capacity,
+            log_limit=log_limit,
+            required_extra_bytes=required_extra_bytes,
+        )
+        summary["production_capacity_preflight"] = preflight_capacity
+        if preflight_capacity.get("status") != "PASS":
+            summary["status"] = "BLOCKED"
+            summary["stop_reason"] = "production capacity, log, or active-writer preflight failed"
+            return summary
+        conflict_gate = _migration_conflict_gate(cursor, migration_id)
+        summary["migration_conflict_preflight"] = conflict_gate
+        if conflict_gate.get("status") != "PASS":
+            summary["status"] = "BLOCKED"
+            summary["stop_reason"] = "another historical compact migration is RUNNING"
+            return summary
         _make_migration(cursor, migration_id, apply=True)
         connection.commit()
+    else:
+        summary["production_capacity_preflight"] = {"status": "NOT_APPLICABLE_PLAN"}
 
     batch_start = 0
     for index, snapshot_id in enumerate(snapshot_ids):
@@ -679,7 +1043,7 @@ def _process(
                 unit["status"] = "PLANNED"
                 summary["planned"] += 1
             else:
-                _store_unit(
+                store_outcome = _store_unit(
                     cursor,
                     migration_id=migration_id,
                     snapshot_id=snapshot_id,
@@ -688,18 +1052,32 @@ def _process(
                     encoded=encoded,
                     counts=unit["counts"],
                 )
+                unit["store_outcome"] = store_outcome
                 connection.commit()
                 stored_gzip, stored_hash = _read_stored_envelope(cursor, snapshot_id)
                 stored_envelope = decode_compact_envelope(stored_gzip, expected_sha256=stored_hash)
                 stored_parity = _unit_parity(normalized_snapshot, normalized_rows, stored_envelope)
-                unit["sql_readback_parity"] = stored_parity
-                if stored_parity["status"] != "PASS":
+                sql_readback = _sql_readback_parity(
+                    cursor,
+                    snapshot=normalized_snapshot,
+                    rows=normalized_rows,
+                    stored_envelope_parity=stored_parity,
+                )
+                unit["sql_readback_parity"] = sql_readback
+                if sql_readback["status"] != "PASS":
                     _mark_unit(cursor, migration_id, snapshot_id, "QUARANTINED", "SQL readback field parity failed")
                     connection.commit()
                     unit["status"] = "QUARANTINED"
                     summary["quarantined"] += 1
                     summary["status"] = "BLOCKED"
                     stop_after_unit = True
+                    _set_migration_status(
+                        cursor,
+                        migration_id,
+                        "BLOCKED",
+                        "SQL compatibility-view or physical-field readback parity failed",
+                    )
+                    connection.commit()
                 else:
                     _mark_unit(cursor, migration_id, snapshot_id, "VERIFIED")
                     connection.commit()
@@ -732,17 +1110,23 @@ def _process(
                 connection.rollback()
             except Exception:
                 pass
-            unit["status"] = "BLOCKED" if isinstance(exc, MssqlSafetyError) else "QUARANTINED"
+            recovery = _recovery_decision(unit.get("store_outcome"), exc)
+            retryable_built = recovery["retryable_built"]
+            quarantineable = recovery["quarantineable"]
+            unit["status"] = recovery["status"]
+            if recovery["recovery"] is not None:
+                unit["recovery"] = recovery["recovery"]
             unit["error_type"] = type(exc).__name__
             unit["error"] = _safe_error(exc)
             summary["status"] = "BLOCKED"
             if apply:
-                try:
-                    _mark_unit(cursor, migration_id, snapshot_id, "QUARANTINED", unit["error"])
-                    connection.commit()
-                    summary["quarantined"] += 1
-                except Exception:
-                    connection.rollback()
+                if quarantineable:
+                    try:
+                        _mark_unit(cursor, migration_id, snapshot_id, "QUARANTINED", unit["error"])
+                        connection.commit()
+                        summary["quarantined"] += 1
+                    except Exception:
+                        connection.rollback()
                 try:
                     _set_migration_status(cursor, migration_id, "BLOCKED", unit["error"])
                     connection.commit()

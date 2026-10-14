@@ -283,7 +283,7 @@ def server_and_capacity(settings: MssqlConnectionSettings, archive_dir: Path) ->
             master,
             """
             SELECT d.name, d.state_desc, d.user_access_desc, d.recovery_model_desc,
-                   allocated_mb = SUM(mf.size) * 8.0 / 1024,
+                   allocated_mb = SUM(CAST(mf.size AS bigint)) * 8.0 / 1024,
                    file_count = COUNT(*)
             FROM sys.databases AS d
             JOIN sys.master_files AS mf ON mf.database_id = d.database_id
@@ -297,9 +297,9 @@ def server_and_capacity(settings: MssqlConnectionSettings, archive_dir: Path) ->
             """
             SELECT DB_NAME(mf.database_id) AS database_name,
                    mf.name AS logical_name, mf.type_desc, mf.physical_name,
-                   allocated_mb = mf.size * 8.0 / 1024,
+                   allocated_mb = CAST(mf.size AS bigint) * 8.0 / 1024,
                    mf.growth, mf.is_percent_growth,
-                   max_size_mb = CASE WHEN mf.max_size = -1 THEN NULL ELSE mf.max_size * 8.0 / 1024 END,
+                   max_size_mb = CASE WHEN mf.max_size = -1 THEN NULL ELSE CAST(mf.max_size AS bigint) * 8.0 / 1024 END,
                    v.total_bytes, v.available_bytes
             FROM sys.master_files AS mf
             CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) AS v
@@ -348,10 +348,10 @@ def active_database_state(settings: MssqlConnectionSettings) -> dict[str, Any]:
             connection,
             """
             SELECT name AS logical_name, type_desc, physical_name,
-                   allocated_mb = size * 8.0 / 1024,
-                   used_mb = FILEPROPERTY(name, 'SpaceUsed') * 8.0 / 1024,
+                   allocated_mb = CAST(size AS bigint) * 8.0 / 1024,
+                   used_mb = CAST(FILEPROPERTY(name, 'SpaceUsed') AS bigint) * 8.0 / 1024,
                    growth, is_percent_growth,
-                   max_size_mb = CASE WHEN max_size = -1 THEN NULL ELSE max_size * 8.0 / 1024 END
+                   max_size_mb = CASE WHEN max_size = -1 THEN NULL ELSE CAST(max_size AS bigint) * 8.0 / 1024 END
             FROM sys.database_files
             ORDER BY file_id
             """,
@@ -392,8 +392,8 @@ def table_inventory(connection: Any) -> dict[str, Any]:
         """
         SELECT s.name AS schema_name, t.name AS table_name, t.create_date, t.modify_date,
                row_count = COALESCE(SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END), 0),
-               reserved_mb = COALESCE(SUM(ps.reserved_page_count) * 8.0 / 1024, 0),
-               used_mb = COALESCE(SUM(ps.used_page_count) * 8.0 / 1024, 0)
+               reserved_mb = COALESCE(SUM(CAST(ps.reserved_page_count AS bigint)) * 8.0 / 1024, 0),
+               used_mb = COALESCE(SUM(CAST(ps.used_page_count AS bigint)) * 8.0 / 1024, 0)
         FROM sys.tables AS t
         JOIN sys.schemas AS s ON s.schema_id = t.schema_id
         LEFT JOIN sys.dm_db_partition_stats AS ps ON ps.object_id = t.object_id

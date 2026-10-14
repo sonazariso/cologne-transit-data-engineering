@@ -18,6 +18,7 @@ param(
     [ValidateSet("Mandatory", "Optional", "Strict")]
     [string] $EncryptMode = "Mandatory",
     [switch] $Apply,
+    [switch] $VerifyExisting,
     [string] $EvidencePath
 )
 
@@ -87,7 +88,7 @@ function Write-JsonEvidence([object] $Value) {
 
 $result = [ordered]@{
     operation = "windows_integrated_sql_backup"
-    mode = if ($Apply) { "APPLY" } else { "PREFLIGHT" }
+    mode = if ($VerifyExisting) { "VERIFY_EXISTING" } elseif ($Apply) { "APPLY" } else { "PREFLIGHT" }
     server_name = $SqlInstance
     database_name = $Database
     backup_path = $BackupPath
@@ -97,6 +98,9 @@ $result = [ordered]@{
 }
 
 try {
+    if ($Apply -and $VerifyExisting) {
+        throw "-Apply and -VerifyExisting are mutually exclusive"
+    }
     if ($Database -ne "CologneTransitIntelligence") {
         throw "the target database must be CologneTransitIntelligence"
     }
@@ -169,6 +173,80 @@ SELECT
         active_runs = [int64]$activeRows[0].ActiveRuns
         active_leases = [int64]$activeRows[0].ActiveLeases
         active_user_transactions = [int64]$activeRows[0].ActiveUserTransactions
+    }
+
+    if ($VerifyExisting) {
+        $pathLiteral = Convert-ToSqlUnicodeLiteral $BackupPath
+        $metadata = @(Invoke-SafeSql @"
+SELECT DISTINCT
+       bs.backup_set_id AS BackupSetId,
+       bs.media_set_id AS MediaSetId,
+       bs.backup_start_date AS BackupStartDate,
+       bs.backup_finish_date AS BackupFinishDate,
+       bs.database_name AS DatabaseName,
+       bs.type AS BackupType,
+       bs.is_copy_only AS CopyOnly,
+       bs.has_backup_checksums AS HasBackupChecksums,
+       bs.compressed_backup_size AS CompressedBackupSize,
+       bs.position AS BackupPosition
+FROM msdb.dbo.backupset AS bs
+WHERE bs.database_name = DB_NAME()
+  AND bs.type = 'D'
+  AND EXISTS
+  (
+      SELECT 1
+      FROM msdb.dbo.backupmediafamily AS bmf
+      WHERE bmf.media_set_id = bs.media_set_id
+        AND bmf.device_type = 2
+        AND bmf.physical_device_name = $pathLiteral
+  )
+ORDER BY bs.backup_finish_date DESC, bs.backup_set_id DESC;
+"@)
+        if ($metadata.Count -ne 1) {
+            throw "the existing backup path did not identify exactly one full backup set"
+        }
+        if ($metadata[0].DatabaseName -ne "CologneTransitIntelligence" -or
+            $metadata[0].BackupType -ne "D" -or
+            -not [bool]$metadata[0].CopyOnly -or
+            -not [bool]$metadata[0].HasBackupChecksums -or
+            [int64]$metadata[0].CompressedBackupSize -le 0 -or
+            [int]$metadata[0].BackupPosition -le 0) {
+            throw "existing backup history failed the full/COPY_ONLY/compression/checksum gate"
+        }
+        $media = @(Invoke-SafeSql ("SELECT family_sequence_number AS FamilySequenceNumber, physical_device_name AS PhysicalDeviceName, device_type AS DeviceType FROM msdb.dbo.backupmediafamily WHERE media_set_id = {0} ORDER BY family_sequence_number;" -f [int64]$metadata[0].MediaSetId))
+        if ($media.Count -lt 1 -or @($media | Where-Object { [int]$_.DeviceType -ne 2 -or [string]$_.PhysicalDeviceName -ne $BackupPath }).Count -ne 0) {
+            throw "existing backup media is missing, non-disk, or does not match the requested SQL-visible path"
+        }
+        $header = @(Invoke-SafeSql ("RESTORE HEADERONLY FROM DISK = {0} WITH FILE = {1};" -f $pathLiteral, [int]$metadata[0].BackupPosition))
+        if ($header.Count -ne 1 -or $header[0].DatabaseName -ne "CologneTransitIntelligence" -or
+            [int]$header[0].BackupType -ne 1 -or
+            -not [bool]$header[0].IsCopyOnly -or
+            -not [bool]$header[0].HasBackupChecksums -or
+            -not [bool]$header[0].Compressed) {
+            throw "RESTORE HEADERONLY failed the existing backup contract"
+        }
+        Invoke-SafeSql ("RESTORE VERIFYONLY FROM DISK = {0} WITH FILE = {1}, CHECKSUM;" -f $pathLiteral, [int]$metadata[0].BackupPosition) | Out-Null
+        $result.restore_verifyonly = "PASS"
+        $result.backup = [ordered]@{
+            status = "PASS"
+            database_name = [string]$metadata[0].DatabaseName
+            backup_set_id = [int64]$metadata[0].BackupSetId
+            media_set_id = [int64]$metadata[0].MediaSetId
+            backup_position = [int]$metadata[0].BackupPosition
+            backup_start_date = $metadata[0].BackupStartDate
+            backup_finish_date = $metadata[0].BackupFinishDate
+            copy_only = [bool]$metadata[0].CopyOnly
+            checksum = [bool]$metadata[0].HasBackupChecksums
+            compressed_backup_size = [int64]$metadata[0].CompressedBackupSize
+            media_count = $media.Count
+            backup_path = $BackupPath
+            destination_accessibility = "PASS"
+            headeronly = @{ status = "PASS"; database_name = $header[0].DatabaseName; backup_position = [int]$header[0].Position }
+            verifyonly = @{ status = "PASS"; checksum = $true; source = "RESTORE VERIFYONLY" }
+        }
+        $result.status = "PASS"
+        Write-JsonEvidence $result
+        exit 0
     }
 
     if (-not $Apply) {

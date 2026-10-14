@@ -47,6 +47,7 @@ REQUIRED_MARKERS = (
     "stg.uspMddMacCompactStoreHistoricalEnvelope",
     "stg.uspMddMacCompactMarkUnit",
     "stg.uspPersistMddMacSnapshotCompact",
+    "stg.vMddMacCompactPhysicalFieldReadback",
 )
 SAFETY_FLOOR_GIB = 12.0
 MAX_LOG_USED_PERCENT = 70.0
@@ -105,8 +106,9 @@ def _production_preflight(cursor: Any) -> dict[str, Any]:
     cursor.execute(
         """
         SELECT df.file_id, df.name, df.type_desc,
-               df.size * 8192 AS allocated_bytes,
-               FILEPROPERTY(df.name, 'SpaceUsed') * 8192 AS used_bytes,
+               CONVERT(BIGINT, df.size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+               CONVERT(BIGINT, FILEPROPERTY(df.name, 'SpaceUsed'))
+                   * CONVERT(BIGINT, 8192) AS used_bytes,
                vs.volume_mount_point, vs.available_bytes
         FROM sys.database_files AS df
         CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
@@ -176,7 +178,31 @@ def _production_preflight(cursor: Any) -> dict[str, Any]:
         WHERE st.session_id <> @@SPID AND es.is_user_process = 1
         """
     )
-    active_user_transactions = int(_row_value(cursor.fetchone(), "active_user_transactions", 0) or 0)
+    transaction_row = cursor.fetchone()
+    if transaction_row is None or _row_value(transaction_row, "active_user_transactions", 0) is None:
+        raise RuntimeError("SQL active-transaction measurement is incomplete")
+    active_user_transactions = int(_row_value(transaction_row, "active_user_transactions", 0) or 0)
+    cursor.execute(
+        """
+        SELECT COUNT_BIG(*) AS active_collector_sessions
+        FROM sys.dm_exec_sessions AS es
+        INNER JOIN sys.dm_exec_connections AS ec ON ec.session_id = es.session_id
+        WHERE es.session_id <> @@SPID
+          AND es.is_user_process = 1
+          AND es.database_id = DB_ID()
+          AND (
+              LOWER(COALESCE(es.program_name, N'')) LIKE N'%cologne%transit%'
+              OR LOWER(COALESCE(es.program_name, N'')) LIKE N'%mdd%collector%'
+              OR LOWER(COALESCE(es.host_name, N'')) LIKE N'%mdd%collector%'
+          )
+        """
+    )
+    collector_session_row = cursor.fetchone()
+    if collector_session_row is None or _row_value(collector_session_row, "active_collector_sessions", 0) is None:
+        raise RuntimeError("SQL active-collector-session measurement is incomplete")
+    active_collector_sessions = int(
+        _row_value(collector_session_row, "active_collector_sessions", 0) or 0
+    )
     data_files = [item for item in files if item["type"].casefold() == "rows"]
     c_files = [item for item in data_files if item["volume"].casefold().startswith("c:")]
     free_gib = min((item["windows_free_gib"] for item in c_files), default=0.0)
@@ -193,6 +219,7 @@ def _production_preflight(cursor: Any) -> dict[str, Any]:
         and active_runs == 0
         and active_leases == 0
         and active_user_transactions == 0
+        and active_collector_sessions == 0
         else "BLOCKED"
     )
     return {
@@ -214,6 +241,7 @@ def _production_preflight(cursor: Any) -> dict[str, Any]:
         "active_runs": active_runs,
         "active_leases": active_leases,
         "active_user_transactions": active_user_transactions,
+        "active_collector_sessions": active_collector_sessions,
     }
 
 
@@ -245,6 +273,37 @@ def _static_result() -> dict[str, Any]:
     }
 
 
+def _validate_batches_without_persisting(settings: Any, batches: Sequence[str]) -> dict[str, Any]:
+    """Compile/execute the complete guarded deployment inside a rollback scope."""
+
+    validation_connection = connect_mssql(settings)
+    executed = 0
+    try:
+        cursor = validation_connection.cursor()
+        cursor.execute("SET XACT_ABORT ON; BEGIN TRANSACTION;")
+        _drain(cursor)
+        for batch in batches:
+            cursor.execute(batch)
+            _drain(cursor)
+            executed += 1
+        # The migration's own transaction is nested under this outer
+        # transaction.  Rolling back this connection removes every catalog or
+        # ledger change made during validation, including successful DDL.
+        validation_connection.rollback()
+        return {"status": "PASS", "validated_batches": executed, "persistent_writes": 0}
+    except BaseException:
+        try:
+            validation_connection.rollback()
+        finally:
+            validation_connection.close()
+        raise
+    finally:
+        try:
+            validation_connection.close()
+        except Exception:
+            pass
+
+
 def _apply(backup_evidence: Path) -> dict[str, Any]:
     backup_gate = _backup_gate(backup_evidence)
     if backup_gate.get("status") != "PASS":
@@ -267,6 +326,7 @@ def _apply(backup_evidence: Path) -> dict[str, Any]:
         preflight = _production_preflight(cursor)
         if preflight.get("status") != "PASS":
             raise RuntimeError("SQL identity, active-writer, log, or disk-capacity preflight failed")
+        validation = _validate_batches_without_persisting(settings, _batches(apply=True))
         cursor.execute("SET XACT_ABORT ON;")
         _drain(cursor)
         for batch in _batches(apply=True):
@@ -288,6 +348,7 @@ def _apply(backup_evidence: Path) -> dict[str, Any]:
         "collector_gate": collector_gate,
         "storage_operation_gate": operation_gate,
         "production_preflight": preflight,
+        "deployment_validation": validation,
         "admin_role_source": role_source,
         "executed_batches": executed,
         "schema": schema,
