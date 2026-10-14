@@ -156,6 +156,9 @@ BEGIN TRY
             StateId TINYINT NOT NULL
                 CONSTRAINT PK_stg_MddMacCompactStorageState PRIMARY KEY,
             StorageFormatVersion SMALLINT NOT NULL,
+            MigrationImplementationVersion VARCHAR(100) NOT NULL
+                CONSTRAINT DF_stg_MddMacCompactStorageState_MigrationImplementationVersion
+                DEFAULT ('compact-historical-migration-v2'),
             FutureWriteEnabled BIT NOT NULL
                 CONSTRAINT DF_stg_MddMacCompactStorageState_FutureWriteEnabled DEFAULT (0),
             CompatibilityVerified BIT NOT NULL
@@ -171,6 +174,21 @@ BEGIN TRY
             CONSTRAINT CK_stg_MddMacCompactStorageState_Version CHECK (StorageFormatVersion = 1)
         );
     END;
+    IF COL_LENGTH(N'stg.MddMacCompactStorageState', N'MigrationImplementationVersion') IS NULL
+    BEGIN
+        ALTER TABLE stg.MddMacCompactStorageState
+            ADD MigrationImplementationVersion VARCHAR(100) NOT NULL
+                CONSTRAINT DF_stg_MddMacCompactStorageState_MigrationImplementationVersion_Upgrade
+                DEFAULT ('compact-historical-migration-v2');
+    END;
+    IF EXISTS
+    (
+        SELECT 1 FROM stg.MddMacCompactStorageState
+        WHERE StateId = 1
+          AND (StorageFormatVersion <> 1
+               OR MigrationImplementationVersion <> 'compact-historical-migration-v2')
+    )
+        THROW 51210, 'Compact storage implementation version is incompatible with this runner.', 1;
     IF NOT EXISTS (SELECT 1 FROM stg.MddMacCompactStorageState WHERE StateId = 1)
     BEGIN
         INSERT INTO stg.MddMacCompactStorageState
@@ -475,6 +493,7 @@ INSERT INTO @CompactColumnContract (ObjectId, ColumnName, TypeName, MaxLength, I
 VALUES
     (OBJECT_ID(N''stg.MddMacCompactStorageState''), N''StateId'', N''tinyint'', 1, 0),
     (OBJECT_ID(N''stg.MddMacCompactStorageState''), N''StorageFormatVersion'', N''smallint'', 2, 0),
+    (OBJECT_ID(N''stg.MddMacCompactStorageState''), N''MigrationImplementationVersion'', N''varchar'', 100, 0),
     (OBJECT_ID(N''stg.MddMacCompactStorageState''), N''FutureWriteEnabled'', N''bit'', 1, 0),
     (OBJECT_ID(N''stg.MddMacCompactObservationEnvelope''), N''SnapshotId'', N''bigint'', 8, 0),
     (OBJECT_ID(N''stg.MddMacCompactObservationEnvelope''), N''EnvelopeJsonGzip'', N''varbinary'', -1, 0),

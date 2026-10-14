@@ -165,6 +165,188 @@ INNER JOIN sys.database_permissions AS p ON p.major_id = lo.ObjectId AND p.class
 INNER JOIN sys.database_principals AS dp ON dp.principal_id = p.grantee_principal_id
 WHERE p.permission_name IN (N'SELECT', N'VIEW DEFINITION');
 
+DECLARE @ExpectedCompactColumns TABLE
+(
+    ObjectName SYSNAME NOT NULL,
+    ColumnName SYSNAME NOT NULL,
+    TypeName SYSNAME NOT NULL,
+    MaxLength SMALLINT NOT NULL,
+    IsNullable BIT NOT NULL
+);
+INSERT INTO @ExpectedCompactColumns (ObjectName, ColumnName, TypeName, MaxLength, IsNullable)
+VALUES
+    (N'stg.MddMacCompactStorageState', N'StateId', N'tinyint', 1, 0),
+    (N'stg.MddMacCompactStorageState', N'StorageFormatVersion', N'smallint', 2, 0),
+    (N'stg.MddMacCompactStorageState', N'MigrationImplementationVersion', N'varchar', 100, 0),
+    (N'stg.MddMacCompactStorageState', N'FutureWriteEnabled', N'bit', 1, 0),
+    (N'stg.MddMacCompactObservationEnvelope', N'SnapshotId', N'bigint', 8, 0),
+    (N'stg.MddMacCompactObservationEnvelope', N'EnvelopeJsonGzip', N'varbinary', -1, 0),
+    (N'stg.MddMacCompactObservationEnvelope', N'EnvelopeSha256', N'char', 64, 0),
+    (N'stg.MddMacCompactObservationEnvelope', N'VerificationStatus', N'varchar', 20, 0);
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ExpectedCompactColumns AS expected
+    LEFT JOIN sys.columns AS c
+        ON c.object_id = OBJECT_ID(expected.ObjectName)
+       AND c.name = expected.ColumnName
+    LEFT JOIN sys.types AS t ON t.user_type_id = c.user_type_id
+    WHERE c.column_id IS NULL
+       OR t.name <> expected.TypeName
+       OR c.max_length <> expected.MaxLength
+       OR c.is_nullable <> expected.IsNullable
+)
+    THROW 51317, 'Compact storage schema contract is not validated for retirement.', 1;
+
+/*
+    These values are deliberately supplied by the reviewed operator artifact
+    on the supported runner.  A direct SSMS invocation must replace the NULLs
+    with the same measured values before the DROP path can proceed.
+*/
+DECLARE @RetirementTransactionLogReserveBytes BIGINT = NULL;
+DECLARE @RetirementTempdbReserveBytes BIGINT = NULL;
+DECLARE @RetirementRollbackReserveBytes BIGINT = NULL;
+DECLARE @RetirementDdlIndexReserveBytes BIGINT = NULL;
+DECLARE @RetirementAutogrowthReserveBytes BIGINT = NULL;
+DECLARE @RetirementExternalDiskReserveBytes BIGINT = NULL;
+
+IF @RetirementTransactionLogReserveBytes IS NULL
+   OR @RetirementTempdbReserveBytes IS NULL
+   OR @RetirementRollbackReserveBytes IS NULL
+   OR @RetirementDdlIndexReserveBytes IS NULL
+   OR @RetirementAutogrowthReserveBytes IS NULL
+   OR @RetirementExternalDiskReserveBytes IS NULL
+   OR @RetirementTransactionLogReserveBytes <= 0
+   OR @RetirementTempdbReserveBytes <= 0
+   OR @RetirementRollbackReserveBytes <= 0
+   OR @RetirementDdlIndexReserveBytes <= 0
+   OR @RetirementAutogrowthReserveBytes <= 0
+   OR @RetirementExternalDiskReserveBytes <= 0
+    THROW 51310, 'Measured retirement capacity reserves are required before DROP.', 1;
+
+DECLARE @WindowsCFreeBytes BIGINT =
+(
+    SELECT MIN(CONVERT(BIGINT, vs.available_bytes))
+    FROM
+    (
+        SELECT DB_ID() AS database_id, file_id FROM sys.database_files
+        UNION ALL
+        SELECT DB_ID(N'tempdb') AS database_id, file_id FROM tempdb.sys.database_files
+    ) AS files
+    CROSS APPLY sys.dm_os_volume_stats(files.database_id, files.file_id) AS vs
+    WHERE vs.volume_mount_point LIKE N'C:%'
+);
+DECLARE @LogTotalBytes BIGINT = NULL;
+DECLARE @LogUsedBytes BIGINT = NULL;
+DECLARE @LogUsedPercent DECIMAL(9, 3) = NULL;
+SELECT @LogTotalBytes = CONVERT(BIGINT, total_log_size_in_bytes),
+       @LogUsedBytes = CONVERT(BIGINT, used_log_space_in_bytes),
+       @LogUsedPercent = CONVERT(DECIMAL(9, 3), used_log_space_in_percent)
+FROM sys.dm_db_log_space_usage
+WHERE database_id = DB_ID();
+
+DECLARE @TempdbInternalFreeBytes BIGINT =
+(
+    SELECT COALESCE(SUM(
+        (CONVERT(BIGINT, df.size) - CONVERT(BIGINT, COALESCE(fsu.allocated_extent_page_count, 0)))
+        * CONVERT(BIGINT, 8192)), 0)
+    FROM tempdb.sys.database_files AS df
+    LEFT JOIN tempdb.sys.dm_db_file_space_usage AS fsu ON fsu.file_id = df.file_id
+    WHERE df.type = 0
+);
+DECLARE @TempdbWindowsFreeBytes BIGINT =
+(
+    SELECT MIN(CONVERT(BIGINT, vs.available_bytes))
+    FROM tempdb.sys.database_files AS df
+    CROSS APPLY sys.dm_os_volume_stats(DB_ID(N'tempdb'), df.file_id) AS vs
+);
+DECLARE @LegacyReservedBytes BIGINT =
+(
+    SELECT COALESCE(SUM(CONVERT(BIGINT, ps.reserved_page_count)) * CONVERT(BIGINT, 8192), 0)
+    FROM sys.dm_db_partition_stats AS ps
+    INNER JOIN sys.objects AS o ON o.object_id = ps.object_id
+    INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+    WHERE s.name = N'stg' AND o.object_id IN (SELECT ObjectId FROM @LegacyObjects)
+);
+DECLARE @LegacyIndexReservedBytes BIGINT =
+(
+    SELECT COALESCE(SUM(CONVERT(BIGINT, ps.index_reserved_page_count)) * CONVERT(BIGINT, 8192), 0)
+    FROM sys.dm_db_partition_stats AS ps
+    INNER JOIN sys.objects AS o ON o.object_id = ps.object_id
+    INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+    WHERE s.name = N'stg' AND o.object_id IN (SELECT ObjectId FROM @LegacyObjects)
+);
+DECLARE @ActiveUserTransactions BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM sys.dm_tran_session_transactions AS st
+    INNER JOIN sys.dm_exec_sessions AS es ON es.session_id = st.session_id
+    WHERE st.session_id <> @@SPID AND es.is_user_process = 1
+);
+
+IF @WindowsCFreeBytes IS NULL
+   OR @WindowsCFreeBytes -
+      (
+          @RetirementTransactionLogReserveBytes
+          + @RetirementTempdbReserveBytes
+          + @RetirementRollbackReserveBytes
+          + @RetirementDdlIndexReserveBytes
+          + @RetirementAutogrowthReserveBytes
+          + @RetirementExternalDiskReserveBytes
+      ) < CONVERT(BIGINT, 12) * 1024 * 1024 * 1024
+    THROW 51311, 'Windows C: headroom would fall below the 12 GiB retirement floor.', 1;
+
+IF @LogTotalBytes IS NULL OR @LogUsedBytes IS NULL OR @LogUsedPercent IS NULL
+   OR @LogUsedPercent > 70
+   OR @LogTotalBytes - @LogUsedBytes < @RetirementTransactionLogReserveBytes
+    THROW 51312, 'Transaction-log reserve or utilization preflight failed.', 1;
+
+IF @TempdbWindowsFreeBytes IS NULL
+   OR @TempdbInternalFreeBytes < @RetirementTempdbReserveBytes
+   OR @TempdbWindowsFreeBytes < @RetirementTempdbReserveBytes
+    THROW 51313, 'Tempdb reserve preflight failed.', 1;
+
+IF @ActiveUserTransactions <> 0
+    THROW 51314, 'Another SQL user transaction is active; legacy retirement is blocked.', 1;
+
+IF @RetirementDdlIndexReserveBytes < @LegacyReservedBytes
+   OR @RetirementDdlIndexReserveBytes < @LegacyIndexReservedBytes
+    THROW 51315, 'DDL/index reserve is smaller than measured legacy allocation.', 1;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM
+    (
+        SELECT df.type_desc, df.name,
+               CONVERT(BIGINT, df.size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+               CONVERT(BIGINT, df.max_size) * CONVERT(BIGINT, 8192) AS max_bytes,
+               CONVERT(BIGINT, df.growth) AS growth_value,
+               CAST(0 AS BIT) AS is_tempdb
+        FROM sys.database_files AS df
+        UNION ALL
+        SELECT df.type_desc, df.name,
+               CONVERT(BIGINT, df.size) * CONVERT(BIGINT, 8192),
+               CONVERT(BIGINT, df.max_size) * CONVERT(BIGINT, 8192),
+               CONVERT(BIGINT, df.growth),
+               CAST(1 AS BIT)
+        FROM tempdb.sys.database_files AS df
+    ) AS files
+    WHERE files.growth_value <= 0
+       OR
+       (
+           files.max_bytes >= 0
+           AND files.max_bytes - files.allocated_bytes <
+               CASE
+                   WHEN files.is_tempdb = 1 THEN @RetirementTempdbReserveBytes + @RetirementAutogrowthReserveBytes
+                   WHEN files.type_desc = N'LOG' THEN @RetirementTransactionLogReserveBytes + @RetirementAutogrowthReserveBytes
+                   ELSE @RetirementDdlIndexReserveBytes + @RetirementRollbackReserveBytes + @RetirementAutogrowthReserveBytes
+               END
+       )
+)
+    THROW 51316, 'Finite file growth or autogrowth headroom is insufficient for retirement.', 1;
+
 BEGIN TRY
     BEGIN TRANSACTION;
 

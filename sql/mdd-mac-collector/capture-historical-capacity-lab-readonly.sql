@@ -19,22 +19,45 @@ SET NOCOUNT ON;
 SET LOCK_TIMEOUT 5000;
 
 DECLARE @CapturePhase varchar(10) = 'BEFORE';
+DECLARE @ExecutionEnvironment varchar(30) = 'isolated-lab';
 DECLARE @ServerName nvarchar(128) = CONVERT(nvarchar(128), SERVERPROPERTY(N'ServerName'));
 IF @CapturePhase NOT IN ('BEFORE', 'AFTER')
     THROW 51440, 'Capture phase must be BEFORE or AFTER.', 1;
-IF @ServerName = N'DataAnalyst-VM' OR @ServerName LIKE N'DataAnalyst-VM\%'
+IF LOWER(@ExecutionEnvironment) <> N'isolated-lab'
+    THROW 51443, 'The full-history capacity capture must use the isolated-lab environment.', 1;
+IF LOWER(@ServerName) = N'dataanalyst-vm' OR LOWER(@ServerName) LIKE N'dataanalyst-vm%'
     THROW 51441, 'The full-history capacity capture cannot run on the production instance.', 1;
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_files AS df
+    CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+    WHERE vs.volume_mount_point LIKE N'C:%'
+)
+   OR EXISTS
+(
+    SELECT 1
+    FROM tempdb.sys.database_files AS df
+    CROSS APPLY sys.dm_os_volume_stats(DB_ID(N'tempdb'), df.file_id) AS vs
+    WHERE vs.volume_mount_point LIKE N'C:%'
+)
+    THROW 51442, 'The isolated lab must place SQL data, log, and tempdb files on a non-C: volume.', 1;
 
 SELECT
     N'capacity.database_identity' AS statement_id,
     @CapturePhase AS capture_phase,
+    @ExecutionEnvironment AS execution_environment,
     DB_NAME() AS database_name,
     @ServerName AS server_name,
     DATABASEPROPERTYEX(DB_NAME(), N'Status') AS database_status,
     DATABASEPROPERTYEX(DB_NAME(), N'UserAccess') AS user_access,
     CONVERT(int, DATABASEPROPERTYEX(DB_NAME(), N'CompatibilityLevel')) AS compatibility_level,
+    CONVERT(nvarchar(128), drs.database_guid) AS database_guid,
     SUSER_SNAME() AS effective_login,
-    SYSUTCDATETIME() AS measurement_timestamp_utc;
+    SYSUTCDATETIME() AS measurement_timestamp_utc
+FROM sys.databases AS d
+LEFT JOIN sys.database_recovery_status AS drs ON drs.database_id = d.database_id
+WHERE d.database_id = DB_ID();
 
 SELECT
     CASE WHEN @CapturePhase = 'BEFORE'
@@ -83,6 +106,7 @@ SELECT
          THEN N'capacity.sample_allocation_before'
          ELSE N'capacity.sample_allocation_after' END AS statement_id,
     @CapturePhase AS capture_phase,
+    @ExecutionEnvironment AS execution_environment,
     SUM(CASE WHEN df.type = 0
              THEN CONVERT(bigint, df.size) * CONVERT(bigint, 8192)
              ELSE CONVERT(bigint, 0) END) AS database_file_allocated_bytes,
@@ -99,13 +123,14 @@ SELECT
          SELECT vs.available_bytes AS volume_available_bytes
          FROM sys.database_files AS cdf
          CROSS APPLY sys.dm_os_volume_stats(DB_ID(), cdf.file_id) AS vs
-         WHERE vs.volume_mount_point LIKE N'C:%'
-     ) AS vs) AS windows_c_available_bytes
+         WHERE vs.volume_mount_point NOT LIKE N'C:%'
+     ) AS vs) AS windows_target_volume_available_bytes
 FROM sys.database_files AS df;
 
 SELECT
     N'capacity.snapshot_population' AS statement_id,
     @CapturePhase AS capture_phase,
+    @ExecutionEnvironment AS execution_environment,
     COUNT_BIG(*) AS snapshot_count,
     MIN(SnapshotId) AS first_snapshot_id,
     MAX(SnapshotId) AS last_snapshot_id
@@ -113,8 +138,9 @@ FROM stg.MddMacSourceSnapshot;
 
 /* The exact full-history run uses every current SnapshotId, in this order. */
 SELECT
-    N'capacity.sample_selection' AS statement_id,
+    N'capacity.snapshot_ids_complete' AS statement_id,
     @CapturePhase AS capture_phase,
+    @ExecutionEnvironment AS execution_environment,
     SnapshotId,
     ROW_NUMBER() OVER (ORDER BY SnapshotId) AS selection_ordinal
 FROM stg.MddMacSourceSnapshot
@@ -219,36 +245,65 @@ SELECT
 FROM tempdb.sys.database_files AS df
 ORDER BY database_scope, file_id;
 
-SELECT
-    N'capacity.migration_state' AS statement_id,
-    @CapturePhase AS capture_phase,
-    MigrationId,
-    MigrationKind,
-    Status,
-    VerifiedUnitCount,
-    QuarantinedUnitCount,
-    LastSnapshotId,
-    CompletedAtUtc
-FROM stg.MddMacCompactMigration
-WHERE MigrationKind = N'HISTORICAL'
-ORDER BY StartedAtUtc, MigrationId;
+IF OBJECT_ID(N'stg.MddMacCompactMigration', N'U') IS NULL
+BEGIN
+    SELECT N'capacity.migration_state' AS statement_id,
+           @CapturePhase AS capture_phase,
+           @ExecutionEnvironment AS execution_environment,
+           N'NOT_INSTALLED' AS status;
+END
+ELSE
+BEGIN
+    SELECT
+        N'capacity.migration_state' AS statement_id,
+        @CapturePhase AS capture_phase,
+        @ExecutionEnvironment AS execution_environment,
+        MigrationId,
+        MigrationKind,
+        Status,
+        VerifiedUnitCount,
+        QuarantinedUnitCount,
+        LastSnapshotId,
+        CompletedAtUtc
+    FROM stg.MddMacCompactMigration
+    WHERE MigrationKind = N'HISTORICAL'
+    ORDER BY StartedAtUtc, MigrationId;
+END;
+
+IF OBJECT_ID(N'stg.MddMacCompactObservationEnvelope', N'U') IS NULL
+BEGIN
+    SELECT N'capacity.sample_observation_sizes' AS statement_id,
+           @CapturePhase AS capture_phase,
+           @ExecutionEnvironment AS execution_environment,
+           N'NOT_INSTALLED' AS status;
+END
+ELSE
+BEGIN
+    SELECT
+        N'capacity.sample_observation_sizes' AS statement_id,
+        @CapturePhase AS capture_phase,
+        @ExecutionEnvironment AS execution_environment,
+        e.SnapshotId,
+        e.SourceSnapshotRowCount,
+        e.CallRowCount,
+        e.TimingRowCount,
+        e.SituationRowCount,
+        e.ServiceSectionRowCount,
+        e.AttributeRowCount,
+        e.ResponseErrorRowCount,
+        e.ParserGapRowCount,
+        e.EnvelopeLogicalBytes,
+        e.EnvelopeCompressedBytes,
+        DATALENGTH(e.EnvelopeJsonGzip) AS stored_gzip_bytes
+    FROM stg.MddMacCompactObservationEnvelope AS e
+    WHERE e.VerificationStatus = N'VERIFIED'
+    ORDER BY e.SnapshotId;
+END;
 
 SELECT
-    N'capacity.sample_observation_sizes' AS statement_id,
+    N'capacity.migration_implementation' AS statement_id,
     @CapturePhase AS capture_phase,
-    e.SnapshotId,
-    e.SourceSnapshotRowCount,
-    e.CallRowCount,
-    e.TimingRowCount,
-    e.SituationRowCount,
-    e.ServiceSectionRowCount,
-    e.AttributeRowCount,
-    e.ResponseErrorRowCount,
-    e.ParserGapRowCount,
-    e.EnvelopeLogicalBytes,
-    e.EnvelopeCompressedBytes,
-    DATALENGTH(e.EnvelopeJsonGzip) AS stored_gzip_bytes
-FROM stg.MddMacCompactObservationEnvelope AS e
-WHERE e.VerificationStatus = N'VERIFIED'
-ORDER BY e.SnapshotId;
+    @ExecutionEnvironment AS execution_environment,
+    N'compact-historical-migration-v2' AS migration_implementation_version,
+    CONVERT(bit, 1) AS read_only_measurement;
 GO

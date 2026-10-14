@@ -1,4 +1,4 @@
-# Tiered50 historical and future storage recovery — S147 correction
+# Tiered50 historical and future storage recovery — S150 correction
 
 Date: 2026-10-14 (Europe/Berlin)
 
@@ -8,10 +8,10 @@ collector, or introduce a replacement architecture.
 
 ## Current result
 
-The requested S146 implementation corrections are applied and offline-tested. No
-production SQL connection, new backup, DDL, data migration, legacy-table
-retirement, MDF shrink, Power BI refresh, collector start, or MDD request was
-performed by this repository.
+The requested S146/S149/S150 implementation corrections are applied and
+offline-tested. No production SQL connection, new backup, production ALTER
+INDEX, data migration, DROP, MDF shrink, Power BI refresh, collector start, or
+MDD request was performed by this repository.
 
 The collector remains disabled and unloaded. The operator has now confirmed
 the existing 2026-10-14 recovery point in Windows SSMS. The exact file is
@@ -36,28 +36,154 @@ recovery point.
 The confirmed SQL-visible backup root is
 `\\vmware-host\Shared Folders\CologneTransitData`. The SQL Server service
 must be able to see and write that UNC path; this is not a Mac filesystem
-path. The latest supplied Windows measurement reports approximately 13.86 GiB
-free on C:. That is only 1.86 GiB above the 12 GiB operational floor. It does
-not currently prove that a full-history migration peak is safe. Re-measure it
-with the consolidated audit before any capacity decision. It cannot satisfy
-the future target of 10 GiB growth while retaining a 12 GiB floor (that target
-needs at least 22 GiB free before growth).
+path. The current S150 production evidence supplied for this review reports:
+
+| TimingObservation evidence | Supplied value |
+|---|---:|
+| Rows | 2,553,690 |
+| Total allocation | 12.99 GiB |
+| Clustered allocation | 11.87 GiB |
+| Clustered compression | `NONE` |
+| Windows C: free | 13.92 GiB |
+| Mandatory C: floor | 12.00 GiB |
+| Headroom above floor | 1.92 GiB |
+
+These values are operator-supplied production evidence, not a result captured
+by this Mac or by the corrected audit. They establish that TimingObservation
+is the immediate storage priority: its clustered allocation averages roughly
+4.87 KiB per row, while the whole table allocation averages roughly 5.33 KiB
+per row. They do not identify the responsible columns or authorize a write.
+The actual column-byte and index-design result sets added below must be run in
+SSMS before assigning savings to scalar fields, source paths, identity fields,
+JSON, or indexes.
+
+At 13.92 GiB free, only 1.92 GiB remains above the floor. A full-history
+duplicate/rebuild peak is therefore not feasible on the current C: evidence
+unless the isolated lab proves a lower peak and the fresh production audit
+confirms the same headroom. The future target of 10 GiB growth while retaining
+the 12 GiB floor still requires at least 22 GiB free before growth.
 
 `FINAL_RESULT: BLOCKED_PENDING_FULL_HISTORY_CAPACITY_PLAN`
 
 The remaining blocker is missing exact full-history physical capacity evidence:
 the production allocation audit and the isolated SQL Server lab measurement
-have not been run from this Mac. The implementation has a signed,
-independently bound physical-capacity evidence contract. The operator's SSMS
-backup result proves the recovery point, but it is not silently relabeled as a
-machine-generated signed artifact.
+have not been run from this Mac. The implementation now binds the signed plan
+to fresh production SQL identity, MDF/LDF and tempdb allocations, the complete
+SnapshotId population, migration implementation version, reserve measurements,
+and freshness immediately before the first migration write. The operator's
+SSMS backup result proves the recovery point, but it is not silently relabeled
+as a machine-generated signed artifact.
 If a fresh physical-capacity measurement fails its stated thresholds, the
 result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable future
 writes in that case.
 
+If no isolated SQL Server with a non-C: data/log/tempdb volume is available,
+the exact infrastructure blocker is:
+`NO_SUITABLE_ISOLATED_SQL_SERVER_AND_NON_C_STORAGE_AVAILABLE_FOR_FULL_HISTORY_MEASUREMENT`.
+The data-preserving alternative is to keep the verified backup and production
+history untouched, reclaim only separately reviewed unrelated Windows files, or
+obtain an approved controlled replacement/cutover on an existing non-C: SQL
+volume. Do not fabricate a peak, duplicate the database on C:, or authorize a
+production migration from JSON-length estimates.
+
 The next safe operator action is the consolidated read-only storage audit
 described below. The backup verification step is complete and must not be
 rerun unnecessarily.
+
+### S150 Timing storage findings and VMware feasibility
+
+The source-side review is now explicit about the physical design. The Timing
+table repeats the same scalar identifiers across observations, carries several
+source-path columns, carries source-event identity and identity-audit JSON,
+and has a clustered identity index and additional occurrence/identity access
+paths. Repeated values may be good dictionary candidates, but the candidate
+must retain original typed values, NULL versus empty, Unicode, timestamps and
+source timestamp text, GZIP bytes, row identity, and duplicate occurrences. A
+row count or JSON-length estimate is not sufficient.
+
+The read-only production audit now returns:
+
+- `capacity.timing_column_bytes`: `DATALENGTH` totals, NULL/non-NULL counts,
+  average non-NULL byte length, category, and index key/INCLUDE membership for
+  every physical Timing column;
+- `capacity.timing_index_design`: the actual key order, INCLUDE membership,
+  uniqueness/filter flags, compression, and reserved/used allocation for each
+  Timing index; and
+- `capacity.vmware_relocation_assessment`: the C: data/log/tempdb files,
+  their allocated bytes, and the target free-space requirement if user-
+  database files are moved.
+
+No per-column savings number is claimed yet because the production audit has
+not been rerun after this source change. The isolated comparison is provided
+by `sql/mdd-mac-collector/measure-timing-storage-options-lab.sql`. It creates
+disposable full-history lab candidates and measures actual reserved pages for
+lossless PAGE-compressed source-shaped storage and a lossless dictionary
+layout. It returns the actual comparison in
+`capacity.timing_storage_option_savings`, plus exact fixed-column/dictionary
+byte mismatches and NULL/empty metrics. Its `OBSERVED_CHECKPOINT_MAX` is not a
+production peak authorization; a separate sampler must capture the in-flight
+CREATE/ALTER INDEX high-water mark and the result must be bound to the signed
+capacity plan.
+
+The measured-savings ledger for this review is therefore:
+
+| Decision quantity | Current result | Required evidence |
+|---|---|---|
+| Timing source-shaped PAGE allocated pages/bytes | `NOT_MEASURED` | Lab `capacity.timing_storage_option_allocation` |
+| Timing dictionary allocated pages/bytes | `NOT_MEASURED` | Lab `capacity.timing_storage_option_allocation` |
+| PAGE savings versus uncompressed source shape | `NOT_MEASURED` | Lab `capacity.timing_storage_option_savings` |
+| Dictionary savings versus PAGE | `NOT_MEASURED` | Lab `capacity.timing_storage_option_savings` |
+| Full-history migration peak | `NOT_MEASURED` | In-flight sampler plus signed before/after capture |
+| C: bytes recovered by VMware relocation | `NOT_MEASURED` | Windows/SQL before-after file and volume evidence |
+
+Consequently the current feasibility decision is `BLOCKED`: 1.92 GiB of
+supplied C: headroom is not a measured full-history peak and cannot authorize
+an ALTER INDEX, migration, DROP, SHRINK, or restart.
+
+Adding a separate VMware virtual disk is technically feasible only after the
+Windows/VMware administrator confirms a persistent non-C: VMDK, NTFS health,
+SQL Server service-account access, backup coverage, and enough free space for
+the complete allocated data/log files plus copy/rollback reserve. Attaching a
+VMDK alone recovers no C: space. Moving user-database MDF/LDF files requires
+an approved maintenance window, a verified backup, collector quiescence, an
+offline/file-state move, SQL metadata updates, service-account permissions,
+and post-move SQL allocation and application checks. Moving tempdb is a
+separate planned SQL restart and is not authorized here. The current review
+performed none of those operations and has not measured a positive C: delta.
+
+The one recommended safe execution path is: provision and validate the
+separate non-C: VMDK; use it for the isolated full-history restore and the
+PAGE-versus-dictionary measurement; choose the option only from actual page
+and peak evidence; then, in a separately approved maintenance window, move
+the existing user-database data/log files to that volume and verify the C:
+before/after delta before considering any compact migration, legacy retirement,
+or bounded shrink. Until all of those gates pass, keep production history and
+the verified backup untouched.
+
+### Production-audit errors observed and corrected
+
+The operator-observed read-only production-audit attempt returned Msg 207
+because the current V1/V2 schema does not install the optional Storage V3
+GZIP columns used by the original snapshot and representative-payload
+queries. The same audit also referenced the nonexistent
+`sys.sql_expression_dependencies.referenced_minor_name` field.
+
+The existing audit file is corrected in place. It now inventories the expected
+payload columns through `sys.columns`, reports each absent optional column as
+`MISSING_OPTIONAL`, and builds the length-only payload expressions only from
+physical columns confirmed present. The snapshot population result uses the
+same guard, and the dependency result derives the minor name with
+`COL_NAME(referenced_id, referenced_minor_id)`. An offline regression models a
+V1/V2-only database with every V3 GZIP column absent. No V3 installation,
+schema change, data migration, collector restart, or production rerun was
+performed; rerun the unchanged read-only audit after this source review.
+
+A follow-up audit attempt exposed Msg 8115 in both 12 GiB safety-floor
+expressions: SQL Server evaluated `12 * 1024 * 1024 * 1024` as `INT` before
+the outer conversion. Both occurrences now cast `12` to `BIGINT` before
+multiplication. The remaining page-to-byte products were reviewed and already
+cast their page operands before multiplying by 8192; the regression check
+guards both corrected floor expressions and rejects the old overflow pattern.
 
 ## Implementation defects fixed
 
@@ -91,6 +217,23 @@ The existing implementation was corrected in place:
   a separately captured, read-only SQL allocation artifact whose fields are
   bound to those plan values, signed with the operator key, and verified with
   `--capacity-evidence-public-key` (or `MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY`).
+  Before the first write, a fresh read-only SQL binding rechecks identity,
+  MDF/LDF growth limits, tempdb, the complete ordered SnapshotId population,
+  installed migration version, evidence freshness, log/rollback/transient
+  reserves, current Windows headroom, and the selected volume policy. Any
+  mismatch blocks without writing a migration ledger row.
+- The consolidated historical-storage audit now survives the observed V1/V2
+  production schema: `sys.columns` reports the physical payload contract and
+  missing optional GZIP columns, the representative-size query references only
+  installed columns, and dependency minor names use `COL_NAME(...)`.
+- The audit's two 12 GiB floor calculations now cast before multiplication,
+  preventing Msg 8115 from intermediate `INT` overflow; all remaining
+  page-to-byte capacity products retain BIGINT operands.
+- The audit now measures actual `DATALENGTH` bytes for every physical Timing
+  column, reports NULL/non-NULL and average-value sizes, exposes Timing index
+  key/INCLUDE membership and allocation, and reports the C: file allocation
+  that a separate VMware disk could receive. No result is treated as a
+  production capacity plan until captured from SQL Server.
 - Historical verification now checks the actual SQL compatibility views and a
   separate physical-field readback view. It compares catalog data types,
   lengths, precision, scale, and nullability rules; normalized decoded rows;
@@ -101,18 +244,31 @@ The existing implementation was corrected in place:
   VERIFIED units are immutable, quarantined units cannot be promoted, and
   network/readback failures leave the migration BLOCKED with a retryable
   BUILT unit rather than falsely completing it.
-- `sql/mdd-mac-collector/estimate-storage-v3-compression.sql` now contains a
-  disabled-by-default isolated-lab measurement for current complete
-  envelopes, raw-binary field storage, lossless dictionary references, and
-  existing compressed snapshot payloads, including tempdb physical page
-  allocation and a field-count losslessness check.
+- `sql/mdd-mac-collector/estimate-storage-v3-compression.sql` remains a
+  disabled-by-default bounded diagnostic for compact envelopes and payload
+  candidates. The new
+  `sql/mdd-mac-collector/measure-timing-storage-options-lab.sql` is the
+  full-history Timing comparison: it creates disposable source-shaped PAGE
+  and dictionary candidates, measures actual reserved pages and data/log/
+  tempdb checkpoints, and verifies exact fixed/variable-field round trips.
+  `scripts/sample_timing_storage_peak_lab.py` supplies the separate read-only
+  in-flight high-water measurement required before capacity authorization.
 - `sql/mdd-mac-collector/approve-compact-observation-gates-v1.sql` now requires
   Power BI confirmation before either future writes or retirement approval and
   no longer clears a previously recorded retirement approval on a later gate
   run.
 - `sql/mdd-mac-collector/retire-legacy-observation-storage-v1.sql` verifies
   replacement object types and all eight compatibility-view counts before its
-  destructive transaction commits.
+  destructive transaction commits. It now also requires measured log, tempdb,
+  rollback, DDL/index, autogrowth, and unrelated-disk reserves, checks live
+  physical headroom with the 12 GiB C: floor, and blocks finite growth limits
+  or active transactions. The Python retirement runner additionally requires
+  full-history parity, a fresh real Power BI consumer artifact, dependency and
+  schema-contract checks, and explicit human approval.
+- The isolated-lab path now uses only `CTI_LAB_MSSQL_*` settings and a separate
+  lab Keychain service/identity. It rejects the production host, collector
+  login, production evidence key, and C: SQL data/log/tempdb placement. Lab
+  credentials and evidence are never accepted by the production path.
 - `sql/mdd-mac-collector/backfill-snapshot-gzip-v1.sql` now blocks active
   production runs and other active SQL transactions. It remains optional,
   dry-run by default, and is not part of the required compact transition.
@@ -139,14 +295,19 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 | `<WINDOWS_LOGIN>` | `DATAANALYST-VM\Somaye` | The backup batch fails closed if `SUSER_SNAME()` differs |
 | `<DATABASE>` | `CologneTransitIntelligence` | Fixed by every supplied SQL file |
 | `<SQL_VISIBLE_BACKUP_PATH>` | Generated below `\\vmware-host\Shared Folders\CologneTransitData` by the backup batch | The SQL Server service must be able to write it; the Mac filesystem is irrelevant |
-| `<WINDOWS_C_FREE_GIB>` | `13.86` GiB supplied latest Windows estimate | Re-measure in SSMS; only 1.86 GiB is above the 12 GiB floor |
+| `<WINDOWS_C_FREE_GIB>` | `13.92` GiB supplied S150 production evidence | Re-measure in SSMS; only 1.92 GiB is above the 12 GiB floor |
 | `<BACKUP_DEST_FREE_GIB>` | Fresh Windows measurement of the confirmed UNC destination | Must cover the expected backup size plus the operator-approved reserve; `xp_fileexist` proves reachability, not free capacity |
 | `<MIGRATION_ID>` | New UUID recorded by the operator, or the existing failed/blocked UUID being intentionally resumed | Never reuse a UUID for unrelated history |
 | `<CAPACITY_PLAN_FILE>` | JSON file made from measured SQL allocation, log, tempdb, rollback, autogrowth, and duplication peaks plus signed evidence bindings | Must cover `FULL_HISTORY_MIGRATION_PEAK`; self-declared numbers are rejected |
 | `<CAPACITY_EVIDENCE_PUBLIC_KEY>` | Operator-controlled public key outside the repository | Must verify the signed SQL allocation evidence embedded in the capacity plan |
+| `<LAB_MSSQL_HOST>` | Explicit isolated SQL Server host, different from `DataAnalyst-VM` | Set through `CTI_LAB_MSSQL_HOST`; never reuse `MSSQL_ADMIN_HOST` |
+| `<LAB_MSSQL_INSTANCE_ID>` | Non-production lab instance identifier | Set through `CTI_LAB_MSSQL_INSTANCE_ID`; values containing `production` are rejected |
+| `<LAB_CAPACITY_EVIDENCE_PUBLIC_KEY>` | Lab-only public key outside the repository | Never pass it through `MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY` or the production command |
 | `<MDF_LOGICAL_FILE_NAME>` | Exact `sys.database_files.name` returned by SSMS | Never guess the logical file name |
 | `<TARGET_SIZE_MB>` | Calculated from current used pages plus explicit headroom | Never substitute `SHRINKDATABASE` |
 | `<POWERBI_APPROVER>` | Human who verified the real consumer refresh | Record outside SQL and in the retirement approval artifact |
+| `<POWERBI_EVIDENCE_JSON>` | Fresh PASS artifact from the real report/dataset refresh | Must identify the consumer, dataset/report, refresh, schema contract, approver, and timestamp |
+| `<RETIREMENT_RESERVES>` | Fresh measured log/tempdb/rollback/DDL-index/autogrowth/external-disk reserve object | All six byte reserves must be positive, PASS, fresh, and based on the isolated-lab plus production read-only measurements |
 
 ## Execution order
 
@@ -175,11 +336,18 @@ stable `statement_id` values intact. The results must include:
 - `capacity.database_identity`, `capacity.database_files`, and
   `capacity.production_object_allocation` with actual SQL allocations and C:
   volume availability;
-- `capacity.snapshot_population` and `capacity.historical_row_counts` for the
-  complete history;
+- `capacity.snapshot_population`, `capacity.snapshot_ids_complete`, and
+  `capacity.historical_row_counts` for the complete history;
+- `capacity.migration_implementation` and the database GUID/instance identity
+  used to bind the evidence to the intended SQL Server;
 - `capacity.representative_snapshot_selection` and
   `capacity.representative_observation_sizes`, which are bounded length-only
   diagnostics and are not a physical compact-envelope allocation claim;
+- `capacity.representative_payload_schema` and
+  `capacity.representative_payload_audit`, which identify installed payload
+  columns and explicitly report missing optional Storage V3 columns;
+- `capacity.timing_column_bytes`, `capacity.timing_index_design`, and
+  `capacity.vmware_relocation_assessment` for the Timing storage decision;
 - `capacity.transaction_log`, `capacity.tempdb`, `capacity.rollback`, and
   `capacity.autogrowth`;
 - `capacity.active_writer_state`, the compact gate state, and the server-side
@@ -189,10 +357,11 @@ Expected outcome: the identity is the intended database, status is `ONLINE`,
 access is `MULTI_USER`, no collector run/lease/session or unrelated user
 transaction is active, every required source table is present, and no required
 allocation field is NULL. Any missing result, incomplete file measurement,
-active writer, or C: free-space result below 12 GiB is `BLOCKED`.
+active writer, incomplete SnapshotId list, stale timestamp, migration-version
+mismatch, or C: free-space result below 12 GiB is `BLOCKED`.
 
-The supplied 13.86 GiB value is not reused as current evidence. At that value
-the hard available headroom is only `13.86 - 12.00 = 1.86 GiB`; a migration
+The supplied 13.92 GiB value is not reused as current evidence. At that value
+the hard available headroom is only `13.92 - 12.00 = 1.92 GiB`; a migration
 whose measured peak exceeds that headroom must not be started.
 
 ### 2. Measure the full-history peak in an isolated SQL Server lab
@@ -247,10 +416,38 @@ The exact full-history measurement uses every current SnapshotId in ascending
 order; a representative sample or a logical-byte extrapolation is not a
 production capacity plan.
 
+Use the existing scripts in this order on the isolated lab copy. The scripts
+run from macOS through the explicit lab SQL connection; they do not use the
+launchd production gate or the production administrator Keychain item. Set
+only the separated lab variables (the password may come from the separate
+`com.cologne-transit-intelligence.mssql-lab-admin-password` Keychain item):
+
+```text
+CTI_LAB_MSSQL_HOST=<LAB_MSSQL_HOST>
+CTI_LAB_MSSQL_DATABASE=CologneTransitIntelligence
+CTI_LAB_MSSQL_USER=<LAB_ADMIN_LOGIN>
+CTI_LAB_MSSQL_INSTANCE_ID=<LAB_MSSQL_INSTANCE_ID>
+CTI_LAB_MSSQL_PASSWORD=<LAB_PASSWORD_IF_NOT_USING_LAB_KEYCHAIN>
+```
+
+The lab host must be different from `DataAnalyst-VM`, and all lab SQL
+data/log/tempdb files must remain on the existing non-C: volume. If these
+settings or the non-C: volume do not exist, stop with the exact blocker given
+in **Current result**; do not substitute the production host or a second C:
+volume.
+
 Use the existing scripts in this order on the isolated lab copy:
 
-1. Run the additive compact-storage script in the lab working copy with only
-   `@ApplyCompactStorage = 1`, while keeping future writes disabled.
+1. Run the additive compact-storage script through the existing lab runner,
+   with `--execution-environment isolated-lab` and only its apply flag, while
+   keeping future writes disabled. The runner performs the same non-C: and
+   active-writer checks before sending the guarded batches.
+
+   ```text
+   python3 scripts/apply_compact_storage_migration.py --apply \
+     --execution-environment isolated-lab \
+     --backup-evidence <LAB_BACKUP_EVIDENCE_JSON>
+   ```
 2. Use the existing `scripts/migrate_historical_compact_observations.py`
    serializer and stored procedure against the lab copy, with `--batch-size 1`
    and no snapshot limit. A deliberately overprovisioned, lab-only signed
@@ -259,7 +456,12 @@ Use the existing scripts in this order on the isolated lab copy:
    the command shape is:
 
    ```text
-   py -3 scripts/migrate_historical_compact_observations.py --apply \
+   CTI_LAB_MSSQL_HOST=<LAB_MSSQL_HOST> \
+   CTI_LAB_MSSQL_DATABASE=CologneTransitIntelligence \
+   CTI_LAB_MSSQL_USER=<LAB_ADMIN_LOGIN> \
+   CTI_LAB_MSSQL_INSTANCE_ID=<LAB_MSSQL_INSTANCE_ID> \
+   python3 scripts/migrate_historical_compact_observations.py --apply \
+     --execution-environment isolated-lab \
      --migration-id <LAB_MIGRATION_ID> --batch-size 1 \
      --capacity-plan <LAB_CAPACITY_PLAN_FILE> \
      --capacity-evidence-public-key <LAB_PUBLIC_KEY> \
@@ -269,11 +471,30 @@ Use the existing scripts in this order on the isolated lab copy:
    The lab evidence and key remain separate from the production plan and key.
 3. During the lab run, retain every per-unit pre/post allocation result and
    record the maximum data-file, log, and tempdb allocation observed. Run
-   `sql/mdd-mac-collector/estimate-storage-v3-compression.sql` only in its
-   isolated lab database, changing only `@RunLab = 1` and leaving
-   `@SampleSnapshots = 0` for the full verified history, to measure temporary
-   candidate allocations and losslessness. Its logical payload lengths are not
-   physical production allocation evidence.
+   `sql/mdd-mac-collector/measure-timing-storage-options-lab.sql` only in the
+   isolated lab database, changing only `@RunLab = 1`, to compare actual
+   reserved pages for lossless PAGE compression and dictionary storage across
+   the complete Timing history. In a second lab terminal, run the read-only
+   sampler for the whole operation window:
+
+   ```text
+   CTI_LAB_MSSQL_HOST=<LAB_MSSQL_HOST> \
+   CTI_LAB_MSSQL_DATABASE=CologneTransitIntelligence \
+   CTI_LAB_MSSQL_USER=<LAB_ADMIN_LOGIN> \
+   CTI_LAB_MSSQL_INSTANCE_ID=<LAB_MSSQL_INSTANCE_ID> \
+   python3 scripts/sample_timing_storage_peak_lab.py \
+     --duration-seconds <LONGER_THAN_THE_LAB_RUN> \
+     --interval-seconds 1 \
+     --output <LAB_PEAK_SAMPLER_JSON>
+   ```
+
+   The sampler is read-only, rejects the production host and C: placement,
+   and records the in-flight data/log/tempdb high-water mark. The SQL script
+   labels its post-operation high-water mark `OBSERVED_CHECKPOINT_MAX` until
+   this sampler evidence is captured. The
+   older `estimate-storage-v3-compression.sql` remains a bounded diagnostic;
+   its logical payload lengths are not physical production allocation
+   evidence.
 4. After the full history is `VERIFIED`, run the capture file again with only
    `@CapturePhase = 'AFTER'`.
 
@@ -298,6 +519,13 @@ If the full-history peak does not fit in the fresh C: headroom above the 12 GiB
 floor, do not run the migration, install a production compact schema, retire
 legacy tables, or shrink the MDF. A read-only size sample cannot be used to
 justify proceeding.
+
+If the lab prerequisite itself cannot be met, record
+`INFRASTRUCTURE_BLOCKER: NO_SUITABLE_ISOLATED_SQL_SERVER_AND_NON_C_STORAGE_AVAILABLE_FOR_FULL_HISTORY_MEASUREMENT`
+and keep the verified backup and all production history intact. The practical
+alternative is a separately authorized non-C: replacement/cutover or reviewed
+unrelated-file cleanup; it is not permission to estimate the peak or migrate
+on production.
 
 The safest practical recovery path is, in order:
 
@@ -399,9 +627,13 @@ read-only estimates is rejected.
 {
   "capacity_plan_format_version": "CTI_SQL_PHYSICAL_CAPACITY_PLAN_V2",
   "migration_implementation_version": "compact-historical-migration-v2",
+  "execution_environment": "production",
   "database_identity": {
     "server_name": "<SERVERPROPERTY_SERVER_NAME>",
-    "database_name": "CologneTransitIntelligence"
+    "instance_name": "<SERVERPROPERTY_INSTANCE_NAME>",
+    "database_name": "CologneTransitIntelligence",
+    "database_id": <DB_ID>,
+    "database_guid": "<sys.database_recovery_status.database_guid>"
   },
   "current_production_file_sizes": [
     {
@@ -436,8 +668,11 @@ read-only estimates is rejected.
   "snapshot_population": {
     "count": <current_full_snapshot_count>,
     "first_snapshot_id": <first_snapshot_id>,
-    "last_snapshot_id": <last_snapshot_id>
+    "last_snapshot_id": <last_snapshot_id>,
+    "snapshot_ids": [<every_current_snapshot_id_in_ascending_order>],
+    "snapshot_ids_sha256": "<sha256_of_compact_snapshot_id_array>"
   },
+  "snapshot_ids_sha256": "<same_population_hash>",
   "measurement_timestamp_utc": "<UTC_TIMESTAMP>",
   "measured_sample_selection": {
     "snapshot_ids": [<measured_snapshot_ids>],
@@ -455,6 +690,16 @@ read-only estimates is rejected.
   "rollback_bytes": <measured_bytes>,
   "autogrowth_reserve_bytes": <measured_bytes>,
   "peak_temporary_duplication_bytes": <measured_bytes>,
+  "external_disk_consumption_reserve_bytes": <measured_bytes>,
+  "reserve_measurements": {
+    "transaction_log_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "tempdb_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "rollback_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "index_overhead_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "autogrowth_reserve_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "peak_temporary_duplication_bytes": {"status": "PASS", "bytes": <same_measured_bytes>},
+    "external_disk_consumption_reserve_bytes": {"status": "PASS", "bytes": <same_measured_bytes>}
+  },
   "physical_allocation_deltas": {
     "envelope_allocation_bytes": <same_measured_bytes>,
     "index_overhead_bytes": <same_measured_bytes>,
@@ -464,31 +709,35 @@ read-only estimates is rejected.
     "autogrowth_reserve_bytes": <same_measured_bytes>,
     "peak_temporary_duplication_bytes": <same_measured_bytes>
   },
-  "peak_additional_bytes": <exact_sum_of_the_seven_components>,
+  "peak_additional_bytes": <exact_sum_of_the_seven_components_plus_external_reserve>,
   "independent_sql_evidence": {
     "artifact_version": "CTI_SQL_PHYSICAL_ALLOCATION_EVIDENCE_V1",
     "status": "PASS",
     "capture_provenance": {
       "read_only": true,
+      "execution_environment": "production",
       "server_name": "<same_server_name>",
-      "database_name": "CologneTransitIntelligence"
+      "database_name": "CologneTransitIntelligence",
+      "migration_implementation_version": "compact-historical-migration-v2"
     },
     "sample_allocation_before": {
       "database_file_allocated_bytes": <measured_bytes>,
       "log_file_allocated_bytes": <measured_bytes>,
       "tempdb_file_allocated_bytes": <measured_bytes>,
       "transaction_log_used_bytes": <measured_bytes>,
-      "windows_c_available_bytes": <measured_bytes>
+      "windows_target_volume_available_bytes": <measured_bytes>
     },
     "sample_allocation_after": {
       "database_file_allocated_bytes": <measured_bytes>,
       "log_file_allocated_bytes": <measured_bytes>,
       "tempdb_file_allocated_bytes": <measured_bytes>,
       "transaction_log_used_bytes": <measured_bytes>,
-      "windows_c_available_bytes": <measured_bytes>
+      "windows_target_volume_available_bytes": <measured_bytes>
     },
     "query_results": [
-      {"statement_id": "capacity.database_identity", "status": "PASS", "executed": true, "result_sha256": "<64_hex_chars>"}
+      {"statement_id": "capacity.database_identity", "status": "PASS", "executed": true, "result_sha256": "<64_hex_chars>"},
+      {"statement_id": "capacity.snapshot_ids_complete", "status": "PASS", "executed": true, "result_sha256": "<64_hex_chars>"},
+      {"statement_id": "capacity.migration_implementation", "status": "PASS", "executed": true, "result_sha256": "<64_hex_chars>"}
     ],
     "artifact_integrity": {
       "status": "SIGNED",
@@ -501,9 +750,12 @@ read-only estimates is rejected.
 
 The evidence query list must include `capacity.database_identity`,
 `capacity.database_files`, `capacity.snapshot_population`,
+`capacity.snapshot_ids_complete`, `capacity.migration_implementation`,
 `capacity.sample_allocation_before`, `capacity.sample_allocation_after`,
-`capacity.transaction_log`, `capacity.tempdb`, `capacity.rollback`, and
-`capacity.autogrowth`. Capture each result in SSMS using the existing
+`capacity.transaction_log`, `capacity.tempdb`, `capacity.rollback`,
+`capacity.autogrowth`, `capacity.timing_column_bytes`,
+`capacity.timing_index_design`, and `capacity.vmware_relocation_assessment`.
+Capture each result in SSMS using the existing
 read-only/admin workflow, hash the canonical result, and sign the evidence
 with the operator-controlled key outside the repository. Use the existing
 `scripts/sign_admin_evidence.py` signing utility for the detached signature;
@@ -534,6 +786,7 @@ If an authorized migration host is available, the exact existing command is:
 ```text
 python3 scripts/migrate_historical_compact_observations.py \
   --apply \
+  --execution-environment production \
   --migration-id <MIGRATION_ID> \
   --batch-size 1 \
   --capacity-plan <CAPACITY_PLAN_FILE> \
@@ -555,13 +808,13 @@ Before invoking the command, compute the physical decision from fresh SSMS
 values:
 
 ```text
-available_headroom_bytes = windows_c_available_bytes - (12 * 1024 * 1024 * 1024)
+available_headroom_bytes = windows_target_volume_available_bytes - (12 * 1024 * 1024 * 1024)
 allow_migration = peak_additional_bytes <= available_headroom_bytes
 ```
 
 Also require the log, tempdb, finite-autogrowth, rollback, active-writer, and
-collector gates to pass. With the supplied 13.86 GiB value,
-`available_headroom_bytes` is approximately 1.86 GiB; if the signed full-
+collector gates to pass. With the supplied 13.92 GiB value,
+`available_headroom_bytes` is approximately 1.92 GiB; if the signed full-
 history peak is greater than that, stop without `--apply`, leave future writes
 disabled, and record `FINAL_RESULT: CAPACITY_REQUIREMENTS_NOT_MET`.
 
@@ -673,6 +926,14 @@ without renamed/missing fields, and the captured aggregate totals match the
 pre-migration report. Until that human evidence exists, the Power BI gate is
 `NOT_VERIFIED` and retirement must not be approved.
 
+The supported retirement runner accepts a separate fresh JSON artifact only
+when it contains `status = PASS`, `approved = true`,
+`evidence_source = REAL_POWER_BI_CONSUMER`, `refresh_verified = true`,
+`schema_contract_status = PASS`, non-empty `consumer_id`,
+`dataset_or_report`, `approved_by`, and a `validated_at_utc` no more than 30
+minutes old at apply time. A SQL flag or repository view query alone cannot
+produce this artifact.
+
 ### 7. Human-approved legacy storage retirement
 
 This operation is irreversible without restoring the verified off-C backup. It has two
@@ -701,6 +962,33 @@ only:
 DECLARE @ApplyLegacyRetirement BIT = 1;
 ```
 
+The supported Python path is the preferred execution path because it binds the
+fresh Power BI artifact and full-history parity result before connecting:
+
+```text
+python3 scripts/reclaim_sql_datafile_space.py --apply \
+  --backup-evidence <EXISTING_VERIFIED_BACKUP_EVIDENCE_JSON> \
+  --parity-evidence <FULL_HISTORY_EXACT_PARITY_JSON> \
+  --approval-evidence <HUMAN_RETIREMENT_APPROVAL_WITH_CAPACITY_RESERVES_JSON> \
+  --powerbi-evidence <POWERBI_EVIDENCE_JSON> \
+  --migration-id <COMPLETE_MIGRATION_ID>
+```
+
+The approval artifact's `capacity_reserves` must contain fresh, measured,
+positive PASS byte values for `transaction_log_reserve_bytes`,
+`tempdb_reserve_bytes`, `rollback_reserve_bytes`,
+`ddl_index_reserve_bytes`, `autogrowth_reserve_bytes`, and
+`external_disk_consumption_reserve_bytes`, with measurement basis
+`FULL_HISTORY_ISOLATED_LAB_AND_PRODUCTION_READONLY_AUDIT`. The runner measures
+current SQL file/log/tempdb/legacy allocation again and refuses the DROP if
+any reserve, dependency, permission, schema, active-transaction, or C: floor
+check fails.
+
+For a direct reviewed SSMS working copy, replace the six `NULL` values in the
+retirement script's `@Retirement*ReserveBytes` declarations with those same
+measured values. Leaving any one `NULL`, using counts as a substitute, or
+omitting the live preflight keeps the script blocked.
+
 Execute the whole file in SSMS. It checks all ledger gates, external foreign
 keys, dependencies, active writers, and exact counts; in one transaction it
 drops the eight old physical tables, recreates same-name compatibility views,
@@ -721,8 +1009,12 @@ remain zero; only the reviewed SSMS working copy may use one.
 ### 8. Safe physical MDF space reclamation
 
 Run only after Step 7 committed, with no active writer/lease/transaction and
-with explicit approval for the physical shrink. First identify the exact file
-and current measurements:
+with explicit approval for the physical shrink. The supported Python runner
+repeats the live log, tempdb, rollback, DDL/index, autogrowth, external-disk,
+and C: floor preflight immediately before `DBCC SHRINKFILE`; use that path when
+possible. If SSMS is used, repeat the same six measured reserve checks in the
+working copy immediately before the DBCC statement. First identify the exact
+file and current measurements:
 
 ```sql
 USE CologneTransitIntelligence;
@@ -843,7 +1135,11 @@ WHERE df.type = 0 AND df.name = @LogicalFileName;
 Expected result: either `NOT_NEEDED`, or a bounded `DBCC SHRINKFILE` with the
 post-check still at or above 12 GiB free on C:, and allocated MDF size reduced
 without going below used pages plus headroom. No automatic shrink is run by
-this repository.
+this repository. A successful retirement or a successful SQL transaction is
+not itself physical recovery: record the before/after Windows free-space and
+allocated-file measurements, and leave the final problem status
+`NOT_SOLVED_UNTIL_POSITIVE_PHYSICAL_DISK_RECOVERY_MEASURED` when the delta is
+zero or not captured.
 
 ### 9. Future-storage capacity verification
 
@@ -929,6 +1225,15 @@ The operator-facing files are:
   `sql/mdd-mac-collector/audit-historical-storage-recovery-readonly.sql`.
 - Isolated before/after lab capture:
   `sql/mdd-mac-collector/capture-historical-capacity-lab-readonly.sql`.
+- Timing PAGE-versus-dictionary lab measurement:
+  `sql/mdd-mac-collector/measure-timing-storage-options-lab.sql`, default
+  `@RunLab = 0`; it is the only file in this recovery path that creates
+  disposable comparison tables, and it is guarded to reject production/C:
+  placement.
+- Read-only in-flight lab sampler:
+  `scripts/sample_timing_storage_peak_lab.py`; it requires the separate
+  `CTI_LAB_MSSQL_*` connection settings and writes evidence only to the
+  operator-selected output path.
 - Existing compact-state audit: `sql/mdd-mac-collector/audit-compact-storage-readonly.sql`.
 - Additive schema: `sql/mdd-mac-collector/compact-observation-storage-v1.sql`,
   default `@ApplyCompactStorage = 0`.
@@ -960,15 +1265,15 @@ No production connection was used. Offline checks completed:
 
 ```text
 python3 -m compileall -q src scripts tests                                  PASS
-PYTHONPATH=src python3 -m unittest tests.test_compact_observation_storage \
+PYTHONPATH=src:scripts python3 -m unittest tests.test_compact_observation_storage \
   tests.test_windows_sql_backup_validation tests.test_windows_sql_result_shape \
   tests.test_windows_sql_dbnull tests.test_production_repairs \
-  tests.test_tiered50_timing_capacity -q                                    56 PASS, 3 skipped
+  tests.test_tiered50_timing_capacity tests.test_s149_storage_recovery -q    63 PASS, 3 skipped
 python3 scripts/validate_snapshot_gzip_storage_v1.py                         PASS
 PYTHONPATH=src python3 scripts/validate_mssql_migration.py                   PASS
 PYTHONPATH=src python3 scripts/validate_storage_v3.py                         PASS
-static read-only audit keyword/statement-id checks                         PASS
-PYTHONPATH=src python3 -m unittest discover -s tests -q                      420 run; PASS, 3 skipped
+static schema-aware read-only audit keyword/statement-id checks             PASS
+PYTHONPATH=src:scripts python3 -m unittest discover -s tests -q                432 run; PASS, 3 skipped
 git diff --check                                                             PASS
 ```
 
@@ -980,20 +1285,27 @@ Server or Power BI results. No production mutation was executed.
 ## Final labels
 
 ```text
-SOURCE_CODE_REVIEW: PASS
-IMPLEMENTATION_DEFECTS: FIXED_AND_OFFLINE_TESTED
-SQL_SERVER_PRODUCTION_VALIDATION: STORAGE_AUDIT_NOT_EXECUTED; SSMS_BACKUP_VERIFYONLY_OPERATOR_CONFIRMED
+SOURCE_CODE_VALIDATION: PASS; 432 OFFLINE TESTS PASS, 3 SKIPPED; NO PRODUCTION CONNECTION
+IMPLEMENTATION_DEFECTS: S150_TIMING_BYTE_AUDIT_PAGE_DICTIONARY_LAB_AND_VMWARE_ASSESSMENT_FIXED_IN_SOURCE
+ISOLATED_SQL_SERVER_VALIDATION: NOT_EXECUTED; FULL_HISTORY_LAB_CAPTURE_AND_PARITY_REQUIRED
+SQL_SERVER_PRODUCTION_MEASUREMENTS: STORAGE_AUDIT_ATTEMPT_OBSERVED_MSG_207; CORRECTED_SOURCE_NOT_RERUN; SSMS_BACKUP_VERIFYONLY_OPERATOR_CONFIRMED_ONLY
+PRODUCTION_AUDIT_OBSERVED_ERRORS: MSG_207_OPTIONAL_STORAGE_V3_GZIP_COLUMNS; MSG_207_INVALID_REFERENCED_MINOR_NAME; MSG_8115_INT_CAPACITY_FLOOR_ARITHMETIC
+PRODUCTION_AUDIT_FIX: SCHEMA_AWARE_READ_ONLY_SOURCE_APPLIED; BIGINT_FLOOR_ARITHMETIC; V1_V2_ONLY_REGRESSION_ADDED; NOT_RERUN
 FRESH_VERIFIED_OFF_C_BACKUP: OPERATOR_CONFIRMED_SSMS_RESTORE_VERIFYONLY_PASS; MACHINE_ARTIFACT_NOT_CAPTURED
-WINDOWS_C_FREE_AT_LAST_CHECK: 13.86_GIB_SUPPLIED_ESTIMATE; 12_GIB_FLOOR_LEAVES_1.86_GIB_HEADROOM
-CONSOLIDATED_STORAGE_AUDIT: PREPARED; NOT_EXECUTED
+WINDOWS_C_FREE_AT_LAST_CHECK: 13.92_GIB_SUPPLIED_EVIDENCE; 12_GIB_FLOOR_LEAVES_1.92_GIB_HEADROOM
+CONSOLIDATED_STORAGE_AUDIT: SOURCE_PATCHED_AFTER_OBSERVED_MSG_207; NOT_RERUN
 COMPACT_SCHEMA_INSTALLATION: NOT_EXECUTED
 BOUNDED_HISTORICAL_MIGRATION: NOT_EXECUTED
 EXACT_FULL_HISTORICAL_PARITY: NOT_EXECUTED
+TIMING_COLUMN_BYTE_MEASUREMENT: SOURCE_ADDED; PRODUCTION_AUDIT_NOT_RERUN
+TIMING_PAGE_VS_DICTIONARY: LAB_SCRIPT_AND_READ_ONLY_SAMPLER_ADDED; NOT_EXECUTED
 HISTORICAL_COMPRESSION_EFFICIENCY: OFFLINE_LOGICAL_CANDIDATES_PASS; SQL_PHYSICAL_LAB_NOT_EXECUTED
 POWER_BI_COMPATIBILITY: NOT_VERIFIED
 LEGACY_RETIREMENT: NOT_EXECUTED
-PHYSICAL_MDF_RECLAMATION: NOT_EXECUTED
-PEAK_MIGRATION_SPACE: NOT_MEASURED; 1.86_GIB_SUPPLIED_HEADROOM_REQUIRES_FRESH_RECHECK
+PHYSICAL_WINDOWS_DISK_RECOVERY: NOT_EXECUTED; NO_POSITIVE_BEFORE_AFTER_FREE_SPACE_DELTA_MEASURED
+PEAK_MIGRATION_SPACE: NOT_MEASURED; IN_FLIGHT_SAMPLER_NOT_EXECUTED; 1.92_GIB_SUPPLIED_HEADROOM_REQUIRES_FRESH_RECHECK
+VMWARE_SEPARATE_DISK: FEASIBILITY_ASSESSED; ATTACHMENT_RELOCATION_AND_C_FREE_DELTA_NOT_EXECUTED
 COLLECTOR_STATUS: DISABLED_AND_UNLOADED; NOT_RESTARTED
-FINAL_RESULT: BLOCKED_PENDING_FULL_HISTORY_CAPACITY_PLAN
+FINAL_RESULT: BLOCKED_PENDING_FULL_HISTORY_CAPACITY_PLAN_AND_ISOLATED_LAB_VALIDATION
+PROBLEM_SOLVED: NO; DO_NOT_CLAIM_SOLVED_UNTIL_ACTUAL_WINDOWS_DISK_RECOVERY_IS_MEASURED
 ```

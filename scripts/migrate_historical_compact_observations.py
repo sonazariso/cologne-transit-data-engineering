@@ -26,7 +26,7 @@ import re
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,7 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 from cologne_transit_collector.runtime_configuration import (  # noqa: E402
     MacOSKeychainSecretProvider,
     resolve_administrator_connection_settings,
+    resolve_isolated_lab_connection_settings,
 )
 from reclaim_sql_datafile_space import _backup_gate  # noqa: E402
 
@@ -73,6 +74,15 @@ DEFAULT_MAX_LOG_USED_PERCENT = 70.0
 CAPACITY_PLAN_SCOPE = "FULL_HISTORY_MIGRATION_PEAK"
 CAPACITY_PLAN_FORMAT_VERSION = "CTI_SQL_PHYSICAL_CAPACITY_PLAN_V2"
 COMPACT_MIGRATION_IMPLEMENTATION_VERSION = "compact-historical-migration-v2"
+CAPACITY_EVIDENCE_ARTIFACT_VERSION = "CTI_SQL_PHYSICAL_ALLOCATION_EVIDENCE_V1"
+CAPACITY_EVIDENCE_MAX_AGE = timedelta(minutes=30)
+CAPACITY_EVIDENCE_CLOCK_SKEW = timedelta(minutes=2)
+PRODUCTION_EXECUTION_ENVIRONMENT = "production"
+ISOLATED_LAB_EXECUTION_ENVIRONMENT = "isolated-lab"
+EXECUTION_ENVIRONMENTS = frozenset(
+    {PRODUCTION_EXECUTION_ENVIRONMENT, ISOLATED_LAB_EXECUTION_ENVIRONMENT}
+)
+LAB_SAFETY_FLOOR_GIB = 12.0
 CAPACITY_PLAN_FIELDS = (
     "sample_snapshots",
     "envelope_allocation_bytes",
@@ -87,19 +97,30 @@ CAPACITY_EVIDENCE_QUERY_IDS = (
     "capacity.database_identity",
     "capacity.database_files",
     "capacity.snapshot_population",
+    "capacity.snapshot_ids_complete",
+    "capacity.migration_implementation",
     "capacity.sample_allocation_before",
     "capacity.sample_allocation_after",
     "capacity.transaction_log",
     "capacity.tempdb",
     "capacity.rollback",
     "capacity.autogrowth",
+    "capacity.timing_column_bytes",
+    "capacity.timing_index_design",
+    "capacity.vmware_relocation_assessment",
+)
+CAPACITY_PLAN_STRICT_FIELDS = (
+    "execution_environment",
+    "snapshot_ids_sha256",
+    "reserve_measurements",
+    "external_disk_consumption_reserve_bytes",
 )
 CAPACITY_ALLOCATION_SNAPSHOT_FIELDS = (
     "database_file_allocated_bytes",
     "log_file_allocated_bytes",
     "tempdb_file_allocated_bytes",
     "transaction_log_used_bytes",
-    "windows_c_available_bytes",
+    "windows_target_volume_available_bytes",
 )
 
 COMPATIBILITY_VIEWS: tuple[tuple[str, str], ...] = (
@@ -127,6 +148,19 @@ SOURCE_PRIMARY_KEY_COLUMNS = {
 }
 PHYSICAL_FIELD_READBACK_VIEW = "stg.vMddMacCompactPhysicalFieldReadback"
 READBACK_SESSION_CONTEXT_KEY = "CTI.CompactStorageReadback"
+CAPACITY_FILE_FIELDS = (
+    "file_id",
+    "name",
+    "type",
+    "physical_name",
+    "volume",
+    "allocated_bytes",
+    "used_bytes",
+    "growth_value",
+    "is_percent_growth",
+    "max_size_pages",
+    "available_bytes",
+)
 
 
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
@@ -150,6 +184,87 @@ def _safe_error(exc: BaseException) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_utc_timestamp(value: Any, *, field: str) -> datetime:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field} is missing")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must include a timezone")
+    parsed = parsed.astimezone(timezone.utc)
+    return parsed
+
+
+def _freshness_check(
+    value: Any,
+    *,
+    now: datetime | None = None,
+    max_age: timedelta = CAPACITY_EVIDENCE_MAX_AGE,
+) -> dict[str, Any]:
+    """Return a fail-closed freshness result for signed capacity evidence."""
+
+    measured_at = _parse_utc_timestamp(value, field="measurement_timestamp_utc")
+    current = (now or _utc_now()).astimezone(timezone.utc)
+    age = current - measured_at
+    if age < -CAPACITY_EVIDENCE_CLOCK_SKEW:
+        return {
+            "status": "BLOCKED",
+            "reason": "capacity evidence timestamp is in the future",
+            "measurement_timestamp_utc": measured_at.isoformat().replace("+00:00", "Z"),
+            "age_seconds": age.total_seconds(),
+            "max_age_seconds": max_age.total_seconds(),
+        }
+    if age > max_age:
+        return {
+            "status": "BLOCKED",
+            "reason": "capacity evidence is stale",
+            "measurement_timestamp_utc": measured_at.isoformat().replace("+00:00", "Z"),
+            "age_seconds": age.total_seconds(),
+            "max_age_seconds": max_age.total_seconds(),
+        }
+    return {
+        "status": "PASS",
+        "reason": "capacity evidence is fresh",
+        "measurement_timestamp_utc": measured_at.isoformat().replace("+00:00", "Z"),
+        "age_seconds": max(0.0, age.total_seconds()),
+        "max_age_seconds": max_age.total_seconds(),
+    }
+
+
+def _snapshot_ids_sha256(snapshot_ids: Sequence[int]) -> str:
+    normalized = [int(value) for value in snapshot_ids]
+    return hashlib.sha256(
+        json.dumps(normalized, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _normalized_file_evidence(value: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize only allocation fields used for exact live-plan binding."""
+
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        row = {name: item.get(name) for name in CAPACITY_FILE_FIELDS}
+        row["type"] = str(row["type"] or "").upper()
+        row["is_percent_growth"] = bool(row["is_percent_growth"])
+        normalized.append(row)
+    return sorted(normalized, key=lambda item: (str(item["type"]), int(item["file_id"])))
+
+
+def _capacity_identity(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a stable database identity without login or secret material."""
+
+    return {
+        "server_name": str(row.get("server_name") or "").strip(),
+        "instance_name": str(row.get("instance_name") or "").strip(),
+        "database_name": str(row.get("database_name") or "").strip(),
+        "database_id": int(row["database_id"]) if row.get("database_id") is not None else None,
+        "database_guid": str(row.get("database_guid") or "").strip(),
+    }
 
 
 def _launchd_gate() -> dict[str, Any]:
@@ -280,6 +395,18 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         """,
         "tempdb-file",
     )
+    known_volumes = {str(item.get("volume") or "").casefold() for item in volumes}
+    for item in tempdb_files:
+        volume_key = str(item.get("volume") or "").casefold()
+        if volume_key and volume_key not in known_volumes:
+            volumes.append(
+                {
+                    "volume": str(item["volume"]),
+                    "total_bytes": 0,
+                    "available_bytes": int(item["available_bytes"]),
+                }
+            )
+            known_volumes.add(volume_key)
     cursor.execute(
         """
         SELECT COUNT_BIG(*) AS active_user_transactions
@@ -330,6 +457,7 @@ def _capacity_gate(
     required_extra_bytes: int = 0,
     capacity_plan: Mapping[str, Any] | None = None,
     baseline_capacity: Mapping[str, Any] | None = None,
+    execution_environment: str = PRODUCTION_EXECUTION_ENVIRONMENT,
 ) -> dict[str, Any]:
     """Apply the physical-space gate using only the allocation still needed.
 
@@ -341,11 +469,22 @@ def _capacity_gate(
     live for the next unit.  The current Windows free-space measurement is
     never replaced by a logical-byte estimate.
     """
+    if execution_environment not in EXECUTION_ENVIRONMENTS:
+        raise ValueError("unsupported storage recovery execution environment")
     volumes = list(capacity.get("volumes", ()))
-    c_volumes = [
-        item for item in volumes
-        if str(item.get("volume", "")).casefold().startswith("c:")
-    ]
+    if execution_environment == PRODUCTION_EXECUTION_ENVIRONMENT:
+        c_volumes = [
+            item for item in volumes
+            if str(item.get("volume", "")).casefold().startswith("c:")
+        ]
+    else:
+        # The lab is deliberately required to use a non-C: SQL volume.  This
+        # makes the Mac-to-lab path executable without assuming that the
+        # production Windows VM has another C: volume available.
+        c_volumes = [
+            item for item in volumes
+            if not str(item.get("volume", "")).casefold().startswith("c:")
+        ]
     rows_volume = min(
         c_volumes,
         key=lambda item: int(item.get("available_bytes", 0) or 0),
@@ -357,16 +496,20 @@ def _capacity_gate(
     if required_extra_bytes < 0:
         raise ValueError("required_extra_bytes cannot be negative")
 
+    def target_volume(item: Mapping[str, Any]) -> bool:
+        is_c = str(item.get("volume", "")).casefold().startswith("c:")
+        return is_c if execution_environment == PRODUCTION_EXECUTION_ENVIRONMENT else not is_c
+
     def file_totals(value: Mapping[str, Any]) -> dict[str, int]:
         database_files = [
             item for item in value.get("files", ())
             if isinstance(item, Mapping)
-            and str(item.get("volume", "")).casefold().startswith("c:")
+            and target_volume(item)
         ]
         tempdb_files = [
             item for item in value.get("tempdb_files", ())
             if isinstance(item, Mapping)
-            and str(item.get("volume", "")).casefold().startswith("c:")
+            and target_volume(item)
         ]
         return {
             "data": sum(
@@ -398,9 +541,17 @@ def _capacity_gate(
         baseline_available = min(
             int(item.get("available_bytes", 0) or 0)
             for item in baseline_capacity.get("volumes", ())
-            if str(item.get("volume", "")).casefold().startswith("c:")
+            if (
+                str(item.get("volume", "")).casefold().startswith("c:")
+                if execution_environment == PRODUCTION_EXECUTION_ENVIRONMENT
+                else not str(item.get("volume", "")).casefold().startswith("c:")
+            )
         ) if any(
-            str(item.get("volume", "")).casefold().startswith("c:")
+            (
+                str(item.get("volume", "")).casefold().startswith("c:")
+                if execution_environment == PRODUCTION_EXECUTION_ENVIRONMENT
+                else not str(item.get("volume", "")).casefold().startswith("c:")
+            )
             for item in baseline_capacity.get("volumes", ())
         ) else available
         sql_growth = sum(observed_deltas.values())
@@ -426,6 +577,9 @@ def _capacity_gate(
         remaining_components["rollback_bytes"] = int(capacity_plan["rollback_bytes"])
         remaining_components["peak_temporary_duplication_bytes"] = int(
             capacity_plan["peak_temporary_duplication_bytes"]
+        )
+        remaining_components["external_disk_consumption_reserve_bytes"] = int(
+            capacity_plan.get("external_disk_consumption_reserve_bytes", 0) or 0
         )
         required_extra_bytes = sum(remaining_components.values())
         autogrowth_status = "PASS"
@@ -481,6 +635,227 @@ def _capacity_gate(
         "active_collector_sessions": active_collector_sessions,
         "volume": rows_volume,
         "c_volumes": c_volumes,
+        "execution_environment": execution_environment,
+        "capacity_volume_policy": "C:" if execution_environment == PRODUCTION_EXECUTION_ENVIRONMENT else "NON_C:",
+    }
+
+
+def _read_live_capacity_binding(
+    cursor: Any,
+    *,
+    execution_environment: str = PRODUCTION_EXECUTION_ENVIRONMENT,
+) -> dict[str, Any]:
+    """Capture the read-only SQL state that a signed plan must match.
+
+    This deliberately reads the complete ordered SnapshotId population.  A
+    count/min/max triple is not sufficient: a deleted row followed by an
+    inserted row could otherwise preserve all three summary values while
+    changing the migration input.
+    """
+
+    if execution_environment not in EXECUTION_ENVIRONMENTS:
+        raise MssqlSafetyError("unsupported storage recovery execution environment")
+    cursor.execute(
+        """
+        SELECT DB_NAME() AS database_name,
+               CONVERT(INT, DB_ID()) AS database_id,
+               CONVERT(NVARCHAR(128), SERVERPROPERTY(N'ServerName')) AS server_name,
+               CONVERT(NVARCHAR(128), SERVERPROPERTY(N'InstanceName')) AS instance_name,
+               CONVERT(NVARCHAR(128), drs.database_guid) AS database_guid,
+               d.state_desc AS database_status,
+               d.user_access_desc AS user_access,
+               d.recovery_model_desc AS recovery_model,
+               CONVERT(INT, DATABASEPROPERTYEX(DB_NAME(), N'CompatibilityLevel')) AS compatibility_level
+        FROM sys.databases AS d
+        LEFT JOIN sys.database_recovery_status AS drs ON drs.database_id = d.database_id
+        WHERE d.database_id = DB_ID()
+        """
+    )
+    identity_row = cursor.fetchone()
+    if identity_row is None:
+        raise MssqlSafetyError("SQL database identity measurement is incomplete")
+    identity = _capacity_identity(
+        {
+            "database_name": _row_value(identity_row, "database_name", 0),
+            "database_id": _row_value(identity_row, "database_id", 1),
+            "server_name": _row_value(identity_row, "server_name", 2),
+            "instance_name": _row_value(identity_row, "instance_name", 3),
+            "database_guid": _row_value(identity_row, "database_guid", 4),
+        }
+    )
+    if not identity["server_name"] or not identity["database_name"] or identity["database_id"] is None:
+        raise MssqlSafetyError("SQL database identity measurement is incomplete")
+
+    cursor.execute(
+        "SELECT SnapshotId FROM stg.MddMacSourceSnapshot ORDER BY SnapshotId"
+    )
+    raw_snapshot_rows = cursor.fetchall()
+    snapshot_ids: list[int] = []
+    for row in raw_snapshot_rows:
+        value = _row_value(row, "SnapshotId", 0)
+        if isinstance(value, bool) or value is None:
+            raise MssqlSafetyError("complete SnapshotId population measurement is incomplete")
+        snapshot_ids.append(int(value))
+    if snapshot_ids != sorted(snapshot_ids) or len(set(snapshot_ids)) != len(snapshot_ids):
+        raise MssqlSafetyError("SnapshotId population is not a unique ordered set")
+    snapshot_population = {
+        "count": len(snapshot_ids),
+        "first_snapshot_id": snapshot_ids[0] if snapshot_ids else None,
+        "last_snapshot_id": snapshot_ids[-1] if snapshot_ids else None,
+        "snapshot_ids": snapshot_ids,
+        "snapshot_ids_sha256": _snapshot_ids_sha256(snapshot_ids),
+    }
+
+    cursor.execute(
+        """
+        IF OBJECT_ID(N'stg.MddMacCompactStorageState', N'U') IS NOT NULL
+        BEGIN
+            IF COL_LENGTH(N'stg.MddMacCompactStorageState', N'MigrationImplementationVersion') IS NOT NULL
+                SELECT StorageFormatVersion, MigrationImplementationVersion
+                FROM stg.MddMacCompactStorageState
+                WHERE StateId = 1;
+            ELSE
+                SELECT StorageFormatVersion, CAST(NULL AS VARCHAR(100)) AS MigrationImplementationVersion
+                FROM stg.MddMacCompactStorageState
+                WHERE StateId = 1;
+        END
+        ELSE
+            SELECT CAST(NULL AS SMALLINT) AS StorageFormatVersion,
+                   CAST(NULL AS VARCHAR(100)) AS MigrationImplementationVersion;
+        """
+    )
+    state_row = cursor.fetchone()
+    state = {
+        "storage_format_version": _row_value(state_row, "StorageFormatVersion", 0),
+        "migration_implementation_version": _row_value(
+            state_row, "MigrationImplementationVersion", 1
+        ),
+    }
+    capacity = _read_capacity(cursor)
+    capacity["database_identity"] = identity
+    capacity["database_status"] = str(_row_value(identity_row, "database_status", 5) or "")
+    capacity["user_access"] = str(_row_value(identity_row, "user_access", 6) or "")
+    capacity["recovery_model"] = str(_row_value(identity_row, "recovery_model", 7) or "")
+    capacity["compatibility_level"] = _row_value(identity_row, "compatibility_level", 8)
+    capacity["snapshot_population"] = snapshot_population
+    capacity["migration_implementation_version"] = (
+        str(state["migration_implementation_version"] or "").strip() or None
+    )
+    capacity["storage_format_version"] = state["storage_format_version"]
+    capacity["execution_environment"] = execution_environment
+    return capacity
+
+
+def _live_capacity_preflight(
+    cursor: Any,
+    capacity_plan: Mapping[str, Any],
+    *,
+    execution_environment: str,
+    log_limit: float,
+    require_installed_implementation_version: bool = True,
+) -> dict[str, Any]:
+    """Bind a signed plan to the exact current SQL Server state."""
+
+    live = _read_live_capacity_binding(cursor, execution_environment=execution_environment)
+    evidence = capacity_plan.get("independent_sql_evidence")
+    plan_identity = _capacity_identity(capacity_plan["database_identity"])
+    live_identity = _capacity_identity(live["database_identity"])
+    evidence_identity = _capacity_identity(evidence.get("database_identity", {}) if isinstance(evidence, Mapping) else {})
+    plan_files = _normalized_file_evidence(capacity_plan["current_production_file_sizes"])
+    live_files = _normalized_file_evidence(live["files"])
+    evidence_files = _normalized_file_evidence(
+        evidence.get("current_production_file_sizes", ()) if isinstance(evidence, Mapping) else ()
+    )
+    plan_tempdb = _normalized_file_evidence(capacity_plan["current_tempdb_file_sizes"])
+    live_tempdb = _normalized_file_evidence(live["tempdb_files"])
+    evidence_tempdb = _normalized_file_evidence(
+        evidence.get("current_tempdb_file_sizes", ()) if isinstance(evidence, Mapping) else ()
+    )
+    plan_population = dict(capacity_plan["snapshot_population"])
+    live_population = dict(live["snapshot_population"])
+    evidence_population = dict(evidence.get("snapshot_population", {})) if isinstance(evidence, Mapping) else {}
+    checks: dict[str, dict[str, Any]] = {}
+
+    def check(name: str, expected: Any, actual: Any) -> None:
+        checks[name] = {
+            "status": "PASS" if expected == actual else "BLOCKED",
+            "expected": expected,
+            "actual": actual,
+        }
+
+    check("database_identity", plan_identity, live_identity)
+    check("database_status", "ONLINE", live.get("database_status"))
+    check("database_user_access", "MULTI_USER", live.get("user_access"))
+    check("database_name", "CologneTransitIntelligence", live_identity.get("database_name"))
+    check("signed_evidence_database_identity", evidence_identity, live_identity)
+    check("production_file_allocations_and_limits", plan_files, live_files)
+    check("signed_evidence_production_file_allocations", evidence_files, live_files)
+    check("tempdb_allocations_and_limits", plan_tempdb, live_tempdb)
+    check("signed_evidence_tempdb_allocations", evidence_tempdb, live_tempdb)
+    check("complete_snapshot_population", plan_population, live_population)
+    check("signed_evidence_complete_snapshot_population", evidence_population, live_population)
+    check(
+        "migration_implementation_version",
+        COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
+        capacity_plan.get("migration_implementation_version"),
+    )
+    if require_installed_implementation_version:
+        check(
+            "installed_compact_migration_implementation_version",
+            COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
+            live.get("migration_implementation_version"),
+        )
+    else:
+        checks["installed_compact_migration_implementation_version"] = {
+            "status": "PASS",
+            "reason": "compact schema is the write being preflighted",
+        }
+    if isinstance(evidence, Mapping):
+        check(
+            "signed_evidence_migration_implementation_version",
+            COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
+            evidence.get("migration_implementation_version"),
+        )
+        check(
+            "execution_environment",
+            execution_environment,
+            evidence.get("capture_provenance", {}).get("execution_environment")
+            if isinstance(evidence.get("capture_provenance"), Mapping)
+            else None,
+        )
+    else:
+        checks["signed_evidence_migration_implementation_version"] = {"status": "BLOCKED"}
+        checks["execution_environment"] = {"status": "BLOCKED"}
+
+    freshness = _freshness_check(capacity_plan.get("measurement_timestamp_utc"))
+    checks["capacity_plan_freshness"] = freshness
+    if isinstance(evidence, Mapping):
+        evidence_timestamp = evidence.get("measurement_timestamp_utc")
+        evidence_freshness = _freshness_check(evidence_timestamp)
+        checks["signed_evidence_freshness"] = evidence_freshness
+        check("plan_and_signed_evidence_timestamp", capacity_plan.get("measurement_timestamp_utc"), evidence_timestamp)
+    else:
+        checks["signed_evidence_freshness"] = {"status": "BLOCKED", "reason": "evidence is missing"}
+
+    # The live physical gate is evaluated from the freshly read state, never
+    # from the plan's claimed free-space value.  This is what catches C: space
+    # consumed after the signed audit was captured.
+    gate = _capacity_gate(
+        live,
+        log_limit=log_limit,
+        required_extra_bytes=int(capacity_plan["peak_additional_bytes"]),
+        capacity_plan=capacity_plan,
+        baseline_capacity=live,
+        execution_environment=execution_environment,
+    )
+    checks["live_physical_capacity_headroom"] = gate
+    status = "PASS" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED"
+    return {
+        "status": status,
+        "execution_environment": execution_environment,
+        "checks": checks,
+        "live_capacity": live,
+        "capacity_gate": gate,
     }
 
 
@@ -494,6 +869,9 @@ def _validate_capacity_plan(
     value: Mapping[str, Any],
     *,
     require_independent_evidence: bool = True,
+    require_live_binding: bool = False,
+    expected_execution_environment: str = PRODUCTION_EXECUTION_ENVIRONMENT,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("capacity plan must be an object")
@@ -516,12 +894,20 @@ def _validate_capacity_plan(
     ):
         if required_name not in value:
             missing.append(required_name)
+    if require_live_binding:
+        missing.extend(
+            name for name in CAPACITY_PLAN_STRICT_FIELDS if name not in value
+        )
     if missing:
         raise ValueError("capacity plan is missing: " + ", ".join(missing))
     if value["capacity_plan_format_version"] != CAPACITY_PLAN_FORMAT_VERSION:
         raise ValueError("capacity plan format version is unsupported")
     if value["migration_implementation_version"] != COMPACT_MIGRATION_IMPLEMENTATION_VERSION:
         raise ValueError("capacity plan was measured for a different migration implementation")
+    if expected_execution_environment not in EXECUTION_ENVIRONMENTS:
+        raise ValueError("unsupported capacity-plan execution environment")
+    if require_live_binding and value.get("execution_environment") != expected_execution_environment:
+        raise ValueError("capacity plan execution environment is not bound to this run")
     sample_snapshots = _strict_nonnegative_integer(value["sample_snapshots"], "sample_snapshots")
     planned_snapshot_count = _strict_nonnegative_integer(value["planned_snapshot_count"], "planned_snapshot_count")
     if sample_snapshots <= 0 or planned_snapshot_count <= 0 or sample_snapshots > planned_snapshot_count:
@@ -545,18 +931,18 @@ def _validate_capacity_plan(
         raise ValueError(
             "capacity plan must explicitly cover the full-history migration peak"
         )
-    peak = sum(components.values())
-    declared_peak = _strict_nonnegative_integer(value["peak_additional_bytes"], "peak_additional_bytes")
-    if declared_peak != peak:
-        raise ValueError("capacity plan peak_additional_bytes does not equal its measured components")
-    if declared_peak <= 0:
-        raise ValueError("capacity plan peak_additional_bytes must be positive")
-
     database_identity = value["database_identity"]
     if not isinstance(database_identity, Mapping):
         raise ValueError("capacity plan database_identity must be an object")
     if not str(database_identity.get("server_name") or "").strip() or database_identity.get("database_name") != "CologneTransitIntelligence":
         raise ValueError("capacity plan database identity is incomplete or unexpected")
+    if require_live_binding:
+        for name in ("instance_name", "database_id", "database_guid"):
+            if name == "database_id":
+                if isinstance(database_identity.get(name), bool) or not isinstance(database_identity.get(name), int) or database_identity[name] <= 0:
+                    raise ValueError("capacity plan database identity is missing database_id")
+            elif not str(database_identity.get(name) or "").strip():
+                raise ValueError(f"capacity plan database identity is missing {name}")
 
     def validate_file_sizes(raw: Any, field_name: str) -> list[dict[str, Any]]:
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)) or not raw:
@@ -607,6 +993,32 @@ def _validate_capacity_plan(
         raise ValueError("capacity plan snapshot population does not match planned_snapshot_count")
     if first_snapshot_id <= 0 or last_snapshot_id < first_snapshot_id:
         raise ValueError("capacity plan snapshot population bounds are invalid")
+    population_ids = population.get("snapshot_ids")
+    if population_ids is not None:
+        if not isinstance(population_ids, Sequence) or isinstance(population_ids, (str, bytes, bytearray)):
+            raise ValueError("capacity plan snapshot_ids must be an array")
+        normalized_population_ids = [int(item) for item in population_ids]
+        if any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in population_ids):
+            raise ValueError("capacity plan snapshot_ids are invalid")
+        if normalized_population_ids != sorted(normalized_population_ids) or len(set(normalized_population_ids)) != len(normalized_population_ids):
+            raise ValueError("capacity plan snapshot_ids must be ordered and unique")
+        if len(normalized_population_ids) != population_count:
+            raise ValueError("capacity plan snapshot_ids do not match snapshot count")
+        if normalized_population_ids[0] != first_snapshot_id or normalized_population_ids[-1] != last_snapshot_id:
+            raise ValueError("capacity plan snapshot_ids do not match population bounds")
+        expected_population_hash = _snapshot_ids_sha256(normalized_population_ids)
+        if str(population.get("snapshot_ids_sha256") or "").casefold() != expected_population_hash:
+            raise ValueError("capacity plan snapshot_ids hash is invalid")
+    elif require_live_binding:
+        raise ValueError("capacity plan requires the complete SnapshotId population")
+    elif population.get("snapshot_ids_sha256") is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(population["snapshot_ids_sha256"])):
+            raise ValueError("capacity plan snapshot_ids_sha256 is invalid")
+    if require_live_binding:
+        if str(value.get("snapshot_ids_sha256") or "").casefold() != str(
+            population.get("snapshot_ids_sha256") or ""
+        ).casefold():
+            raise ValueError("capacity plan top-level SnapshotId hash is not bound to the population")
 
     timestamp = str(value["measurement_timestamp_utc"] or "").strip()
     try:
@@ -617,6 +1029,10 @@ def _validate_capacity_plan(
         raise ValueError("capacity plan measurement_timestamp_utc must include a timezone")
     if parsed_timestamp.utcoffset() != timezone.utc.utcoffset(parsed_timestamp):
         raise ValueError("capacity plan measurement_timestamp_utc must be UTC")
+    if require_live_binding:
+        freshness = _freshness_check(timestamp, now=now)
+        if freshness["status"] != "PASS":
+            raise ValueError(freshness["reason"])
 
     sample_selection = value["measured_sample_selection"]
     if not isinstance(sample_selection, Mapping):
@@ -631,6 +1047,8 @@ def _validate_capacity_plan(
         raise ValueError("capacity plan sample selection does not match sample_snapshots")
     if any(item < first_snapshot_id or item > last_snapshot_id for item in normalized_sample_ids):
         raise ValueError("capacity plan sample selection is outside the snapshot population")
+    if population_ids is not None and any(item not in set(normalized_population_ids) for item in normalized_sample_ids):
+        raise ValueError("capacity plan sample selection is not contained in the complete SnapshotId population")
     sample_hash = hashlib.sha256(
         json.dumps(normalized_sample_ids, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -652,15 +1070,49 @@ def _validate_capacity_plan(
         if measured_deltas.get(name) != components[name]:
             raise ValueError(f"capacity plan physical delta does not match {name}")
 
+    external_reserve = value.get("external_disk_consumption_reserve_bytes", 0)
+    if require_live_binding:
+        external_reserve = _strict_nonnegative_integer(
+            external_reserve, "external_disk_consumption_reserve_bytes"
+        )
+        if external_reserve <= 0:
+            raise ValueError("capacity plan must reserve measured unrelated external disk consumption")
+        reserve_measurements = value.get("reserve_measurements")
+        if not isinstance(reserve_measurements, Mapping):
+            raise ValueError("capacity plan reserve measurements are missing")
+        required_reserve_names = {
+            "transaction_log_bytes": "transaction_log_bytes",
+            "tempdb_bytes": "tempdb_bytes",
+            "rollback_bytes": "rollback_bytes",
+            "index_overhead_bytes": "index_overhead_bytes",
+            "autogrowth_reserve_bytes": "autogrowth_reserve_bytes",
+            "peak_temporary_duplication_bytes": "peak_temporary_duplication_bytes",
+            "external_disk_consumption_reserve_bytes": "external_disk_consumption_reserve_bytes",
+        }
+        for reserve_name, component_name in required_reserve_names.items():
+            item = reserve_measurements.get(reserve_name)
+            if not isinstance(item, Mapping) or item.get("status") != "PASS":
+                raise ValueError(f"capacity plan reserve measurement is missing: {reserve_name}")
+            if _strict_nonnegative_integer(item.get("bytes"), f"reserve_measurements.{reserve_name}.bytes") != (external_reserve if component_name == "external_disk_consumption_reserve_bytes" else components[component_name]):
+                raise ValueError(f"capacity plan reserve measurement does not match {reserve_name}")
+    peak = sum(components.values()) + int(external_reserve or 0)
+    declared_peak = _strict_nonnegative_integer(value["peak_additional_bytes"], "peak_additional_bytes")
+    if declared_peak != peak:
+        raise ValueError("capacity plan peak_additional_bytes does not equal its measured components")
+    if declared_peak <= 0:
+        raise ValueError("capacity plan peak_additional_bytes must be positive")
+
     evidence = value.get("independent_sql_evidence")
     if require_independent_evidence:
         if not isinstance(evidence, Mapping):
             raise ValueError("capacity plan requires independently captured SQL allocation evidence")
-        if evidence.get("status") != "PASS" or evidence.get("artifact_version") != "CTI_SQL_PHYSICAL_ALLOCATION_EVIDENCE_V1":
+        if evidence.get("status") != "PASS" or evidence.get("artifact_version") != CAPACITY_EVIDENCE_ARTIFACT_VERSION:
             raise ValueError("capacity plan SQL allocation evidence is not an accepted artifact")
         provenance = evidence.get("capture_provenance")
         if not isinstance(provenance, Mapping) or provenance.get("read_only") is not True:
             raise ValueError("capacity plan SQL evidence is not marked read-only")
+        if require_live_binding and provenance.get("execution_environment") != expected_execution_environment:
+            raise ValueError("capacity plan SQL evidence execution environment is not bound to the run")
         if provenance.get("database_name") != database_identity.get("database_name") or provenance.get("server_name") != database_identity.get("server_name"):
             raise ValueError("capacity plan SQL evidence is bound to a different database identity")
         if str(evidence.get("measurement_timestamp_utc") or "") != timestamp:
@@ -675,6 +1127,8 @@ def _validate_capacity_plan(
             raise ValueError("capacity plan SQL evidence tempdb file sizes are not bound to the plan")
         if evidence.get("snapshot_population") != dict(population):
             raise ValueError("capacity plan SQL evidence snapshot population is not bound to the plan")
+        if require_live_binding and evidence.get("snapshot_population", {}).get("snapshot_ids") != population.get("snapshot_ids"):
+            raise ValueError("capacity plan SQL evidence does not contain the complete SnapshotId population")
         if evidence.get("measured_sample_selection") != {
             **dict(sample_selection),
             "snapshot_ids": normalized_sample_ids,
@@ -714,6 +1168,12 @@ def _validate_capacity_plan(
             raise ValueError("capacity plan SQL evidence targets a different migration implementation")
         if evidence.get("physical_allocation_deltas") != dict(measured_deltas):
             raise ValueError("capacity plan SQL evidence deltas are not bound to the plan")
+        if require_live_binding:
+            if evidence.get("external_disk_consumption_reserve_bytes") != external_reserve:
+                raise ValueError("capacity plan SQL evidence external-disk reserve is not bound to the plan")
+            reserve_measurements = evidence.get("reserve_measurements")
+            if reserve_measurements != value.get("reserve_measurements"):
+                raise ValueError("capacity plan SQL evidence reserve measurements are not bound to the plan")
 
     return {
         "status": "PASS",
@@ -723,6 +1183,7 @@ def _validate_capacity_plan(
         "current_production_file_sizes": file_sizes,
         "current_tempdb_file_sizes": tempdb_file_sizes,
         "snapshot_population": dict(population),
+        "execution_environment": value.get("execution_environment", expected_execution_environment),
         "measurement_timestamp_utc": timestamp,
         "measured_sample_selection": {
             **dict(sample_selection),
@@ -736,16 +1197,30 @@ def _validate_capacity_plan(
         "sample_snapshots": sample_snapshots,
         "planned_snapshot_count": planned_snapshot_count,
         "physical_allocation_measured": True,
+        "external_disk_consumption_reserve_bytes": int(external_reserve or 0),
+        "reserve_measurements": dict(value.get("reserve_measurements", {}))
+        if isinstance(value.get("reserve_measurements"), Mapping)
+        else None,
         **components,
         "peak_additional_bytes": peak,
     }
 
 
-def _load_capacity_plan(path: Path, *, public_key_path: Path | None = None) -> dict[str, Any]:
+def _load_capacity_plan(
+    path: Path,
+    *,
+    public_key_path: Path | None = None,
+    execution_environment: str = PRODUCTION_EXECUTION_ENVIRONMENT,
+) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, Mapping):
         raise ValueError("capacity plan must be a JSON object")
-    plan = _validate_capacity_plan(value, require_independent_evidence=True)
+    plan = _validate_capacity_plan(
+        value,
+        require_independent_evidence=True,
+        require_live_binding=True,
+        expected_execution_environment=execution_environment,
+    )
     evidence = plan.get("independent_sql_evidence")
     if public_key_path is None:
         raise ValueError("capacity plan SQL evidence public key is required for independent verification")
@@ -755,8 +1230,16 @@ def _load_capacity_plan(path: Path, *, public_key_path: Path | None = None) -> d
         raise ValueError("capacity plan SQL evidence public key must remain outside the repository")
     if not verify_signature(evidence, public_key_path=public_key, integrity=evidence.get("artifact_integrity")):
         raise ValueError("capacity plan SQL evidence signature is not verified")
+    freshness = _freshness_check(plan["measurement_timestamp_utc"])
+    if freshness["status"] != "PASS":
+        raise ValueError(freshness["reason"])
+    evidence_freshness = _freshness_check(evidence.get("measurement_timestamp_utc"))
+    if evidence_freshness["status"] != "PASS":
+        raise ValueError(evidence_freshness["reason"])
     plan["independent_sql_evidence"] = dict(evidence)
     plan["independent_evidence_signature_verified"] = True
+    plan["capacity_plan_freshness"] = freshness
+    plan["independent_evidence_freshness"] = evidence_freshness
     return plan
 
 
@@ -1437,6 +1920,7 @@ def _process(
     log_limit: float,
     batch_size: int,
     capacity_plan: Mapping[str, Any] | None = None,
+    execution_environment: str = PRODUCTION_EXECUTION_ENVIRONMENT,
 ) -> dict[str, Any]:
     cursor = connection.cursor()
     summary: dict[str, Any] = {
@@ -1450,6 +1934,7 @@ def _process(
         "planned": 0,
         "units": [],
         "batch_checkpoints": [],
+        "execution_environment": execution_environment,
     }
     cursor.execute("SELECT COUNT_BIG(*) AS source_snapshot_count FROM stg.MddMacSourceSnapshot")
     total_source_snapshots = int(_row_value(cursor.fetchone(), "source_snapshot_count", 0) or 0)
@@ -1462,7 +1947,11 @@ def _process(
         signature_verified = capacity_plan.get("independent_evidence_signature_verified") is True
         if apply and not signature_verified:
             raise MssqlSafetyError("capacity plan SQL evidence signature was not independently verified")
-        capacity_plan = _validate_capacity_plan(capacity_plan)
+        capacity_plan = _validate_capacity_plan(
+            capacity_plan,
+            require_live_binding=apply,
+            expected_execution_environment=execution_environment,
+        )
         if signature_verified:
             capacity_plan["independent_evidence_signature_verified"] = True
         required_extra_bytes = capacity_plan["peak_additional_bytes"]
@@ -1497,15 +1986,16 @@ def _process(
         # This is deliberately before _make_migration: a failed capacity,
         # writer, or conflict check must leave the production database with no
         # migration metadata write at all.
-        capacity = _read_capacity(cursor)
-        baseline_capacity = capacity
-        preflight_capacity = _capacity_gate(
-            capacity,
+        binding = _live_capacity_preflight(
+            cursor,
+            capacity_plan,
+            execution_environment=execution_environment,
             log_limit=log_limit,
-            required_extra_bytes=required_extra_bytes,
-            capacity_plan=capacity_plan,
-            baseline_capacity=baseline_capacity,
         )
+        summary["capacity_evidence_binding"] = binding
+        capacity = binding["live_capacity"]
+        baseline_capacity = capacity
+        preflight_capacity = binding["capacity_gate"]
         summary["production_capacity_preflight"] = preflight_capacity
         summary["capacity_baseline"] = {
             "volumes": capacity.get("volumes", []),
@@ -1515,7 +2005,7 @@ def _process(
         }
         if preflight_capacity.get("status") != "PASS":
             summary["status"] = "BLOCKED"
-            summary["stop_reason"] = "production capacity, log, or active-writer preflight failed"
+            summary["stop_reason"] = "live capacity evidence binding or physical preflight failed"
             return summary
         conflict_gate = _migration_conflict_gate(cursor, migration_id)
         summary["migration_conflict_preflight"] = conflict_gate
@@ -1540,6 +2030,7 @@ def _process(
                 required_extra_bytes=required_extra_bytes,
                 capacity_plan=capacity_plan,
                 baseline_capacity=baseline_capacity,
+                execution_environment=execution_environment,
             )
             unit["preflight_capacity"] = gate
             if gate["status"] != "PASS":
@@ -1618,6 +2109,7 @@ def _process(
                     required_extra_bytes=required_extra_bytes,
                     capacity_plan=capacity_plan,
                     baseline_capacity=baseline_capacity,
+                    execution_environment=execution_environment,
                 )
                 unit["postflight_capacity"] = post_gate
                 if post_gate["status"] != "PASS":
@@ -1695,6 +2187,7 @@ def _process(
                 required_extra_bytes=required_extra_bytes,
                 capacity_plan=capacity_plan,
                 baseline_capacity=baseline_capacity,
+                execution_environment=execution_environment,
             )
             if gate["status"] != "PASS":
                 summary["status"] = "BLOCKED"
@@ -1733,6 +2226,12 @@ def _process(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="write compact envelopes; otherwise plan only")
+    parser.add_argument(
+        "--execution-environment",
+        choices=sorted(EXECUTION_ENVIRONMENTS),
+        default=PRODUCTION_EXECUTION_ENVIRONMENT,
+        help="explicitly select production or the isolated lab connection contract",
+    )
     parser.add_argument("--migration-id", type=uuid.UUID, help="resume an existing migration ledger")
     parser.add_argument("--from-snapshot-id", type=int)
     parser.add_argument("--to-snapshot-id", type=int)
@@ -1760,6 +2259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status": "BLOCKED",
         "operation": "historical_compact_migration",
         "safety_floor_gib": SAFETY_FLOOR_GIB,
+        "execution_environment": args.execution_environment,
         "collector_gate": _launchd_gate(),
         "storage_operation_gate": local_storage_operation_gate(),
     }
@@ -1771,11 +2271,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.backup_evidence is None:
                 raise MssqlSafetyError("--backup-evidence is required for historical migration apply")
             public_key_path = args.capacity_evidence_public_key
-            if public_key_path is None and os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"):
-                public_key_path = Path(os.environ["MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"])
+            public_key_env = (
+                "CTI_LAB_CAPACITY_EVIDENCE_PUBLIC_KEY"
+                if args.execution_environment == ISOLATED_LAB_EXECUTION_ENVIRONMENT
+                else "MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"
+            )
+            if public_key_path is None and os.environ.get(public_key_env):
+                public_key_path = Path(os.environ[public_key_env])
             if public_key_path is None:
                 raise MssqlSafetyError(
-                    "--capacity-evidence-public-key or MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY is required"
+                    f"--capacity-evidence-public-key or {public_key_env} is required"
                 )
             result["backup_gate"] = _backup_gate(args.backup_evidence)
             if result["backup_gate"].get("status") != "PASS":
@@ -1783,16 +2288,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             capacity_plan = _load_capacity_plan(
                 args.capacity_plan,
                 public_key_path=public_key_path,
+                execution_environment=args.execution_environment,
             )
             result["capacity_plan"] = capacity_plan
         if result["collector_gate"].get("status") != "PASS":
             raise MssqlSafetyError("collector stopped/disabled gate is not proven")
         if result["storage_operation_gate"].get("status") != "PASS":
             raise MssqlSafetyError("another compact-storage operation is active")
-        settings, _role_source = resolve_administrator_connection_settings(
-            os.environ,
-            secret_provider=MacOSKeychainSecretProvider(),
-        )
+        if args.execution_environment == ISOLATED_LAB_EXECUTION_ENVIRONMENT:
+            settings, role_source = resolve_isolated_lab_connection_settings(
+                os.environ,
+                secret_provider=MacOSKeychainSecretProvider(),
+            )
+        else:
+            settings, role_source = resolve_administrator_connection_settings(
+                os.environ,
+                secret_provider=MacOSKeychainSecretProvider(),
+            )
+        result["connection_role_source"] = role_source
         connection = connect_mssql(settings)
         try:
             cursor = connection.cursor()
@@ -1809,6 +2322,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 log_limit=args.max_log_used_percent,
                 batch_size=max(1, args.batch_size),
                 capacity_plan=capacity_plan,
+                execution_environment=args.execution_environment,
             )
             result["status"] = result["run"].get("status", "BLOCKED")
         finally:

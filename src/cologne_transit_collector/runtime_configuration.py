@@ -43,7 +43,10 @@ KEYCHAIN_ACCOUNT_MSSQL = MSSQL_PASSWORD_ENV
 KEYCHAIN_SERVICE_MSSQL_PENDING = "com.cologne-transit-intelligence.mssql-password.pending"
 KEYCHAIN_ACCOUNT_MSSQL_PENDING = "MSSQL_PASSWORD_PENDING"
 ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-admin-password"
+ISOLATED_LAB_ADMIN_KEYCHAIN_SERVICE = "com.cologne-transit-intelligence.mssql-lab-admin-password"
+ISOLATED_LAB_ADMIN_KEYCHAIN_ACCOUNT = "CTI_LAB_MSSQL_PASSWORD"
 ADMIN_MISSING_FIELDS_MARKER = "__ADMIN_MISSING_FIELDS__"
+ISOLATED_LAB_MISSING_FIELDS_MARKER = "__ISOLATED_LAB_MISSING_FIELDS__"
 
 MDD_API_CREDENTIAL = "MDD_API_KEY"
 MSSQL_CREDENTIAL = "MSSQL_PASSWORD"
@@ -545,6 +548,115 @@ def resolve_administrator_connection_settings(
     return settings, source
 
 
+def _normalized_sql_host(value: str) -> str:
+    """Normalize a host label for the lab/production separation check."""
+
+    host = str(value or "").strip().casefold()
+    if host.startswith("tcp:"):
+        host = host[4:]
+    if "," in host:
+        host = host.split(",", 1)[0]
+    if "\\" in host:
+        host = host.split("\\", 1)[0]
+    return host.strip("[]")
+
+
+def resolve_isolated_lab_environment(
+    environ: Mapping[str, str] | None = None,
+    *,
+    secret_provider: SecretProvider | None = None,
+) -> tuple[dict[str, str], str]:
+    """Resolve the deliberately separate SQL identity used by the lab path.
+
+    The lab resolver does not read ``MSSQL_ADMIN_*`` or the production
+    administrator Keychain item.  Requiring a lab instance identifier and a
+    lab-prefixed host/user/password prevents a copied production command from
+    silently changing its target merely because the normal runtime variables
+    are present on the Mac.
+    """
+
+    source = os.environ if environ is None else environ
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for suffix in ("HOST", "DATABASE", "USER", "INSTANCE_ID"):
+        name = f"CTI_LAB_MSSQL_{suffix}"
+        value = source.get(name)
+        if value is None or not str(value).strip():
+            missing.append(name)
+        else:
+            values[f"MSSQL_{suffix if suffix != 'INSTANCE_ID' else 'LAB_INSTANCE_ID'}"] = str(value).strip()
+
+    host = str(source.get("CTI_LAB_MSSQL_HOST") or "").strip()
+    normalized_host = _normalized_sql_host(host)
+    production_host = _normalized_sql_host(str(source.get("MSSQL_ADMIN_HOST") or "DataAnalyst-VM"))
+    if host and normalized_host == production_host:
+        raise RuntimeConfigurationError(
+            "isolated-lab SQL host must be different from the production administrator host"
+        )
+    instance_id = str(source.get("CTI_LAB_MSSQL_INSTANCE_ID") or "").strip()
+    if instance_id and "production" in instance_id.casefold():
+        raise RuntimeConfigurationError("isolated-lab instance identifier cannot identify production")
+
+    password = source.get("CTI_LAB_MSSQL_PASSWORD")
+    keychain_used = False
+    if password is None or not str(password).strip():
+        account = str(source.get("CTI_LAB_MSSQL_KEYCHAIN_ACCOUNT") or ISOLATED_LAB_ADMIN_KEYCHAIN_ACCOUNT).strip()
+        service = str(
+            source.get("CTI_LAB_MSSQL_KEYCHAIN_SERVICE") or ISOLATED_LAB_ADMIN_KEYCHAIN_SERVICE
+        ).strip()
+        if service == ADMIN_KEYCHAIN_SERVICE:
+            raise RuntimeConfigurationError(
+                "isolated-lab credentials may not use the production administrator Keychain service"
+            )
+        password = (secret_provider or MacOSKeychainSecretProvider()).get(
+            service=service,
+            account=account,
+        )
+        keychain_used = password is not None and bool(str(password).strip())
+    if password is None or not str(password).strip():
+        missing.append("CTI_LAB_MSSQL_PASSWORD_OR_LAB_KEYCHAIN_ITEM")
+    else:
+        values["MSSQL_PASSWORD"] = str(password)
+
+    for suffix in ("PORT", "LOGIN_TIMEOUT_SECONDS", "QUERY_TIMEOUT_SECONDS"):
+        name = f"CTI_LAB_MSSQL_{suffix}"
+        value = source.get(name)
+        if value is not None and str(value).strip():
+            values[f"MSSQL_{suffix}"] = str(value).strip()
+
+    if missing:
+        values[ISOLATED_LAB_MISSING_FIELDS_MARKER] = ",".join(missing)
+        return values, "CTI_LAB_MSSQL_*_REQUIRED"
+    return values, "CTI_LAB_MSSQL_*_KEYCHAIN" if keychain_used else "CTI_LAB_MSSQL_*_EXPLICIT"
+
+
+def resolve_isolated_lab_connection_settings(
+    environ: Mapping[str, str] | None = None,
+    *,
+    secret_provider: SecretProvider | None = None,
+    expected_database: str = EXPECTED_SQL_DATABASE,
+) -> tuple[Any, str]:
+    """Return SQL settings for an explicitly isolated, non-production lab."""
+
+    values, source = resolve_isolated_lab_environment(environ, secret_provider=secret_provider)
+    missing = str(values.get(ISOLATED_LAB_MISSING_FIELDS_MARKER) or "")
+    if missing:
+        raise RuntimeConfigurationError(
+            "MISSING_ISOLATED_LAB_CREDENTIALS: explicitly configure " + missing
+        )
+    from .mssql_persistence import MssqlConnectionSettings
+
+    clean_values = {key: value for key, value in values.items() if not key.startswith("__")}
+    settings = MssqlConnectionSettings.from_environment(clean_values, secret_provider=secret_provider)
+    if settings.database != expected_database:
+        raise RuntimeConfigurationError(f"isolated-lab target database must be {expected_database}")
+    if _normalized_sql_host(settings.host) == _normalized_sql_host("DataAnalyst-VM"):
+        raise RuntimeConfigurationError("isolated-lab SQL host is the production host")
+    if str(settings.user or "").casefold() == "colognetransitcollector":
+        raise RuntimeConfigurationError("isolated-lab SQL access requires a separate administrator login")
+    return settings, source
+
+
 def resolve_required_secrets(
     configuration: RuntimeConfiguration,
     *,
@@ -706,7 +818,10 @@ __all__ = [
     "KEYCHAIN_ACCOUNT_MSSQL",
     "KEYCHAIN_ACCOUNT_MSSQL_PENDING",
     "ADMIN_KEYCHAIN_SERVICE",
+    "ISOLATED_LAB_ADMIN_KEYCHAIN_SERVICE",
+    "ISOLATED_LAB_ADMIN_KEYCHAIN_ACCOUNT",
     "ADMIN_MISSING_FIELDS_MARKER",
+    "ISOLATED_LAB_MISSING_FIELDS_MARKER",
     "KEYCHAIN_SERVICE_MDD_API",
     "KEYCHAIN_SERVICE_MSSQL",
     "KEYCHAIN_SERVICE_MSSQL_PENDING",
@@ -725,6 +840,8 @@ __all__ = [
     "resolve_required_secrets",
     "resolve_administrator_connection_settings",
     "resolve_administrator_environment",
+    "resolve_isolated_lab_connection_settings",
+    "resolve_isolated_lab_environment",
     "resolve_secret",
     "runtime_config_path",
     "delete_keychain_secret",
