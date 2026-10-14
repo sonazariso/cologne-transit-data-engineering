@@ -58,6 +58,23 @@ ROW_SET_FAMILY_NAMES = (
     "parser_gaps",
 )
 
+# Historical SQL rows already have immutable IDENTITY primary keys.  The
+# envelope arrays must use those keys as their first ordering key: JSON object
+# key sorting does not make an array canonical, and SQL Server is free to
+# return rows in any order when a query has no ORDER BY.  The fallback to the
+# canonical row below is only for write-time rows before SQL allocates their
+# physical identity; it also makes those envelopes deterministic without
+# inventing an identity value.
+ROW_FAMILY_PRIMARY_KEYS = {
+    "calls": "call_observation_id",
+    "timings": "timing_observation_id",
+    "situations": "situation_evidence_id",
+    "service_sections": "service_section_evidence_id",
+    "attributes": "attribute_evidence_id",
+    "response_errors": "response_error_id",
+    "parser_gaps": "parser_gap_id",
+}
+
 COLLECTOR_LAUNCHD_LABELS = (
     "com.cologne-transit-intelligence.mdd-collector",
     "com.cologne-transit-intelligence.mdd-tiered50-collector",
@@ -233,6 +250,39 @@ def _copy_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): _json_safe(value) for key, value in row.items()}
 
 
+def _row_order_token(value: Any) -> tuple[int, Any]:
+    """Return a total-order token for an immutable row identity value."""
+
+    if value is None:
+        return (2, "")
+    if isinstance(value, bool):
+        return (1, int(value))
+    if isinstance(value, int):
+        return (0, value)
+    if isinstance(value, decimal.Decimal):
+        try:
+            return (0, int(value)) if value == int(value) else (1, format(value, "f"))
+        except (OverflowError, ValueError):
+            return (1, format(value, "f"))
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return (0, int(value))
+    return (1, _canonical_json(value))
+
+
+def _order_row_family(family: str, values: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Canonicalize a family without changing row identity or multiplicity."""
+
+    rows = [_copy_row(row) for row in values]
+    primary_key = ROW_FAMILY_PRIMARY_KEYS[family]
+    return sorted(
+        rows,
+        key=lambda row: (
+            _row_order_token(row.get(primary_key)),
+            canonical_row(row),
+        ),
+    )
+
+
 def build_compact_envelope(
     *,
     source_snapshot: Mapping[str, Any],
@@ -268,7 +318,7 @@ def build_compact_envelope(
         values = row_sets[family]
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
             raise CompactEnvelopeError(f"row-set {family} must be a sequence")
-        envelope[family] = [_copy_row(row) for row in values]
+        envelope[family] = _order_row_family(family, values)
     # Force validation before the caller persists the object.  This catches
     # non-finite numbers, unsupported values, and incomplete envelopes before
     # a SQL transaction.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import json
 import sys
@@ -33,15 +34,105 @@ from cologne_transit_collector.mssql_persistence import (  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from migrate_historical_compact_observations import (  # noqa: E402
+    CAPACITY_PLAN_FORMAT_VERSION,
+    COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
     _capacity_gate,
     _expected_physical_field_records,
     _load_capacity_plan,
     _read_capacity,
     _recovery_decision,
+    _schema_contract,
+    _validate_capacity_plan,
 )
 from apply_compact_storage_migration import _batches  # noqa: E402
 from reclaim_sql_datafile_space import _approval_gate, _parity_gate  # noqa: E402
 from calculate_tiered50_storage_capacity import calculate as calculate_tiered50  # noqa: E402
+
+
+def _capacity_plan_fixture() -> dict[str, object]:
+    sample_ids = list(range(1, 11))
+    components = {
+        "envelope_allocation_bytes": 100,
+        "index_overhead_bytes": 50,
+        "transaction_log_bytes": 200,
+        "tempdb_bytes": 300,
+        "rollback_bytes": 400,
+        "autogrowth_reserve_bytes": 50,
+        "peak_temporary_duplication_bytes": 600,
+    }
+    file_sizes = [
+        {
+            "file_id": 1,
+            "name": "CologneTransitIntelligence",
+            "type": "ROWS",
+            "volume": "C:",
+            "physical_name": r"C:\CologneTransitIntelligence.mdf",
+            "allocated_bytes": 10 * 1024**3,
+            "used_bytes": 9 * 1024**3,
+            "growth_value": 8192,
+            "is_percent_growth": False,
+            "max_size_pages": -1,
+            "available_bytes": 16 * 1024**3,
+        },
+        {
+            "file_id": 2,
+            "name": "CologneTransitIntelligence_log",
+            "type": "LOG",
+            "volume": "C:",
+            "physical_name": r"C:\CologneTransitIntelligence_log.ldf",
+            "allocated_bytes": 2 * 1024**3,
+            "used_bytes": 512 * 1024**2,
+            "growth_value": 8192,
+            "is_percent_growth": False,
+            "max_size_pages": -1,
+            "available_bytes": 16 * 1024**3,
+        },
+    ]
+    plan: dict[str, object] = {
+        "capacity_plan_format_version": CAPACITY_PLAN_FORMAT_VERSION,
+        "migration_implementation_version": COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
+        "database_identity": {
+            "server_name": "DataAnalyst-VM",
+            "database_name": "CologneTransitIntelligence",
+        },
+        "current_production_file_sizes": file_sizes,
+        "current_tempdb_file_sizes": [
+            {
+                "file_id": 1,
+                "name": "tempdev",
+                "type": "ROWS",
+                "volume": "C:",
+                "physical_name": r"C:\tempdb.mdf",
+                "allocated_bytes": 1 * 1024**3,
+                "used_bytes": 512 * 1024**2,
+                "growth_value": 8192,
+                "is_percent_growth": False,
+                "max_size_pages": -1,
+                "available_bytes": 16 * 1024**3,
+            }
+        ],
+        "snapshot_population": {
+            "count": 100,
+            "first_snapshot_id": 1,
+            "last_snapshot_id": 100,
+        },
+        "measurement_timestamp_utc": "2026-10-14T12:00:00Z",
+        "measured_sample_selection": {
+            "snapshot_ids": sample_ids,
+            "selection_sha256": hashlib.sha256(
+                json.dumps(sample_ids, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        },
+        "physical_allocation_deltas": dict(components),
+        "sample_snapshots": len(sample_ids),
+        "planned_snapshot_count": 100,
+        "measurement_basis": "SQL Server physical allocation measurement on a restored production-shape copy",
+        "physical_allocation_measured": True,
+        "allocation_scope": "FULL_HISTORY_MIGRATION_PEAK",
+        **components,
+    }
+    plan["peak_additional_bytes"] = sum(components.values())
+    return plan
 
 
 class CompactObservationStorageTests(unittest.TestCase):
@@ -70,8 +161,20 @@ class CompactObservationStorageTests(unittest.TestCase):
 
             def fetchall(self) -> list[dict[str, object]]:
                 query = self.queries[-1]
-                if "volume_mount_point" in query:
-                    return [{"volume_mount_point": "C:", "total_bytes": 64 * 1024**3, "available_bytes": 14 * 1024**3}]
+                if "FROM tempdb.sys.database_files" in query:
+                    return [{
+                        "file_id": 1,
+                        "name": "tempdev",
+                        "type_desc": "ROWS",
+                        "allocated_bytes": 1 * 1024**3,
+                        "used_bytes": 512 * 1024**2,
+                        "growth_value": 8192,
+                        "is_percent_growth": False,
+                        "max_size_pages": -1,
+                        "physical_name": r"C:\\tempdb.mdf",
+                        "volume_mount_point": "C:",
+                        "available_bytes": 14 * 1024**3,
+                    }]
                 if "file_id, name, type_desc" in query:
                     return [{
                         "file_id": 1,
@@ -79,7 +182,15 @@ class CompactObservationStorageTests(unittest.TestCase):
                         "type_desc": "ROWS",
                         "allocated_bytes": 29 * 1024**3,
                         "used_bytes": 28 * 1024**3,
+                        "growth_value": 8192,
+                        "is_percent_growth": False,
+                        "max_size_pages": -1,
+                        "physical_name": r"C:\\CologneTransitIntelligence.mdf",
+                        "volume_mount_point": "C:",
+                        "available_bytes": 14 * 1024**3,
                     }]
+                if "volume_mount_point" in query:
+                    return [{"volume_mount_point": "C:", "total_bytes": 64 * 1024**3, "available_bytes": 14 * 1024**3}]
                 return []
 
             def fetchone(self) -> dict[str, object]:
@@ -101,6 +212,38 @@ class CompactObservationStorageTests(unittest.TestCase):
         self.assertIn("CONVERT(BIGINT, size)", file_query)
         self.assertIn("CONVERT(BIGINT, FILEPROPERTY", file_query)
 
+    def test_envelope_hash_is_invariant_to_sql_row_return_order(self) -> None:
+        source = {"snapshot_id": 41, "run_id": "run-α"}
+        rows = {
+            "calls": [
+                {"call_observation_id": 2, "value": "second"},
+                {"call_observation_id": 1, "value": "first"},
+            ],
+            "timings": [
+                {"timing_observation_id": 4, "value": "fourth"},
+                {"timing_observation_id": 3, "value": "third"},
+            ],
+            "situations": [],
+            "service_sections": [],
+            "attributes": [],
+            "response_errors": [],
+            "parser_gaps": [],
+        }
+        reversed_rows = {
+            family: list(reversed(values)) for family, values in rows.items()
+        }
+        first = encode_compact_envelope(
+            build_compact_envelope(source_snapshot=source, row_sets=rows)
+        )
+        second = encode_compact_envelope(
+            build_compact_envelope(source_snapshot=source, row_sets=reversed_rows)
+        )
+        self.assertEqual(first.sha256, second.sha256)
+        self.assertEqual(
+            [row["call_observation_id"] for row in build_compact_envelope(source_snapshot=source, row_sets=rows)["calls"]],
+            [1, 2],
+        )
+
     def test_capacity_gate_blocks_13_86_gib_when_peak_needs_two_gib(self) -> None:
         available = int(13.86 * 1024**3)
         result = _capacity_gate(
@@ -115,6 +258,52 @@ class CompactObservationStorageTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "BLOCKED")
         self.assertAlmostEqual(result["peak_migration_space_gib"], 2.0, places=5)
+
+    def test_capacity_gate_credits_measured_growth_once_and_tracks_external_consumption(self) -> None:
+        plan = _capacity_plan_fixture()
+        gib = 1024**3
+        baseline = {
+            "volumes": [{"volume": "C:", "available_bytes": 16 * gib}],
+            "files": [
+                {"type": "ROWS", "volume": "C:", "allocated_bytes": 10 * gib},
+                {"type": "LOG", "volume": "C:", "allocated_bytes": 2 * gib},
+            ],
+            "tempdb_files": [{"type": "ROWS", "volume": "C:", "allocated_bytes": 1 * gib}],
+        }
+        current = {
+            "volumes": [{"volume": "C:", "available_bytes": 16 * gib - 250}],
+            "files": [
+                {"type": "ROWS", "volume": "C:", "allocated_bytes": 10 * gib + 100},
+                {"type": "LOG", "volume": "C:", "allocated_bytes": 2 * gib + 20},
+            ],
+            "tempdb_files": [{"type": "ROWS", "volume": "C:", "allocated_bytes": 1 * gib + 30}],
+            "log": {"used_percent": 25.0},
+            "active_user_transactions": 0,
+            "active_collector_sessions": 0,
+        }
+        result = _capacity_gate(
+            current,
+            log_limit=70.0,
+            required_extra_bytes=int(plan["peak_additional_bytes"]),
+            capacity_plan=plan,
+            baseline_capacity=baseline,
+        )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["observed_allocation_deltas"], {"data": 100, "log": 20, "tempdb": 30})
+        self.assertEqual(result["unexpected_external_consumption_bytes"], 100)
+        self.assertEqual(result["remaining_allocation_bytes"], 1550)
+        self.assertLess(result["remaining_allocation_bytes"], plan["peak_additional_bytes"])
+        blocked_files = [dict(item) for item in current["files"]]
+        blocked_files[0]["max_size_pages"] = (10 * gib + 100) // 8192
+        blocked_capacity = {**current, "files": blocked_files}
+        blocked = _capacity_gate(
+            blocked_capacity,
+            log_limit=70.0,
+            capacity_plan=plan,
+            baseline_capacity=baseline,
+        )
+        self.assertEqual(blocked["autogrowth_status"], "BLOCKED")
+        self.assertEqual(blocked["status"], "BLOCKED")
 
     def test_sql_physical_field_contract_preserves_null_empty_binary_and_duplicates(self) -> None:
         records = _expected_physical_field_records(
@@ -230,30 +419,55 @@ class CompactObservationStorageTests(unittest.TestCase):
         self.assertEqual(calculate_tiered50(args)["status"], "NO_GO")
 
     def test_capacity_plan_requires_full_history_peak_scope(self) -> None:
-        plan = {
-            "sample_snapshots": 10,
-            "planned_snapshot_count": 100,
-            "measurement_basis": "SQL Server physical allocation measurement",
-            "physical_allocation_measured": True,
-            "envelope_allocation_bytes": 10,
-            "index_overhead_bytes": 20,
-            "transaction_log_bytes": 30,
-            "tempdb_bytes": 40,
-            "rollback_bytes": 50,
-            "peak_temporary_duplication_bytes": 60,
-            "peak_additional_bytes": 210,
-        }
+        plan = _capacity_plan_fixture()
+        plan.pop("allocation_scope")
+        with self.assertRaises(ValueError):
+            _validate_capacity_plan(plan, require_independent_evidence=False)
+        plan["allocation_scope"] = "FULL_HISTORY_MIGRATION_PEAK"
+        self.assertEqual(
+            _validate_capacity_plan(plan, require_independent_evidence=False)["status"],
+            "PASS",
+        )
+
+    def test_capacity_plan_rejects_unsigned_self_declared_evidence(self) -> None:
+        plan = _capacity_plan_fixture()
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".json") as handle:
             json.dump(plan, handle)
             handle.flush()
             with self.assertRaises(ValueError):
                 _load_capacity_plan(Path(handle.name))
-            plan["allocation_scope"] = "FULL_HISTORY_MIGRATION_PEAK"
-            handle.seek(0)
-            handle.truncate()
-            json.dump(plan, handle)
-            handle.flush()
-            self.assertEqual(_load_capacity_plan(Path(handle.name))["status"], "PASS")
+
+    def test_schema_contract_compares_physical_metadata_and_strict_nullability(self) -> None:
+        source = [
+            {
+                "column_id": 1,
+                "name": "SnapshotId",
+                "key": "snapshot_id",
+                "type_name": "bigint",
+                "max_length": 8,
+                "precision": 19,
+                "scale": 0,
+                "is_nullable": False,
+            },
+            {
+                "column_id": 2,
+                "name": "Value",
+                "key": "value",
+                "type_name": "nvarchar",
+                "max_length": 200,
+                "precision": 0,
+                "scale": 0,
+                "is_nullable": True,
+            },
+        ]
+        view = [dict(item) for item in source]
+        self.assertEqual(_schema_contract("calls", source, view)["status"], "PASS")
+        view[0]["precision"] = 18
+        view[0]["is_nullable"] = True
+        result = _schema_contract("calls", source, view)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(any(item["kind"] == "precision" for item in result["mismatches"]))
+        self.assertTrue(any(item["kind"] == "nullability" for item in result["mismatches"]))
 
     def test_nested_gzip_hex_representation_is_measured_explicitly(self) -> None:
         result = nested_gzip_hex_benchmark(

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import collections
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,10 @@ from cologne_transit_collector.compact_observation import (  # noqa: E402
     local_storage_operation_gate,
     normalize_sql_row,
 )
+from cologne_transit_collector.admin_evidence import (  # noqa: E402
+    payload_sha256,
+    verify_signature,
+)
 from cologne_transit_collector.mssql_persistence import (  # noqa: E402
     MssqlSafetyError,
     connect_mssql,
@@ -66,6 +71,8 @@ FAMILIES: tuple[tuple[str, str], ...] = (
 SAFETY_FLOOR_GIB = 12.0
 DEFAULT_MAX_LOG_USED_PERCENT = 70.0
 CAPACITY_PLAN_SCOPE = "FULL_HISTORY_MIGRATION_PEAK"
+CAPACITY_PLAN_FORMAT_VERSION = "CTI_SQL_PHYSICAL_CAPACITY_PLAN_V2"
+COMPACT_MIGRATION_IMPLEMENTATION_VERSION = "compact-historical-migration-v2"
 CAPACITY_PLAN_FIELDS = (
     "sample_snapshots",
     "envelope_allocation_bytes",
@@ -73,7 +80,26 @@ CAPACITY_PLAN_FIELDS = (
     "transaction_log_bytes",
     "tempdb_bytes",
     "rollback_bytes",
+    "autogrowth_reserve_bytes",
     "peak_temporary_duplication_bytes",
+)
+CAPACITY_EVIDENCE_QUERY_IDS = (
+    "capacity.database_identity",
+    "capacity.database_files",
+    "capacity.snapshot_population",
+    "capacity.sample_allocation_before",
+    "capacity.sample_allocation_after",
+    "capacity.transaction_log",
+    "capacity.tempdb",
+    "capacity.rollback",
+    "capacity.autogrowth",
+)
+CAPACITY_ALLOCATION_SNAPSHOT_FIELDS = (
+    "database_file_allocated_bytes",
+    "log_file_allocated_bytes",
+    "tempdb_file_allocated_bytes",
+    "transaction_log_used_bytes",
+    "windows_c_available_bytes",
 )
 
 COMPATIBILITY_VIEWS: tuple[tuple[str, str], ...] = (
@@ -90,6 +116,15 @@ SOURCE_TABLES: tuple[tuple[str, str], ...] = (
     ("source_snapshot", "stg.MddMacSourceSnapshot"),
     *FAMILIES,
 )
+SOURCE_PRIMARY_KEY_COLUMNS = {
+    "calls": "CallObservationId",
+    "timings": "TimingObservationId",
+    "situations": "SituationEvidenceId",
+    "service_sections": "ServiceSectionEvidenceId",
+    "attributes": "AttributeEvidenceId",
+    "response_errors": "ResponseErrorId",
+    "parser_gaps": "ParserGapId",
+}
 PHYSICAL_FIELD_READBACK_VIEW = "stg.vMddMacCompactPhysicalFieldReadback"
 READBACK_SESSION_CONTEXT_KEY = "CTI.CompactStorageReadback"
 
@@ -166,36 +201,85 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         "used_bytes": int(_row_value(log_row, "used_log_space_in_bytes", 1) or 0),
         "used_percent": float(_row_value(log_row, "used_log_space_in_percent", 2) or 0),
     }
-    cursor.execute(
+
+    def read_files(query: str, label: str) -> list[dict[str, Any]]:
+        cursor.execute(query)
+        result: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            values = (
+                _row_value(row, "file_id", 0),
+                _row_value(row, "name", 1),
+                _row_value(row, "type_desc", 2),
+                _row_value(row, "allocated_bytes", 3),
+                _row_value(row, "used_bytes", 4),
+                _row_value(row, "growth_value", 5),
+                _row_value(row, "is_percent_growth", 6),
+                _row_value(row, "max_size_pages", 7),
+                _row_value(row, "physical_name", 8),
+                _row_value(row, "volume_mount_point", 9),
+                _row_value(row, "available_bytes", 10),
+            )
+            required_values = (*values[:4], *values[5:])
+            if any(value is None for value in required_values):
+                raise MssqlSafetyError(f"SQL {label} allocation/autogrowth measurement is incomplete")
+            if values[4] is None and str(values[2]).casefold() != "log":
+                raise MssqlSafetyError(f"SQL {label} data-file used-space measurement is incomplete")
+            result.append(
+                {
+                    "file_id": int(values[0]),
+                    "name": str(values[1]),
+                    "type": str(values[2]),
+                    "allocated_bytes": int(values[3]),
+                    "used_bytes": None if values[4] is None else int(values[4]),
+                    "growth_value": int(values[5]),
+                    "is_percent_growth": bool(values[6]),
+                    "max_size_pages": int(values[7]),
+                    "physical_name": str(values[8]),
+                    "volume": str(values[9]),
+                    "available_bytes": int(values[10]),
+                }
+            )
+        return result
+
+    files = read_files(
         """
         SELECT file_id, name, type_desc,
                CONVERT(BIGINT, size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
                CONVERT(BIGINT, FILEPROPERTY(name, 'SpaceUsed'))
-                   * CONVERT(BIGINT, 8192) AS used_bytes
-        FROM sys.database_files
+                   * CONVERT(BIGINT, 8192) AS used_bytes,
+               CONVERT(BIGINT, growth) AS growth_value,
+               is_percent_growth,
+               CONVERT(BIGINT, max_size) AS max_size_pages,
+               physical_name,
+               vs.volume_mount_point,
+               CONVERT(BIGINT, vs.available_bytes) AS available_bytes
+        FROM sys.database_files AS df
+        CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
         ORDER BY file_id
-        """
+        """,
+        "database-file",
     )
-    files = []
-    for row in cursor.fetchall():
-        values = (
-            _row_value(row, "file_id", 0),
-            _row_value(row, "name", 1),
-            _row_value(row, "type_desc", 2),
-            _row_value(row, "allocated_bytes", 3),
-            _row_value(row, "used_bytes", 4),
-        )
-        if any(value is None for value in values):
-            raise MssqlSafetyError("SQL data-file allocation measurement is incomplete")
-        files.append(
-            {
-                "file_id": int(values[0]),
-                "name": str(values[1]),
-                "type": str(values[2]),
-                "allocated_bytes": int(values[3]),
-                "used_bytes": int(values[4]),
-            }
-        )
+    tempdb_files = read_files(
+        """
+        SELECT file_id, name, type_desc,
+               CONVERT(BIGINT, size) * CONVERT(BIGINT, 8192) AS allocated_bytes,
+               CONVERT(BIGINT, fsu.allocated_extent_page_count)
+                   * CONVERT(BIGINT, 8192) AS used_bytes,
+               CONVERT(BIGINT, growth) AS growth_value,
+               is_percent_growth,
+               CONVERT(BIGINT, max_size) AS max_size_pages,
+               physical_name,
+               vs.volume_mount_point,
+               CONVERT(BIGINT, vs.available_bytes) AS available_bytes
+        FROM tempdb.sys.database_files AS df
+        LEFT JOIN tempdb.sys.dm_db_file_space_usage AS fsu
+          ON fsu.database_id = DB_ID(N'tempdb')
+         AND fsu.file_id = df.file_id
+        CROSS APPLY sys.dm_os_volume_stats(DB_ID(N'tempdb'), df.file_id) AS vs
+        ORDER BY file_id
+        """,
+        "tempdb-file",
+    )
     cursor.execute(
         """
         SELECT COUNT_BIG(*) AS active_user_transactions
@@ -233,6 +317,7 @@ def _read_capacity(cursor: Any) -> dict[str, Any]:
         "volumes": volumes,
         "log": log,
         "files": files,
+        "tempdb_files": tempdb_files,
         "active_user_transactions": active_user_transactions,
         "active_collector_sessions": active_collector_sessions,
     }
@@ -243,7 +328,19 @@ def _capacity_gate(
     *,
     log_limit: float,
     required_extra_bytes: int = 0,
+    capacity_plan: Mapping[str, Any] | None = None,
+    baseline_capacity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Apply the physical-space gate using only the allocation still needed.
+
+    ``required_extra_bytes`` is retained for the small, plan-free unit tests
+    and for callers that have no measured plan.  An apply run always supplies
+    ``capacity_plan`` and ``baseline_capacity``.  In that path, committed SQL
+    file growth is credited once against the measured persistent components;
+    the remaining transaction-log/tempdb/rollback/duplication reserve stays
+    live for the next unit.  The current Windows free-space measurement is
+    never replaced by a logical-byte estimate.
+    """
     volumes = list(capacity.get("volumes", ()))
     c_volumes = [
         item for item in volumes
@@ -259,6 +356,100 @@ def _capacity_gate(
         raise ValueError("required_extra_bytes must be an integer")
     if required_extra_bytes < 0:
         raise ValueError("required_extra_bytes cannot be negative")
+
+    def file_totals(value: Mapping[str, Any]) -> dict[str, int]:
+        database_files = [
+            item for item in value.get("files", ())
+            if isinstance(item, Mapping)
+            and str(item.get("volume", "")).casefold().startswith("c:")
+        ]
+        tempdb_files = [
+            item for item in value.get("tempdb_files", ())
+            if isinstance(item, Mapping)
+            and str(item.get("volume", "")).casefold().startswith("c:")
+        ]
+        return {
+            "data": sum(
+                int(item.get("allocated_bytes", 0) or 0)
+                for item in database_files
+                if str(item.get("type", "")).casefold() == "rows"
+            ),
+            "log": sum(
+                int(item.get("allocated_bytes", 0) or 0)
+                for item in database_files
+                if str(item.get("type", "")).casefold() == "log"
+            ),
+            "tempdb": sum(int(item.get("allocated_bytes", 0) or 0) for item in tempdb_files),
+        }
+
+    remaining_components: dict[str, int] = {}
+    observed_deltas = {"data": 0, "log": 0, "tempdb": 0}
+    unexpected_external_consumption = 0
+    autogrowth_status = "NOT_APPLICABLE"
+    if capacity_plan is not None:
+        if baseline_capacity is None:
+            raise ValueError("baseline_capacity is required with a measured capacity plan")
+        current_totals = file_totals(capacity)
+        baseline_totals = file_totals(baseline_capacity)
+        observed_deltas = {
+            name: max(0, current_totals[name] - baseline_totals[name])
+            for name in current_totals
+        }
+        baseline_available = min(
+            int(item.get("available_bytes", 0) or 0)
+            for item in baseline_capacity.get("volumes", ())
+            if str(item.get("volume", "")).casefold().startswith("c:")
+        ) if any(
+            str(item.get("volume", "")).casefold().startswith("c:")
+            for item in baseline_capacity.get("volumes", ())
+        ) else available
+        sql_growth = sum(observed_deltas.values())
+        unexpected_external_consumption = max(0, baseline_available - available - sql_growth)
+
+        data_budget = int(capacity_plan["envelope_allocation_bytes"])
+        data_budget += int(capacity_plan["index_overhead_bytes"])
+        data_budget += int(capacity_plan["autogrowth_reserve_bytes"])
+        remaining_components["envelope_and_index_allocation_bytes"] = max(
+            0,
+            data_budget - observed_deltas["data"],
+        )
+        remaining_components["transaction_log_bytes"] = max(
+            0,
+            int(capacity_plan["transaction_log_bytes"]) - observed_deltas["log"],
+        )
+        remaining_components["tempdb_bytes"] = max(
+            0,
+            int(capacity_plan["tempdb_bytes"]) - observed_deltas["tempdb"],
+        )
+        # These are peak transient reserves.  They are not subtracted after a
+        # committed unit because a later unit can need the same reserve again.
+        remaining_components["rollback_bytes"] = int(capacity_plan["rollback_bytes"])
+        remaining_components["peak_temporary_duplication_bytes"] = int(
+            capacity_plan["peak_temporary_duplication_bytes"]
+        )
+        required_extra_bytes = sum(remaining_components.values())
+        autogrowth_status = "PASS"
+        for item in capacity.get("files", ()):
+            if not isinstance(item, Mapping):
+                continue
+            max_pages = int(item.get("max_size_pages", -1) or -1)
+            if max_pages >= 0:
+                max_bytes = max_pages * 8192
+                type_name = str(item.get("type", "")).casefold()
+                reserve = remaining_components["envelope_and_index_allocation_bytes"] if type_name == "rows" else (
+                    remaining_components["transaction_log_bytes"] if type_name == "log" else 0
+                )
+                if int(item.get("allocated_bytes", 0) or 0) + reserve > max_bytes:
+                    autogrowth_status = "BLOCKED"
+                    break
+        for item in capacity.get("tempdb_files", ()):
+            if not isinstance(item, Mapping):
+                continue
+            max_pages = int(item.get("max_size_pages", -1) or -1)
+            if max_pages >= 0 and int(item.get("allocated_bytes", 0) or 0) + remaining_components["tempdb_bytes"] > max_pages * 8192:
+                autogrowth_status = "BLOCKED"
+                break
+
     projected_free_gib = (available - required_extra_bytes) / (1024**3)
     free_gib = available / (1024**3)
     log_used = float((capacity.get("log") or {}).get("used_percent", 100.0))
@@ -269,13 +460,19 @@ def _capacity_gate(
         if rows_volume
         and projected_free_gib >= SAFETY_FLOOR_GIB
         and log_used <= log_limit
+        and autogrowth_status != "BLOCKED"
         and active_user_transactions == 0
         and active_collector_sessions == 0
         else "BLOCKED",
         "windows_free_gib": round(free_gib, 3),
         "required_extra_bytes": required_extra_bytes,
+        "remaining_allocation_bytes": required_extra_bytes,
         "peak_migration_space_gib": round(required_extra_bytes / (1024**3), 6),
-        "peak_capacity_plan_exact": required_extra_bytes > 0,
+        "peak_capacity_plan_exact": capacity_plan is not None or required_extra_bytes > 0,
+        "remaining_capacity_components": remaining_components,
+        "observed_allocation_deltas": observed_deltas,
+        "unexpected_external_consumption_bytes": unexpected_external_consumption,
+        "autogrowth_status": autogrowth_status,
         "projected_windows_free_gib": round(projected_free_gib, 3),
         "required_windows_free_gib": SAFETY_FLOOR_GIB,
         "log_used_percent": log_used,
@@ -293,9 +490,24 @@ def _strict_nonnegative_integer(value: Any, name: str) -> int:
     return value
 
 
-def _validate_capacity_plan(value: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_capacity_plan(
+    value: Mapping[str, Any],
+    *,
+    require_independent_evidence: bool = True,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("capacity plan must be an object")
     missing = [name for name in CAPACITY_PLAN_FIELDS if name not in value]
     for required_name in (
+        "capacity_plan_format_version",
+        "migration_implementation_version",
+        "database_identity",
+        "current_production_file_sizes",
+        "current_tempdb_file_sizes",
+        "snapshot_population",
+        "measurement_timestamp_utc",
+        "measured_sample_selection",
+        "physical_allocation_deltas",
         "planned_snapshot_count",
         "measurement_basis",
         "physical_allocation_measured",
@@ -306,6 +518,10 @@ def _validate_capacity_plan(value: Mapping[str, Any]) -> dict[str, Any]:
             missing.append(required_name)
     if missing:
         raise ValueError("capacity plan is missing: " + ", ".join(missing))
+    if value["capacity_plan_format_version"] != CAPACITY_PLAN_FORMAT_VERSION:
+        raise ValueError("capacity plan format version is unsupported")
+    if value["migration_implementation_version"] != COMPACT_MIGRATION_IMPLEMENTATION_VERSION:
+        raise ValueError("capacity plan was measured for a different migration implementation")
     sample_snapshots = _strict_nonnegative_integer(value["sample_snapshots"], "sample_snapshots")
     planned_snapshot_count = _strict_nonnegative_integer(value["planned_snapshot_count"], "planned_snapshot_count")
     if sample_snapshots <= 0 or planned_snapshot_count <= 0 or sample_snapshots > planned_snapshot_count:
@@ -335,8 +551,186 @@ def _validate_capacity_plan(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("capacity plan peak_additional_bytes does not equal its measured components")
     if declared_peak <= 0:
         raise ValueError("capacity plan peak_additional_bytes must be positive")
+
+    database_identity = value["database_identity"]
+    if not isinstance(database_identity, Mapping):
+        raise ValueError("capacity plan database_identity must be an object")
+    if not str(database_identity.get("server_name") or "").strip() or database_identity.get("database_name") != "CologneTransitIntelligence":
+        raise ValueError("capacity plan database identity is incomplete or unexpected")
+
+    def validate_file_sizes(raw: Any, field_name: str) -> list[dict[str, Any]]:
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)) or not raw:
+            raise ValueError(f"capacity plan {field_name} must be a non-empty array")
+        normalized: list[dict[str, Any]] = []
+        for file_row in raw:
+            if not isinstance(file_row, Mapping):
+                raise ValueError(f"capacity plan {field_name} contains malformed file-size evidence")
+            for name in ("file_id", "name", "type", "physical_name", "volume"):
+                if name == "file_id":
+                    if isinstance(file_row.get(name), bool) or not isinstance(file_row.get(name), int) or file_row[name] <= 0:
+                        raise ValueError(f"capacity plan {field_name} file_id is invalid")
+                elif not str(file_row.get(name) or "").strip():
+                    raise ValueError(f"capacity plan {field_name} is missing {name}")
+            if str(file_row["type"]).upper() not in {"ROWS", "LOG"}:
+                raise ValueError(f"capacity plan {field_name} has an unsupported file type")
+            for name in ("allocated_bytes", "used_bytes", "growth_value", "available_bytes"):
+                if name not in file_row:
+                    raise ValueError(f"capacity plan {field_name} is missing {name}")
+                number = file_row.get(name)
+                if name == "used_bytes" and number is None and str(file_row["type"]).upper() == "LOG":
+                    continue
+                if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+                    raise ValueError(f"capacity plan {field_name} field {name} is invalid")
+            max_size_pages = file_row.get("max_size_pages")
+            if isinstance(max_size_pages, bool) or not isinstance(max_size_pages, int) or max_size_pages < -1:
+                raise ValueError(f"capacity plan {field_name} field max_size_pages is invalid")
+            if not isinstance(file_row.get("is_percent_growth"), bool):
+                raise ValueError(f"capacity plan {field_name} has invalid growth mode")
+            normalized.append(dict(file_row))
+        return normalized
+
+    file_sizes = validate_file_sizes(value["current_production_file_sizes"], "current_production_file_sizes")
+    tempdb_file_sizes = validate_file_sizes(value["current_tempdb_file_sizes"], "current_tempdb_file_sizes")
+
+    population = value["snapshot_population"]
+    if not isinstance(population, Mapping):
+        raise ValueError("capacity plan snapshot_population must be an object")
+    population_count = population.get("count")
+    first_snapshot_id = population.get("first_snapshot_id")
+    last_snapshot_id = population.get("last_snapshot_id")
+    if any(
+        isinstance(item, bool) or not isinstance(item, int)
+        for item in (population_count, first_snapshot_id, last_snapshot_id)
+    ):
+        raise ValueError("capacity plan snapshot population fields are invalid")
+    if population_count != planned_snapshot_count:
+        raise ValueError("capacity plan snapshot population does not match planned_snapshot_count")
+    if first_snapshot_id <= 0 or last_snapshot_id < first_snapshot_id:
+        raise ValueError("capacity plan snapshot population bounds are invalid")
+
+    timestamp = str(value["measurement_timestamp_utc"] or "").strip()
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("capacity plan measurement_timestamp_utc is invalid") from exc
+    if parsed_timestamp.tzinfo is None:
+        raise ValueError("capacity plan measurement_timestamp_utc must include a timezone")
+    if parsed_timestamp.utcoffset() != timezone.utc.utcoffset(parsed_timestamp):
+        raise ValueError("capacity plan measurement_timestamp_utc must be UTC")
+
+    sample_selection = value["measured_sample_selection"]
+    if not isinstance(sample_selection, Mapping):
+        raise ValueError("capacity plan measured_sample_selection must be an object")
+    sample_ids = sample_selection.get("snapshot_ids")
+    if not isinstance(sample_ids, Sequence) or isinstance(sample_ids, (str, bytes, bytearray)):
+        raise ValueError("capacity plan sample snapshot_ids are missing")
+    if any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in sample_ids):
+        raise ValueError("capacity plan sample snapshot_ids are invalid")
+    normalized_sample_ids = list(sample_ids)
+    if len(normalized_sample_ids) != sample_snapshots or len(set(normalized_sample_ids)) != len(normalized_sample_ids):
+        raise ValueError("capacity plan sample selection does not match sample_snapshots")
+    if any(item < first_snapshot_id or item > last_snapshot_id for item in normalized_sample_ids):
+        raise ValueError("capacity plan sample selection is outside the snapshot population")
+    sample_hash = hashlib.sha256(
+        json.dumps(normalized_sample_ids, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if str(sample_selection.get("selection_sha256") or "").casefold() != sample_hash:
+        raise ValueError("capacity plan sample selection hash is invalid")
+
+    measured_deltas = value["physical_allocation_deltas"]
+    if not isinstance(measured_deltas, Mapping):
+        raise ValueError("capacity plan physical_allocation_deltas must be an object")
+    expected_delta_names = {
+        name for name in CAPACITY_PLAN_FIELDS if name != "sample_snapshots"
+    }
+    if set(measured_deltas) != expected_delta_names:
+        raise ValueError("capacity plan physical allocation deltas do not match its measured components")
+    for name in CAPACITY_PLAN_FIELDS:
+        if name == "sample_snapshots":
+            continue
+        _strict_nonnegative_integer(measured_deltas[name], f"physical_allocation_deltas.{name}")
+        if measured_deltas.get(name) != components[name]:
+            raise ValueError(f"capacity plan physical delta does not match {name}")
+
+    evidence = value.get("independent_sql_evidence")
+    if require_independent_evidence:
+        if not isinstance(evidence, Mapping):
+            raise ValueError("capacity plan requires independently captured SQL allocation evidence")
+        if evidence.get("status") != "PASS" or evidence.get("artifact_version") != "CTI_SQL_PHYSICAL_ALLOCATION_EVIDENCE_V1":
+            raise ValueError("capacity plan SQL allocation evidence is not an accepted artifact")
+        provenance = evidence.get("capture_provenance")
+        if not isinstance(provenance, Mapping) or provenance.get("read_only") is not True:
+            raise ValueError("capacity plan SQL evidence is not marked read-only")
+        if provenance.get("database_name") != database_identity.get("database_name") or provenance.get("server_name") != database_identity.get("server_name"):
+            raise ValueError("capacity plan SQL evidence is bound to a different database identity")
+        if str(evidence.get("measurement_timestamp_utc") or "") != timestamp:
+            raise ValueError("capacity plan SQL evidence timestamp is not bound to the plan")
+        if evidence.get("capacity_plan_format_version") != CAPACITY_PLAN_FORMAT_VERSION:
+            raise ValueError("capacity plan SQL evidence targets a different plan format")
+        if evidence.get("database_identity") != dict(database_identity):
+            raise ValueError("capacity plan SQL evidence database identity is not bound to the plan")
+        if evidence.get("current_production_file_sizes") != file_sizes:
+            raise ValueError("capacity plan SQL evidence file sizes are not bound to the plan")
+        if evidence.get("current_tempdb_file_sizes") != tempdb_file_sizes:
+            raise ValueError("capacity plan SQL evidence tempdb file sizes are not bound to the plan")
+        if evidence.get("snapshot_population") != dict(population):
+            raise ValueError("capacity plan SQL evidence snapshot population is not bound to the plan")
+        if evidence.get("measured_sample_selection") != {
+            **dict(sample_selection),
+            "snapshot_ids": normalized_sample_ids,
+            "selection_sha256": sample_hash,
+        }:
+            raise ValueError("capacity plan SQL evidence sample selection is not bound to the plan")
+        for snapshot_name in ("sample_allocation_before", "sample_allocation_after"):
+            allocation_snapshot = evidence.get(snapshot_name)
+            if not isinstance(allocation_snapshot, Mapping):
+                raise ValueError(f"capacity plan SQL evidence is missing {snapshot_name}")
+            for field_name in CAPACITY_ALLOCATION_SNAPSHOT_FIELDS:
+                if field_name not in allocation_snapshot:
+                    raise ValueError(f"capacity plan SQL evidence {snapshot_name} is missing {field_name}")
+                _strict_nonnegative_integer(
+                    allocation_snapshot[field_name],
+                    f"independent_sql_evidence.{snapshot_name}.{field_name}",
+                )
+        query_results = evidence.get("query_results")
+        if not isinstance(query_results, Sequence) or isinstance(query_results, (str, bytes, bytearray)):
+            raise ValueError("capacity plan SQL evidence query provenance is missing")
+        query_ids = {str(item.get("statement_id")) for item in query_results if isinstance(item, Mapping)}
+        if not set(CAPACITY_EVIDENCE_QUERY_IDS).issubset(query_ids):
+            raise ValueError("capacity plan SQL evidence omits required allocation queries")
+        for item in query_results:
+            if not isinstance(item, Mapping):
+                raise ValueError("capacity plan SQL evidence query provenance is malformed")
+            if item.get("status") != "PASS" or item.get("executed") is not True:
+                raise ValueError("capacity plan SQL evidence contains an unexecuted query")
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", str(item.get("result_sha256") or "")):
+                raise ValueError("capacity plan SQL evidence query hash is missing")
+        integrity = evidence.get("artifact_integrity")
+        if not isinstance(integrity, Mapping) or integrity.get("status") != "SIGNED":
+            raise ValueError("capacity plan SQL evidence is not cryptographically signed")
+        if integrity.get("payload_sha256") != payload_sha256(evidence):
+            raise ValueError("capacity plan SQL evidence payload hash does not match")
+        if evidence.get("migration_implementation_version") != COMPACT_MIGRATION_IMPLEMENTATION_VERSION:
+            raise ValueError("capacity plan SQL evidence targets a different migration implementation")
+        if evidence.get("physical_allocation_deltas") != dict(measured_deltas):
+            raise ValueError("capacity plan SQL evidence deltas are not bound to the plan")
+
     return {
         "status": "PASS",
+        "capacity_plan_format_version": CAPACITY_PLAN_FORMAT_VERSION,
+        "migration_implementation_version": COMPACT_MIGRATION_IMPLEMENTATION_VERSION,
+        "database_identity": dict(database_identity),
+        "current_production_file_sizes": file_sizes,
+        "current_tempdb_file_sizes": tempdb_file_sizes,
+        "snapshot_population": dict(population),
+        "measurement_timestamp_utc": timestamp,
+        "measured_sample_selection": {
+            **dict(sample_selection),
+            "snapshot_ids": normalized_sample_ids,
+            "selection_sha256": sample_hash,
+        },
+        "physical_allocation_deltas": dict(measured_deltas),
+        "independent_sql_evidence": dict(evidence) if isinstance(evidence, Mapping) else None,
         "measurement_basis": str(value.get("measurement_basis", "")),
         "allocation_scope": allocation_scope,
         "sample_snapshots": sample_snapshots,
@@ -347,11 +741,23 @@ def _validate_capacity_plan(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_capacity_plan(path: Path) -> dict[str, Any]:
+def _load_capacity_plan(path: Path, *, public_key_path: Path | None = None) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, Mapping):
         raise ValueError("capacity plan must be a JSON object")
-    return _validate_capacity_plan(value)
+    plan = _validate_capacity_plan(value, require_independent_evidence=True)
+    evidence = plan.get("independent_sql_evidence")
+    if public_key_path is None:
+        raise ValueError("capacity plan SQL evidence public key is required for independent verification")
+    public_key = public_key_path.expanduser().resolve()
+    repository_root = ROOT.resolve()
+    if public_key == repository_root or repository_root in public_key.parents:
+        raise ValueError("capacity plan SQL evidence public key must remain outside the repository")
+    if not verify_signature(evidence, public_key_path=public_key, integrity=evidence.get("artifact_integrity")):
+        raise ValueError("capacity plan SQL evidence signature is not verified")
+    plan["independent_sql_evidence"] = dict(evidence)
+    plan["independent_evidence_signature_verified"] = True
+    return plan
 
 
 def _dict_row(row: Any, cursor: Any) -> dict[str, Any]:
@@ -363,14 +769,21 @@ def _dict_row(row: Any, cursor: Any) -> dict[str, Any]:
 
 
 def _read_unit(cursor: Any, snapshot_id: int) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
-    cursor.execute("SELECT * FROM stg.MddMacSourceSnapshot WHERE SnapshotId = %s", (snapshot_id,))
+    cursor.execute(
+        "SELECT * FROM stg.MddMacSourceSnapshot WHERE SnapshotId = %s ORDER BY SnapshotId",
+        (snapshot_id,),
+    )
     raw_snapshot = cursor.fetchone()
     if raw_snapshot is None:
         raise MssqlSafetyError(f"SnapshotId {snapshot_id} does not exist")
     snapshot_row = _dict_row(raw_snapshot, cursor)
     rows: dict[str, list[dict[str, Any]]] = {}
     for family, table in FAMILIES:
-        cursor.execute(f"SELECT * FROM {table} WHERE SnapshotId = %s", (snapshot_id,))
+        primary_key = SOURCE_PRIMARY_KEY_COLUMNS[family]
+        cursor.execute(
+            f"SELECT * FROM {table} WHERE SnapshotId = %s ORDER BY {primary_key}",
+            (snapshot_id,),
+        )
         rows[family] = [_dict_row(item, cursor) for item in cursor.fetchall()]
     return snapshot_row, rows
 
@@ -539,6 +952,114 @@ def _description_names(cursor: Any) -> set[str]:
     return {str(item[0]) for item in description if item}
 
 
+def _schema_metadata(cursor: Any, object_name: str, *, family: str) -> list[dict[str, Any]]:
+    """Read the catalog contract, not only the names in a result set."""
+
+    cursor.execute(
+        """
+        SELECT c.column_id, c.name, t.name AS type_name,
+               c.max_length, c.precision, c.scale, c.is_nullable
+        FROM sys.columns AS c
+        INNER JOIN sys.objects AS o ON o.object_id = c.object_id
+        INNER JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+        INNER JOIN sys.types AS t ON t.user_type_id = c.user_type_id
+        WHERE s.name + N'.' + o.name = %s
+        ORDER BY c.column_id
+        """,
+        (object_name,),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        raise MssqlSafetyError(f"SQL catalog schema measurement is incomplete for {object_name}")
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        raw_name = _row_value(row, "name", 1)
+        type_name = _row_value(row, "type_name", 2)
+        values = (
+            _row_value(row, "column_id", 0),
+            raw_name,
+            type_name,
+            _row_value(row, "max_length", 3),
+            _row_value(row, "precision", 4),
+            _row_value(row, "scale", 5),
+            _row_value(row, "is_nullable", 6),
+        )
+        if any(value is None for value in values):
+            raise MssqlSafetyError(f"SQL catalog schema measurement is incomplete for {object_name}")
+        normalized = normalize_sql_row({str(raw_name): None}, family=family)
+        if len(normalized) != 1:
+            raise MssqlSafetyError(f"SQL catalog column normalization is ambiguous for {object_name}.{raw_name}")
+        key = next(iter(normalized))
+        result.append(
+            {
+                "column_id": int(values[0]),
+                "name": str(raw_name),
+                "key": key,
+                "type_name": str(type_name).casefold(),
+                "max_length": int(values[3]),
+                "precision": int(values[4]),
+                "scale": int(values[5]),
+                "is_nullable": bool(values[6]),
+            }
+        )
+    return result
+
+
+def _schema_contract(
+    family: str,
+    source_schema: Sequence[Mapping[str, Any]],
+    view_schema: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    source_by_key = {str(item["key"]): item for item in source_schema}
+    view_by_key = {str(item["key"]): item for item in view_schema}
+    mismatches: list[dict[str, Any]] = []
+    # SnapshotId is the view's direct parent identity and must retain the
+    # source nullability contract.  Family IDs are COALESCE expressions in
+    # the compatibility views so SQL Server may expose them as metadata
+    # nullable even though the decoded value is required and is checked below
+    # by identity-aware row parity.
+    strict_nullability = {"snapshot_id"}
+    for key in sorted(set(source_by_key) | set(view_by_key)):
+        source = source_by_key.get(key)
+        view = view_by_key.get(key)
+        if source is None:
+            mismatches.append({"key": key, "kind": "unexpected_view_column"})
+            continue
+        if view is None:
+            mismatches.append({"key": key, "kind": "missing_view_column"})
+            continue
+        for field in ("type_name", "max_length", "precision", "scale"):
+            if source[field] != view[field]:
+                mismatches.append(
+                    {
+                        "key": key,
+                        "kind": field,
+                        "source": source[field],
+                        "view": view[field],
+                    }
+                )
+        if source["is_nullable"] != view["is_nullable"]:
+            # A view may be metadata-relaxed for a computed OPENJSON column,
+            # but it must never make a nullable source value non-nullable.
+            nullability_kind = "nullability" if key in strict_nullability else "nullable_view_relaxation"
+            if key in strict_nullability or source["is_nullable"] and not view["is_nullable"]:
+                mismatches.append(
+                    {
+                        "key": key,
+                        "kind": nullability_kind,
+                        "source": source["is_nullable"],
+                        "view": view["is_nullable"],
+                    }
+                )
+    return {
+        "status": "PASS" if not mismatches else "FAIL",
+        "family": family,
+        "source": [dict(item) for item in source_schema],
+        "view": [dict(item) for item in view_schema],
+        "mismatches": mismatches,
+    }
+
+
 def _logical_view_row(row: Mapping[str, Any], *, family: str) -> dict[str, Any]:
     """Build the separately validated decoded contract for a view row."""
 
@@ -626,25 +1147,14 @@ def _read_compatibility_view_parity(
     family_results: list[dict[str, Any]] = []
     for family, view in COMPATIBILITY_VIEWS:
         cursor.execute(f"SELECT * FROM {view} WHERE SnapshotId = %s", (snapshot["snapshot_id"],))
-        actual_description_names = _description_names(cursor)
         actual_rows = [_dict_row(item, cursor) for item in cursor.fetchall()]
-        actual_columns = {
-            key
-            for name in actual_description_names
-            for key in normalize_sql_row({name: None}, family=family)
-        }
         source_table = dict(SOURCE_TABLES)[family]
-        cursor.execute(f"SELECT TOP (0) * FROM {source_table}")
-        source_description_names = _description_names(cursor)
-        if not source_description_names:
-            raise MssqlSafetyError(f"SQL source-table schema measurement is incomplete for {family}")
-        expected_columns = {
-            key
-            for name in source_description_names
-            for key in normalize_sql_row({name: None}, family=family)
-        }
+        source_schema = _schema_metadata(cursor, source_table, family=family)
+        view_schema = _schema_metadata(cursor, view, family=family)
+        schema = _schema_contract(family, source_schema, view_schema)
+        expected_columns = sorted(str(item["key"]) for item in source_schema)
+        actual_columns = sorted(str(item["key"]) for item in view_schema)
         expected_rows = expected_by_family[family]
-        column_status = "PASS" if actual_columns == expected_columns else "FAIL"
         decoded_expected = [_logical_view_row(item, family=family) for item in expected_rows]
         decoded_actual = [_logical_view_row(item, family=family) for item in actual_rows]
         comparison = compare_row_family(family, decoded_expected, decoded_actual)
@@ -652,9 +1162,10 @@ def _read_compatibility_view_parity(
             {
                 "family": family,
                 "view": view,
-                "column_status": column_status,
-                "expected_columns": sorted(expected_columns),
-                "actual_columns": sorted(actual_columns),
+                "column_status": schema["status"],
+                "schema_contract": schema,
+                "expected_columns": expected_columns,
+                "actual_columns": actual_columns,
                 "comparison_status": "PASS" if comparison.passed else "FAIL",
                 "expected_count": comparison.expected_count,
                 "actual_count": comparison.actual_count,
@@ -948,7 +1459,12 @@ def _process(
     if capacity_plan is not None:
         if not isinstance(capacity_plan, Mapping):
             raise MssqlSafetyError("capacity plan must be an object")
+        signature_verified = capacity_plan.get("independent_evidence_signature_verified") is True
+        if apply and not signature_verified:
+            raise MssqlSafetyError("capacity plan SQL evidence signature was not independently verified")
         capacity_plan = _validate_capacity_plan(capacity_plan)
+        if signature_verified:
+            capacity_plan["independent_evidence_signature_verified"] = True
         required_extra_bytes = capacity_plan["peak_additional_bytes"]
     summary["capacity_plan"] = dict(capacity_plan) if capacity_plan else None
     summary["peak_migration_space_gib"] = (
@@ -957,6 +1473,7 @@ def _process(
         else None
     )
     summary["peak_capacity_plan_exact"] = capacity_plan is not None
+    baseline_capacity: Mapping[str, Any] | None = None
     if apply and capacity_plan is None:
         summary["status"] = "BLOCKED"
         summary["stop_reason"] = "a measured bounded SQL capacity plan is required for apply"
@@ -981,12 +1498,21 @@ def _process(
         # writer, or conflict check must leave the production database with no
         # migration metadata write at all.
         capacity = _read_capacity(cursor)
+        baseline_capacity = capacity
         preflight_capacity = _capacity_gate(
             capacity,
             log_limit=log_limit,
             required_extra_bytes=required_extra_bytes,
+            capacity_plan=capacity_plan,
+            baseline_capacity=baseline_capacity,
         )
         summary["production_capacity_preflight"] = preflight_capacity
+        summary["capacity_baseline"] = {
+            "volumes": capacity.get("volumes", []),
+            "files": capacity.get("files", []),
+            "tempdb_files": capacity.get("tempdb_files", []),
+            "log": capacity.get("log", {}),
+        }
         if preflight_capacity.get("status") != "PASS":
             summary["status"] = "BLOCKED"
             summary["stop_reason"] = "production capacity, log, or active-writer preflight failed"
@@ -1012,6 +1538,8 @@ def _process(
                 capacity,
                 log_limit=log_limit,
                 required_extra_bytes=required_extra_bytes,
+                capacity_plan=capacity_plan,
+                baseline_capacity=baseline_capacity,
             )
             unit["preflight_capacity"] = gate
             if gate["status"] != "PASS":
@@ -1083,10 +1611,13 @@ def _process(
                     connection.commit()
                     unit["status"] = "VERIFIED"
                     summary["verified"] += 1
+                post_capacity = _read_capacity(cursor)
                 post_gate = _capacity_gate(
-                    _read_capacity(cursor),
+                    post_capacity,
                     log_limit=log_limit,
                     required_extra_bytes=required_extra_bytes,
+                    capacity_plan=capacity_plan,
+                    baseline_capacity=baseline_capacity,
                 )
                 unit["postflight_capacity"] = post_gate
                 if post_gate["status"] != "PASS":
@@ -1162,6 +1693,8 @@ def _process(
                 _read_capacity(cursor),
                 log_limit=log_limit,
                 required_extra_bytes=required_extra_bytes,
+                capacity_plan=capacity_plan,
+                baseline_capacity=baseline_capacity,
             )
             if gate["status"] != "PASS":
                 summary["status"] = "BLOCKED"
@@ -1209,7 +1742,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--capacity-plan",
         type=Path,
-        help="measured bounded SQL allocation plan required for --apply",
+        help="signed, independently measured SQL allocation plan required for --apply",
+    )
+    parser.add_argument(
+        "--capacity-evidence-public-key",
+        type=Path,
+        help="operator public key used to verify the embedded SQL allocation evidence",
     )
     parser.add_argument(
         "--backup-evidence",
@@ -1232,10 +1770,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise MssqlSafetyError("--capacity-plan is required for historical migration apply")
             if args.backup_evidence is None:
                 raise MssqlSafetyError("--backup-evidence is required for historical migration apply")
+            public_key_path = args.capacity_evidence_public_key
+            if public_key_path is None and os.environ.get("MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"):
+                public_key_path = Path(os.environ["MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY"])
+            if public_key_path is None:
+                raise MssqlSafetyError(
+                    "--capacity-evidence-public-key or MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY is required"
+                )
             result["backup_gate"] = _backup_gate(args.backup_evidence)
             if result["backup_gate"].get("status") != "PASS":
                 raise MssqlSafetyError("fresh checksum-verified off-drive backup gate is not proven")
-            capacity_plan = _load_capacity_plan(args.capacity_plan)
+            capacity_plan = _load_capacity_plan(
+                args.capacity_plan,
+                public_key_path=public_key_path,
+            )
             result["capacity_plan"] = capacity_plan
         if result["collector_gate"].get("status") != "PASS":
             raise MssqlSafetyError("collector stopped/disabled gate is not proven")

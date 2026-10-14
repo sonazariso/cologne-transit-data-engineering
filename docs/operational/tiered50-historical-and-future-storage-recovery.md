@@ -1,4 +1,4 @@
-# Tiered50 historical and future storage recovery — S145 correction
+# Tiered50 historical and future storage recovery — S146 correction
 
 Date: 2026-10-14 (Europe/Berlin)
 
@@ -8,7 +8,7 @@ collector, or introduce a replacement architecture.
 
 ## Current result
 
-The requested implementation corrections are applied and offline-tested. No
+The requested S146 implementation corrections are applied and offline-tested. No
 production SQL connection, backup, DDL, data migration, legacy-table
 retirement, MDF shrink, Power BI refresh, collector start, or MDD request was
 performed.
@@ -36,8 +36,9 @@ satisfy the future target of 10 GiB growth while retaining a 12 GiB floor
 The blockers are missing SQL Server validation evidence, missing exact
 full-history physical capacity measurements, and missing RESTORE VERIFYONLY
 evidence for the reported existing backup. The implementation now has a
-safe, read-only verification path for that existing file and a lab-only
-physical candidate measurement path; neither was executed from this Mac.
+safe, read-only verification path for that existing file and a signed,
+independently bound physical-capacity evidence contract; neither production
+validation path was executed from this Mac.
 If a fresh physical-capacity measurement fails its stated thresholds, the
 result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable future
 writes in that case.
@@ -63,15 +64,31 @@ The existing implementation was corrected in place:
   batch poisons the remaining batches. The Python apply runner first executes
   the complete guarded script in an outer rollback validation transaction.
 - `scripts/migrate_historical_compact_observations.py` now casts SQL page
-  counts to BIGINT before byte multiplication, measures active collector SQL
-  sessions, and performs capacity/log/conflict preflight before the first
-  migration-ledger write. The measured plan must explicitly cover the exact
-  full-history peak sum.
+  counts to BIGINT before byte multiplication, reads target and tempdb file
+  allocation/autogrowth metadata, measures active collector SQL sessions, and
+  performs capacity/log/conflict preflight before the first migration-ledger
+  write. Each checkpoint credits observed data/log/tempdb allocation deltas
+  once, keeps rollback and transient-duplication reserves live, accounts for
+  external C: consumption through the physical free-space gate, and rejects
+  finite SQL autogrowth limits that cannot fit the remaining reserve. The
+  measured plan must explicitly cover the exact full-history peak sum.
+- Historical envelope arrays are ordered by their immutable source-family
+  primary keys before canonical UTF-16LE serialization. The runner also adds
+  `ORDER BY` to every source-family read, so a resumed `BUILT` unit cannot
+  acquire a different hash solely because SQL Server returned rows in another
+  order.
+- Capacity plans now carry database identity, production file sizes, snapshot
+  population, a timestamp, the exact measured sample selection, physical
+  allocation deltas, and the migration implementation version. Apply requires
+  a separately captured, read-only SQL allocation artifact whose fields are
+  bound to those plan values, signed with the operator key, and verified with
+  `--capacity-evidence-public-key` (or `MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY`).
 - Historical verification now checks the actual SQL compatibility views and a
-  separate physical-field readback view. It compares normalized decoded rows,
-  exact columns, raw JSON types/values, NULL versus empty values, original
-  GZIP bytes, identities, timestamps, paths, JSON, duplicates, and Unicode
-  before promotion.
+  separate physical-field readback view. It compares catalog data types,
+  lengths, precision, scale, and nullability rules; normalized decoded rows;
+  raw JSON types/values; NULL versus empty values; original GZIP bytes;
+  identities, timestamps, paths, JSON, duplicates, and Unicode before
+  promotion.
 - BUILT units are restartable and returned explicitly by the store procedure;
   VERIFIED units are immutable, quarantined units cannot be promoted, and
   network/readback failures leave the migration BLOCKED with a retryable
@@ -117,7 +134,8 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 | `<WINDOWS_C_FREE_GIB>` | `13.86` GiB supplied latest Windows estimate | Re-measure in SSMS; only 1.86 GiB is above the 12 GiB floor |
 | `<BACKUP_DEST_FREE_GIB>` | Fresh Windows measurement of the confirmed UNC destination | Must cover the expected backup size plus the operator-approved reserve; `xp_fileexist` proves reachability, not free capacity |
 | `<MIGRATION_ID>` | New UUID recorded by the operator, or the existing failed/blocked UUID being intentionally resumed | Never reuse a UUID for unrelated history |
-| `<CAPACITY_PLAN_FILE>` | JSON file made from measured SQL allocation, log, tempdb, rollback, and duplication peaks | Must cover `FULL_HISTORY_MIGRATION_PEAK` |
+| `<CAPACITY_PLAN_FILE>` | JSON file made from measured SQL allocation, log, tempdb, rollback, autogrowth, and duplication peaks plus signed evidence bindings | Must cover `FULL_HISTORY_MIGRATION_PEAK`; self-declared numbers are rejected |
+| `<CAPACITY_EVIDENCE_PUBLIC_KEY>` | Operator-controlled public key outside the repository | Must verify the signed SQL allocation evidence embedded in the capacity plan |
 | `<MDF_LOGICAL_FILE_NAME>` | Exact `sys.database_files.name` returned by SSMS | Never guess the logical file name |
 | `<TARGET_SIZE_MB>` | Calculated from current used pages plus explicit headroom | Never substitute `SHRINKDATABASE` |
 | `<POWERBI_APPROVER>` | Human who verified the real consumer refresh | Record outside SQL and in the retirement approval artifact |
@@ -226,10 +244,62 @@ FROM stg.MddMacCompactObservationEnvelope;
 ```
 
 Prepare `<CAPACITY_PLAN_FILE>` from a real SQL physical-allocation pilot. It
-must contain these fields, with no invented values:
+must contain these fields, with no invented values. The pilot must run against
+a restored production-shape copy for the measured sample; capture the target
+database identity, target database file sizes, snapshot population, sample
+SnapshotIds, before/after physical allocation deltas, log/tempdb growth,
+rollback reserve, and autogrowth limits. The signed evidence object must repeat
+the bound identity, file sizes, population, sample selection, timestamp, and
+deltas; a plan containing only self-declared numbers is rejected.
 
 ```json
 {
+  "capacity_plan_format_version": "CTI_SQL_PHYSICAL_CAPACITY_PLAN_V2",
+  "migration_implementation_version": "compact-historical-migration-v2",
+  "database_identity": {
+    "server_name": "<SERVERPROPERTY_SERVER_NAME>",
+    "database_name": "CologneTransitIntelligence"
+  },
+  "current_production_file_sizes": [
+    {
+      "file_id": <file_id>,
+      "name": "<logical_file_name>",
+      "type": "ROWS|LOG",
+      "volume": "C:\\",
+      "physical_name": "<SQL_physical_name>",
+      "allocated_bytes": <measured_bytes>,
+      "used_bytes": <measured_bytes_or_null_for_log>,
+      "growth_value": <measured_value>,
+      "is_percent_growth": false,
+      "max_size_pages": <measured_pages_or_minus_one>,
+      "available_bytes": <measured_bytes>
+    }
+  ],
+  "current_tempdb_file_sizes": [
+    {
+      "file_id": <tempdb_file_id>,
+      "name": "<tempdb_logical_file_name>",
+      "type": "ROWS",
+      "volume": "C:\\",
+      "physical_name": "<tempdb_physical_name>",
+      "allocated_bytes": <measured_bytes>,
+      "used_bytes": <measured_bytes_or_null_for_log>,
+      "growth_value": <measured_value>,
+      "is_percent_growth": false,
+      "max_size_pages": <measured_pages_or_minus_one>,
+      "available_bytes": <measured_bytes>
+    }
+  ],
+  "snapshot_population": {
+    "count": <current_full_snapshot_count>,
+    "first_snapshot_id": <first_snapshot_id>,
+    "last_snapshot_id": <last_snapshot_id>
+  },
+  "measurement_timestamp_utc": "<UTC_TIMESTAMP>",
+  "measured_sample_selection": {
+    "snapshot_ids": [<measured_snapshot_ids>],
+    "selection_sha256": "<sha256_of_compact_snapshot_id_array>"
+  },
   "sample_snapshots": <positive_integer>,
   "planned_snapshot_count": <current_full_snapshot_count>,
   "measurement_basis": "SQL Server physical allocation measurement on the restored production-shape copy",
@@ -240,9 +310,80 @@ must contain these fields, with no invented values:
   "transaction_log_bytes": <measured_bytes>,
   "tempdb_bytes": <measured_bytes>,
   "rollback_bytes": <measured_bytes>,
+  "autogrowth_reserve_bytes": <measured_bytes>,
   "peak_temporary_duplication_bytes": <measured_bytes>,
-  "peak_additional_bytes": <exact_sum_of_the_six_components>
+  "physical_allocation_deltas": {
+    "envelope_allocation_bytes": <same_measured_bytes>,
+    "index_overhead_bytes": <same_measured_bytes>,
+    "transaction_log_bytes": <same_measured_bytes>,
+    "tempdb_bytes": <same_measured_bytes>,
+    "rollback_bytes": <same_measured_bytes>,
+    "autogrowth_reserve_bytes": <same_measured_bytes>,
+    "peak_temporary_duplication_bytes": <same_measured_bytes>
+  },
+  "peak_additional_bytes": <exact_sum_of_the_seven_components>,
+  "independent_sql_evidence": {
+    "artifact_version": "CTI_SQL_PHYSICAL_ALLOCATION_EVIDENCE_V1",
+    "status": "PASS",
+    "capture_provenance": {
+      "read_only": true,
+      "server_name": "<same_server_name>",
+      "database_name": "CologneTransitIntelligence"
+    },
+    "sample_allocation_before": {
+      "database_file_allocated_bytes": <measured_bytes>,
+      "log_file_allocated_bytes": <measured_bytes>,
+      "tempdb_file_allocated_bytes": <measured_bytes>,
+      "transaction_log_used_bytes": <measured_bytes>,
+      "windows_c_available_bytes": <measured_bytes>
+    },
+    "sample_allocation_after": {
+      "database_file_allocated_bytes": <measured_bytes>,
+      "log_file_allocated_bytes": <measured_bytes>,
+      "tempdb_file_allocated_bytes": <measured_bytes>,
+      "transaction_log_used_bytes": <measured_bytes>,
+      "windows_c_available_bytes": <measured_bytes>
+    },
+    "query_results": [
+      {"statement_id": "capacity.database_identity", "status": "PASS", "executed": true, "result_sha256": "<64_hex_chars>"}
+    ],
+    "artifact_integrity": {
+      "status": "SIGNED",
+      "payload_sha256": "<sha256>",
+      "signature_base64": "<operator_signature>"
+    }
+  }
 }
+```
+
+The evidence query list must include `capacity.database_identity`,
+`capacity.database_files`, `capacity.snapshot_population`,
+`capacity.sample_allocation_before`, `capacity.sample_allocation_after`,
+`capacity.transaction_log`, `capacity.tempdb`, `capacity.rollback`, and
+`capacity.autogrowth`. Capture each result in SSMS using the existing
+read-only/admin workflow, hash the canonical result, and sign the evidence
+with the operator-controlled key outside the repository. Use the existing
+`scripts/sign_admin_evidence.py` signing utility for the detached signature;
+do not copy its private key into the repository. The signed object must also
+repeat `capacity_plan_format_version`, `migration_implementation_version`,
+`database_identity`, `current_production_file_sizes`,
+`current_tempdb_file_sizes`, `snapshot_population`,
+`measurement_timestamp_utc`, `measured_sample_selection`, and
+`physical_allocation_deltas` exactly, plus signed raw before/after allocation
+snapshots for the sample. The JSON validator binds the signed evidence to the
+plan before any SQL connection is opened.
+
+For the existing signer, use an operator-secure intermediate path and keep
+the private key outside the repository:
+
+```text
+MSSQL_ADMIN_EVIDENCE_PUBLIC_KEY=<CAPACITY_EVIDENCE_PUBLIC_KEY> \
+python3 scripts/sign_admin_evidence.py \
+  --input <UNSIGNED_CAPACITY_EVIDENCE_JSON> \
+  --output <OPERATOR_SECURE_CAPACITY_EVIDENCE_JSON> \
+  --intermediate \
+  --signing-key <OPERATOR_SECURE_PRIVATE_KEY> \
+  --public-key <CAPACITY_EVIDENCE_PUBLIC_KEY>
 ```
 
 If an authorized migration host is available, the exact existing command is:
@@ -253,6 +394,7 @@ python3 scripts/migrate_historical_compact_observations.py \
   --migration-id <MIGRATION_ID> \
   --batch-size 1 \
   --capacity-plan <CAPACITY_PLAN_FILE> \
+  --capacity-evidence-public-key <CAPACITY_EVIDENCE_PUBLIC_KEY> \
   --backup-evidence <fresh-backup-evidence.json> \
   --json
 ```
@@ -655,10 +797,10 @@ python3 -m compileall -q src scripts tests                                  PASS
 PYTHONPATH=src python3 -m unittest tests.test_compact_observation_storage \
   tests.test_windows_sql_backup_validation tests.test_windows_sql_result_shape \
   tests.test_windows_sql_dbnull tests.test_production_repairs \
-  tests.test_tiered50_timing_capacity -q                                    52 PASS, 3 skipped
+  tests.test_tiered50_timing_capacity -q                                    56 PASS, 3 skipped
 python3 scripts/validate_snapshot_gzip_storage_v1.py                         PASS
 PYTHONPATH=src python3 scripts/validate_mssql_migration.py                   PASS
-PYTHONPATH=src python3 -m unittest discover -s tests -q                      416 run; PASS, 3 skipped
+PYTHONPATH=src python3 -m unittest discover -s tests -q                      420 run; PASS, 3 skipped
 git diff --check                                                             PASS
 ```
 
