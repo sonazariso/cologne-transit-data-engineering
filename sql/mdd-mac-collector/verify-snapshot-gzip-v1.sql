@@ -4,8 +4,9 @@
     This validates every stored compressed snapshot without returning payload
     text. Rows that still retain both physical representations are compared
     by exact UTF-16LE bytes, length, and the compatible readback view. A
-    compressed-only row was compared inside the lossless backfill transaction;
-    here it is checked for a valid decompression, JSON shape, and view parity.
+    compressed-only row is checked for a valid decompression, JSON shape, and
+    view parity. The final result sets are stable evidence for the separate
+    backup-coverage and capacity gates; they do not authorize a write.
 */
 USE CologneTransitIntelligence;
 GO
@@ -76,6 +77,39 @@ IF EXISTS
       )
 )
     THROW 51114, 'Compressed-only SnapshotJson readback parity failed.', 1;
+
+/* Plaintext-only rows must also be unchanged through the consumer view. */
+IF EXISTS
+(
+    SELECT 1
+    FROM stg.MddMacSourceSnapshot AS s
+    INNER JOIN stg.vMddMacSourceSnapshotJson AS v ON v.SnapshotId = s.SnapshotId
+    WHERE s.SnapshotJson IS NOT NULL
+      AND s.SnapshotJsonGzip IS NULL
+      AND
+      (
+          DATALENGTH(v.SnapshotJson) <> DATALENGTH(s.SnapshotJson)
+          OR HASHBYTES(N'SHA2_256', CONVERT(VARBINARY(MAX), v.SnapshotJson))
+             <> HASHBYTES(N'SHA2_256', CONVERT(VARBINARY(MAX), s.SnapshotJson))
+      )
+)
+    THROW 51116, 'Plaintext SnapshotJson readback parity failed.', 1;
+
+SELECT
+    N'capacity.snapshot_gzip_readback_compatibility' AS statement_id,
+    COUNT_BIG(*) AS snapshot_rows,
+    SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END)
+        AS plaintext_rows,
+    SUM(CASE WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END)
+        AS compressed_rows,
+    COUNT_BIG(v.SnapshotId) AS compatible_view_rows,
+    CASE WHEN COUNT_BIG(*) = COUNT_BIG(v.SnapshotId)
+              AND SUM(CASE WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) = 0
+              AND SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) = 0
+         THEN N'PASS' ELSE N'BLOCKED' END AS compatibility_status,
+    N'EXACT_UTF16_LENGTH_AND_SHA256_VIEW_PARITY' AS verification_basis
+FROM stg.MddMacSourceSnapshot AS s
+LEFT JOIN stg.vMddMacSourceSnapshotJson AS v ON v.SnapshotId = s.SnapshotId;
 
 SELECT
     COUNT_BIG(*) AS Snapshots,

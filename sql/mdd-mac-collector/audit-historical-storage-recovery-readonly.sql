@@ -21,6 +21,8 @@ USE CologneTransitIntelligence;
 GO
 SET NOCOUNT ON;
 SET LOCK_TIMEOUT 5000;
+DECLARE @WindowsSafetyFloorBytes BIGINT = CONVERT(bigint, 12)
+    * CONVERT(bigint, 1024) * CONVERT(bigint, 1024) * CONVERT(bigint, 1024);
 
 SELECT
     N'capacity.database_identity' AS statement_id,
@@ -273,6 +275,48 @@ BEGIN
         CAST(NULL AS bigint) AS missing_snapshot_payload_rows,
         CAST(NULL AS bigint) AS plaintext_snapshot_bytes,
         CAST(NULL AS bigint) AS gzip_snapshot_bytes,
+        N'SnapshotJson' AS missing_required_column;
+END;
+
+/*
+    Exact bounded candidate measurement for the first in-place recovery step.
+    COMPRESS is evaluated against every currently plaintext SnapshotJson value
+    and no row is updated.  The result is logical payload evidence only; the
+    one-row transaction-log and physical allocation peak comes from the
+    isolated Snapshot GZIP lab script.
+*/
+IF COALESCE(@SnapshotJsonPresent, 0) = 1
+BEGIN
+    DECLARE @SnapshotGzipSavingsSql nvarchar(max) = N'
+SELECT
+    N''capacity.snapshot_gzip_exact_savings'' AS statement_id,
+    COUNT_BIG(*) AS total_snapshot_rows,
+    SUM(CONVERT(bigint, CASE WHEN SnapshotJson IS NOT NULL ' +
+        CASE WHEN COALESCE(@SnapshotGzipPresent, 0) = 1
+             THEN N' AND SnapshotJsonGzip IS NULL' ELSE N'' END +
+        N' THEN 1 ELSE 0 END)) AS eligible_plaintext_rows,
+    SUM(CONVERT(bigint, CASE WHEN SnapshotJson IS NOT NULL ' +
+        CASE WHEN COALESCE(@SnapshotGzipPresent, 0) = 1
+             THEN N' AND SnapshotJsonGzip IS NULL' ELSE N'' END +
+        N' THEN DATALENGTH(SnapshotJson) ELSE 0 END)) AS plaintext_utf16_bytes,
+    SUM(CONVERT(bigint, CASE WHEN SnapshotJson IS NOT NULL ' +
+        CASE WHEN COALESCE(@SnapshotGzipPresent, 0) = 1
+             THEN N' AND SnapshotJsonGzip IS NULL' ELSE N'' END +
+        N' THEN DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END)) AS compressed_payload_bytes,
+    SUM(CONVERT(bigint, CASE WHEN SnapshotJson IS NOT NULL ' +
+        CASE WHEN COALESCE(@SnapshotGzipPresent, 0) = 1
+             THEN N' AND SnapshotJsonGzip IS NULL' ELSE N'' END +
+        N' THEN DATALENGTH(SnapshotJson) - DATALENGTH(COMPRESS(SnapshotJson)) ELSE 0 END))
+        AS exact_payload_savings_bytes,
+    N''PAYLOAD_ONLY; PHYSICAL_ALLOCATION_REQUIRES_ISOLATED_LAB'' AS measurement_basis
+FROM stg.MddMacSourceSnapshot;';
+    EXEC sys.sp_executesql @SnapshotGzipSavingsSql;
+END
+ELSE
+BEGIN
+    SELECT
+        N'capacity.snapshot_gzip_exact_savings' AS statement_id,
+        N'BLOCKED_MISSING_REQUIRED_COLUMN' AS audit_status,
         N'SnapshotJson' AS missing_required_column;
 END;
 
@@ -548,65 +592,36 @@ BEGIN
 END;
 
 /*
-    SQL can identify the C: allocation that a separate VMware disk could
-    potentially receive, but it cannot prove that a VMDK was attached,
-    formatted, backed up, or granted to the SQL Server service.  Keep those
-    facts as an explicit external gate rather than guessing them here.
+    Existing C: physical-space recovery assessment.  Internal free pages are
+    not assumed to be returnable to Windows: only a later, explicitly approved
+    bounded DBCC SHRINKFILE can establish that, and the before/after volume
+    measurement must show a positive Windows free-space delta.
 */
-;WITH RelocationFiles AS
-(
-    SELECT
-        N'USER_DATABASE' AS file_scope,
-        df.file_id,
-        df.name AS logical_file_name,
-        df.type_desc AS file_type,
-        df.physical_name,
-        vs.volume_mount_point,
-        CONVERT(bigint, df.size) * CONVERT(bigint, 8192) AS allocated_bytes,
-        CONVERT(bigint, vs.available_bytes) AS source_volume_available_bytes
-    FROM sys.database_files AS df
-    CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
-    UNION ALL
-    SELECT
-        N'TEMPDB' AS file_scope,
-        df.file_id,
-        df.name,
-        df.type_desc,
-        df.physical_name,
-        vs.volume_mount_point,
-        CONVERT(bigint, df.size) * CONVERT(bigint, 8192),
-        CONVERT(bigint, vs.available_bytes)
-    FROM tempdb.sys.database_files AS df
-    CROSS APPLY sys.dm_os_volume_stats(DB_ID(N'tempdb'), df.file_id) AS vs
-)
 SELECT
-    N'capacity.vmware_relocation_assessment' AS statement_id,
-    file_scope,
-    file_id,
-    logical_file_name,
-    file_type,
-    physical_name,
-    volume_mount_point AS source_volume,
-    allocated_bytes,
-    source_volume_available_bytes,
-    CONVERT(bit, CASE WHEN UPPER(LEFT(volume_mount_point, 2)) = N'C:' THEN 1 ELSE 0 END)
-        AS on_windows_c,
-    CONVERT(bigint, CASE
-        WHEN file_scope = N'USER_DATABASE'
-         AND UPPER(LEFT(volume_mount_point, 2)) = N'C:' THEN allocated_bytes
-        ELSE 0 END) AS estimated_c_bytes_recovered_if_moved,
-    SUM(CASE
-        WHEN file_scope = N'USER_DATABASE'
-         AND UPPER(LEFT(volume_mount_point, 2)) = N'C:' THEN allocated_bytes
-        ELSE CONVERT(bigint, 0) END) OVER () AS user_database_c_target_free_required_bytes,
-    CASE
-        WHEN file_scope = N'TEMPDB' THEN N'TEMPDB_MOVE_REQUIRES_PLANNED_SQL_RESTART'
-        WHEN file_type = N'LOG' THEN N'USER_DATABASE_FILE_MOVE_REQUIRES_OFFLINE_WINDOW'
-        ELSE N'USER_DATABASE_FILE_MOVE_REQUIRES_OFFLINE_WINDOW'
-    END AS relocation_prerequisite,
-    N'NOT_VERIFIED_VMWARE_DESTINATION' AS assessment_status
-FROM RelocationFiles
-ORDER BY file_scope, file_id;
+    N'capacity.datafile_space_reclamation' AS statement_id,
+    df.file_id,
+    df.name AS logical_file_name,
+    df.type_desc AS file_type,
+    df.physical_name,
+    vs.volume_mount_point,
+    CONVERT(bigint, df.size) * CONVERT(bigint, 8192) AS allocated_bytes,
+    CONVERT(bigint, FILEPROPERTY(df.name, N'SpaceUsed')) * CONVERT(bigint, 8192)
+        AS used_bytes,
+    CONVERT(bigint, df.size) * CONVERT(bigint, 8192)
+      - CONVERT(bigint, FILEPROPERTY(df.name, N'SpaceUsed')) * CONVERT(bigint, 8192)
+        AS internal_free_bytes,
+    CONVERT(bigint, vs.available_bytes) AS windows_volume_available_bytes,
+    @WindowsSafetyFloorBytes AS required_windows_c_floor_bytes,
+    CASE WHEN UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:'
+              AND CONVERT(bigint, vs.available_bytes) >= @WindowsSafetyFloorBytes
+         THEN N'ELIGIBLE_FOR_SEPARATE_BOUNDED_SHRINK_ASSESSMENT'
+         ELSE N'BLOCKED_OR_NOT_C_DATA_FILE' END AS shrink_assessment_status,
+    N'NOT_MEASURED_RETURNABLE_TO_WINDOWS; TAIL_FREE_SPACE_AND_BEFORE_AFTER_SHRINK_REQUIRED'
+        AS physical_recovery_status
+FROM sys.database_files AS df
+CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+WHERE df.type = 0
+ORDER BY df.file_id;
 
 /* Deterministic IDs for length-only representative samples. */
 ;WITH OrderedSnapshots AS

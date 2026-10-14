@@ -107,7 +107,8 @@ CAPACITY_EVIDENCE_QUERY_IDS = (
     "capacity.autogrowth",
     "capacity.timing_column_bytes",
     "capacity.timing_index_design",
-    "capacity.vmware_relocation_assessment",
+    "capacity.snapshot_gzip_exact_savings",
+    "capacity.datafile_space_reclamation",
 )
 CAPACITY_PLAN_STRICT_FIELDS = (
     "execution_environment",

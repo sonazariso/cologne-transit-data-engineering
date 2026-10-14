@@ -13,12 +13,13 @@ REPORT = ROOT / "docs/operational/tiered50-historical-and-future-storage-recover
 
 
 class S150StorageRecoveryTests(unittest.TestCase):
-    def test_production_audit_measures_timing_columns_indexes_and_relocation(self) -> None:
+    def test_production_audit_measures_timing_columns_and_c_only_reclamation(self) -> None:
         audit = AUDIT.read_text(encoding="utf-8")
         for statement_id in (
             "capacity.timing_column_bytes",
             "capacity.timing_index_design",
-            "capacity.vmware_relocation_assessment",
+            "capacity.snapshot_gzip_exact_savings",
+            "capacity.datafile_space_reclamation",
         ):
             self.assertIn(statement_id, audit)
         self.assertIn("DATALENGTH(t.", audit)
@@ -26,13 +27,15 @@ class S150StorageRecoveryTests(unittest.TestCase):
         self.assertIn("average_non_null_value_bytes", audit)
         self.assertIn("key_index_count", audit)
         self.assertIn("include_index_count", audit)
-        self.assertIn("estimated_c_bytes_recovered_if_moved", audit)
-        self.assertIn("user_database_c_target_free_required_bytes", audit)
-        self.assertIn("TEMPDB_MOVE_REQUIRES_PLANNED_SQL_RESTART", audit)
+        self.assertIn("exact_payload_savings_bytes", audit)
+        self.assertIn("internal_free_bytes", audit)
+        self.assertIn("SHRINKFILE", audit.upper())
         migration = (ROOT / "scripts/migrate_historical_compact_observations.py").read_text(encoding="utf-8")
         self.assertIn('"capacity.timing_column_bytes"', migration)
         self.assertIn('"capacity.timing_index_design"', migration)
-        self.assertIn('"capacity.vmware_relocation_assessment"', migration)
+        self.assertIn('"capacity.snapshot_gzip_exact_savings"', migration)
+        self.assertIn('"capacity.datafile_space_reclamation"', migration)
+        self.assertNotIn("vmware_relocation_assessment", migration)
 
     def test_lab_comparison_is_disabled_and_rejects_production_or_c_drive(self) -> None:
         lab = LAB.read_text(encoding="utf-8")
@@ -52,6 +55,10 @@ class S150StorageRecoveryTests(unittest.TestCase):
         self.assertIn("dictionary_roundtrip_mismatch_count", lab)
         self.assertIn("variable_source_null_cell_count", lab)
         self.assertIn("variable_source_zero_length_cell_count", lab)
+        self.assertIn("@SampleRows", lab)
+        self.assertIn("@ReclaimedCapacityBytes", lab)
+        self.assertIn("#TimingSourceSample", lab)
+        self.assertIn("NO_FULL_HISTORY_DUPLICATE", lab)
 
         # The destructive lab DDL must remain after the explicit @RunLab guard.
         guard = lab.index("IF @RunLab <> 1")
@@ -60,12 +67,14 @@ class S150StorageRecoveryTests(unittest.TestCase):
 
     def test_report_records_supplied_baseline_and_does_not_claim_savings(self) -> None:
         report = REPORT.read_text(encoding="utf-8")
-        for value in ("2,553,690", "12.99 GiB", "11.87 GiB", "13.92 GiB", "1.92 GiB"):
+        for value in ("695", "5.51 GiB", "2,553,690", "12.99 GiB", "11.87 GiB", "13.92 GiB", "1.92 GiB"):
             self.assertIn(value, report)
-        self.assertIn("No per-column savings number is claimed yet", report)
-        self.assertIn("PAGE-versus-dictionary measurement", report)
-        self.assertIn("The one recommended safe execution path is", report)
-        self.assertIn("VMware virtual disk", report)
+        self.assertIn("exact `COMPRESS`", report)
+        self.assertIn("bounded Timing lab sample", report)
+        self.assertIn("existing C: allocation only", report)
+        self.assertIn("EXTERNAL_STORAGE_ADDITION: EXCLUDED_FROM_ACTIVE_PLAN", report)
+        self.assertNotIn("VMware", report)
+        self.assertNotIn("MDF", report)
         self.assertIn("PROBLEM_SOLVED: NO", report)
         self.assertNotRegex(report, r"Stage\s+15")
 

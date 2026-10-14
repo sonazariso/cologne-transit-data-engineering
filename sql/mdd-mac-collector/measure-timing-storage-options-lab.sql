@@ -1,8 +1,12 @@
 /*
     COLOGNE TRANSIT INTELLIGENCE — TIMING STORAGE OPTIONS LAB MEASUREMENT
 
-    This is an isolated-lab measurement, not a production migration.  It
-    creates and rebuilds disposable candidate tables in the lab database so
+    This is an isolated-lab bounded-sample measurement, not a production
+    migration.  It creates and rebuilds disposable candidate tables for a
+    deterministic sample that fits inside capacity reclaimed by the preceding
+    SnapshotJsonGzip recovery.  It never creates a full-history duplicate of
+    the approximately 12 GiB TimingObservation table.
+
     SQL Server reports actual reserved pages for:
 
       1. the current TimingObservation row shape with the source indexes and
@@ -11,7 +15,9 @@
          dictionary references for every variable-width physical column, and
          the original fixed-width values retained in the base row.
 
-    The candidate tables preserve every source row by TimingObservationId.
+    The candidate tables preserve every sampled source row by
+    TimingObservationId.  The sample is evidence for a follow-up decision,
+    not a full-history production authorization.
     NULL has no dictionary reference, while an empty value has a reference to
     a zero-byte dictionary value.  VARBINARY values are copied byte-for-byte,
     so the original JSON and GZIP companions are not replaced by a lossy
@@ -20,9 +26,9 @@
     The script is intentionally disabled.  It is safe to enable only on a
     restored, isolated SQL Server copy whose data, log, and tempdb files are
     all on a non-C: volume.  It must never be run on DataAnalyst-VM.  The
-    candidate tables may consume substantial data-file, log, tempdb, and
-    transaction space; keep the lab recovery point until the results are
-    captured and reviewed.
+    candidate tables may consume the operator-supplied reclaimed-capacity
+    budget, log, and tempdb space; keep the lab recovery point until the
+    results are captured and reviewed.
 
     The allocation result is checkpointed after each physical operation.  A
     separate read-only sampler should poll the same file/log/tempdb DMVs while
@@ -36,6 +42,9 @@ SET XACT_ABORT ON;
 SET LOCK_TIMEOUT 5000;
 
 DECLARE @RunLab bit = 0;
+DECLARE @SampleRows bigint = 50000;
+DECLARE @ReclaimedCapacityBytes bigint = 0;
+DECLARE @MaximumSampleRows bigint = 100000;
 DECLARE @ServerName nvarchar(128) = CONVERT(nvarchar(128), SERVERPROPERTY(N'ServerName'));
 DECLARE @DatabaseName sysname = DB_NAME();
 
@@ -60,8 +69,23 @@ IF EXISTS
     THROW 51502, 'Timing storage lab requires SQL data, log, and tempdb files on non-C: volumes.', 1;
 IF OBJECT_ID(N'stg.MddMacTimingObservation', N'U') IS NULL
     THROW 51503, 'TimingObservation source table is missing in the lab copy.', 1;
-IF (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation) = 0
-    THROW 51504, 'TimingObservation source table is empty; a full-history lab measurement is required.', 1;
+DECLARE @SourceTimingRows bigint = (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation);
+IF @SourceTimingRows = 0
+    THROW 51504, 'TimingObservation source table is empty; a bounded lab sample cannot be measured.', 1;
+IF @SampleRows < 1 OR @SampleRows > @MaximumSampleRows OR @SampleRows >= @SourceTimingRows
+    THROW 51506, 'Timing lab sample must be positive, bounded, and smaller than the source population.', 1;
+IF @ReclaimedCapacityBytes <= 0
+    THROW 51507, 'Set @ReclaimedCapacityBytes to measured internal capacity reclaimed by SnapshotJsonGzip recovery.', 1;
+
+/* Keep the source sample deterministic and bounded before creating candidates. */
+SELECT TOP (@SampleRows) *
+INTO #TimingSourceSample
+FROM stg.MddMacTimingObservation
+ORDER BY TimingObservationId;
+
+DECLARE @SampledTimingRows bigint = (SELECT COUNT_BIG(*) FROM #TimingSourceSample);
+IF @SampledTimingRows <> @SampleRows
+    THROW 51508, 'The deterministic TimingObservation sample is incomplete.', 1;
 
 IF SCHEMA_ID(N'lab') IS NULL
     EXEC(N'CREATE SCHEMA lab AUTHORIZATION dbo;');
@@ -77,7 +101,8 @@ CREATE TABLE #StorageMeasurements
 (
     phase nvarchar(80) NOT NULL,
     measured_at_utc datetime2(7) NOT NULL,
-    source_reserved_pages bigint NULL,
+    sampled_source_reserved_pages bigint NULL,
+    sampled_source_rows bigint NULL,
     page_candidate_reserved_pages bigint NULL,
     page_candidate_used_pages bigint NULL,
     dictionary_base_reserved_pages bigint NULL,
@@ -92,7 +117,7 @@ CREATE TABLE #StorageMeasurements
 DECLARE @MeasureSql nvarchar(max) = N'
 INSERT #StorageMeasurements
 (
-    phase, measured_at_utc, source_reserved_pages,
+    phase, measured_at_utc, sampled_source_reserved_pages, sampled_source_rows,
     page_candidate_reserved_pages, page_candidate_used_pages,
     dictionary_base_reserved_pages, dictionary_value_reserved_pages,
     dictionary_reference_reserved_pages, database_data_allocated_bytes,
@@ -102,8 +127,9 @@ INSERT #StorageMeasurements
 SELECT
     @Phase, SYSUTCDATETIME(),
     (SELECT SUM(CONVERT(bigint, reserved_page_count))
-     FROM sys.dm_db_partition_stats
-     WHERE object_id = OBJECT_ID(N''stg.MddMacTimingObservation'')),
+     FROM tempdb.sys.dm_db_partition_stats
+     WHERE object_id = OBJECT_ID(N''tempdb..#TimingSourceSample'')),
+    (SELECT COUNT_BIG(*) FROM #TimingSourceSample),
     (SELECT SUM(CONVERT(bigint, reserved_page_count))
      FROM sys.dm_db_partition_stats
      WHERE object_id = OBJECT_ID(N''lab.TimingPageCandidate'')),
@@ -134,7 +160,7 @@ EXEC sys.sp_executesql @MeasureSql, N'@Phase nvarchar(80)', @Phase = @Phase;
 /* Candidate A: complete source row shape and equivalent source indexes. */
 SELECT *
 INTO lab.TimingPageCandidate
-FROM stg.MddMacTimingObservation;
+FROM #TimingSourceSample;
 
 CREATE CLUSTERED INDEX CX_lab_TimingPageCandidate
     ON lab.TimingPageCandidate (TimingObservationId)
@@ -172,7 +198,7 @@ SELECT @VariableCellSql = STUFF
             N'SELECT s.TimingObservationId, ' + CONVERT(nvarchar(20), c.column_id) +
             N', N''' + REPLACE(c.name, N'''', N'''''') + N''',' +
             N' CONVERT(varbinary(max), s.' + QUOTENAME(c.name) + N')' +
-            N' FROM stg.MddMacTimingObservation AS s' +
+            N' FROM #TimingSourceSample AS s' +
             N' WHERE s.' + QUOTENAME(c.name) + N' IS NOT NULL'
         FROM sys.columns AS c
         INNER JOIN sys.types AS ty ON ty.user_type_id = c.user_type_id
@@ -284,7 +310,7 @@ CREATE INDEX IX_lab_TimingDictionaryReference_Dictionary
 DECLARE @CreateBaseSql nvarchar(max) =
     N'SELECT ' + @FixedColumnList +
     N' INTO lab.TimingDictionaryBase' +
-    N' FROM stg.MddMacTimingObservation;';
+    N' FROM #TimingSourceSample;';
 EXEC sys.sp_executesql @CreateBaseSql;
 
 CREATE CLUSTERED INDEX CX_lab_TimingDictionaryBase
@@ -297,9 +323,12 @@ EXEC sys.sp_executesql @MeasureSql, N'@Phase nvarchar(80)', @Phase = @Phase;
 /* Capture the full physical allocation result, including reserved pages. */
 SELECT
     N'capacity.timing_storage_option_allocation' AS statement_id,
+    @SampleRows AS requested_sample_rows,
+    @ReclaimedCapacityBytes AS reclaimed_capacity_bytes,
     phase,
     measured_at_utc,
-    source_reserved_pages,
+    sampled_source_reserved_pages,
+    sampled_source_rows,
     page_candidate_reserved_pages,
     page_candidate_used_pages,
     dictionary_base_reserved_pages,
@@ -311,6 +340,38 @@ SELECT
     transaction_log_used_bytes
 FROM #StorageMeasurements
 ORDER BY measured_at_utc, phase;
+
+/*
+    The bounded candidates must fit inside capacity reclaimed by the preceding
+    snapshot recovery.  This is a decision gate, not an extrapolation to the
+    full TimingObservation population.
+*/
+;WITH Checkpoints AS
+(
+    SELECT
+        MIN(CASE WHEN phase = N'BEFORE' THEN database_data_allocated_bytes END)
+            AS baseline_data_allocated_bytes,
+        MAX(database_data_allocated_bytes) AS peak_data_allocated_bytes,
+        MAX(tempdb_allocated_bytes) -
+            MIN(CASE WHEN phase = N'BEFORE' THEN tempdb_allocated_bytes END)
+            AS peak_tempdb_growth_bytes,
+        MAX(transaction_log_used_bytes) -
+            MIN(CASE WHEN phase = N'BEFORE' THEN transaction_log_used_bytes END)
+            AS peak_transaction_log_growth_bytes
+    FROM #StorageMeasurements
+)
+SELECT
+    N'capacity.timing_storage_reclaimed_capacity_gate' AS statement_id,
+    @SampleRows AS sampled_source_rows,
+    @SourceTimingRows AS source_timing_rows,
+    @ReclaimedCapacityBytes AS reclaimed_capacity_bytes,
+    peak_data_allocated_bytes - baseline_data_allocated_bytes AS observed_candidate_data_growth_bytes,
+    peak_tempdb_growth_bytes,
+    peak_transaction_log_growth_bytes,
+    CASE WHEN peak_data_allocated_bytes - baseline_data_allocated_bytes <= @ReclaimedCapacityBytes
+         THEN N'PASS' ELSE N'BLOCKED' END AS reclaimed_capacity_status,
+    N'BOUNDED_SAMPLE_ONLY; NO_FULL_HISTORY_DUPLICATE' AS decision_scope
+FROM Checkpoints;
 
 /* Actual reserved-page comparison from the lab checkpoints. */
 ;WITH Options AS
@@ -396,7 +457,7 @@ CREATE TABLE #LosslessMetrics
 DECLARE @FixedMismatchSql nvarchar(max) = N'
 INSERT #LosslessMetrics (metric_name, metric_value)
 SELECT N''fixed_source_row_count'', COUNT_BIG(*)
-FROM stg.MddMacTimingObservation
+FROM #TimingSourceSample
 UNION ALL
 SELECT N''fixed_dictionary_row_count'', COUNT_BIG(*)
 FROM lab.TimingDictionaryBase
@@ -404,7 +465,7 @@ UNION ALL
 SELECT N''fixed_forward_mismatch_count'', COUNT_BIG(*)
 FROM
 (
-    SELECT ' + @FixedColumnList + N' FROM stg.MddMacTimingObservation
+    SELECT ' + @FixedColumnList + N' FROM #TimingSourceSample
     EXCEPT
     SELECT ' + @FixedColumnList + N' FROM lab.TimingDictionaryBase
 ) AS forward_mismatch
@@ -414,7 +475,7 @@ FROM
 (
     SELECT ' + @FixedColumnList + N' FROM lab.TimingDictionaryBase
     EXCEPT
-    SELECT ' + @FixedColumnList + N' FROM stg.MddMacTimingObservation
+    SELECT ' + @FixedColumnList + N' FROM #TimingSourceSample
 ) AS reverse_mismatch;';
 EXEC sys.sp_executesql @FixedMismatchSql;
 
@@ -449,7 +510,7 @@ DECLARE @VariableZeroLengthCellCount bigint = 0;
 SELECT @VariableNullCellSql = STUFF
 (
     (
-        SELECT N' + (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation'
+        SELECT N' + (SELECT COUNT_BIG(*) FROM #TimingSourceSample'
              + N' WHERE ' + QUOTENAME(c.name) + N' IS NULL)'
         FROM sys.columns AS c
         INNER JOIN sys.types AS ty ON ty.user_type_id = c.user_type_id
@@ -464,7 +525,7 @@ SELECT @VariableNullCellSql = STUFF
 SELECT @VariableZeroLengthCellSql = STUFF
 (
     (
-        SELECT N' + (SELECT COUNT_BIG(*) FROM stg.MddMacTimingObservation'
+        SELECT N' + (SELECT COUNT_BIG(*) FROM #TimingSourceSample'
              + N' WHERE ' + QUOTENAME(c.name) + N' IS NOT NULL'
              + N' AND DATALENGTH(' + QUOTENAME(c.name) + N') = 0)'
         FROM sys.columns AS c
