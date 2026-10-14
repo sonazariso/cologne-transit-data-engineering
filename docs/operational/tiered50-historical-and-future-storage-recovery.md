@@ -15,9 +15,19 @@ refresh, collector start, or MDD request was performed.
 The collector remains disabled and unloaded. Do not use the archived Windows
 capture as a current recovery point: its latest verified full backup finished
 on 2026-10-12. The archived capture is useful only as evidence that the
-Windows-integrated administrative path existed for `DataAnalyst-VM` /
-`CologneTransitIntelligence`; every operation below requires fresh SSMS
-results.
+Windows-integrated administrative path exists for `DATAANALYST-VM\Somaye` on
+`DataAnalyst-VM` / `CologneTransitIntelligence`; every operation below still
+requires fresh SSMS results.
+
+The confirmed SQL-visible backup root is
+`\\vmware-host\Shared Folders\CologneTransitData`. The SQL Server service
+must be able to see and write that UNC path; this is not a Mac filesystem
+path. The latest Windows measurement reports 17.31 GiB free on C:. That is
+above the 12 GiB operational floor for the backup gate, but it leaves only
+5.31 GiB before that floor. It does not currently prove that a full-history
+migration peak is safe, and it cannot satisfy the future target of 10 GiB
+growth while retaining a 12 GiB floor (that target needs at least 22 GiB free
+before growth).
 
 `FINAL_RESULT: BLOCKED_WITH_EXACT_OPERATOR_ACTION`
 
@@ -26,6 +36,12 @@ The exact sequence, parameters, files, prerequisites, and expected results are
 below. If a fresh physical-capacity measurement fails its stated thresholds,
 the result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable
 future writes in that case.
+
+The first safe production operation after this run finishes is manual
+execution of `sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql` in
+Windows SSMS, after changing only `@ApplyBackup` from `0` to `1`. It creates
+and verifies one off-C COPY_ONLY backup; it does not install schema, write
+historical envelopes, retire tables, shrink MDF, or start the collector.
 
 ## Implementation defects fixed
 
@@ -64,12 +80,14 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 
 | Parameter | Required production value | Rule |
 |---|---|---|
-| `<SQL_INSTANCE>` | Actual `SERVERPROPERTY('ServerName')` from the Windows SSMS session; archived evidence says `DataAnalyst-VM` | Verify, do not assume the archived value |
+| `<SQL_INSTANCE>` | `DataAnalyst-VM` | The backup batch fails closed if `SERVERPROPERTY('ServerName')` differs |
+| `<WINDOWS_LOGIN>` | `DATAANALYST-VM\Somaye` | The backup batch fails closed if `SUSER_SNAME()` differs |
 | `<DATABASE>` | `CologneTransitIntelligence` | Fixed by every supplied SQL file |
-| `<SQL_VISIBLE_BACKUP_PATH>` | A new UNC or non-C: Windows path, for example `\\<approved-host>\\<share>\\CologneTransitIntelligence\\CTI-storage-20261013-<HHMMSS>.bak` | The SQL Server service must be able to write it; the Mac filesystem is irrelevant |
-| `<BACKUP_DEST_FREE_GIB>` | Fresh Windows measurement of the backup destination | Must meet the operator’s approved reserve and the SQL backup gate |
+| `<SQL_VISIBLE_BACKUP_PATH>` | Generated below `\\vmware-host\Shared Folders\CologneTransitData` by the backup batch | The SQL Server service must be able to write it; the Mac filesystem is irrelevant |
+| `<WINDOWS_C_FREE_GIB>` | `17.31` GiB at the latest Windows check | Re-measure in SSMS; the backup floor is 12 GiB |
+| `<BACKUP_DEST_FREE_GIB>` | Fresh Windows measurement of the confirmed UNC destination | Must cover the expected backup size plus the operator-approved reserve; `xp_fileexist` proves reachability, not free capacity |
 | `<MIGRATION_ID>` | New UUID recorded by the operator, or the existing failed/blocked UUID being intentionally resumed | Never reuse a UUID for unrelated history |
-| `<CAPACITY_PLAN_JSON>` | JSON made from measured SQL allocation, log, tempdb, rollback, and duplication peaks | Must cover `FULL_HISTORY_MIGRATION_PEAK` |
+| `<CAPACITY_PLAN_FILE>` | JSON file made from measured SQL allocation, log, tempdb, rollback, and duplication peaks | Must cover `FULL_HISTORY_MIGRATION_PEAK` |
 | `<MDF_LOGICAL_FILE_NAME>` | Exact `sys.database_files.name` returned by SSMS | Never guess the logical file name |
 | `<TARGET_SIZE_MB>` | Calculated from current used pages plus explicit headroom | Never substitute `SHRINKDATABASE` |
 | `<POWERBI_APPROVER>` | Human who verified the real consumer refresh | Record outside SQL and in the retirement approval artifact |
@@ -85,131 +103,32 @@ Prerequisites:
 - Confirm the database identity, `ONLINE`/`MULTI_USER` state, no active
   collector run, no active production lease, and no unrelated user
   transaction. The collector must remain disabled.
-- Use a new backup filename. Do not point SQL Server at a Mac path, VMware
-  shared-folder path, or a path that has not been proven SQL-service-visible.
+- Confirm the existing SQL-visible destination is reachable from the SQL
+  Server service and has enough free space for the expected backup plus the
+  approved reserve. The batch below also performs `xp_fileexist`; that check
+  is not a free-space measurement.
 
-In SSMS, execute this exact batch after replacing only
-`<SQL_VISIBLE_BACKUP_PATH>`:
+In SSMS, open
+`sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql`, confirm the
+connection is `DataAnalyst-VM` / `CologneTransitIntelligence` as
+`DATAANALYST-VM\Somaye`, and change only:
 
 ```sql
-USE CologneTransitIntelligence;
-GO
-SET NOCOUNT ON;
-SET XACT_ABORT ON;
-
-DECLARE @BackupPath nvarchar(4000) = N'<SQL_VISIBLE_BACKUP_PATH>';
-DECLARE @StartedAt datetime2(7);
-
-IF DB_NAME() <> N'CologneTransitIntelligence'
-    THROW 51400, 'Wrong database context.', 1;
-IF @BackupPath LIKE N'C:%'
-    THROW 51401, 'The backup destination may not be Windows C:.', 1;
-IF LEFT(@BackupPath, 2) <> N'\\'
-   AND @BackupPath NOT LIKE N'[D-Zd-z]:%'
-    THROW 51402, 'The backup destination must be a SQL-visible UNC or non-C: drive path.', 1;
-IF EXISTS
-(
-    SELECT 1 FROM ctl.MddMacCollectorRun
-    WHERE Status IN ('RUNNING', 'CLAIMED')
-      AND CollectionContext IN ('MAC_LEGACY7_PRODUCTION', 'MAC_TIERED50_PRODUCTION')
-)
-    THROW 51403, 'A production collector run is active.', 1;
-IF EXISTS
-(
-    SELECT 1 FROM ctl.MddMacProductionLease
-    WHERE LeaseName = 'MDD_MAC_PRODUCTION' AND Status = 'ACTIVE'
-)
-    THROW 51404, 'The production lease is active.', 1;
-IF EXISTS
-(
-    SELECT 1
-    FROM sys.dm_tran_session_transactions AS st
-    INNER JOIN sys.dm_exec_sessions AS es ON es.session_id = st.session_id
-    WHERE st.session_id <> @@SPID AND es.is_user_process = 1
-)
-    THROW 51405, 'Another user transaction is active.', 1;
-
-SELECT DB_NAME() AS database_name,
-       CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS server_name,
-       CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128)) AS instance_name,
-       DATABASEPROPERTYEX(DB_NAME(), 'Status') AS database_status,
-       DATABASEPROPERTYEX(DB_NAME(), 'UserAccess') AS user_access,
-       SUSER_SNAME() AS effective_login;
-
-SET @StartedAt = SYSDATETIME();
-BACKUP DATABASE [CologneTransitIntelligence]
-    TO DISK = @BackupPath
-    WITH COPY_ONLY, COMPRESSION, CHECKSUM, STATS = 5;
-
-DECLARE @Fresh TABLE
-(
-    backup_set_id int NOT NULL,
-    media_set_id int NOT NULL,
-    backup_position int NOT NULL,
-    database_name sysname NOT NULL,
-    backup_start_date datetime NOT NULL,
-    backup_finish_date datetime NOT NULL,
-    copy_only bit NOT NULL,
-    checksum_enabled bit NOT NULL,
-    compressed_backup_size bigint NOT NULL,
-    media_count bigint NOT NULL
-);
-
-INSERT @Fresh
-SELECT DISTINCT
-    bs.backup_set_id,
-    bs.media_set_id,
-    bs.position,
-    bs.database_name,
-    bs.backup_start_date,
-    bs.backup_finish_date,
-    bs.is_copy_only,
-    bs.has_backup_checksums,
-    bs.compressed_backup_size,
-    (
-        SELECT COUNT_BIG(*)
-        FROM msdb.dbo.backupmediafamily AS bmf_count
-        WHERE bmf_count.media_set_id = bs.media_set_id
-    )
-FROM msdb.dbo.backupset AS bs
-INNER JOIN msdb.dbo.backupmediafamily AS bmf
-    ON bmf.media_set_id = bs.media_set_id
-WHERE bs.database_name = N'CologneTransitIntelligence'
-  AND bs.type = 'D'
-  AND bs.is_copy_only = 1
-  AND bs.has_backup_checksums = 1
-  AND bs.backup_finish_date >= @StartedAt
-  AND bmf.device_type = 2
-  AND bmf.physical_device_name = @BackupPath;
-
-IF (SELECT COUNT(*) FROM @Fresh) <> 1
-    THROW 51406, 'Exactly one fresh COPY_ONLY/checksum full backup was not identified.', 1;
-IF EXISTS
-(
-    SELECT 1 FROM @Fresh
-    WHERE database_name <> N'CologneTransitIntelligence'
-       OR copy_only <> 1
-       OR checksum_enabled <> 1
-       OR compressed_backup_size <= 0
-       OR media_count <= 0
-)
-    THROW 51407, 'Fresh backup metadata failed the COPY_ONLY/compression/checksum/media gate.', 1;
-
-DECLARE @BackupPosition int = (SELECT backup_position FROM @Fresh);
-RESTORE VERIFYONLY FROM DISK = @BackupPath
-    WITH FILE = @BackupPosition, CHECKSUM;
-
-SELECT *, @BackupPath AS sql_visible_backup_path,
-          N'PASS' AS verifyonly_status
-FROM @Fresh;
+DECLARE @ApplyBackup BIT = 1;
 ```
 
-Expected result: the backup command completes, `RESTORE VERIFYONLY` returns
-without error, and the final row has one backup set, `copy_only = 1`,
-`checksum_enabled = 1`, `compressed_backup_size > 0`, disk media, the exact
-SQL-visible path, and `verifyonly_status = PASS`. Save the final row and the
-SSMS messages as the fresh backup evidence. This is the only backup evidence
-accepted by later gates; the archived 2026-10-12 backup is not sufficient.
+Execute the whole file. It generates a new filename below
+`\\vmware-host\Shared Folders\CologneTransitData`, so no path replacement is
+needed. The source-controlled default remains `0`.
+
+Expected result: the preflight row has `preflight_status = PREFLIGHT_PASS` and
+at least 12 GiB measured on C:, the backup completes, `RESTORE VERIFYONLY`
+returns without error, the metadata row has exactly one disk media file with
+`copy_only = 1`, `checksum_enabled = 1`, `compressed_backup_size > 0`, and the
+final `verifyonly_status = PASS`. The last result set is also a JSON evidence
+value. Save that value alone as `fresh-backup-evidence.json`; later Python
+gates consume this existing evidence shape. Save the SSMS messages as well.
+The archived 2026-10-12 backup is not sufficient.
 
 ### 2. Additive compact schema installation
 
@@ -231,8 +150,8 @@ working copy, without changing the source-controlled default:
 DECLARE @ApplyCompactStorage BIT = 1;
 ```
 
-The file contains `GO` separators and starts with `USE
-CologneTransitIntelligence`; execute it as one SSMS script, not by pasting
+The file contains `GO` separators and starts with `USE CologneTransitIntelligence`;
+execute it as one SSMS script, not by pasting
 individual procedure fragments. It is additive: it creates the compact state,
 allocator, envelope, migration ledger, procedures, and readback/analytics
 views. It does not drop, truncate, shrink, null, or rewrite legacy rows.
@@ -274,7 +193,7 @@ SELECT COUNT_BIG(*) AS compact_envelope_count,
 FROM stg.MddMacCompactObservationEnvelope;
 ```
 
-Prepare `<CAPACITY_PLAN_JSON>` from a real SQL physical-allocation pilot. It
+Prepare `<CAPACITY_PLAN_FILE>` from a real SQL physical-allocation pilot. It
 must contain these fields, with no invented values:
 
 ```json
@@ -301,7 +220,7 @@ python3 scripts/migrate_historical_compact_observations.py \
   --apply \
   --migration-id <MIGRATION_ID> \
   --batch-size 1 \
-  --capacity-plan <CAPACITY_PLAN_JSON> \
+  --capacity-plan <CAPACITY_PLAN_FILE> \
   --backup-evidence <fresh-backup-evidence.json> \
   --json
 ```
@@ -663,6 +582,9 @@ and do not start the collector.
 
 The operator-facing files are:
 
+- First safe manual operation: `sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql`,
+  default `@ApplyBackup = 0`; it is bound to `DataAnalyst-VM`,
+  `DATAANALYST-VM\Somaye`, and the confirmed UNC backup root.
 - Read-only audit: `sql/mdd-mac-collector/audit-compact-storage-readonly.sql`.
 - Additive schema: `sql/mdd-mac-collector/compact-observation-storage-v1.sql`,
   default `@ApplyCompactStorage = 0`.
@@ -699,15 +621,14 @@ PYTHONPATH=src python3 -m unittest tests.test_compact_observation_storage \
   tests.test_tiered50_timing_capacity -q                                    47 PASS, 3 skipped
 python3 scripts/validate_snapshot_gzip_storage_v1.py                         PASS
 PYTHONPATH=src python3 scripts/validate_mssql_migration.py                   PASS
-PYTHONPATH=src python3 -m unittest discover -s tests -q                      411 run; 2 ambient evidence-path failures, 3 skipped
+PYTHONPATH=src python3 -m unittest discover -s tests -q                      411 run; PASS, 3 skipped
 git diff --check                                                             PASS
 ```
 
-The two full-suite failures are in `test_current_evidence_paths`: the
-ambient user evidence-path configuration resolves to the user configuration
-directory instead of the test-created repository root. They do not touch SQL
-Server or production data. These are source/static and offline results, not
-SQL Server or Power BI results. No production mutation was executed.
+The evidence-path tests explicitly isolate the operator-configured external
+artifact location, so the full offline suite does not write to or depend on a
+user-level evidence path. These are source/static and offline results, not SQL
+Server or Power BI results. No production mutation was executed.
 
 ## Final labels
 
@@ -715,14 +636,15 @@ SQL Server or Power BI results. No production mutation was executed.
 SOURCE_CODE_REVIEW: PASS
 IMPLEMENTATION_DEFECTS: FIXED_AND_OFFLINE_TESTED
 SQL_SERVER_PRODUCTION_VALIDATION: NOT_EXECUTED
-FRESH_VERIFIED_OFF_C_BACKUP: BLOCKED_PENDING_WINDOWS_SSMS
+FRESH_VERIFIED_OFF_C_BACKUP: READY_FOR_MANUAL_WINDOWS_SSMS; NOT_EXECUTED
+WINDOWS_C_FREE_AT_LAST_CHECK: 17.31_GIB; 12_GIB_FLOOR_PASSES_BACKUP_ONLY
 COMPACT_SCHEMA_INSTALLATION: NOT_EXECUTED
 BOUNDED_HISTORICAL_MIGRATION: NOT_EXECUTED
 EXACT_FULL_HISTORICAL_PARITY: NOT_EXECUTED
 POWER_BI_COMPATIBILITY: NOT_VERIFIED
 LEGACY_RETIREMENT: NOT_EXECUTED
 PHYSICAL_MDF_RECLAMATION: NOT_EXECUTED
-FUTURE_STORAGE_CAPACITY: NOT_MEASURED
+FUTURE_STORAGE_CAPACITY: NOT_MEASURED; 22_GIB_PRE_GROWTH_FREE_REQUIRED_FOR_CURRENT_TARGET
 COLLECTOR_STATUS: DISABLED_AND_UNLOADED; NOT_RESTARTED
 FINAL_RESULT: BLOCKED_WITH_EXACT_OPERATOR_ACTION
 ```

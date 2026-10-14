@@ -11,11 +11,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "capture_windows_sql_admin_evidence.ps1"
 WINDOWS_BACKUP_SCRIPT = ROOT / "scripts" / "execute_windows_sql_backup.ps1"
+SSMS_BACKUP_SCRIPT = ROOT / "sql" / "mdd-mac-collector" / "backup-cologne-transit-off-c-v1.sql"
 
 
 class WindowsSqlBackupValidationTests(unittest.TestCase):
     def test_windows_integrated_backup_runner_is_narrow_and_fail_closed(self) -> None:
         script = WINDOWS_BACKUP_SCRIPT.read_text(encoding="utf-8")
+        ssms_script = SSMS_BACKUP_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn("Windows Authentication", script)
         self.assertIn("Encrypt = $EncryptMode", script)
@@ -27,6 +29,19 @@ class WindowsSqlBackupValidationTests(unittest.TestCase):
         self.assertNotIn("-Username", script)
         self.assertNotIn("-Password", script)
         self.assertNotIn("WITH INIT", script)
+
+        self.assertIn("DECLARE @ApplyBackup BIT = 0;", ssms_script)
+        self.assertIn("N'DataAnalyst-VM'", ssms_script)
+        self.assertIn("N'DATAANALYST-VM\\Somaye'", ssms_script)
+        self.assertIn("N'\\\\vmware-host\\Shared Folders\\CologneTransitData'", ssms_script)
+        self.assertIn("COPY_ONLY, COMPRESSION, CHECKSUM", ssms_script)
+        self.assertIn("RESTORE VERIFYONLY", ssms_script)
+        self.assertIn("master.dbo.xp_fileexist", ssms_script)
+        self.assertIn("FOR JSON PATH, WITHOUT_ARRAY_WRAPPER", ssms_script)
+        self.assertNotIn("DROP TABLE", ssms_script.upper())
+        self.assertNotIn("TRUNCATE TABLE", ssms_script.upper())
+        self.assertNotIn("DBCC SHRINK", ssms_script.upper())
+        self.assertNotIn("WITH INIT", ssms_script.upper())
         self.assertNotIn("DROP TABLE", script)
         self.assertNotIn("DBCC SHRINK", script)
 

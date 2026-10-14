@@ -46,6 +46,16 @@ NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
 
 
 class CurrentEvidencePathTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Keep repository-root tests hermetic when an operator has configured
+        # the approved external evidence location in the shell environment.
+        self._evidence_path_environment = patch.dict(
+            os.environ,
+            {"MSSQL_ADMIN_EVIDENCE_PATH": ""},
+        )
+        self._evidence_path_environment.start()
+        self.addCleanup(self._evidence_path_environment.stop)
+
     def _repository(self, directory: str) -> Path:
         repository = Path(directory) / "repository"
         (repository / "docs" / "operational").mkdir(parents=True, mode=0o700)
