@@ -1,4 +1,4 @@
-# Tiered50 historical and future storage recovery — S146 correction
+# Tiered50 historical and future storage recovery — S147 correction
 
 Date: 2026-10-14 (Europe/Berlin)
 
@@ -9,47 +9,55 @@ collector, or introduce a replacement architecture.
 ## Current result
 
 The requested S146 implementation corrections are applied and offline-tested. No
-production SQL connection, backup, DDL, data migration, legacy-table
+production SQL connection, new backup, DDL, data migration, legacy-table
 retirement, MDF shrink, Power BI refresh, collector start, or MDD request was
-performed.
+performed by this repository.
 
-The collector remains disabled and unloaded. Do not use the archived Windows
-capture as a current recovery point: its latest verified full backup finished
-on 2026-10-12. The operator reports that a fresh manual COPY_ONLY,
-COMPRESSION, CHECKSUM backup completed on 2026-10-14 at approximately
-3854.35 MiB, with SQL backup history showing completion. That report is not
-repository evidence and does not prove RESTORE VERIFYONLY; the existing
-backup must be verified through the read-only procedure below before it can
-satisfy the Python evidence gate.
+The collector remains disabled and unloaded. The operator has now confirmed
+the existing 2026-10-14 recovery point in Windows SSMS. The exact file is
+`CologneTransitIntelligence_PreCompaction_20261014_162324_90D92CE6.bak` below
+the SQL-visible root `\\vmware-host\Shared Folders\CologneTransitData`, and
+the confirmed SSMS result was:
+
+```text
+BACKUP_VERIFYONLY_PASS
+```
+
+This is an operator-confirmed, read-only SQL Server `RESTORE VERIFYONLY`
+result. It is distinct from machine-generated repository evidence: no new
+Windows PowerShell/JSON capture was created in this worktree, and the older
+`windows-admin-evidence-v20261013-*.json` artifacts do not represent this
+2026-10-14 file. Do not fabricate or backdate a JSON artifact. If a later
+Python apply gate needs the existing `_backup_gate` shape, capture the already
+verified file's metadata through the approved Windows path once; do not create
+another backup or repeat the completed verification merely to produce a new
+recovery point.
 
 The confirmed SQL-visible backup root is
 `\\vmware-host\Shared Folders\CologneTransitData`. The SQL Server service
 must be able to see and write that UNC path; this is not a Mac filesystem
 path. The latest supplied Windows measurement reports approximately 13.86 GiB
 free on C:. That is only 1.86 GiB above the 12 GiB operational floor. It does
-not currently prove that a full-history migration peak is safe, and it cannot
-satisfy the future target of 10 GiB growth while retaining a 12 GiB floor
-(that target needs at least 22 GiB free before growth).
+not currently prove that a full-history migration peak is safe. Re-measure it
+with the consolidated audit before any capacity decision. It cannot satisfy
+the future target of 10 GiB growth while retaining a 12 GiB floor (that target
+needs at least 22 GiB free before growth).
 
-`FINAL_RESULT: BLOCKED_PENDING_EXISTING_BACKUP_VERIFYONLY_AND_CAPACITY_PLAN`
+`FINAL_RESULT: BLOCKED_PENDING_FULL_HISTORY_CAPACITY_PLAN`
 
-The blockers are missing SQL Server validation evidence, missing exact
-full-history physical capacity measurements, and missing RESTORE VERIFYONLY
-evidence for the reported existing backup. The implementation now has a
-safe, read-only verification path for that existing file and a signed,
-independently bound physical-capacity evidence contract; neither production
-validation path was executed from this Mac.
+The remaining blocker is missing exact full-history physical capacity evidence:
+the production allocation audit and the isolated SQL Server lab measurement
+have not been run from this Mac. The implementation has a signed,
+independently bound physical-capacity evidence contract. The operator's SSMS
+backup result proves the recovery point, but it is not silently relabeled as a
+machine-generated signed artifact.
 If a fresh physical-capacity measurement fails its stated thresholds, the
 result must instead be `CAPACITY_REQUIREMENTS_NOT_MET`; do not enable future
 writes in that case.
 
-The first safe operator action is read-only verification of the existing
-2026-10-14 backup: use --verify-existing in
-scripts/verify_current_sql_backup.py, -VerifyExisting in the Windows helper,
-or set @VerifyExistingBackup = 1 and the actual path in a reviewed SSMS
-working copy. These branches do not execute BACKUP DATABASE. They produce the
-existing _backup_gate JSON shape only after real SQL metadata, RESTORE
-HEADERONLY, and RESTORE VERIFYONLY WITH CHECKSUM pass.
+The next safe operator action is the consolidated read-only storage audit
+described below. The backup verification step is complete and must not be
+rerun unnecessarily.
 
 ## Implementation defects fixed
 
@@ -142,49 +150,182 @@ Do not replace these with Mac paths or values inferred from the Mac host.
 
 ## Execution order
 
-### 1. Verify the reported existing off-C backup
+### Recovery point already confirmed
 
-Prerequisites:
+The Windows administrator has already completed the read-only SSMS check for
+the exact existing file and reported `BACKUP_VERIFYONLY_PASS`. Do not open the
+backup script with `@VerifyExistingBackup = 1`, invoke `-VerifyExisting`, or
+create another backup as part of this sequence. Retain the operator's result
+as an SSMS/operator record, separate from any machine-generated JSON evidence.
 
-- Connect in SSMS to the verified Windows SQL instance using the authorized
-  Windows-integrated administrator identity.
-- Confirm the database identity, `ONLINE`/`MULTI_USER` state, no active
-  collector run, no active production lease, and no unrelated user
-  transaction. The collector must remain disabled.
-- Confirm the exact SQL-visible path of the reported 2026-10-14 backup. The
-  existing backup metadata query and `RESTORE HEADERONLY`/`VERIFYONLY` must
-  run from SQL Server; a Mac path or a screenshot is not sufficient.
+### 1. Run the consolidated production storage audit
 
-In SSMS, open the reviewed backup script, confirm the authorized SQL
-identity and database, set the actual existing path, and change only:
+In SSMS, connect with Windows Authentication to `DataAnalyst-VM`, database
+`CologneTransitIntelligence`, using the authorized administrator identity.
+Require encrypted transport with certificate validation and leave the
+collector disabled/unloaded. Open and execute the whole file unchanged:
 
-```sql
-DECLARE @VerifyExistingBackup BIT = 1;
+```text
+sql/mdd-mac-collector/audit-historical-storage-recovery-readonly.sql
 ```
 
-Execute the whole file. This branch does not execute `BACKUP DATABASE` and
-does not create or overwrite a file. The source-controlled defaults remain
-`@ApplyBackup = 0`, `@VerifyExistingBackup = 0`.
+The audit is read-only. Save its result sets outside the repository with the
+stable `statement_id` values intact. The results must include:
 
-The equivalent Windows-integrated helper is
-`scripts/execute_windows_sql_backup.ps1 -SqlInstance DataAnalyst-VM
--BackupPath <SQL-visible-existing-file> -VerifyExisting
--EvidencePath existing-backup-evidence.json`.
+- `capacity.database_identity`, `capacity.database_files`, and
+  `capacity.production_object_allocation` with actual SQL allocations and C:
+  volume availability;
+- `capacity.snapshot_population` and `capacity.historical_row_counts` for the
+  complete history;
+- `capacity.representative_snapshot_selection` and
+  `capacity.representative_observation_sizes`, which are bounded length-only
+  diagnostics and are not a physical compact-envelope allocation claim;
+- `capacity.transaction_log`, `capacity.tempdb`, `capacity.rollback`, and
+  `capacity.autogrowth`;
+- `capacity.active_writer_state`, the compact gate state, and the server-side
+  column/dependency/foreign-key/module result sets.
 
-Expected result: SQL backup history identifies exactly one full backup set for
-the path, `copy_only = 1`, `checksum = 1`, `compressed_backup_size > 0`, the
-header matches the database and backup position, and `RESTORE VERIFYONLY WITH
-CHECKSUM` returns without error. Save only the final JSON object as
-`fresh-backup-evidence.json`; later Python gates consume this existing
-evidence shape. The reported 3854.35 MiB size may be recorded as operator
-context, but it is not substituted for the actual SQL metadata. The archived
-2026-10-12 backup is not sufficient.
+Expected outcome: the identity is the intended database, status is `ONLINE`,
+access is `MULTI_USER`, no collector run/lease/session or unrelated user
+transaction is active, every required source table is present, and no required
+allocation field is NULL. Any missing result, incomplete file measurement,
+active writer, or C: free-space result below 12 GiB is `BLOCKED`.
 
-### 2. Additive compact schema installation
+The supplied 13.86 GiB value is not reused as current evidence. At that value
+the hard available headroom is only `13.86 - 12.00 = 1.86 GiB`; a migration
+whose measured peak exceeds that headroom must not be started.
+
+### 2. Measure the full-history peak in an isolated SQL Server lab
+
+Do not run the lab on `DataAnalyst-VM`. Use the already verified backup from
+the existing UNC share and an isolated SQL Server instance with an existing
+non-C: data/log volume. Restore a production-shape copy there, using the
+logical names returned by `RESTORE FILELISTONLY` and explicit `MOVE` targets on
+that non-C: volume. The lab database may retain the name
+`CologneTransitIntelligence` because the existing compact SQL and migration
+scripts bind that database name; isolation is provided by the separate SQL
+instance, not by changing the production database.
+
+In the isolated lab SSMS window, use the exact existing file and the backup
+position recorded by the operator. First inspect the logical files:
+
+```sql
+RESTORE FILELISTONLY
+FROM DISK = N'\\vmware-host\Shared Folders\CologneTransitData\CologneTransitIntelligence_PreCompaction_20261014_162324_90D92CE6.bak'
+WITH FILE = <BACKUP_POSITION>;
+```
+
+Expected outcome: the result is readable from the isolated SQL Server service
+account and lists every logical data/log file. Restore to an empty lab
+database using those exact logical names and non-C: paths (one `MOVE` per row):
+
+```sql
+RESTORE DATABASE [CologneTransitIntelligence]
+FROM DISK = N'\\vmware-host\Shared Folders\CologneTransitData\CologneTransitIntelligence_PreCompaction_20261014_162324_90D92CE6.bak'
+WITH FILE = <BACKUP_POSITION>,
+     MOVE N'<LOGICAL_DATA_FILE_1>' TO N'D:\SQLData\CologneTransitIntelligence_1.mdf',
+     MOVE N'<LOGICAL_LOG_FILE_1>' TO N'D:\SQLLog\CologneTransitIntelligence_1.ldf',
+     RECOVERY, STATS = 5;
+```
+
+Do not substitute C: paths, use `WITH REPLACE` against a production database,
+or create a second copy on C:. Expected outcome: the isolated database is
+`ONLINE`, its source tables and row counts match the production audit, and all
+lab data/log files are on the selected non-C: volume.
+
+In the lab SSMS query window, first run this read-only file with
+`@CapturePhase = 'BEFORE'`:
+
+```text
+sql/mdd-mac-collector/capture-historical-capacity-lab-readonly.sql
+```
+
+The file must return `capacity.sample_allocation_before`, the complete
+SnapshotId selection, compact-object allocations, database files, log,
+tempdb, rollback activity, autogrowth limits, and the lab migration ledger.
+The exact full-history measurement uses every current SnapshotId in ascending
+order; a representative sample or a logical-byte extrapolation is not a
+production capacity plan.
+
+Use the existing scripts in this order on the isolated lab copy:
+
+1. Run the additive compact-storage script in the lab working copy with only
+   `@ApplyCompactStorage = 1`, while keeping future writes disabled.
+2. Use the existing `scripts/migrate_historical_compact_observations.py`
+   serializer and stored procedure against the lab copy, with `--batch-size 1`
+   and no snapshot limit. A deliberately overprovisioned, lab-only signed
+   preflight plan may be used for this first measurement run; it must never be
+   promoted to production evidence. From the authorized lab migration host,
+   the command shape is:
+
+   ```text
+   py -3 scripts/migrate_historical_compact_observations.py --apply \
+     --migration-id <LAB_MIGRATION_ID> --batch-size 1 \
+     --capacity-plan <LAB_CAPACITY_PLAN_FILE> \
+     --capacity-evidence-public-key <LAB_PUBLIC_KEY> \
+     --backup-evidence <LAB_BACKUP_EVIDENCE_JSON> --json
+   ```
+
+   The lab evidence and key remain separate from the production plan and key.
+3. During the lab run, retain every per-unit pre/post allocation result and
+   record the maximum data-file, log, and tempdb allocation observed. Run
+   `sql/mdd-mac-collector/estimate-storage-v3-compression.sql` only in its
+   isolated lab database, changing only `@RunLab = 1` and leaving
+   `@SampleSnapshots = 0` for the full verified history, to measure temporary
+   candidate allocations and losslessness. Its logical payload lengths are not
+   physical production allocation evidence.
+4. After the full history is `VERIFIED`, run the capture file again with only
+   `@CapturePhase = 'AFTER'`.
+
+The signed capacity-plan components must be derived from those actual lab
+measurements: compact envelope clustered allocation, nonclustered index
+overhead, transaction-log peak, tempdb peak, rollback reserve from a separate
+bounded abort/rollback sample, finite autogrowth reserve, and peak temporary
+duplication. Bind the before/after file snapshots, complete SnapshotId list,
+database identity, measurement timestamp, migration implementation version,
+and every result hash into `independent_sql_evidence`. Do not label the
+production audit's representative sizes or the offline calculator output as
+`physical_allocation_deltas`.
+
+Expected outcome: the lab migration completes with every unit `VERIFIED`, no
+quarantined unit, exact SQL readback parity, and a full-history measured peak
+that can be recomputed from the signed evidence. If any component is not
+measured, the capacity plan is incomplete and production remains blocked.
+
+### Capacity decision and safest physical-space fallback
+
+If the full-history peak does not fit in the fresh C: headroom above the 12 GiB
+floor, do not run the migration, install a production compact schema, retire
+legacy tables, or shrink the MDF. A read-only size sample cannot be used to
+justify proceeding.
+
+The safest practical recovery path is, in order:
+
+1. Have the Windows administrator inventory C: with the consolidated audit and
+   reclaim only unrelated, recoverable operating-system space (for example,
+   stale installers, temporary exports, or duplicate non-database artifacts)
+   after an explicit file-by-file review. Do not remove SQL database files,
+   transaction logs, historical tables, or the verified backup.
+2. If that is insufficient, use an existing non-C: SQL volume for an isolated
+   restore and measured compacted copy, then obtain explicit authorization for
+   a controlled production replacement/cutover. This keeps the original
+   historical database intact and avoids duplicating the entire database on
+   C:; it is not an action authorized by this report.
+3. Only after exact full-history parity, consumer approval, and explicit
+   retirement approval may the existing bounded retirement/reclamation path
+   remove legacy physical storage and use a bounded `DBCC SHRINKFILE`.
+
+Do not use `SHRINKDATABASE`, do not delete historical rows to make the
+capacity check pass, and do not restart the collector. If no safe unrelated
+space or non-C: path is available, leave the database and history untouched
+and keep the final result `CAPACITY_REQUIREMENTS_NOT_MET`.
+
+### 3. Additive compact schema installation
 
 Prerequisites:
 
-- Step 1 must be complete and its evidence must be saved before proceeding.
+- Steps 1 and 2 must be complete and their evidence must be saved before
+  proceeding.
 - The collector is still disabled/unloaded; no production run or lease is
   active; current C: free space is at least 12 GiB and log use is within the
   operator’s approved bound.
@@ -217,7 +358,7 @@ The state row must show `FutureWriteEnabled = 0`,
 `CompatibilityVerified = 0`, `HistoricalReadbackVerified = 0`, and
 `LegacyRetirementApproved = 0`. Do not enable future writes during this task.
 
-### 3. Bounded historical migration
+### 4. Bounded historical migration
 
 This is the one operation that is not an SSMS-only operation in the existing
 implementation. The canonical UTF-16LE JSON, SHA-256, GZIP, row normalization,
@@ -243,14 +384,16 @@ SELECT COUNT_BIG(*) AS compact_envelope_count,
 FROM stg.MddMacCompactObservationEnvelope;
 ```
 
-Prepare `<CAPACITY_PLAN_FILE>` from a real SQL physical-allocation pilot. It
-must contain these fields, with no invented values. The pilot must run against
-a restored production-shape copy for the measured sample; capture the target
-database identity, target database file sizes, snapshot population, sample
-SnapshotIds, before/after physical allocation deltas, log/tempdb growth,
-rollback reserve, and autogrowth limits. The signed evidence object must repeat
-the bound identity, file sizes, population, sample selection, timestamp, and
-deltas; a plan containing only self-declared numbers is rejected.
+Prepare `<CAPACITY_PLAN_FILE>` from the full-history isolated-lab measurement.
+It must contain these fields, with no invented values. The lab run must cover
+the current complete snapshot population (the measured SnapshotId selection
+must be the full selection used by the plan, not a logical extrapolation from
+three representative snapshots); capture the target database identity, target
+database file sizes, before/after physical allocation deltas, log/tempdb
+growth, rollback reserve, and autogrowth limits. The signed evidence object
+must repeat the bound identity, file sizes, population, sample selection,
+timestamp, and deltas; a plan containing only self-declared numbers or
+read-only estimates is rejected.
 
 ```json
 {
@@ -403,7 +546,24 @@ Run it with no `--max-snapshots`, `--from-snapshot-id`, or
 `--to-snapshot-id` for the full current history. The command must run only
 from an authorized host with the existing administrator connection path; this
 session will not retry unavailable Mac SQL administrator authentication. The
-SQL Server backup path is never a Mac filesystem path.
+SQL Server backup path is never a Mac filesystem path. The
+`<fresh-backup-evidence.json>` input must be an approved machine-generated
+artifact for the already verified October 14 file; do not manufacture it from
+the text `BACKUP_VERIFYONLY_PASS` and do not create another backup.
+
+Before invoking the command, compute the physical decision from fresh SSMS
+values:
+
+```text
+available_headroom_bytes = windows_c_available_bytes - (12 * 1024 * 1024 * 1024)
+allow_migration = peak_additional_bytes <= available_headroom_bytes
+```
+
+Also require the log, tempdb, finite-autogrowth, rollback, active-writer, and
+collector gates to pass. With the supplied 13.86 GiB value,
+`available_headroom_bytes` is approximately 1.86 GiB; if the signed full-
+history peak is greater than that, stop without `--apply`, leave future writes
+disabled, and record `FINAL_RESULT: CAPACITY_REQUIREMENTS_NOT_MET`.
 
 Expected result for a completed full migration: every selected unit reports
 `VERIFIED`, every SQL readback comparison is `PASS`, every batch checkpoint is
@@ -411,7 +571,7 @@ Expected result for a completed full migration: every selected unit reports
 `QuarantinedUnitCount = 0`, and the collector remains disabled. A capacity
 stop or parity failure leaves the migration restartable and blocks retirement.
 
-### 4. Exact full historical parity
+### 5. Exact full historical parity
 
 First run this SSMS count/ledger gate. It is necessary but not sufficient for
 exact parity:
@@ -458,7 +618,7 @@ the validator has selected the full source snapshot count. Counts alone do
 not certify NULL versus empty text, Unicode, timestamps, binary GZIP companions,
 identities, duplicate multiplicity, or every JSON field.
 
-### 5. Power BI compatibility verification
+### 6. Power BI compatibility verification
 
 Power BI compatibility must be proven against the real consumer before
 retirement. Repository view definitions and a SQL catalog query do not prove
@@ -513,12 +673,12 @@ without renamed/missing fields, and the captured aggregate totals match the
 pre-migration report. Until that human evidence exists, the Power BI gate is
 `NOT_VERIFIED` and retirement must not be approved.
 
-### 6. Human-approved legacy storage retirement
+### 7. Human-approved legacy storage retirement
 
-This operation is irreversible without restoring the Step 1 backup. It has two
+This operation is irreversible without restoring the verified off-C backup. It has two
 separate SSMS actions.
 
-First, after Step 5 evidence and human approval, open
+First, after Step 6 evidence and human approval, open
 `sql/mdd-mac-collector/approve-compact-observation-gates-v1.sql` and set only:
 
 ```sql
@@ -558,9 +718,9 @@ Do not set `@EnableFutureWrites = 1`, restart the collector, or treat the
 retirement message as physical disk recovery. The source-controlled defaults
 remain zero; only the reviewed SSMS working copy may use one.
 
-### 7. Safe physical MDF space reclamation
+### 8. Safe physical MDF space reclamation
 
-Run only after Step 6 committed, with no active writer/lease/transaction and
+Run only after Step 7 committed, with no active writer/lease/transaction and
 with explicit approval for the physical shrink. First identify the exact file
 and current measurements:
 
@@ -685,12 +845,12 @@ post-check still at or above 12 GiB free on C:, and allocated MDF size reduced
 without going below used pages plus headroom. No automatic shrink is run by
 this repository.
 
-### 8. Future-storage capacity verification
+### 9. Future-storage capacity verification
 
 Future writes remain disabled. This step is a read-only capacity decision;
 it does not authorize a collector restart or a production test write.
 
-Run this SSMS measurement after Step 7 (or after Step 6 if no shrink is
+Run this SSMS measurement after Step 8 (or after Step 7 if no shrink is
 needed):
 
 ```sql
@@ -732,9 +892,11 @@ FROM stg.MddMacCompactStorageState
 WHERE StateId = 1;
 ```
 
-For a real physical sample, use an isolated restored production-shape copy
-and the existing envelope procedure/serializer; do not insert a test write in
-production. Feed the measured result to the existing calculator:
+The calculator below is only the existing future seven-day growth guard. It is
+not the full-history migration capacity plan and cannot replace the signed
+before/after lab allocation evidence. Use it only after the lab has supplied a
+measured physical bytes-per-successful-snapshot result; do not run a test write
+in production.
 
 ```text
 python3 scripts/calculate_tiered50_storage_capacity.py \
@@ -760,10 +922,14 @@ and do not start the collector.
 
 The operator-facing files are:
 
-- First safe manual operation: `sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql`,
-  default `@ApplyBackup = 0`; it is bound to `DataAnalyst-VM`,
-  `DATAANALYST-VM\Somaye`, and the confirmed UNC backup root.
-- Read-only audit: `sql/mdd-mac-collector/audit-compact-storage-readonly.sql`.
+- Completed recovery-point procedure: `sql/mdd-mac-collector/backup-cologne-transit-off-c-v1.sql`;
+  no new backup is requested. Its existing-file branch is read-only and is
+  only for a later machine-generated evidence capture if required.
+- Consolidated production audit:
+  `sql/mdd-mac-collector/audit-historical-storage-recovery-readonly.sql`.
+- Isolated before/after lab capture:
+  `sql/mdd-mac-collector/capture-historical-capacity-lab-readonly.sql`.
+- Existing compact-state audit: `sql/mdd-mac-collector/audit-compact-storage-readonly.sql`.
 - Additive schema: `sql/mdd-mac-collector/compact-observation-storage-v1.sql`,
   default `@ApplyCompactStorage = 0`.
 - Optional snapshot-only GZIP backfill:
@@ -781,12 +947,12 @@ The operator-facing files are:
 - Existing exact parity validator: `scripts/validate_compact_observation_parity.py`.
 - Existing capacity calculator: `scripts/calculate_tiered50_storage_capacity.py`.
 
-Do not run the SQL verifier from this Mac session when administrator
-authentication or SQL Server visibility is unavailable. Run its
-`--verify-existing` mode only from an authorized host with the real SQL
-connection and SQL-visible backup path; it performs no new backup. The
-Windows helper and SSMS script provide the same read-only existing-file
-procedure. Never fabricate the JSON artifact from the operator report.
+Do not rerun the completed SSMS verification or create another backup. If the
+Python migration gate later requires the machine-generated `_backup_gate`
+artifact, run the existing-file branch only from an authorized Windows host
+with the real SQL connection and SQL-visible backup path, and preserve the
+operator-confirmed SSMS result separately. Never fabricate the JSON artifact
+from the operator report.
 
 ## Local validation completed
 
@@ -800,6 +966,8 @@ PYTHONPATH=src python3 -m unittest tests.test_compact_observation_storage \
   tests.test_tiered50_timing_capacity -q                                    56 PASS, 3 skipped
 python3 scripts/validate_snapshot_gzip_storage_v1.py                         PASS
 PYTHONPATH=src python3 scripts/validate_mssql_migration.py                   PASS
+PYTHONPATH=src python3 scripts/validate_storage_v3.py                         PASS
+static read-only audit keyword/statement-id checks                         PASS
 PYTHONPATH=src python3 -m unittest discover -s tests -q                      420 run; PASS, 3 skipped
 git diff --check                                                             PASS
 ```
@@ -814,9 +982,10 @@ Server or Power BI results. No production mutation was executed.
 ```text
 SOURCE_CODE_REVIEW: PASS
 IMPLEMENTATION_DEFECTS: FIXED_AND_OFFLINE_TESTED
-SQL_SERVER_PRODUCTION_VALIDATION: NOT_EXECUTED
-FRESH_VERIFIED_OFF_C_BACKUP: EXISTING_BACKUP_VERIFYONLY_REQUIRED; NOT_EXECUTED
+SQL_SERVER_PRODUCTION_VALIDATION: STORAGE_AUDIT_NOT_EXECUTED; SSMS_BACKUP_VERIFYONLY_OPERATOR_CONFIRMED
+FRESH_VERIFIED_OFF_C_BACKUP: OPERATOR_CONFIRMED_SSMS_RESTORE_VERIFYONLY_PASS; MACHINE_ARTIFACT_NOT_CAPTURED
 WINDOWS_C_FREE_AT_LAST_CHECK: 13.86_GIB_SUPPLIED_ESTIMATE; 12_GIB_FLOOR_LEAVES_1.86_GIB_HEADROOM
+CONSOLIDATED_STORAGE_AUDIT: PREPARED; NOT_EXECUTED
 COMPACT_SCHEMA_INSTALLATION: NOT_EXECUTED
 BOUNDED_HISTORICAL_MIGRATION: NOT_EXECUTED
 EXACT_FULL_HISTORICAL_PARITY: NOT_EXECUTED
@@ -824,7 +993,7 @@ HISTORICAL_COMPRESSION_EFFICIENCY: OFFLINE_LOGICAL_CANDIDATES_PASS; SQL_PHYSICAL
 POWER_BI_COMPATIBILITY: NOT_VERIFIED
 LEGACY_RETIREMENT: NOT_EXECUTED
 PHYSICAL_MDF_RECLAMATION: NOT_EXECUTED
-PEAK_MIGRATION_SPACE: NOT_MEASURED; FULL_HISTORY_BLOCKED
+PEAK_MIGRATION_SPACE: NOT_MEASURED; 1.86_GIB_SUPPLIED_HEADROOM_REQUIRES_FRESH_RECHECK
 COLLECTOR_STATUS: DISABLED_AND_UNLOADED; NOT_RESTARTED
-FINAL_RESULT: BLOCKED_PENDING_EXISTING_BACKUP_VERIFYONLY_AND_CAPACITY_PLAN
+FINAL_RESULT: BLOCKED_PENDING_FULL_HISTORY_CAPACITY_PLAN
 ```

@@ -41,19 +41,30 @@ EXEC sys.sp_estimate_data_compression_savings
 /*
     BOUNDED COMPACT-STORAGE CANDIDATE MEASUREMENT.
 
-    The following temporary tables materialize the same bounded sample in
-    three lossless forms.  Their reserved pages are measured in tempdb; this
-    is the physical allocation evidence needed for a capacity plan, not a
-    logical compression estimate.  The optimized candidate stores original
-    GZIP bytes as VARBINARY(MAX), while the dictionary candidate replaces only
-    repeated timing/source-path values with dictionary references and keeps
-    every other field, identity, NULL, and occurrence.
+    The following temporary tables materialize the same lab-selected sample
+    in three lossless forms.  Their reserved pages are measured in tempdb;
+    this is physical temporary-allocation evidence, not a logical compression
+    estimate and not the persistent compact-envelope allocation.  Set
+    @SampleSnapshots to 0 for the complete verified history.  The optimized
+    candidate stores original GZIP bytes as VARBINARY(MAX), while the
+    dictionary candidate replaces only repeated timing/source-path values
+    with dictionary references and keeps every other field, identity, NULL,
+    and occurrence.
 */
 IF OBJECT_ID(N'stg.MddMacCompactObservationEnvelope', N'U') IS NULL
    OR OBJECT_ID(N'stg.vMddMacCompactPhysicalFieldReadback', N'V') IS NULL
     THROW 51311, 'The compact envelope and physical-field readback objects are required in the lab.', 1;
 
-DECLARE @SampleSnapshots int = 32;
+DECLARE @SampleSnapshots bigint = 0;
+
+IF @SampleSnapshots = 0
+BEGIN
+    SELECT @SampleSnapshots = COUNT_BIG(*)
+    FROM stg.MddMacCompactObservationEnvelope
+    WHERE VerificationStatus = 'VERIFIED';
+END;
+IF @SampleSnapshots <= 0
+    THROW 51314, 'The lab has no verified compact envelopes in the selected history.', 1;
 
 SELECT TOP (@SampleSnapshots)
        e.SnapshotId,
@@ -63,7 +74,7 @@ FROM stg.MddMacCompactObservationEnvelope AS e
 WHERE e.VerificationStatus = 'VERIFIED'
 ORDER BY e.SnapshotId;
 IF NOT EXISTS (SELECT 1 FROM #CompactCurrentEnvelope)
-    THROW 51313, 'The lab has no verified compact envelopes in the bounded sample.', 1;
+    THROW 51313, 'The lab has no verified compact envelopes in the selected sample.', 1;
 
 CREATE TABLE #CompactExistingSnapshot
 (
@@ -78,7 +89,7 @@ BEGIN
                  COALESCE(SnapshotJsonGzip, COMPRESS(CONVERT(NVARCHAR(MAX), SnapshotJson)))
           FROM stg.MddMacSourceSnapshot
           ORDER BY SnapshotId;',
-        N'@SampleSnapshots int',
+        N'@SampleSnapshots bigint',
         @SampleSnapshots = @SampleSnapshots;
 END
 ELSE IF COL_LENGTH(N'stg.MddMacSourceSnapshot', N'SnapshotJson') IS NOT NULL
@@ -89,7 +100,7 @@ BEGIN
                  COMPRESS(CONVERT(NVARCHAR(MAX), SnapshotJson))
           FROM stg.MddMacSourceSnapshot
           ORDER BY SnapshotId;',
-        N'@SampleSnapshots int',
+        N'@SampleSnapshots bigint',
         @SampleSnapshots = @SampleSnapshots;
 END
 ELSE
