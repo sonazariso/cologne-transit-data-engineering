@@ -20,6 +20,10 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 SET LOCK_TIMEOUT 5000;
+SET IMPLICIT_TRANSACTIONS OFF;
+
+IF @@TRANCOUNT <> 0
+    THROW 51149, 'Snapshot GZIP lab refuses an existing transaction.', 1;
 
 DECLARE @RunLab BIT = 0;
 DECLARE @ServerName nvarchar(128) = CONVERT(nvarchar(128), SERVERPROPERTY(N'ServerName'));
@@ -86,6 +90,7 @@ BEGIN
         CompressedPayloadBytes BIGINT NOT NULL,
         ExactPayloadSavingsBytes BIGINT NOT NULL,
         PeakTransactionLogBytes BIGINT NOT NULL,
+            PeakRollbackLogBytes BIGINT NULL,
         DataFileAllocationDeltaBytes BIGINT NOT NULL,
         DataFileUsedDeltaBytes BIGINT NOT NULL,
         TempdbAllocationDeltaBytes BIGINT NOT NULL,
@@ -98,7 +103,6 @@ BEGIN
         (
             OriginalPlaintextBytes >= 0
             AND CompressedPayloadBytes >= 0
-            AND ExactPayloadSavingsBytes >= 0
             AND PeakTransactionLogBytes >= 0
             AND DataFileAllocationDeltaBytes >= 0
             AND TempdbAllocationDeltaBytes >= 0
@@ -106,6 +110,10 @@ BEGIN
         )
     );
 END;
+
+IF COL_LENGTH(N'lab.SnapshotGzipCapacityMeasurement', N'PeakRollbackLogBytes') IS NULL
+    ALTER TABLE lab.SnapshotGzipCapacityMeasurement
+        ADD PeakRollbackLogBytes BIGINT NULL;
 
 DECLARE @SnapshotId BIGINT;
 DECLARE @OriginalText NVARCHAR(MAX);
@@ -116,6 +124,7 @@ DECLARE @CompressedLength BIGINT;
 DECLARE @CompressedHash VARBINARY(32);
 DECLARE @TransactionId BIGINT;
 DECLARE @PeakTransactionLogBytes BIGINT;
+DECLARE @PeakRollbackLogBytes BIGINT;
 DECLARE @DataAllocatedBefore BIGINT;
 DECLARE @DataUsedBefore BIGINT;
 DECLARE @DataAllocatedDuring BIGINT;
@@ -168,6 +177,35 @@ BEGIN
         FROM sys.database_files AS df
         CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
         WHERE UPPER(LEFT(vs.volume_mount_point, 2)) <> N'C:';
+
+        /* Measure the rollback/log reserve in a separate transaction.  The
+           probe is deliberately rolled back before the committed one-row
+           measurement and never leaves a second physical representation. */
+        SELECT
+            @OriginalText = s.SnapshotJson,
+            @OriginalLength = CONVERT(BIGINT, DATALENGTH(s.SnapshotJson)),
+            @OriginalHash = HASHBYTES(N'SHA2_256', CONVERT(VARBINARY(MAX), s.SnapshotJson))
+        FROM stg.MddMacSourceSnapshot AS s WITH (UPDLOCK, HOLDLOCK)
+        WHERE s.SnapshotId = @SnapshotId
+          AND s.SnapshotJson IS NOT NULL
+          AND s.SnapshotJsonGzip IS NULL;
+        IF @OriginalText IS NULL
+            THROW 51146, 'The selected lab snapshot is no longer a plaintext row.', 1;
+        SET @CompressedPayload = COMPRESS(@OriginalText);
+        BEGIN TRANSACTION;
+        UPDATE stg.MddMacSourceSnapshot
+        SET SnapshotJsonGzip = @CompressedPayload,
+            SnapshotJson = NULL
+        WHERE SnapshotId = @SnapshotId
+          AND SnapshotJson IS NOT NULL
+          AND SnapshotJsonGzip IS NULL;
+        SELECT @TransactionId = transaction_id
+        FROM sys.dm_tran_current_transaction();
+        SELECT @PeakRollbackLogBytes = COALESCE(MAX(CONVERT(BIGINT, dt.database_transaction_log_bytes_used)), 0)
+        FROM sys.dm_tran_database_transactions AS dt
+        WHERE dt.transaction_id = @TransactionId
+          AND dt.database_id = DB_ID();
+        ROLLBACK TRANSACTION;
 
         BEGIN TRANSACTION;
         SELECT
@@ -256,7 +294,7 @@ BEGIN
         (
             SnapshotId, MeasuredAtUtc, OriginalPlaintextBytes,
             CompressedPayloadBytes, ExactPayloadSavingsBytes,
-            PeakTransactionLogBytes, DataFileAllocationDeltaBytes,
+            PeakTransactionLogBytes, PeakRollbackLogBytes, DataFileAllocationDeltaBytes,
             DataFileUsedDeltaBytes, TempdbAllocationDeltaBytes,
             TempdbUsedDeltaBytes, LabVolumeFreeBeforeBytes,
             LabVolumeFreeDuringBytes, LabVolumeFreeAfterBytes,
@@ -267,6 +305,7 @@ BEGIN
             @SnapshotId, SYSUTCDATETIME(), @OriginalLength,
             @CompressedLength, @OriginalLength - @CompressedLength,
             @PeakTransactionLogBytes,
+            @PeakRollbackLogBytes,
             CASE WHEN @DataAllocatedDuring - @DataAllocatedBefore > 0
                  THEN @DataAllocatedDuring - @DataAllocatedBefore ELSE 0 END,
             @DataUsedDuring - @DataUsedBefore,
@@ -300,6 +339,7 @@ SELECT
     CompressedPayloadBytes AS compressed_payload_bytes,
     ExactPayloadSavingsBytes AS exact_payload_savings_bytes,
     PeakTransactionLogBytes AS peak_transaction_log_bytes,
+    PeakRollbackLogBytes AS peak_rollback_log_bytes,
     DataFileAllocationDeltaBytes AS data_file_allocation_delta_bytes,
     TempdbAllocationDeltaBytes AS tempdb_allocation_delta_bytes,
     ObservedLabVolumeConsumptionBytes AS observed_lab_volume_consumption_bytes
@@ -310,6 +350,7 @@ SELECT
     N'capacity.snapshot_gzip_lab_peak' AS statement_id,
     COUNT_BIG(*) AS measured_snapshot_rows,
     MAX(PeakTransactionLogBytes) AS peak_transaction_log_bytes,
+    COALESCE(MAX(PeakRollbackLogBytes), 0) AS peak_rollback_log_bytes,
     MAX(DataFileAllocationDeltaBytes) AS peak_data_file_allocation_bytes,
     MAX(TempdbAllocationDeltaBytes) AS peak_tempdb_allocation_bytes,
     MAX(ObservedLabVolumeConsumptionBytes) AS peak_observed_lab_volume_consumption_bytes,

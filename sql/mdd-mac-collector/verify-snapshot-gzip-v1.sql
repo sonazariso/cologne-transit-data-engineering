@@ -2,11 +2,13 @@
     SNAPSHOT GZIP V1 — READ-ONLY INTEGRITY CHECK
 
     This validates every stored compressed snapshot without returning payload
-    text. Rows that still retain both physical representations are compared
-    by exact UTF-16LE bytes, length, and the compatible readback view. A
-    compressed-only row is checked for a valid decompression, JSON shape, and
-    view parity. The final result sets are stable evidence for the separate
-    backup-coverage and capacity gates; they do not authorize a write.
+    text. The physical contract is XOR storage in the base table; the logical
+    contract is the original SnapshotJson value exposed by
+    stg.vMddMacSourceSnapshotJson. Rows that still retain both physical
+    representations are compared by exact UTF-16LE bytes, length, SHA-256,
+    NULL/empty state, and the compatible readback view. A compressed-only row
+    is checked for valid decompression and view parity. These result sets do
+    not authorize a write and do not make direct raw-column readers safe.
 */
 USE CologneTransitIntelligence;
 GO
@@ -39,7 +41,11 @@ IF EXISTS
       AND s.SnapshotJsonGzip IS NOT NULL
       AND
       (
-          DATALENGTH(s.SnapshotJson) <> DATALENGTH(d.RestoredBytes)
+          d.RestoredBytes IS NULL
+          OR d.RestoredBytes <> CONVERT(VARBINARY(MAX), s.SnapshotJson)
+          OR DATALENGTH(s.SnapshotJson) <> DATALENGTH(d.RestoredBytes)
+          OR CONVERT(BIT, CASE WHEN DATALENGTH(s.SnapshotJson) = 0 THEN 1 ELSE 0 END)
+             <> CONVERT(BIT, CASE WHEN DATALENGTH(d.RestoredBytes) = 0 THEN 1 ELSE 0 END)
           OR HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), s.SnapshotJson))
              <> HASHBYTES('SHA2_256', d.RestoredBytes)
       )
@@ -69,8 +75,9 @@ IF EXISTS
       AND s.SnapshotJsonGzip IS NOT NULL
       AND
       (
-          d.RestoredText IS NULL
-          OR ISJSON(d.RestoredText) <> 1
+          v.SnapshotJson IS NULL
+          OR d.RestoredText IS NULL
+          OR (DATALENGTH(d.RestoredText) > 0 AND ISJSON(d.RestoredText) <> 1)
           OR DATALENGTH(v.SnapshotJson) <> DATALENGTH(d.RestoredText)
           OR HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), v.SnapshotJson))
              <> HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), d.RestoredText))
@@ -95,6 +102,26 @@ IF EXISTS
 )
     THROW 51116, 'Plaintext SnapshotJson readback parity failed.', 1;
 
+IF EXISTS
+(
+    SELECT 1
+    FROM stg.MddMacSourceSnapshot AS s
+    INNER JOIN stg.vMddMacSourceSnapshotJson AS v ON v.SnapshotId = s.SnapshotId
+    WHERE v.SnapshotId IS NULL
+       OR s.RunId <> v.RunId
+       OR s.AuditId <> v.AuditId
+       OR s.TargetIdentity <> v.TargetIdentity
+       OR ISNULL(s.SamplingTargetId, -2147483648) <> ISNULL(v.SamplingTargetId, -2147483648)
+       OR s.LogicalDueBucket <> v.LogicalDueBucket
+       OR s.ObservedAtUtc <> v.ObservedAtUtc
+       OR ISNULL(s.ResponseTimestampSourceText, N'') <> ISNULL(v.ResponseTimestampSourceText, N'')
+       OR s.ParserVersion <> v.ParserVersion
+       OR ISNULL(s.ApplicationStatus, '') <> ISNULL(v.ApplicationStatus, '')
+       OR s.PayloadHashSha256 <> v.PayloadHashSha256
+       OR s.CreatedAtUtc <> v.CreatedAtUtc
+)
+    THROW 51117, 'SnapshotId or audit-lineage readback parity failed.', 1;
+
 SELECT
     N'capacity.snapshot_gzip_readback_compatibility' AS statement_id,
     COUNT_BIG(*) AS snapshot_rows,
@@ -108,6 +135,29 @@ SELECT
               AND SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) = 0
          THEN N'PASS' ELSE N'BLOCKED' END AS compatibility_status,
     N'EXACT_UTF16_LENGTH_AND_SHA256_VIEW_PARITY' AS verification_basis
+FROM stg.MddMacSourceSnapshot AS s
+LEFT JOIN stg.vMddMacSourceSnapshotJson AS v ON v.SnapshotId = s.SnapshotId;
+
+SELECT
+    N'capacity.snapshot_gzip_physical_logical_contract' AS statement_id,
+    COUNT_BIG(*) AS physical_snapshot_rows,
+    COUNT_BIG(DISTINCT s.SnapshotId) AS distinct_snapshot_ids,
+    COUNT_BIG(DISTINCT s.AuditId) AS distinct_audit_ids,
+    SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) AS physical_plaintext_rows,
+    SUM(CASE WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS physical_compressed_rows,
+    SUM(CASE WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) AS physical_missing_rows,
+    SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) AS physical_dual_rows,
+    SUM(CASE WHEN v.SnapshotJson IS NULL THEN 1 ELSE 0 END) AS logical_null_rows,
+    SUM(CASE WHEN v.SnapshotJson IS NOT NULL AND DATALENGTH(v.SnapshotJson) = 0 THEN 1 ELSE 0 END) AS logical_empty_rows,
+    COUNT_BIG(v.SnapshotId) AS logical_view_rows,
+    CASE WHEN COUNT_BIG(*) = COUNT_BIG(DISTINCT s.SnapshotId)
+              AND COUNT_BIG(*) = COUNT_BIG(DISTINCT s.AuditId)
+              AND COUNT_BIG(*) = COUNT_BIG(v.SnapshotId)
+              AND SUM(CASE WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NULL THEN 1 ELSE 0 END) = 0
+              AND SUM(CASE WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END) = 0
+              AND SUM(CASE WHEN v.SnapshotJson IS NULL THEN 1 ELSE 0 END) = 0
+         THEN N'PASS' ELSE N'BLOCKED' END AS contract_status,
+    N'PHYSICAL_XOR; LOGICAL_VIEW_PRESERVES_UTF16LE_BYTES_SHA256_NULL_EMPTY_AND_ROW_MULTIPLICITY' AS contract_basis
 FROM stg.MddMacSourceSnapshot AS s
 LEFT JOIN stg.vMddMacSourceSnapshotJson AS v ON v.SnapshotId = s.SnapshotId;
 

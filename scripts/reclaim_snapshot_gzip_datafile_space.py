@@ -2,9 +2,11 @@
 """Assess or explicitly apply bounded C: data-file reclamation after Snapshot GZIP.
 
 The default path is read-only.  ``--apply`` requires a fresh backup artifact,
-complete Snapshot GZIP/readback evidence, a separate human approval artifact,
-the stopped-collector gate, and the live 12 GiB C: floor.  It never moves SQL
-files, adds storage, retires legacy tables, or uses SHRINKDATABASE.
+complete Snapshot GZIP/readback evidence, an independently captured live
+MDF/LDF/tempdb/session/collector preflight, measured log/rollback/autogrowth/
+external reserves, a separate human approval artifact, the stopped-collector
+gate, and the live 12 GiB C: floor.  It never moves SQL files, adds storage,
+retires legacy tables, or uses SHRINKDATABASE.
 """
 
 from __future__ import annotations
@@ -43,6 +45,13 @@ from reclaim_sql_datafile_space import (  # noqa: E402
 
 
 EVIDENCE_MAX_AGE = timedelta(minutes=30)
+CAPACITY_RESERVE_FIELDS = (
+    "transaction_log_reserve_bytes",
+    "rollback_reserve_bytes",
+    "tempdb_reserve_bytes",
+    "autogrowth_reserve_bytes",
+    "external_c_drive_reserve_bytes",
+)
 
 
 def _load_json(path: Path) -> Mapping[str, Any]:
@@ -72,6 +81,9 @@ def _approval_gate(path: Path, *, now: datetime | None = None) -> dict[str, Any]
             "operation",
             "snapshot_gzip_readback_status",
             "windows_floor_confirmed",
+            "live_preflight_evidence_reference",
+            "live_preflight_captured_at_utc",
+            "capacity_reserves",
         )
         if not str(data.get(name) or "").strip()
     ]
@@ -89,6 +101,32 @@ def _approval_gate(path: Path, *, now: datetime | None = None) -> dict[str, Any]
         missing.append("snapshot_gzip_readback_status")
     if data.get("windows_floor_confirmed") is not True:
         missing.append("windows_floor_confirmed")
+    if not str(data.get("live_preflight_evidence_reference") or "").strip():
+        missing.append("live_preflight_evidence_reference")
+    try:
+        preflight_at = _fresh_utc(data.get("live_preflight_captured_at_utc"))
+        preflight_age = (now or datetime.now(timezone.utc)).astimezone(timezone.utc) - preflight_at
+        preflight_fresh = timedelta(0) <= preflight_age <= EVIDENCE_MAX_AGE
+    except (TypeError, ValueError):
+        preflight_age = None
+        preflight_fresh = False
+        missing.append("live_preflight_captured_at_utc")
+    if not preflight_fresh:
+        missing.append("fresh_live_preflight")
+    reserves = data.get("capacity_reserves")
+    if not isinstance(reserves, Mapping):
+        missing.append("capacity_reserves")
+    else:
+        for field in CAPACITY_RESERVE_FIELDS:
+            item = reserves.get(field)
+            if not isinstance(item, Mapping) or item.get("status") != "PASS":
+                missing.append(f"capacity_reserves.{field}")
+                continue
+            try:
+                if int(item.get("bytes")) < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                missing.append(f"capacity_reserves.{field}.bytes")
     if not fresh:
         missing.append("fresh_approval")
     return {
@@ -98,6 +136,9 @@ def _approval_gate(path: Path, *, now: datetime | None = None) -> dict[str, Any]
         "missing_fields": sorted(set(missing)),
         "fresh": fresh,
         "age_seconds": age.total_seconds() if age is not None else None,
+        "live_preflight_fresh": preflight_fresh,
+        "live_preflight_age_seconds": preflight_age.total_seconds() if preflight_age is not None else None,
+        "capacity_reserve_fields": list(CAPACITY_RESERVE_FIELDS),
     }
 
 
@@ -129,17 +170,67 @@ def _snapshot_gzip_gate(cursor: Any) -> dict[str, Any]:
     )
     view_rows = int(_row_value(cursor.fetchone(), "view_rows", 0) or 0)
     values["view_rows"] = view_rows
+    cursor.execute(
+        """
+        SELECT
+            SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NOT NULL
+                                     AND DECOMPRESS(SnapshotJsonGzip) IS NULL THEN 1 ELSE 0 END)) AS corrupt_gzip_rows,
+            SUM(CONVERT(BIGINT, CASE WHEN SnapshotJson IS NULL AND SnapshotJsonGzip IS NOT NULL
+                                     AND SnapshotJsonGzip IS NOT NULL THEN 1 ELSE 0 END)) AS compressed_payload_rows
+        FROM stg.MddMacSourceSnapshot
+        """
+    )
+    parity_row = cursor.fetchone()
+    values["corrupt_gzip_rows"] = int(_row_value(parity_row, "corrupt_gzip_rows", 0) or 0)
+    values["compressed_payload_rows"] = int(_row_value(parity_row, "compressed_payload_rows", 1) or 0)
     values["status"] = (
         "PASS"
         if values["snapshot_rows"] == values["compressed_rows"]
         and values["snapshot_rows"] == view_rows
         and values["missing_payload_rows"] == 0
         and values["dual_payload_rows"] == 0
+        and values["corrupt_gzip_rows"] == 0
         and values["snapshot_rows"] > 0
         else "BLOCKED"
     )
     values["contract"] = "ALL_SNAPSHOTS_COMPRESSED_AND_VIEW_READBACK_COMPLETE"
     return values
+
+
+def _capacity_projection_gate(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Require a measured physical C: projection before a shrink write."""
+
+    projection = data.get("physical_capacity_projection")
+    required = (
+        "status",
+        "current_windows_c_free_bytes",
+        "worst_case_physical_c_reserve_bytes",
+        "projected_worst_case_c_free_bytes",
+        "required_windows_c_floor_bytes",
+    )
+    if not isinstance(projection, Mapping):
+        return {"status": "BLOCKED", "missing_fields": ["physical_capacity_projection"]}
+    missing = [name for name in required if name not in projection]
+    try:
+        current = int(projection.get("current_windows_c_free_bytes"))
+        reserve = int(projection.get("worst_case_physical_c_reserve_bytes"))
+        projected = int(projection.get("projected_worst_case_c_free_bytes"))
+        floor = int(projection.get("required_windows_c_floor_bytes"))
+    except (TypeError, ValueError):
+        missing.append("physical_capacity_projection.numeric_fields")
+        current = reserve = projected = floor = -1
+    if projection.get("status") != "PASS":
+        missing.append("physical_capacity_projection.status")
+    if current < floor or reserve < 0 or projected < floor or current - reserve != projected:
+        missing.append("physical_capacity_projection.floor_proof")
+    return {
+        "status": "PASS" if not missing else "BLOCKED",
+        "missing_fields": sorted(set(missing)),
+        "current_windows_c_free_bytes": current,
+        "worst_case_physical_c_reserve_bytes": reserve,
+        "projected_worst_case_c_free_bytes": projected,
+        "required_windows_c_floor_bytes": floor,
+    }
 
 
 def _active_writer_gate(cursor: Any) -> dict[str, Any]:
@@ -153,7 +244,18 @@ def _active_writer_gate(cursor: Any) -> dict[str, Any]:
              WHERE LeaseName = N'MDD_MAC_PRODUCTION' AND Status = N'ACTIVE') AS active_leases,
             (SELECT COUNT_BIG(*) FROM sys.dm_tran_session_transactions AS st
              INNER JOIN sys.dm_exec_sessions AS es ON es.session_id = st.session_id
-             WHERE st.session_id <> @@SPID AND es.is_user_process = 1) AS active_transactions
+             WHERE st.session_id <> @@SPID AND es.is_user_process = 1) AS active_transactions,
+            (SELECT COUNT_BIG(*) FROM sys.dm_exec_sessions AS es
+             WHERE es.session_id <> @@SPID AND es.is_user_process = 1
+               AND es.database_id = DB_ID()) AS active_sql_sessions,
+            (SELECT COUNT_BIG(*) FROM sys.dm_exec_requests AS er
+             WHERE er.session_id <> @@SPID AND er.database_id = DB_ID()) AS active_sql_requests,
+            (SELECT COUNT_BIG(*) FROM sys.dm_exec_sessions AS es
+             WHERE es.session_id <> @@SPID AND es.is_user_process = 1
+               AND es.database_id = DB_ID()
+               AND (LOWER(COALESCE(es.program_name, N'')) LIKE N'%cologne%transit%'
+                    OR LOWER(COALESCE(es.program_name, N'')) LIKE N'%mdd%collector%'
+                    OR LOWER(COALESCE(es.host_name, N'')) LIKE N'%mdd%collector%')) AS collector_sessions
         """
     )
     row = cursor.fetchone()
@@ -161,9 +263,47 @@ def _active_writer_gate(cursor: Any) -> dict[str, Any]:
         "active_runs": int(_row_value(row, "active_runs", 0) or 0),
         "active_leases": int(_row_value(row, "active_leases", 1) or 0),
         "active_transactions": int(_row_value(row, "active_transactions", 2) or 0),
+        "active_sql_sessions": int(_row_value(row, "active_sql_sessions", 3) or 0),
+        "active_sql_requests": int(_row_value(row, "active_sql_requests", 4) or 0),
+        "collector_sessions": int(_row_value(row, "collector_sessions", 5) or 0),
     }
     values["status"] = "PASS" if not any(values.values()) else "BLOCKED"
     return values
+
+
+def _fragmentation_snapshot(cursor: Any) -> list[dict[str, Any]]:
+    """Capture read-only fragmentation evidence around a separate shrink."""
+
+    cursor.execute(
+        """
+        SELECT
+            OBJECT_SCHEMA_NAME(ps.object_id) AS schema_name,
+            OBJECT_NAME(ps.object_id) AS object_name,
+            ps.index_id,
+            ps.index_type_desc,
+            ps.page_count,
+            CONVERT(decimal(9, 3), ps.avg_fragmentation_in_percent) AS avg_fragmentation_in_percent,
+            ps.fragment_count,
+            ps.avg_page_space_used_in_percent
+        FROM sys.dm_db_index_physical_stats(
+            DB_ID(), NULL, NULL, NULL, 'LIMITED'
+        ) AS ps
+        WHERE OBJECT_SCHEMA_NAME(ps.object_id) = N'stg'
+          AND OBJECT_NAME(ps.object_id) IN (N'MddMacSourceSnapshot', N'MddMacCallObservation',
+              N'MddMacTimingObservation', N'MddMacSituationEvidence', N'MddMacServiceSectionEvidence',
+              N'MddMacAttributeEvidence', N'MddMacResponseError', N'MddMacParserGap')
+        ORDER BY ps.object_id, ps.index_id;
+        """
+    )
+    columns = (
+        "schema_name", "object_name", "index_id", "index_type_desc",
+        "page_count", "avg_fragmentation_in_percent", "fragment_count",
+        "avg_page_space_used_in_percent",
+    )
+    return [
+        {name: _row_value(row, name, index) for index, name in enumerate(columns)}
+        for row in cursor.fetchall()
+    ]
 
 
 def _shrink_assessment(
@@ -225,10 +365,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.apply:
             result["backup_gate"] = _backup_gate(args.backup_evidence)
             result["approval_gate"] = _approval_gate(args.approval_evidence)
+            approval_data = _load_json(args.approval_evidence)
+            result["capacity_projection_gate"] = _capacity_projection_gate(approval_data)
             if result["backup_gate"]["status"] != "PASS":
                 raise RuntimeError("verified backup coverage is required before shrink")
             if result["approval_gate"]["status"] != "PASS":
                 raise RuntimeError("fresh explicit Snapshot GZIP shrink approval is required")
+            if result["capacity_projection_gate"]["status"] != "PASS":
+                raise RuntimeError("measured worst-case physical C: floor projection is required before shrink")
         if result["collector_gate"].get("status") != "PASS":
             raise RuntimeError("collector stopped/disabled gate is not proven")
         if result["storage_operation_gate"].get("status") != "PASS":
@@ -250,6 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise RuntimeError("active writer, lease, or user transaction is present")
         before = _file_capacity(cursor, require_legacy_tables=False)
         result["files_before"] = before
+        result["fragmentation_before"] = _fragmentation_snapshot(cursor)
         assessment = _shrink_assessment(
             before,
             headroom_gib=max(0.25, args.shrink_headroom_gib),
@@ -269,6 +414,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             connection.commit()
             after = _file_capacity(cursor, require_legacy_tables=False)
             result["files_after"] = after
+            result["fragmentation_after"] = _fragmentation_snapshot(cursor)
             result["space_delta"] = _space_delta(before, after)
             result["physical_recovery"] = {
                 "status": (

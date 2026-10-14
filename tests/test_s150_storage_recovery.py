@@ -74,7 +74,7 @@ class S150StorageRecoveryTests(unittest.TestCase):
         self.assertIn("existing C: allocation only", report)
         self.assertIn("EXTERNAL_STORAGE_ADDITION: EXCLUDED_FROM_ACTIVE_PLAN", report)
         self.assertNotIn("VMware", report)
-        self.assertNotIn("MDF", report)
+        self.assertIn("MDF", report)
         self.assertIn("PROBLEM_SOLVED: NO", report)
         self.assertNotRegex(report, r"Stage\s+15")
 

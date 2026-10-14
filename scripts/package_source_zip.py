@@ -33,7 +33,12 @@ RUNTIME_STATE_NAMES = frozenset(
 )
 RUNTIME_STATE_SUFFIXES = frozenset(
     {
+        ".bak",
+        ".bacpac",
         ".db",
+        ".mdf",
+        ".ndf",
+        ".ldf",
         ".sqlite",
         ".sqlite3",
         ".sqlite-shm",
@@ -41,6 +46,9 @@ RUNTIME_STATE_SUFFIXES = frozenset(
         ".log",
         ".err.log",
         ".zip",
+        ".7z",
+        ".tar",
+        ".gz",
         ".pem",
         ".p12",
         ".key",
@@ -88,6 +96,10 @@ def is_forbidden_source_member(relative_path: str | Path) -> bool:
     # The approved manifest is source configuration. Other runtime JSON
     # artifacts are machine-local state and must not enter source evidence.
     if name.endswith(".json") and "runtime" in name and path.as_posix() != "config/tiered50_runtime_manifest.json":
+        return True
+    if name.endswith((".jsonl", ".ndjson")) and any(
+        marker in name for marker in ("evidence", "discovery", "dataset", "runtime", "payload")
+    ):
         return True
     return False
 

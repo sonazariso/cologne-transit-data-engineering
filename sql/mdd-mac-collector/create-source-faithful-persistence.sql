@@ -2672,8 +2672,12 @@ BEGIN
 END;
 GO
 
--- Only a read accessor; consumers must not assume the physical SnapshotJson
--- column is populated after a compressed write. No history is lost.
+-- Physical contract: exactly one payload column is populated in the base row.
+-- Logical contract: this accessor reconstructs the original SnapshotJson text
+-- for every row.  A compressed row has a physically NULL SnapshotJson, but a
+-- non-NULL logical value; an original empty string remains empty, and is not
+-- treated as NULL.  Consumers must use this view rather than silently reading
+-- the physical payload column. No history is lost.
 CREATE OR ALTER VIEW stg.vMddMacSourceSnapshotJson
 AS
 SELECT

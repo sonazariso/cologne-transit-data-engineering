@@ -96,7 +96,7 @@ class S151StorageRecoveryTests(unittest.TestCase):
         ):
             self.assertIn(token, report)
         self.assertNotIn("VMware", report)
-        self.assertNotIn("MDF", report)
+        self.assertIn("MDF", report)
         self.assertNotRegex(report, r"Stage\s+15")
 
     def test_all_new_lab_paths_remain_disabled_by_source_defaults(self) -> None:
