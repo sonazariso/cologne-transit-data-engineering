@@ -17,6 +17,29 @@
 
 A target of 80% reduction from a roughly 30 GiB project SQL-file baseline would require roughly 24 GiB of **actual Windows C: file footprint reduction**. This is a *target illustration*, not proof it is physically achievable. The SQL server may contain additional non-project tables, file limits, active dependencies, or later changes.
 
+## S155 correction — preserve the complete database structure
+
+The right-sizing operation is data-only. The complete existing SQL Server
+structure is part of the portfolio deliverable for future Data Analyst
+training and must survive any approved cleanup: every user schema (`stg`,
+`dw`, `ctl`, and any deployed `src`, `wrk`, `core`, `analytics`, or other
+schema), physical table, column, appropriate index, primary/unique/check/
+default key, foreign key, view, function, stored procedure, and trigger.
+
+An independently approved replacement database must be a schema-complete
+rehearsal with matching object inventory, not a replacement of the database
+with an MDD-only subset. Empty tables and views remain useful training
+objects. `sys.objects.type = 'U'` is a physical table; `sys.objects.type =
+'V'` is a view. The inventory must record that distinction before any data
+decision.
+
+The retained data sample is dependency-aware across all layers: exactly the
+ten approved MDD snapshots and all dependent rows; a small, real, coherent
+GTFS dataset; relevant warehouse dimension and fact rows; and the ETL
+lineage, configuration, audit, run and control rows needed to explain and
+reproduce the sample. No table is reduced merely because its name matches
+`gtfs`, `dw`, `fact`, `dim`, `src`, `wrk`, `core`, or `analytics`.
+
 ## Retention proposal — user must approve exact manifest
 
 Retain **exactly 10 curated, referentially complete source snapshots**, selected from evidenced successfully persisted historical observations. Keep *all* child call/timing/situation/attribute/error/parser-gap rows for those snapshots and the relevant `ctl` run/target-audit lineage. Selection should cover as many actually available interview-relevant cases as possible: multiple stations and UTC windows, ordinary planned/estimated timing, established identity, service/line metadata, situation/attribute evidence, recorded-time presence or absence, and parser-gap/response-error evidence. Never invent an unavailable category or assume a fragmented sample is representative. Preserve sufficient static target identity and parser/source-contract metadata to understand those rows. Keep one source-controlled sample manifest with counts, UTC range, per-snapshot hashes and a verification summary.
@@ -27,13 +50,13 @@ Do not confuse retained samples with a continuous sample or representative cityw
 
 ## Required operator sequence (dry-run, sign-off, then separate apply)
 
-1. **Measure** live object allocations, SQL files/paths, current C: free bytes, LDF/tempdb, auto-growth and competing sessions, and map every FK/view/job/external SQL consumer. Record data versus allocated space. Use the included read-only `sql/portfolio/retention-inventory-readonly.sql`.
+1. **Measure** live object allocations, SQL files/paths, current C: free bytes, LDF/tempdb, auto-growth and competing sessions, and map every FK/view/job/external SQL consumer. Record data versus allocated space. Inventory every actual user schema/object and distinguish physical tables from views; use the included read-only `sql/portfolio/retention-inventory-readonly.sql`.
 2. **Validate the confirmed ID set** with `sql/portfolio/select-ten-snapshots-readonly.sql` and `sql/portfolio/replacement-database-dry-run.sql`. The result must prove exactly the ten approved IDs are successful persisted rows with parent/child counts, hashes, payload representation, source coverage and connected control lineage. Export a sanitized manifest and SQL/data-quality evidence. Confirm provider redistribution rights before any public sample.
 3. **Validate a recovery point**: keep the proven backup unchanged, verify restore possibilities, and take a newer off-C backup if the selected current state is not covered. Never store another large backup on C:.
-4. **Prefer a small replacement database when feasible:** use the read-only replacement feasibility plan to assess whether an independently validated NEW bounded SQL Server database with the existing required schema and exactly the 10 approved snapshots can fit in the measured C: headroom while preserving the 12 GiB floor. The peak must include copy, log, tempdb, rollback, autogrowth and external-use reserves. Copy complete selected rows with exact primary IDs, foreign keys, timestamps, binary payloads and hashes only in a separately approved operator workflow; verify every family and consumer view before considering retirement of the large original DB. Compare against bounded in-place deletion/shrink, which can log millions of deletions and cause expensive page movement. A *new small database* requires explicit approval of its name and consumer configuration. Existing MDD collectors stay disabled.
+4. **Prefer a small replacement database when feasible:** use the read-only replacement feasibility plan to assess whether an independently validated NEW bounded SQL Server database with the **complete existing schema/object inventory** and the approved data sample can fit in the measured C: headroom while preserving the 12 GiB floor. The peak must include copy, log, tempdb, rollback, autogrowth and external-use reserves. Copy exact MDD rows plus the reviewed GTFS, warehouse dimension/fact and lineage/configuration/audit rows only in a separately approved operator workflow; verify every object count, key/FK, view/module, family, and consumer readback before considering retirement of the large original DB. Compare against bounded in-place data deletion/shrink, which can log millions of deletions and cause expensive page movement. A *new small database* requires explicit approval of its name and consumer configuration. Existing MDD collectors stay disabled.
 5. **Prove recovery on isolated restore/transactional rehearsal** where possible; if not possible with current resources, report the evidence gap and choose explicit operator-approved smaller steps. Validate row hashes, FK and run/audit lineage and rollback before any destructive operation.
-6. **Execute destructive retirement only after review of the 10 exact SnapshotIds, their manifest, all affected tables, external consumers, signed-off rollback/restoration steps and the exact script**. The source-controlled `sql/portfolio/retention-dry-run.sql` is the final dry-run evidence gate; `sql/portfolio/retention-apply.sql` is a separate disabled-by-default operator template and remains unexecuted. It is limited to nonretained `stg` history only; `ctl` lineage, payloads and all retained children stay. GTFS, warehouse, analytics and working ETL/SQL structures are reviewed separately and are not automatic purge targets. Avoid giant single-transaction `DELETE` on a nearly full C:; account for logging, tempdb, checkpoint and rollback. Do not use a generic cascade deletion or shrink as an unreviewed shortcut.
-7. **Return disk space**: removing rows frees pages **inside MDF**, not necessarily Windows C:. Run `sql/portfolio/recover-project-space-readonly.sql` after retention verification. To return physical disk space, the separately reviewed `sql/portfolio/recover-project-space-apply.sql` requires the exact logical data-file name, fresh reserves, the 12 GiB projection and an 80% project-byte target before a manual `DBCC SHRINKFILE`. Do not blindly shrink a largely full or active database; monitor blocking, log growth and autogrowth, and validate after the operation. Avoid routine scheduled shrinking.
+6. **Execute destructive retirement only after review of the 10 exact SnapshotIds, the complete object inventory, the cross-layer data manifest, all affected tables, external consumers, signed-off rollback/restoration steps and the exact script**. The source-controlled `sql/portfolio/retention-dry-run.sql` is the final dry-run evidence gate; `sql/portfolio/retention-apply.sql` is a separate disabled-by-default operator template and remains unexecuted. It is data-only: the built-in bounded deletes cover the seven MDD child families and source-snapshot parent, while GTFS, warehouse dimensions/facts, lineage/configuration/audit and other physical tables require explicit table-level decisions and FK closure. All schema/object definitions remain preserved. Avoid giant single-transaction `DELETE` on a nearly full C:; account for logging, tempdb, checkpoint and rollback. Do not use a generic cascade deletion or shrink as an unreviewed shortcut.
+7. **Return disk space**: removing rows frees pages **inside MDF**, not necessarily Windows C:. Run `sql/portfolio/recover-project-space-readonly.sql` after retention verification. To return physical disk space, the separately reviewed `sql/portfolio/recover-project-space-apply.sql` requires an exact literal plan for every project data file, fresh reserves, no file expansion, the 12 GiB projection and an 80% project-byte target before manual `DBCC SHRINKFILE` commands. Do not blindly shrink a largely full or active database; monitor blocking, log growth and autogrowth, and validate all files after the operation. Avoid routine scheduled shrinking.
 8. **Measure actual achievement** using before/after bytes from `sys.database_files`, `sys.dm_os_volume_stats` (and host filesystem observation) and validate downstream views. Compute `(original project bytes − final project bytes) / original project bytes`. Report the true value, even if it is below 80%.
 9. **Keep evidence**: retention manifest, backup SHA/location (not secrets), high-level before/after table sizes, query output samples, validation status and collector disabled state. Never commit the original bulky private DB/backup.
 
@@ -50,17 +73,20 @@ operator is not present in this worktree. Therefore the final plan is
 **DRY_RUN_ONLY**. Before cleanup, the administrator must provide a signed
 approval naming the operator and UTC time, confirm those ten IDs against the
 read-only SQL result, attach all seven child-family counts and payload/hash
-parity, review FK/module/job/direct/external consumers, verify an off-C checked
-backup, and attach fresh before/after MDF/LDF/tempdb/C: measurements. The
-approval must also state whether the independently measured replacement
-database fits; if it does not, it must explicitly approve the bounded in-place
-fallback. Any destructive apply and any `DBCC SHRINKFILE` require separate
-approval.
+parity, attach the complete schema/object inventory, and provide a table-level
+manifest for the coherent GTFS sample, warehouse dimensions/facts, and
+lineage/configuration/audit rows. The review must cover the full FK graph,
+module/job/direct/external consumers, verify an off-C checked backup, and
+attach fresh before/after MDF/LDF/tempdb/C: measurements. The approval must
+also state whether the schema-complete replacement database fits; if it does
+not, it must explicitly approve the bounded in-place data-only fallback. Any
+destructive apply and any `DBCC SHRINKFILE` require separate approval.
 
-GTFS and warehouse tables are separate portfolio decisions. The inventory and
-replacement feasibility queries report them separately and do not discard
-them automatically. Working ETL/SQL structures, analytics views and required
-lineage remain preserved.
+GTFS and warehouse data are separate retention decisions, but their required
+rows are part of the final coherent sample rather than automatic discard
+targets. The inventory and replacement feasibility queries report them
+separately, preserve all object definitions, and require FK closure. Working
+ETL/SQL structures, analytics views and required lineage remain preserved.
 
 ## Why not try PAGE compression first?
 
@@ -69,6 +95,8 @@ The Timing table was approx. 13 GiB, mostly in-row/clustered. Rebuilding it is l
 ## Closure criteria
 
 - User-approved retention objective and ID set are 10 snapshots (`22, 93, 185, 189, 207, 224, 225, 226, 228, 229`); live evidence, restoration steps and any destructive execution script must still be reviewed.
+- Complete live schema/object inventory reconciled before and after: all user schemas, physical tables, columns, indexes, keys, foreign keys, views, functions, procedures and triggers preserved.
+- Coherent retained data readback passes for MDD, GTFS, warehouse dimensions/facts and required ETL lineage/configuration/audit rows.
 - Measured >80% C:-disk release from the **project's** baseline, or a documented quantified reason it could not be reached.
 - User-owned off-C backup preserved and sample is reproducible.
 - Collectors remain disabled; no fictitious continuity or actual-delay metrics.

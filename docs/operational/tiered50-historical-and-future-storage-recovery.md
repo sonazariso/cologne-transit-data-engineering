@@ -304,13 +304,16 @@ measurement.
 
 The preferred cleanup method is a small independently validated replacement
 database if its complete copy/log/tempdb/rollback peak fits on the existing C:
-drive while preserving the 12 GiB floor. GTFS, warehouse and analytics
-objects are separate portfolio-necessity reviews; working ETL/SQL structures,
-source payloads, all seven child families and required `ctl` lineage remain in
-scope. Direct SQL, notebook, export, Power BI and other external consumers
-must be reviewed explicitly. The October 14 off-C checked backup remains
-unchanged; backup metadata and operator-run `RESTORE VERIFYONLY WITH CHECKSUM`
-evidence are required before cleanup.
+drive while preserving the 12 GiB floor. The replacement must preserve the
+complete existing SQL Server structure—every schema, physical table, column,
+index, key, foreign key, view, function, procedure and trigger—not only the
+MDD tables. The data manifest must retain the ten complete snapshots, a small
+real coherent GTFS sample, relevant warehouse dimensions/facts and required
+ETL lineage/configuration/audit rows with FK closure. Direct SQL, notebook,
+export, Power BI and other external consumers must be reviewed explicitly.
+The October 14 off-C checked backup remains unchanged; backup metadata and
+operator-run `RESTORE VERIFYONLY WITH CHECKSUM` evidence are required before
+cleanup.
 
 The current decision remains:
 
@@ -321,7 +324,8 @@ LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE
 RETENTION_SQL_APPLIED: FALSE
 PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
 REPLACEMENT_DATABASE: PREFERRED_ONLY_IF_INDEPENDENT_PEAK_FITS_C_WITH_12_GIB_FLOOR
-GTFS_WAREHOUSE_DISPOSITION: SEPARATE_REVIEW; NO_AUTOMATIC_DISCARD
+GTFS_WAREHOUSE_DISPOSITION: COHERENT_SAMPLE_MANIFEST_REQUIRED; NO_AUTOMATIC_DISCARD
+SCHEMA_OBJECT_DISPOSITION: PRESERVE_COMPLETE_EXISTING_SQL_SERVER_STRUCTURE
 COLLECTOR_DISABLED: TRUE
 GITHUB_PUSH: NOT_PERFORMED
 FINAL_DECISION: DRY_RUN_ONLY_UNTIL_LIVE_EVIDENCE_AND_OPERATOR_APPROVAL

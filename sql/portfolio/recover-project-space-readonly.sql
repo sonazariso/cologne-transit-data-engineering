@@ -4,8 +4,12 @@
     READ ONLY.  Run after the ten-snapshot retention result has been verified.
     This measures the current database files, internal MDF free pages, C:
     volume bytes, LDF/tempdb state, active requests, and limited index
-    fragmentation.  It does not shrink, rebuild, change growth settings, or
-    claim that the 80 percent target has been achieved.
+    fragmentation across all data files.  It also records the complete
+    schema/object inventory boundary: physical tables may have their DATA
+    reduced, while schemas, columns, indexes, keys, foreign keys, views,
+    functions, procedures, and triggers are preserved.  It does not shrink,
+    rebuild, change growth settings, or claim that the 80 percent target has
+    been achieved.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -15,8 +19,22 @@ SET LOCK_TIMEOUT 5000;
 IF DB_NAME() <> N'CologneTransitIntelligence'
     THROW 52300, 'Wrong database. Expected CologneTransitIntelligence.', 1;
 
-IF (SELECT COUNT(*) FROM sys.database_files WHERE type = 0) <> 1
-    THROW 52301, 'This review expects exactly one data file; review a multi-file plan separately.', 1;
+SELECT
+    N'portfolio.recovery_schema_object_contract' AS statement_id,
+    (SELECT COUNT_BIG(*) FROM sys.schemas
+     WHERE name NOT IN (N'sys', N'INFORMATION_SCHEMA', N'guest'))
+        AS user_schema_count,
+    COUNT_BIG(CASE WHEN obj.type = 'U' THEN 1 END) AS physical_table_count,
+    COUNT_BIG(CASE WHEN obj.type = 'V' THEN 1 END) AS view_count,
+    COUNT_BIG(CASE WHEN obj.type IN ('P', 'PC') THEN 1 END) AS procedure_count,
+    COUNT_BIG(CASE WHEN obj.type IN ('FN', 'IF', 'TF', 'FS', 'FT') THEN 1 END)
+        AS function_count,
+    COUNT_BIG(CASE WHEN obj.type = 'TR' THEN 1 END) AS trigger_count,
+    N'PRESERVE_ALL_OBJECT_DEFINITIONS; DATA_ONLY_SPACE_RECOVERY'
+        AS recovery_boundary
+FROM sys.objects AS obj
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE obj.is_ms_shipped = 0;
 
 SELECT
     N'portfolio.recovery_file_before' AS statement_id,
@@ -57,6 +75,39 @@ SELECT
     N'PROJECT_FILE_BASELINE; VERIFY WHICH FILES ARE IN THE 80 PERCENT SCOPE'
         AS measurement_basis
 FROM sys.database_files AS df;
+
+SELECT
+    N'portfolio.recovery_data_domain_allocations' AS statement_id,
+    sch.name AS schema_name,
+    tab.name AS table_name,
+    MAX(CASE
+        WHEN LOWER(sch.name) LIKE N'%gtfs%'
+          OR LOWER(tab.name) LIKE N'%gtfs%' THEN N'GTFS'
+        WHEN LOWER(sch.name) IN (N'dw', N'dwh', N'warehouse')
+          OR LOWER(tab.name) LIKE N'%warehouse%'
+          OR LOWER(tab.name) LIKE N'fact%'
+          OR LOWER(tab.name) LIKE N'dim%' THEN N'WAREHOUSE'
+        WHEN LOWER(sch.name) IN (N'ctl', N'stg', N'src', N'wrk', N'core', N'analytics')
+          OR LOWER(tab.name) LIKE N'%lineage%'
+          OR LOWER(tab.name) LIKE N'%config%'
+          OR LOWER(tab.name) LIKE N'%audit%'
+          OR LOWER(tab.name) LIKE N'%run%'
+          OR LOWER(tab.name) LIKE N'%claim%'
+          OR LOWER(tab.name) LIKE N'%lease%' THEN N'ETL_LINEAGE_OR_SOURCE'
+        ELSE N'OTHER'
+    END) AS data_domain,
+    SUM(CONVERT(bigint, ps.row_count)) AS physical_rows,
+    SUM(CONVERT(bigint, ps.reserved_page_count)) * CONVERT(bigint, 8192)
+        AS reserved_bytes,
+    SUM(CONVERT(bigint, ps.used_page_count)) * CONVERT(bigint, 8192)
+        AS used_bytes,
+    N'DATA_ONLY_REVIEW; STRUCTURE_PRESERVED' AS disposition
+FROM sys.dm_db_partition_stats AS ps
+JOIN sys.tables AS tab ON tab.object_id = ps.object_id
+JOIN sys.schemas AS sch ON sch.schema_id = tab.schema_id
+WHERE ps.index_id IN (0, 1)
+GROUP BY sch.name, tab.name
+ORDER BY reserved_bytes DESC, sch.name, tab.name;
 
 SELECT
     N'portfolio.recovery_log_space' AS statement_id,

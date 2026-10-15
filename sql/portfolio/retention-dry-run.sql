@@ -10,11 +10,14 @@
     The default exits with a blocked result and cannot act on an empty,
     guessed, or different set.
 
-    This dry run keeps all ctl history in scope and reports the seven stg
-    child families that the later bounded purge would remove for nonretained
-    snapshots.  A small replacement database is preferred if an independent
-    peak measurement fits on C: while preserving the 12 GiB floor.  This file
-    is not a backup, replacement-database build, or proof of Windows recovery.
+    This dry run inventories the complete deployed structure first, then
+    reports the seven stg child families, connected ctl lineage/configuration/
+    audit rows, GTFS sample contract, and warehouse dimension/fact contract.
+    A small replacement database is preferred if an independent peak
+    measurement fits on C: while preserving the 12 GiB floor.  This file is
+    not a backup, replacement-database build, or proof of Windows recovery.
+    It never removes a schema or object and never assumes that a view is a
+    physical table.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -25,8 +28,65 @@ SET IMPLICIT_TRANSACTIONS OFF;
 IF DB_NAME() <> N'CologneTransitIntelligence'
     THROW 52100, 'Wrong database. Expected CologneTransitIntelligence.', 1;
 
+SELECT
+    N'portfolio.retention_dry_run_schema_object_inventory' AS statement_id,
+    sch.name AS schema_name,
+    obj.name AS object_name,
+    obj.object_id,
+    obj.type,
+    obj.type_desc,
+    CASE
+        WHEN obj.type = 'U' THEN N'PHYSICAL_TABLE'
+        WHEN obj.type = 'V' THEN N'VIEW'
+        WHEN obj.type IN ('P', 'PC') THEN N'STORED_PROCEDURE'
+        WHEN obj.type IN ('FN', 'IF', 'TF', 'FS', 'FT') THEN N'FUNCTION'
+        WHEN obj.type = 'TR' THEN N'TRIGGER'
+        ELSE N'OTHER_USER_OBJECT'
+    END AS physical_or_logical_kind,
+    CASE
+        WHEN obj.type = 'U' THEN N'DATA_RETENTION_REVIEW_REQUIRED'
+        ELSE N'PRESERVE_OBJECT_DEFINITION'
+    END AS disposition
+FROM sys.objects AS obj
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE obj.is_ms_shipped = 0
+ORDER BY sch.name, physical_or_logical_kind, obj.name;
+
+SELECT
+    N'portfolio.retention_dry_run_schema_contract' AS statement_id,
+    (SELECT COUNT_BIG(*) FROM sys.schemas
+     WHERE name NOT IN (N'sys', N'INFORMATION_SCHEMA', N'guest'))
+        AS user_schema_count,
+    COUNT_BIG(CASE WHEN obj.type = 'U' THEN 1 END) AS physical_table_count,
+    COUNT_BIG(CASE WHEN obj.type = 'V' THEN 1 END) AS view_count,
+    COUNT_BIG(CASE WHEN obj.type IN ('P', 'PC') THEN 1 END) AS procedure_count,
+    COUNT_BIG(CASE WHEN obj.type IN ('FN', 'IF', 'TF', 'FS', 'FT') THEN 1 END)
+        AS function_count,
+    COUNT_BIG(CASE WHEN obj.type = 'TR' THEN 1 END) AS trigger_count,
+    N'PRESERVE_ALL_EXISTING_SCHEMAS_AND_OBJECTS; DATA_ONLY_RETENTION'
+        AS required_boundary
+FROM sys.objects AS obj
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE obj.is_ms_shipped = 0;
+
 DECLARE @ManifestApproved BIT = 0;
+DECLARE @SchemaInventoryReviewed BIT = 0;
+DECLARE @CrossLayerManifestApproved BIT = 0;
+DECLARE @GtfsManifestApproved BIT = 0;
+DECLARE @WarehouseManifestApproved BIT = 0;
+DECLARE @LineageManifestApproved BIT = 0;
 DECLARE @OperatorEvidenceReference NVARCHAR(400) = N'';
+DECLARE @SchemaInventoryReference NVARCHAR(400) = N'';
+DECLARE @CrossLayerEvidenceReference NVARCHAR(400) = N'';
+DECLARE @DataRetentionManifest TABLE
+(
+    DomainName VARCHAR(40) NOT NULL,
+    SchemaName sysname NULL,
+    TableName sysname NULL,
+    PhysicalTableReviewed BIT NOT NULL,
+    RetentionRule NVARCHAR(400) NOT NULL,
+    EvidenceReference NVARCHAR(400) NOT NULL
+);
 DECLARE @Manifest TABLE
 (
     SnapshotId BIGINT NOT NULL PRIMARY KEY,
@@ -46,6 +106,24 @@ DECLARE @Manifest TABLE
         ... nine more literal rows for 93, 185, 189, 207, 224, 225, 226, 228 and 229 ...;
 
     Do not replace the values with TOP, a range, or a subquery.
+
+    Also paste the reviewed table-level data manifest before setting the
+    cross-layer gates.  It must identify the actual live physical tables and
+    retain a small coherent GTFS sample, relevant warehouse dimensions and
+    facts, and the lineage/configuration/audit rows needed by the retained
+    MDD sample.  Views and programmable objects are never entered as data
+    tables; their definitions remain preserved.
+
+    INSERT @DataRetentionManifest
+        (DomainName, SchemaName, TableName, PhysicalTableReviewed,
+         RetentionRule, EvidenceReference)
+    VALUES
+        ('GTFS', N'<actual schema>', N'<actual table>', 1,
+         N'<reviewed coherent sample and FK closure>', N'<evidence>'),
+        ('WAREHOUSE', N'<actual schema>', N'<dimension or fact table>', 1,
+         N'<reviewed relevant rows and FK closure>', N'<evidence>'),
+        ('ETL_LINEAGE_CONFIG_AUDIT', N'<actual schema>', N'<actual table>', 1,
+         N'<connected rows required for the retained sample>', N'<evidence>');
 */
 
 IF @ManifestApproved = 0
@@ -58,6 +136,25 @@ BEGIN
         (SELECT COUNT_BIG(*) FROM @Manifest) AS supplied_manifest_rows,
         N'Paste exactly ten literal rows and attach the reviewed SQL result.'
             AS required_action;
+    RETURN;
+END;
+
+IF @SchemaInventoryReviewed = 0
+   OR @CrossLayerManifestApproved = 0
+   OR @GtfsManifestApproved = 0
+   OR @WarehouseManifestApproved = 0
+   OR @LineageManifestApproved = 0
+   OR NULLIF(@SchemaInventoryReference, N'') IS NULL
+   OR NULLIF(@CrossLayerEvidenceReference, N'') IS NULL
+BEGIN
+    SELECT
+        N'portfolio.retention_cross_layer_gate' AS statement_id,
+        N'BLOCKED_SCHEMA_AND_DATA_MANIFEST_REVIEW_REQUIRED' AS status,
+        N'Inventory all actual objects, distinguish physical tables from views,
+          preserve every schema/object definition, and attach reviewed GTFS,
+          warehouse dimension/fact, and ETL lineage/configuration/audit
+          retention evidence with FK closure.' AS required_action,
+        N'No base rows were changed.' AS mutation_status;
     RETURN;
 END;
 
@@ -328,6 +425,83 @@ SELECT
      JOIN @Manifest AS m ON m.RunId = x.RunId) AS retained_target_claim_event_rows;
 
 SELECT
+    N'portfolio.retention_cross_layer_manifest' AS statement_id,
+    DomainName AS domain_name,
+    SchemaName AS schema_name,
+    TableName AS table_name,
+    PhysicalTableReviewed AS physical_table_reviewed,
+    RetentionRule AS retention_rule,
+    EvidenceReference AS evidence_reference,
+    N'RETAIN_DATA_ONLY; PRESERVE_TABLE_AND_ALL_OBJECT_DEFINITIONS'
+        AS schema_disposition
+FROM @DataRetentionManifest
+ORDER BY DomainName, SchemaName, TableName;
+
+SELECT
+    N'portfolio.retention_data_domain_allocations' AS statement_id,
+    sch.name AS schema_name,
+    tab.name AS table_name,
+    MAX(CASE
+        WHEN LOWER(sch.name) LIKE N'%gtfs%'
+          OR LOWER(tab.name) LIKE N'%gtfs%' THEN N'GTFS'
+        WHEN LOWER(sch.name) IN (N'dw', N'dwh', N'warehouse')
+          OR LOWER(tab.name) LIKE N'%warehouse%'
+          OR LOWER(tab.name) LIKE N'fact%'
+          OR LOWER(tab.name) LIKE N'dim%' THEN N'WAREHOUSE'
+        WHEN LOWER(sch.name) IN (N'ctl', N'stg', N'src', N'wrk', N'core', N'analytics')
+          OR LOWER(tab.name) LIKE N'%lineage%'
+          OR LOWER(tab.name) LIKE N'%config%'
+          OR LOWER(tab.name) LIKE N'%audit%'
+          OR LOWER(tab.name) LIKE N'%run%'
+          OR LOWER(tab.name) LIKE N'%claim%'
+          OR LOWER(tab.name) LIKE N'%lease%' THEN N'ETL_LINEAGE_OR_SOURCE'
+        ELSE N'OTHER'
+    END) AS data_domain,
+    SUM(CONVERT(bigint, ps.row_count)) AS physical_rows,
+    SUM(CONVERT(bigint, ps.reserved_page_count)) * CONVERT(bigint, 8192)
+        AS reserved_bytes,
+    SUM(CONVERT(bigint, ps.used_page_count)) * CONVERT(bigint, 8192)
+        AS used_bytes,
+    N'PRESERVE_STRUCTURE; RETAIN_OR_REDUCE_ROWS_ONLY_AFTER_DOMAIN_MANIFEST'
+        AS disposition
+FROM sys.dm_db_partition_stats AS ps
+JOIN sys.tables AS tab ON tab.object_id = ps.object_id
+JOIN sys.schemas AS sch ON sch.schema_id = tab.schema_id
+WHERE ps.index_id IN (0, 1)
+GROUP BY sch.name, tab.name
+ORDER BY reserved_bytes DESC, sch.name, tab.name;
+
+SELECT
+    N'portfolio.retention_foreign_keys_all_schemas' AS statement_id,
+    fk.name AS foreign_key_name,
+    OBJECT_SCHEMA_NAME(fk.parent_object_id) AS child_schema,
+    OBJECT_NAME(fk.parent_object_id) AS child_table,
+    OBJECT_SCHEMA_NAME(fk.referenced_object_id) AS parent_schema,
+    OBJECT_NAME(fk.referenced_object_id) AS parent_table,
+    fk.delete_referential_action_desc,
+    fk.update_referential_action_desc,
+    fk.is_disabled,
+    fk.is_not_trusted,
+    N'RETAIN_PARENT_CHILD_CLOSURE; NEVER_ASSUME_CASCADE_IS_SAFE'
+        AS retention_contract
+FROM sys.foreign_keys AS fk
+WHERE OBJECTPROPERTYEX(fk.parent_object_id, 'IsMSShipped') = 0
+   OR OBJECTPROPERTYEX(fk.referenced_object_id, 'IsMSShipped') = 0
+ORDER BY child_schema, child_table, foreign_key_name;
+
+SELECT
+    N'portfolio.retention_domain_contract' AS statement_id,
+    N'MDD' AS domain_name,
+    N'EXACTLY_TEN_APPROVED_SNAPSHOTS_AND_ALL_DEPENDENT_ROWS' AS required_data,
+    N'GTFS' AS next_domain_name,
+    N'SMALL_REAL_COHERENT_DATASET_AND_ALL_REQUIRED_FK_ROWS' AS next_required_data,
+    N'WAREHOUSE' AS next_next_domain_name,
+    N'RELEVANT_DIMENSION_AND_FACT_ROWS_AND_ALL_REQUIRED_FK_ROWS'
+        AS next_next_required_data,
+    N'ETL_LINEAGE_CONFIGURATION_AUDIT' AS lineage_domain,
+    N'RETAIN_ROWS_NEEDED_TO_EXPLAIN_THE_SAMPLE' AS lineage_required_data;
+
+SELECT
     N'portfolio.retention_capacity_baseline' AS statement_id,
     df.name AS logical_file_name,
     df.type_desc AS file_type,
@@ -384,7 +558,7 @@ SELECT
          (CONVERT(bigint, 228)), (CONVERT(bigint, 229))
      ) AS a(SnapshotId)) AS approved_snapshot_ids,
     @OperatorEvidenceReference AS operator_evidence_reference,
-    N'No base rows were changed. Review the result sets, backup coverage,
-      consumer evidence, replacement peak or fallback capacity projection,
-      and the exact APPLY file separately.'
+    N'No base rows were changed. Review the complete object inventory, data
+      manifest, FK closure, backup coverage, consumer evidence, replacement
+      peak or fallback capacity projection, and the exact APPLY file separately.'
         AS next_gate;

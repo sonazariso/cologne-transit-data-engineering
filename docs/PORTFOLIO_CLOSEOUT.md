@@ -4,7 +4,7 @@
 
 ## Goal and stop condition
 
-Show a recruiter the **implemented** API-to-SQL Server engineering chain, operational and data-quality engineering decisions, bounded successful acquisition, SQL persistence and limitations. Stop extending ingestion and volume-oriented storage optimization for this project. Preserve **exactly 10 complete and auditable snapshots** with all dependent rows and required run/audit lineage, using the S154 operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`, subject to live evidence, tested rollback and measured disk reclamation.
+Show a recruiter the **implemented** API-to-SQL Server engineering chain, operational and data-quality engineering decisions, bounded successful acquisition, SQL persistence and limitations. Stop extending ingestion and volume-oriented storage optimization for this project. Preserve **exactly 10 complete and auditable snapshots** with all dependent rows and required run/audit lineage, using the S154 operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`, subject to live evidence, tested rollback and measured disk reclamation. The closeout is data-only: preserve the complete existing SQL Server structure for future Data Analyst training, including all deployed schemas, physical tables, columns, indexes, keys, foreign keys, views, functions, procedures and triggers.
 
 ## What worked (grounded historical evidence)
 
@@ -22,6 +22,7 @@ Show a recruiter the **implemented** API-to-SQL Server engineering chain, operat
 - No validated Actual Delay derived from provider-supplied `RecordedAtTime` at the correct event identity.
 - Historical PostgreSQL Stage 10 operational fact SQL is **not** the active SQL Server reporting implementation; Stage 10 is marked blocked in the original status.
 - The live row-level manifest attachment and fresh post-cleanup Windows C: measurements have not been supplied; the approved ID set is recorded, but cleanup remains dry-run-only.
+- The complete live object inventory and cross-layer data manifest are also not attached. Any future sample must retain a coherent GTFS dataset, relevant warehouse dimensions/facts, and the ETL lineage/configuration/audit rows needed to explain the retained MDD sample.
 
 ## Closeout deliverables
 
@@ -37,7 +38,7 @@ Show a recruiter the **implemented** API-to-SQL Server engineering chain, operat
 
 Retain old decisions, failed runs and complex storage experiments as **historical records**, clearly labeled not active. Do not republish old drafts as current installation instructions. Keep the default source code offline-safe. Active collection remains disabled for portfolio closeout.
 
-## S154 retention decision and method preference
+## S154–S155 retention decision and method preference
 
 The exact operator-confirmed retention set is:
 
@@ -48,29 +49,39 @@ The exact operator-confirmed retention set is:
 The preferred cleanup method is a small replacement database, but only an
 independent peak measurement can establish that it fits on the existing C:
 drive while preserving the 12 GiB safety floor. The replacement rehearsal
-must preserve all seven child families, source payloads, hashes, NULL/empty
-state, `ctl` lineage, foreign keys and working ETL/SQL structures. If the peak
-does not fit, the bounded in-place fallback requires separate approval.
+must preserve the **complete existing structure**—all schemas, physical
+tables, columns, indexes, keys, foreign keys, views, functions, procedures
+and triggers—not just the MDD tables. Its data must include all seven MDD
+child families, source payloads, hashes, NULL/empty state, required `ctl`
+lineage/configuration/audit rows, a coherent GTFS sample and relevant
+warehouse dimensions/facts. If the peak does not fit, the bounded in-place
+data-only fallback requires separate approval.
 
-GTFS and warehouse tables are reviewed separately for portfolio necessity;
-they are not automatic cleanup targets. SQL metadata, SQL-Agent jobs, direct
-clients, notebooks, exports and Power BI/external consumers must be reviewed
-explicitly before any physical payload or database change.
+GTFS and warehouse **data** require separate portfolio-necessity and FK
+closure review, while their tables and all other object definitions remain
+preserved. SQL metadata, SQL-Agent jobs, direct clients, notebooks, exports
+and Power BI/external consumers must be reviewed explicitly before any
+physical payload or database change. The inventory must distinguish physical
+tables from views before any retention decision.
 
-The final source-controlled SQL path is read-only inventory → exact-ID
-candidate/readback evidence → replacement feasibility review →
-`retention-dry-run.sql`. `retention-apply.sql` and file-space recovery remain
-disabled-by-default templates and were not executed.
+The final source-controlled SQL path is read-only complete-object inventory →
+exact-ID candidate/readback evidence → cross-layer data/FK manifest →
+schema-complete replacement feasibility review → `retention-dry-run.sql`.
+`retention-apply.sql` and file-space recovery remain disabled-by-default,
+data-only templates and were not executed; they cannot remove schemas or
+replace views, modules, keys, indexes or other structure.
 
 ## Exact operator approval required before cleanup
 
 The administrator must sign a dated approval that names the ten IDs above,
-attaches the live hashes/counts/lineage and external-consumer review, verifies
-an off-C `RESTORE VERIFYONLY WITH CHECKSUM` recovery point, and records fresh
-before/after MDF/LDF/tempdb/C: measurements. The approval must confirm that
-the selected method keeps worst-case C: free space at or above 12 GiB. It
-authorizes the dry run only; destructive apply and any shrink require their
-own explicit approval.
+attaches the live hashes/counts/lineage, complete schema/object inventory,
+cross-layer GTFS/warehouse/ETL data manifest with FK closure, and
+external-consumer review, verifies an off-C `RESTORE VERIFYONLY WITH CHECKSUM`
+recovery point, and records fresh before/after MDF/LDF/tempdb/C: measurements.
+The approval must confirm that the selected schema-complete method keeps
+worst-case C: free space at or above 12 GiB and does not expand C:. It
+authorizes the dry run only; destructive data apply and any shrink require
+their own explicit approval.
 
 ## Missing sign-offs
 
@@ -79,7 +90,7 @@ own explicit approval.
 - **Consumers:** actual views/jobs, direct SQL consumers, external consumers, GTFS/warehouse necessity and FK dependencies.
 - **GitHub:** owner-managed publication, correct target URL, publication license/permission and secret scan.
 
-**Status:** `OPERATOR_ID_SET_CONFIRMED / DRY_RUN_ONLY / RETENTION_AND_PHYSICAL_RECLAMATION_NOT_EXECUTED`.
+**Status:** `OPERATOR_ID_SET_CONFIRMED / SCHEMA_PRESERVATION_REQUIRED / CROSS_LAYER_DATA_MANIFEST_PENDING / DRY_RUN_ONLY / RETENTION_AND_PHYSICAL_RECLAMATION_NOT_EXECUTED`.
 
 ## Final statement for GitHub
 

@@ -25,6 +25,12 @@
     replacement-database-dry-run.sql to prove those IDs.  If a desired case
     is not present, the query does not invent it; the rationale must say which
     available case was retained.
+
+    This candidate query intentionally selects only the MDD SnapshotId set;
+    it is not a cross-layer cleanup authorization.  Run the complete object
+    inventory and review GTFS, warehouse dimension/fact, ETL lineage,
+    configuration, audit and all-FK retention closure separately before any
+    data-only apply.
 */
 USE [CologneTransitIntelligence];
 GO

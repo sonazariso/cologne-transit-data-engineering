@@ -1,6 +1,6 @@
 # Ten retained snapshots — operator-confirmed ID set and dry-run manifest
 
-**Status: OPERATOR_CONFIRMED_ID_SET / CLEANUP_BLOCKED_PENDING_LIVE_EVIDENCE.**
+**Status: OPERATOR_CONFIRMED_ID_SET / SCHEMA_PRESERVATION_REQUIRED / CLEANUP_BLOCKED_PENDING_LIVE_EVIDENCE.**
 S154 supplies the exact ten IDs approved for the portfolio sample. The
 repository does not contain the referenced `TEN_SNAPSHOT_RETENTION_MANIFEST_FILLED.md`
 attachment, so this document integrates the confirmed IDs without inventing
@@ -34,6 +34,33 @@ needed to explain each retained snapshot: the collector run, target audit,
 HTTP attempts, referenced quota permits, and any run-linked claim/lease rows
 reported by the read-only query. Working ETL/SQL structures and views remain
 in place.
+
+## S155 complete-structure and cross-layer data invariant
+
+This manifest governs DATA only. The full existing SQL Server structure must
+remain available for future Data Analyst training: every user schema (`stg`,
+`dw`, `ctl`, and any deployed `src`, `wrk`, `core`, `analytics`, or other
+schema), physical table, column, appropriate index, key, foreign key, view,
+function, stored procedure, and trigger. A view is a logical object, not a
+physical table; the live inventory must distinguish `sys.objects.type = 'V'`
+from `sys.objects.type = 'U'` before any retention decision. A replacement
+database, if approved, must reproduce that complete object inventory even when
+some tables are empty in the reduced sample.
+
+The cross-layer data manifest must also retain:
+
+- a small, real, coherent GTFS dataset and every required foreign-key parent,
+  child, and bridge row;
+- relevant warehouse dimension and fact rows and the complete required
+  dimension/fact/lineage foreign-key closure; and
+- the ETL lineage, configuration, audit, run, target, quota, claim, lease and
+  other control rows needed to explain and reproduce the retained sample.
+
+No GTFS, warehouse, `src`, `wrk`, `core`, `analytics`, or control table is
+automatically disposable because it is outside the ten MDD `SnapshotId`s. The
+retention review must inventory actual rows and dependencies across all
+layers, then record table-level data decisions separately from the immutable
+schema/object inventory.
 
 The approved ID set is not a continuous panel and is not a representative
 frequency estimate. No child, payload, lineage, GTFS, warehouse, or analytics
@@ -70,8 +97,8 @@ list above.
 ## Preferred cleanup method and scope boundary
 
 The preferred path is a small, independently validated replacement database
-containing the existing required schema and exactly these ten complete
-snapshots. It may be considered only if an isolated copy/rehearsal measures
+containing the **complete existing schema and object inventory** plus exactly
+these ten complete snapshots and the reviewed cross-layer sample. It may be considered only if an isolated copy/rehearsal measures
 the full peak of the new database, copy/log/tempdb overhead, and rollback
 reserve on the existing C: drive and proves:
 
@@ -80,17 +107,19 @@ measured C: free bytes - measured replacement peak reserve >= 12 GiB
 ```
 
 The rehearsal must validate every retained child family, source payload and
-hash, `ctl` lineage, foreign keys, working ETL/SQL structures, and consumer
-views before the original database is considered for retirement. It must not
+hash, `ctl` lineage, GTFS coherence, warehouse dimension/fact coherence,
+foreign keys across all layers, and every working ETL/SQL object and consumer
+view before the original database is considered for retirement. It must not
 create two large database copies. If the measured peak does not fit, the
 separately reviewed bounded in-place plan is the fallback; it is not an
 automatic choice.
 
-GTFS objects and warehouse objects require separate portfolio-necessity
-reviews. The inventory emits separate `GTFS`, `warehouse`, and `analytics`
-result sets; zero rows means only that no matching live objects were visible
-to that query, not that a destructive decision is authorized. No `dw`,
-warehouse, GTFS, `analytics`, `ctl`, or working SQL object is removed by the
+GTFS and warehouse DATA require separate portfolio-necessity reviews and
+explicit coherent-sample manifests. The inventory emits separate `GTFS`,
+`warehouse`, `analytics`, lineage and complete-object result sets; zero rows
+means only that no matching live objects were visible to that query, not that
+a destructive decision is authorized. No schema, table definition, view,
+function, procedure, trigger, index, key or foreign key is removed by the
 ten-snapshot cleanup scope.
 
 ## Required verification gates before cleanup
@@ -99,8 +128,14 @@ The operator must attach all of the following to the manifest review:
 
 - the complete read-only candidate result for all ten IDs and a manifest
   fingerprint;
+- the complete live schema/object inventory, with physical tables distinguished
+  from views and counts of schemas, tables, views, functions, procedures,
+  triggers, indexes, keys and foreign keys;
 - exact before/after counts for the seven child families, with every retained
   row and payload preserved;
+- the cross-layer data manifest and readback proving a coherent GTFS sample,
+  relevant warehouse dimensions/facts, required ETL lineage/configuration/audit
+  rows, and all foreign-key closure;
 - source payload representation, original-byte SHA-256, NULL/empty state and
   `SnapshotId`/`RunId`/`AuditId` parity;
 - foreign-key, SQL-module, SQL-Agent-job, direct SQL, notebook, export and
@@ -131,6 +166,12 @@ I confirm the exact retained SnapshotIds are:
 22, 93, 185, 189, 207, 224, 225, 226, 228, 229.
 I reviewed the live ten-row result, all seven child-family counts, payload
 representation and hashes, NULL/empty state, and RunId/AuditId lineage.
+I reviewed the complete schema/object inventory and confirm that all schemas,
+physical tables, columns, indexes, keys, foreign keys, views, functions,
+procedures and triggers are preserved.
+I reviewed the coherent GTFS data sample, relevant warehouse dimensions and
+facts, required ETL lineage/configuration/audit rows, and FK closure across all
+layers.
 I reviewed foreign keys, SQL modules/jobs, direct consumers, notebooks,
 exports, Power BI access, and GTFS/warehouse/analytics necessity separately.
 I verified an off-C checked recovery point covering this state and will not
@@ -153,7 +194,8 @@ DESTRUCTIVE_SQL: NOT_EXECUTED
 PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
 80_PERCENT_TARGET: TARGET_ONLY_UNTIL_BEFORE_AFTER_BYTES_EXIST
 REPLACEMENT_DATABASE: PREFERRED_ONLY_IF_INDEPENDENT_PEAK_FITS_C_WITH_12_GIB_FLOOR
-GTFS_WAREHOUSE_DISPOSITION: SEPARATE_REVIEW; NO_AUTOMATIC_DISCARD
+GTFS_WAREHOUSE_DISPOSITION: COHERENT_SAMPLE_MANIFEST_REQUIRED; NO_AUTOMATIC_DISCARD
+SCHEMA_OBJECT_DISPOSITION: PRESERVE_COMPLETE_EXISTING_SQL_SERVER_STRUCTURE
 COLLECTORS: DISABLED
 GITHUB_PUSH: NOT_PERFORMED
 ```
