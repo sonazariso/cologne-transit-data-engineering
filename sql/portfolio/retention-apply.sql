@@ -51,7 +51,6 @@ DECLARE @CapacityEvidenceReference NVARCHAR(400) = N'';
 DECLARE @SchemaInventoryEvidenceReference NVARCHAR(400) = N'';
 DECLARE @CrossLayerRetentionEvidenceReference NVARCHAR(400) = N'';
 DECLARE @RequiredCFreeBytes BIGINT = CONVERT(BIGINT, 12) * 1024 * 1024 * 1024;
-DECLARE @BatchSize INT = 50;
 DECLARE @Rows BIGINT = 0;
 DECLARE @TotalRows BIGINT = 0;
 DECLARE @AppLockResult INT = -999;
@@ -296,6 +295,14 @@ IF EXISTS
        OR OBJECT_ID(QUOTENAME(m.SchemaName) + N'.' + QUOTENAME(m.TableName), N'U') IS NULL
 )
     THROW 52205, 'The executable retention manifest names a missing or unreviewed physical table.', 1;
+IF EXISTS
+(
+    SELECT 1
+    FROM #DataRetentionManifest AS m
+    WHERE m.BatchSize <= 0
+       OR m.BatchSize > 1000
+)
+    THROW 52231, 'Every retention manifest batch size must be between 1 and 1000 rows.', 1;
 
 /* Capture the complete current structure before any operator-authorized data change. */
 CREATE TABLE #SchemaInventoryBefore
@@ -370,7 +377,8 @@ WHERE o.is_ms_shipped = 0 AND i.index_id > 0 AND i.is_hypothetical = 0;
 
 CREATE TABLE #ForeignKeyInventoryBefore
 (
-    ForeignKeyName sysname NOT NULL PRIMARY KEY,
+    ForeignKeyObjectId INT NOT NULL PRIMARY KEY,
+    ForeignKeyName sysname NOT NULL,
     ChildSchema sysname NOT NULL,
     ChildTable sysname NOT NULL,
     ParentSchema sysname NOT NULL,
@@ -381,7 +389,7 @@ CREATE TABLE #ForeignKeyInventoryBefore
     IsNotTrusted BIT NOT NULL
 );
 INSERT #ForeignKeyInventoryBefore
-SELECT fk.name,
+SELECT fk.object_id, fk.name,
        OBJECT_SCHEMA_NAME(fk.parent_object_id), OBJECT_NAME(fk.parent_object_id),
        OBJECT_SCHEMA_NAME(fk.referenced_object_id), OBJECT_NAME(fk.referenced_object_id),
        fk.delete_referential_action_desc, fk.update_referential_action_desc,
@@ -472,6 +480,10 @@ CREATE TABLE #ManifestCounts
     ExpectedRetainedRows BIGINT NOT NULL,
     ActualRetainedRows BIGINT NOT NULL,
     CurrentTotalRows BIGINT NOT NULL,
+    BatchSize INT NOT NULL,
+    MaxNonRetainedRowBytes BIGINT NOT NULL,
+    IndexCount INT NOT NULL,
+    WorstCaseBatchReserveBytes BIGINT NOT NULL,
     NonRetainedRows AS (CurrentTotalRows - ActualRetainedRows),
     PRIMARY KEY (SchemaName, TableName)
 );
@@ -482,31 +494,90 @@ DECLARE @CountPredicate NVARCHAR(MAX);
 DECLARE @ExpectedRows BIGINT;
 DECLARE @ActualRows BIGINT;
 DECLARE @CurrentRows BIGINT;
+DECLARE @CountBatchSize INT;
+DECLARE @MaxNonRetainedRowBytes BIGINT;
+DECLARE @IndexCount INT;
+DECLARE @BatchReserveDecimal DECIMAL(38, 0);
+DECLARE @WorstCaseBatchReserveBytes BIGINT;
+DECLARE @PostTotalRows BIGINT;
+DECLARE @RowBytesExpression NVARCHAR(MAX);
 DECLARE @Sql NVARCHAR(MAX);
 DECLARE count_cursor CURSOR LOCAL FAST_FORWARD FOR
-    SELECT SchemaName, TableName, RetentionPredicate, ExpectedRetainedRows
+    SELECT SchemaName, TableName, RetentionPredicate, ExpectedRetainedRows, BatchSize
     FROM #DataRetentionManifest
     ORDER BY DeleteOrder, ManifestId;
 OPEN count_cursor;
-FETCH NEXT FROM count_cursor INTO @CountSchema, @CountTable, @CountPredicate, @ExpectedRows;
+FETCH NEXT FROM count_cursor INTO
+    @CountSchema, @CountTable, @CountPredicate, @ExpectedRows, @CountBatchSize;
 WHILE @@FETCH_STATUS = 0
 BEGIN
     SET @ActualRows = NULL;
     SET @CurrentRows = NULL;
-    SET @Sql = N'SELECT @Actual = COUNT_BIG(*) FROM '
-        + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable)
-        + N' AS x WHERE ' + @CountPredicate + N';
-        SELECT @Total = COUNT_BIG(*) FROM '
-        + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x;';
+    SET @MaxNonRetainedRowBytes = NULL;
+    SET @IndexCount = NULL;
+    SET @RowBytesExpression = NULL;
+    SELECT @RowBytesExpression = STUFF
+    (
+        (
+            SELECT N' + COALESCE(CONVERT(BIGINT, DATALENGTH(x.'
+                + QUOTENAME(c.name) + N')), CONVERT(BIGINT, 0))'
+            FROM sys.columns AS c
+            WHERE c.object_id = OBJECT_ID(QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable))
+              AND c.is_hidden = 0
+            ORDER BY c.column_id
+            FOR XML PATH(N''), TYPE
+        ).value(N'.', N'NVARCHAR(MAX)'), 1, 3, N''
+    );
+    SET @RowBytesExpression = COALESCE(@RowBytesExpression, N'CONVERT(BIGINT, 0)');
+    SET @Sql = N'SELECT
+            @Actual = COALESCE(SUM(CASE WHEN ' + @CountPredicate + N'
+                                       THEN CONVERT(BIGINT, 1)
+                                       ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0)),
+            @Total = COUNT_BIG(*),
+            @MaxRowBytes = COALESCE(MAX(CASE WHEN NOT (' + @CountPredicate + N')
+                                             THEN ' + @RowBytesExpression + N'
+                                             ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0))
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x;';
     EXEC sys.sp_executesql @Sql,
-        N'@Actual BIGINT OUTPUT, @Total BIGINT OUTPUT',
-        @Actual = @ActualRows OUTPUT, @Total = @CurrentRows OUTPUT;
+        N'@Actual BIGINT OUTPUT, @Total BIGINT OUTPUT, @MaxRowBytes BIGINT OUTPUT',
+        @Actual = @ActualRows OUTPUT,
+        @Total = @CurrentRows OUTPUT,
+        @MaxRowBytes = @MaxNonRetainedRowBytes OUTPUT;
     IF @ActualRows <> @ExpectedRows
         THROW 52208, 'A cross-layer retention selector count differs from live evidence.', 1;
+
+    SELECT @IndexCount = COUNT(*)
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID(QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable))
+      AND index_id > 0
+      AND is_hypothetical = 0;
+
+    SET @BatchReserveDecimal =
+        (
+            CONVERT(DECIMAL(38, 0), COALESCE(@MaxNonRetainedRowBytes, 0))
+            + CONVERT(DECIMAL(38, 0), 8192)
+        )
+        * CONVERT(DECIMAL(38, 0), @CountBatchSize)
+        * CONVERT(DECIMAL(38, 0), COALESCE(@IndexCount, 0) + 1)
+        * CONVERT(DECIMAL(38, 0), 4)
+        + CONVERT(DECIMAL(38, 0), 65536);
+    IF @BatchReserveDecimal > CONVERT(DECIMAL(38, 0), 9223372036854775807)
+        THROW 52230, 'The measured maximum row payload cannot be represented by a bounded reserve.', 1;
+    SET @WorstCaseBatchReserveBytes = CONVERT(BIGINT, @BatchReserveDecimal);
     INSERT #ManifestCounts
-        (SchemaName, TableName, ExpectedRetainedRows, ActualRetainedRows, CurrentTotalRows)
-    VALUES (@CountSchema, @CountTable, @ExpectedRows, @ActualRows, @CurrentRows);
-    FETCH NEXT FROM count_cursor INTO @CountSchema, @CountTable, @CountPredicate, @ExpectedRows;
+        (
+            SchemaName, TableName, ExpectedRetainedRows, ActualRetainedRows,
+            CurrentTotalRows, BatchSize, MaxNonRetainedRowBytes, IndexCount,
+            WorstCaseBatchReserveBytes
+        )
+    VALUES
+        (
+            @CountSchema, @CountTable, @ExpectedRows, @ActualRows, @CurrentRows,
+            @CountBatchSize, COALESCE(@MaxNonRetainedRowBytes, 0),
+            COALESCE(@IndexCount, 0), @WorstCaseBatchReserveBytes
+        );
+    FETCH NEXT FROM count_cursor INTO
+        @CountSchema, @CountTable, @CountPredicate, @ExpectedRows, @CountBatchSize;
 END;
 CLOSE count_cursor;
 DEALLOCATE count_cursor;
@@ -569,26 +640,12 @@ SELECT @TempdbAutogrowthReserveBytes = SUM
 FROM tempdb.sys.database_files AS df
 WHERE df.type = 0;
 
-SELECT @MeasuredWorstCaseBatchReserveBytes = COALESCE(MAX
+SELECT @MeasuredWorstCaseBatchReserveBytes = COALESCE
 (
-    CASE WHEN COALESCE(ps.RowsObserved, 0) = 0 THEN CONVERT(BIGINT, 0)
-         ELSE CONVERT(BIGINT,
-                ((ps.ReservedPages + ps.RowsObserved - 1) / NULLIF(ps.RowsObserved, 0)))
-                * CASE WHEN m.BatchSize > @BatchSize THEN @BatchSize ELSE m.BatchSize END
-                * 8192 * 4
-    END
-), CONVERT(BIGINT, 0))
-FROM #DataRetentionManifest AS m
-JOIN sys.tables AS t
-  ON t.schema_id = SCHEMA_ID(m.SchemaName)
- AND t.name = m.TableName
-OUTER APPLY
-(
-    SELECT SUM(CONVERT(BIGINT, p.row_count)) AS RowsObserved,
-           SUM(CONVERT(BIGINT, p.reserved_page_count)) AS ReservedPages
-    FROM sys.dm_db_partition_stats AS p
-    WHERE p.object_id = t.object_id AND p.index_id IN (0, 1)
-) AS ps;
+    MAX(WorstCaseBatchReserveBytes),
+    CONVERT(BIGINT, 0)
+)
+FROM #ManifestCounts;
 
 SELECT
     N'portfolio.retention_capacity_preflight' AS statement_id,
@@ -605,7 +662,7 @@ SELECT
     @DatabaseAutogrowthReserveBytes AS database_next_growth_reserve_bytes,
     @TempdbAutogrowthReserveBytes AS tempdb_next_growth_reserve_bytes,
     @MeasuredWorstCaseBatchReserveBytes AS measured_worst_case_batch_reserve_bytes,
-    N'REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
+    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD; INDEX_AWARE_RESERVE; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
         AS safety_contract;
 
 IF @CFreeBytes IS NULL
@@ -627,7 +684,11 @@ SELECT
     mc.ExpectedRetainedRows AS expected_retained_rows,
     mc.ActualRetainedRows AS actual_retained_rows,
     mc.CurrentTotalRows AS current_total_rows,
-    mc.NonRetainedRows AS rows_eligible_for_bounded_delete
+    mc.NonRetainedRows AS rows_eligible_for_bounded_delete,
+    mc.BatchSize AS reviewed_batch_size,
+    mc.MaxNonRetainedRowBytes AS maximum_nonretained_row_payload_bytes,
+    mc.IndexCount AS index_count_used_for_reserve,
+    mc.WorstCaseBatchReserveBytes AS worst_case_batch_reserve_bytes
 FROM #ManifestCounts AS mc
 ORDER BY mc.SchemaName, mc.TableName;
 
@@ -673,6 +734,19 @@ IF @ManifestApproved = 0
    OR NULLIF(@CrossLayerRetentionEvidenceReference, N'') IS NULL
     THROW 52212, 'All reviewed retention gates and evidence references are required.', 1;
 
+DECLARE @CurrentSchema sysname;
+DECLARE @CurrentTable sysname;
+DECLARE @CurrentPredicate NVARCHAR(MAX);
+DECLARE @CurrentBatchSize INT;
+DECLARE @CurrentCFreeBytes BIGINT;
+DECLARE @CurrentLogFreeBytes BIGINT;
+DECLARE @CurrentTempdbFreeBytes BIGINT;
+DECLARE @CurrentGrowthReserveBytes BIGINT;
+DECLARE @CurrentTempdbGrowthReserveBytes BIGINT;
+DECLARE @CurrentBatchReserveBytes BIGINT;
+DECLARE @DeleteSql NVARCHAR(MAX);
+
+BEGIN TRY
 EXEC @AppLockResult = sys.sp_getapplock
     @Resource = N'CologneTransitIntelligence.portfolio.retention',
     @LockMode = N'Exclusive',
@@ -700,24 +774,11 @@ IF EXISTS
 )
     THROW 52216, 'Another active request exists in the target database.', 1;
 
-DECLARE @CurrentSchema sysname;
-DECLARE @CurrentTable sysname;
-DECLARE @CurrentPredicate NVARCHAR(MAX);
-DECLARE @CurrentBatchSize INT;
-DECLARE @CurrentCFreeBytes BIGINT;
-DECLARE @CurrentLogFreeBytes BIGINT;
-DECLARE @CurrentTempdbFreeBytes BIGINT;
-DECLARE @CurrentGrowthReserveBytes BIGINT;
-DECLARE @CurrentTempdbGrowthReserveBytes BIGINT;
-DECLARE @CurrentBatchReserveBytes BIGINT;
-DECLARE @DeleteSql NVARCHAR(MAX);
 DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
-                       SELECT SchemaName, TableName, RetentionPredicate,
-                              CASE WHEN BatchSize > @BatchSize THEN @BatchSize ELSE BatchSize END
+                       SELECT SchemaName, TableName, RetentionPredicate, BatchSize
     FROM #DataRetentionManifest
     ORDER BY DeleteOrder, ManifestId;
 
-BEGIN TRY
     OPEN delete_cursor;
     FETCH NEXT FROM delete_cursor INTO
         @CurrentSchema, @CurrentTable, @CurrentPredicate, @CurrentBatchSize;
@@ -753,28 +814,15 @@ BEGIN TRY
             )
             FROM tempdb.sys.database_files AS df
             WHERE df.type = 0;
-            SELECT @CurrentBatchReserveBytes = COALESCE(MAX
-            (
-                CASE WHEN COALESCE(ps.RowsObserved, 0) = 0 THEN CONVERT(BIGINT, 0)
-                     ELSE CONVERT(BIGINT,
-                             ((ps.ReservedPages + ps.RowsObserved - 1) / NULLIF(ps.RowsObserved, 0)))
-                             * @CurrentBatchSize * 8192 * 4 END
-            ), CONVERT(BIGINT, 0))
-            FROM #DataRetentionManifest AS m
-            JOIN sys.tables AS t
-              ON t.schema_id = SCHEMA_ID(m.SchemaName) AND t.name = m.TableName
-            OUTER APPLY
-            (
-                SELECT SUM(CONVERT(BIGINT, p.row_count)) AS RowsObserved,
-                       SUM(CONVERT(BIGINT, p.reserved_page_count)) AS ReservedPages
-                FROM sys.dm_db_partition_stats AS p
-                WHERE p.object_id = t.object_id AND p.index_id IN (0, 1)
-            ) AS ps
-            WHERE m.SchemaName = @CurrentSchema AND m.TableName = @CurrentTable;
+            SELECT @CurrentBatchReserveBytes = WorstCaseBatchReserveBytes
+            FROM #ManifestCounts
+            WHERE SchemaName = @CurrentSchema
+              AND TableName = @CurrentTable;
 
             IF @CurrentCFreeBytes IS NULL
                OR @CurrentLogFreeBytes IS NULL
                OR @CurrentTempdbFreeBytes IS NULL
+               OR @CurrentBatchReserveBytes IS NULL
                OR @CurrentCFreeBytes - @CurrentBatchReserveBytes
                     - COALESCE(@CurrentGrowthReserveBytes, 0)
                     - COALESCE(@CurrentTempdbGrowthReserveBytes, 0) < @RequiredCFreeBytes
@@ -862,7 +910,16 @@ IF EXISTS
 )
     THROW 52222, 'A retained snapshot hash or child count failed post-apply verification.', 1;
 
-/* Every retained table selector must still have exactly its reviewed count. */
+/* Every manifest table must now contain exactly its approved retained total. */
+CREATE TABLE #PostManifestCounts
+(
+    SchemaName sysname NOT NULL,
+    TableName sysname NOT NULL,
+    ExpectedRetainedRows BIGINT NOT NULL,
+    SelectorRows BIGINT NOT NULL,
+    TotalRows BIGINT NOT NULL,
+    PRIMARY KEY (SchemaName, TableName)
+);
 DECLARE post_count_cursor CURSOR LOCAL FAST_FORWARD FOR
     SELECT SchemaName, TableName, RetentionPredicate, ExpectedRetainedRows
     FROM #DataRetentionManifest
@@ -872,16 +929,198 @@ FETCH NEXT FROM post_count_cursor INTO @CountSchema, @CountTable, @CountPredicat
 WHILE @@FETCH_STATUS = 0
 BEGIN
     SET @ActualRows = NULL;
-    SET @Sql = N'SELECT @Actual = COUNT_BIG(*) FROM '
+    SET @PostTotalRows = NULL;
+    SET @Sql = N'SELECT @Actual = COALESCE(SUM(CASE WHEN '
+        + @CountPredicate + N' THEN CONVERT(BIGINT, 1) ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0)),
+        @Total = COUNT_BIG(*) FROM '
         + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable)
-        + N' AS x WHERE ' + @CountPredicate + N';';
-    EXEC sys.sp_executesql @Sql, N'@Actual BIGINT OUTPUT', @Actual = @ActualRows OUTPUT;
+        + N' AS x;';
+    EXEC sys.sp_executesql @Sql,
+        N'@Actual BIGINT OUTPUT, @Total BIGINT OUTPUT',
+        @Actual = @ActualRows OUTPUT,
+        @Total = @PostTotalRows OUTPUT;
     IF @ActualRows <> @ExpectedRows
-        THROW 52223, 'A retained cross-layer row count failed post-apply verification.', 1;
+       OR @PostTotalRows <> @ExpectedRows
+        THROW 52223, 'A manifest table retained selector or total-row count failed post-apply verification.', 1;
+    INSERT #PostManifestCounts
+        (SchemaName, TableName, ExpectedRetainedRows, SelectorRows, TotalRows)
+    VALUES (@CountSchema, @CountTable, @ExpectedRows, @ActualRows, @PostTotalRows);
     FETCH NEXT FROM post_count_cursor INTO @CountSchema, @CountTable, @CountPredicate, @ExpectedRows;
 END;
 CLOSE post_count_cursor;
 DEALLOCATE post_count_cursor;
+
+SELECT
+    N'portfolio.retention_after_counts' AS statement_id,
+    SchemaName AS schema_name,
+    TableName AS table_name,
+    ExpectedRetainedRows AS approved_retained_rows,
+    SelectorRows AS selector_rows,
+    TotalRows AS total_rows,
+    CASE WHEN SelectorRows = ExpectedRetainedRows
+              AND TotalRows = ExpectedRetainedRows
+         THEN N'PASS' ELSE N'FAIL' END AS status
+FROM #PostManifestCounts
+ORDER BY SchemaName, TableName;
+
+/* Explicit row-level FK closure check, including composite and self-FKs. */
+CREATE TABLE #ForeignKeyClosureResults
+(
+    ForeignKeyObjectId INT NOT NULL PRIMARY KEY,
+    ForeignKeyName sysname NOT NULL,
+    ViolationRows BIGINT NOT NULL
+);
+DECLARE @FkObjectId INT;
+DECLARE @FkName sysname;
+DECLARE @FkChildSchema sysname;
+DECLARE @FkChildTable sysname;
+DECLARE @FkParentSchema sysname;
+DECLARE @FkParentTable sysname;
+DECLARE @FkJoinPredicate NVARCHAR(MAX);
+DECLARE @FkNotNullPredicate NVARCHAR(MAX);
+DECLARE @FkViolationRows BIGINT;
+DECLARE post_fk_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT fk.object_id,
+           fk.name,
+           OBJECT_SCHEMA_NAME(fk.parent_object_id),
+           OBJECT_NAME(fk.parent_object_id),
+           OBJECT_SCHEMA_NAME(fk.referenced_object_id),
+           OBJECT_NAME(fk.referenced_object_id)
+    FROM sys.foreign_keys AS fk
+    JOIN sys.objects AS child_object
+      ON child_object.object_id = fk.parent_object_id
+    JOIN sys.objects AS parent_object
+      ON parent_object.object_id = fk.referenced_object_id
+    WHERE child_object.is_ms_shipped = 0
+      AND parent_object.is_ms_shipped = 0;
+OPEN post_fk_cursor;
+FETCH NEXT FROM post_fk_cursor INTO
+    @FkObjectId, @FkName, @FkChildSchema, @FkChildTable,
+    @FkParentSchema, @FkParentTable;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @FkJoinPredicate = NULL;
+    SET @FkNotNullPredicate = NULL;
+    SELECT @FkJoinPredicate = STUFF
+    (
+        (
+            SELECT N' AND p.' + QUOTENAME(parent_column.name)
+                + N' = c.' + QUOTENAME(child_column.name)
+            FROM sys.foreign_key_columns AS fkc
+            JOIN sys.columns AS child_column
+              ON child_column.object_id = fkc.parent_object_id
+             AND child_column.column_id = fkc.parent_column_id
+            JOIN sys.columns AS parent_column
+              ON parent_column.object_id = fkc.referenced_object_id
+             AND parent_column.column_id = fkc.referenced_column_id
+            WHERE fkc.constraint_object_id = @FkObjectId
+            ORDER BY fkc.constraint_column_id
+            FOR XML PATH(N''), TYPE
+        ).value(N'.', N'NVARCHAR(MAX)'), 1, 5, N''
+    );
+    SELECT @FkNotNullPredicate = STUFF
+    (
+        (
+            SELECT N' AND c.' + QUOTENAME(child_column.name) + N' IS NOT NULL'
+            FROM sys.foreign_key_columns AS fkc
+            JOIN sys.columns AS child_column
+              ON child_column.object_id = fkc.parent_object_id
+             AND child_column.column_id = fkc.parent_column_id
+            WHERE fkc.constraint_object_id = @FkObjectId
+            ORDER BY fkc.constraint_column_id
+            FOR XML PATH(N''), TYPE
+        ).value(N'.', N'NVARCHAR(MAX)'), 1, 5, N''
+    );
+    SET @FkViolationRows = NULL;
+    SET @Sql = N'SELECT @Violations = COUNT_BIG(*) FROM '
+        + QUOTENAME(@FkChildSchema) + N'.' + QUOTENAME(@FkChildTable) + N' AS c
+        WHERE ' + COALESCE(@FkNotNullPredicate, N'1 = 0') + N'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM ' + QUOTENAME(@FkParentSchema) + N'.' + QUOTENAME(@FkParentTable) + N' AS p
+              WHERE ' + COALESCE(@FkJoinPredicate, N'1 = 0') + N'
+          );';
+    EXEC sys.sp_executesql @Sql,
+        N'@Violations BIGINT OUTPUT',
+        @Violations = @FkViolationRows OUTPUT;
+    INSERT #ForeignKeyClosureResults
+        (ForeignKeyObjectId, ForeignKeyName, ViolationRows)
+    VALUES (@FkObjectId, @FkName, COALESCE(@FkViolationRows, 0));
+    FETCH NEXT FROM post_fk_cursor INTO
+        @FkObjectId, @FkName, @FkChildSchema, @FkChildTable,
+        @FkParentSchema, @FkParentTable;
+END;
+CLOSE post_fk_cursor;
+DEALLOCATE post_fk_cursor;
+
+SELECT
+    N'portfolio.retention_fk_row_closure' AS statement_id,
+    ForeignKeyName AS foreign_key_name,
+    ViolationRows AS violation_rows,
+    CASE WHEN ViolationRows = 0 THEN N'PASS' ELSE N'FAIL' END AS status
+FROM #ForeignKeyClosureResults
+ORDER BY ForeignKeyName;
+IF EXISTS (SELECT 1 FROM #ForeignKeyClosureResults WHERE ViolationRows > 0)
+    THROW 52232, 'A row-level foreign-key closure check found orphaned rows.', 1;
+
+/* Retained DimStop rows must include the complete ancestor closure and no
+   unapproved descendant may remain under an approved hierarchy row. */
+CREATE TABLE #RetainedDimStopHierarchy
+(
+    StopKey INT NOT NULL PRIMARY KEY
+);
+;WITH stop_hierarchy AS
+(
+    SELECT d.StopKey, d.ParentStopKey
+    FROM dw.DimStop AS d
+    JOIN #RetainedDimStopKeys AS k ON k.StopKey = d.StopKey
+    UNION ALL
+    SELECT parent_stop.StopKey, parent_stop.ParentStopKey
+    FROM dw.DimStop AS parent_stop
+    JOIN stop_hierarchy AS h ON h.ParentStopKey = parent_stop.StopKey
+)
+INSERT #RetainedDimStopHierarchy (StopKey)
+SELECT DISTINCT StopKey
+FROM stop_hierarchy
+OPTION (MAXRECURSION 32767);
+
+IF EXISTS
+(
+    SELECT 1
+    FROM #RetainedDimStopHierarchy AS h
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM #RetainedDimStopKeys AS k WHERE k.StopKey = h.StopKey
+    )
+)
+    THROW 52233, 'The retained DimStop hierarchy requires an unapproved ancestor.', 1;
+IF EXISTS
+(
+    SELECT 1
+    FROM dw.DimStop AS d
+    JOIN #RetainedDimStopKeys AS k ON k.StopKey = d.StopKey
+    WHERE d.ParentStopKey IS NOT NULL
+      AND NOT EXISTS
+      (
+          SELECT 1 FROM dw.DimStop AS parent_stop
+          WHERE parent_stop.StopKey = d.ParentStopKey
+      )
+)
+    THROW 52234, 'A retained DimStop row has a missing parent.', 1;
+IF EXISTS
+(
+    SELECT 1
+    FROM dw.DimStop AS child_stop
+    JOIN #RetainedDimStopKeys AS parent_key
+      ON parent_key.StopKey = child_stop.ParentStopKey
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM #RetainedDimStopKeys AS child_key
+        WHERE child_key.StopKey = child_stop.StopKey
+    )
+)
+    THROW 52235, 'DimStop deletion is incomplete; an unapproved child remains.', 1;
 
 /* Verify the full user schema/object/column/index/FK/module inventory. */
 IF EXISTS
@@ -1012,8 +1251,24 @@ OR EXISTS
 )
     THROW 52229, 'SQL module definition inventory changed during retention apply.', 1;
 
-/* DBCC CHECKCONSTRAINTS is a read-only data-integrity verification. */
-DBCC CHECKCONSTRAINTS WITH NO_INFOMSGS;
+/* DBCC CHECKCONSTRAINTS is a read-only data-integrity verification.  Capture
+   its violation rows so a nonempty result can never be followed by success. */
+CREATE TABLE #DbccCheckConstraints
+(
+    TableName NVARCHAR(4000) NULL,
+    ConstraintName NVARCHAR(4000) NULL,
+    WhereClause NVARCHAR(4000) NULL
+);
+INSERT #DbccCheckConstraints (TableName, ConstraintName, WhereClause)
+EXEC (N'DBCC CHECKCONSTRAINTS WITH NO_INFOMSGS;');
+
+SELECT
+    N'portfolio.retention_dbcc_checkconstraints' AS statement_id,
+    COUNT_BIG(*) AS violation_rows,
+    CASE WHEN COUNT_BIG(*) = 0 THEN N'PASS' ELSE N'FAIL' END AS status
+FROM #DbccCheckConstraints;
+IF EXISTS (SELECT 1 FROM #DbccCheckConstraints)
+    THROW 52236, 'DBCC CHECKCONSTRAINTS found violations; apply cannot succeed.', 1;
 
 SELECT
     N'portfolio.retention_apply_result' AS statement_id,

@@ -86,10 +86,11 @@ Read-only SQL Server measurements captured on 2026-10-15 were approximately:
 | Tempdb unallocated | 29,229,056 bytes at the capture |
 
 The apply script remeasures C:, log free bytes, tempdb unallocated bytes,
-database/tempdb next-growth reserves, and a DMV-based worst-case batch reserve
-before every `DELETE TOP` batch.  It stops before starting a batch if the
-12 GiB floor, log reserve, or tempdb reserve cannot be proven.  The current
-headroom is only about 3 GiB, so no cleanup is authorized by this document.
+database/tempdb next-growth reserves, and an index-aware reserve based on the
+maximum measured non-retained row payload before every `DELETE TOP` batch.  It
+stops before starting a batch if the 12 GiB floor, log reserve, or tempdb
+reserve cannot be proven.  The current headroom is only about 3 GiB, so no
+cleanup is authorized by this document.
 
 ## Exact SSMS execution instructions
 
@@ -119,8 +120,8 @@ headroom is only about 3 GiB, so no cleanup is authorized by this document.
 7. Only after the retention readback passes, run
    `sql/portfolio/recover-project-space-readonly.sql`, then review the live
    recovery preflight in `recover-project-space-apply.sql`. A separate
-   approval must set an exact MDF target above current used pages and below
-   current allocation. Never shrink the log, use `SHRINKDATABASE`, or infer
+   approval must set an exact MDF target at or above the measured allocation
+   high-water mark and below current allocation. Never shrink the log, use `SHRINKDATABASE`, or infer
    Windows recovery from MDF internal free pages.
 
 No step above authorizes a production mutation by itself. The repository

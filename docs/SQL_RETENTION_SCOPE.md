@@ -90,7 +90,7 @@ save every result set as review evidence:
 5. Review exact hashes, child counts, cross-layer counts, FK checks,
    `DBCC CHECKCONSTRAINTS`, and the complete post-apply object inventory.
 6. Only after those checks pass, run the recovery read-only review. A separate
-   approval must set an exact MDF target above current used pages and below
-   current allocation in `recover-project-space-apply.sql`; its default
+   approval must set an exact MDF target at or above the measured allocation
+   high-water mark and below current allocation in `recover-project-space-apply.sql`; its default
    `@ApplyShrink = 0` does not execute `DBCC SHRINKFILE`.
 

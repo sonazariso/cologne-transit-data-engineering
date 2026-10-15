@@ -19,9 +19,9 @@ The 2026-10-15 SQL Server preflight measured approximately 14.9927 GiB free on
 Windows `C:` against the mandatory 12 GiB floor, a 28.49 GiB MDF allocation,
 an 1.82 GiB LDF with 3.124% used, and 29.2 MiB of unallocated tempdb space at
 the capture.  The executable SQL remeasures C:, log free bytes, tempdb,
-database/tempdb next-growth reserves and a DMV-based worst-case batch reserve
-before every batch.  A batch is not started when the floor or log/tempdb
-reserve cannot be proven.
+database/tempdb next-growth reserves, and an index-aware reserve based on the
+maximum measured non-retained row payload before every batch.  A batch is not
+started when the floor or log/tempdb reserve cannot be proven.
 
 MDF internal free pages are not Windows recovery.  Actual physical recovery
 can be claimed only from the after-measurement result of the separate,
@@ -63,8 +63,8 @@ application lock and commits each batch, so an interrupted run is resumable.
 `sql/portfolio/recover-project-space-apply.sql` is separate.  It names the
 actual MDF logical file `CologneTransitIntelligence`, measures Windows C:,
 MDF, LDF and tempdb directly, and remains `@ApplyShrink = 0`.  A separately
-approved working copy must provide a target above current used pages and
-below current allocation; it may issue only bounded `DBCC SHRINKFILE` for the
+approved working copy must provide a target at or above the measured MDF
+allocation high-water mark and below current allocation; it may issue only bounded `DBCC SHRINKFILE` for the
 MDF and must verify actual Windows C: bytes afterward.
 
 ## Exact SSMS sequence
