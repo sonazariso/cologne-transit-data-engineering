@@ -11,12 +11,14 @@
 
     Run this file read-only first.  A separately reviewed SSMS working copy
     must replace the NULL target in the file plan with an exact target at or
-    above the measured allocation high-water mark, set @ApplyShrink = 1, and
-    complete every approval gate.  The apply branch
+    above actual used space plus the reviewed MDF reserve, set @ApplyShrink =
+    1, and complete every approval gate.  The apply branch
     remeasures Windows C:, the transaction log, tempdb, and active collectors
     immediately before each shrink command and verifies the actual after
-    measurement.  A data-file shrink is never inferred from logical MDF free
-    pages; only the Windows volume measurement is a recovery result.
+    measurement.  SQL Server may leave a data file larger than the requested
+    SHRINKFILE target when pages cannot be moved; the actual after measurement
+    is authoritative.  A data-file shrink is never inferred from logical MDF
+    free pages; only the Windows volume measurement is a recovery result.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -57,20 +59,27 @@ DECLARE @OriginalProjectFootprintBytes BIGINT;
 DECLARE @ProjectedProjectFootprintBytes BIGINT;
 DECLARE @ProjectedMdfBytes BIGINT;
 DECLARE @ProjectedCDataReductionBytes BIGINT;
-DECLARE @MinimumReachableBytes BIGINT;
-DECLARE @MinimumReachableSizeMB BIGINT;
-DECLARE @MdfFileId INT;
+DECLARE @MdfUsedPages BIGINT;
+DECLARE @MdfGrowthReservePages BIGINT;
+DECLARE @MdfReservePages BIGINT;
+DECLARE @MinimumSafeTargetPages BIGINT;
+DECLARE @MinimumSafeTargetSizeMB BIGINT;
 DECLARE @DatabaseAutogrowthReserveBytes BIGINT;
 DECLARE @TempdbAutogrowthReserveBytes BIGINT;
 DECLARE @ProjectedDatabaseBytes BIGINT;
 DECLARE @ProjectedCFreeBytes BIGINT;
 DECLARE @ProjectedRecoveryPercent DECIMAL(19, 6);
+DECLARE @RecoveryTargetPercent DECIMAL(19, 6) = 80.0;
 DECLARE @ActualBeforeBytes BIGINT;
 DECLARE @ActualAfterBytes BIGINT;
 DECLARE @ActualBeforeMdfBytes BIGINT;
 DECLARE @ActualAfterMdfBytes BIGINT;
 DECLARE @ActualBeforeCFreeBytes BIGINT;
 DECLARE @ActualAfterCFreeBytes BIGINT;
+DECLARE @CurrentMdfUsedPages BIGINT;
+DECLARE @CurrentMdfGrowthReservePages BIGINT;
+DECLARE @CurrentMdfReservePages BIGINT;
+DECLARE @CurrentMinimumSafeTargetPages BIGINT;
 DECLARE @ShrinkFileName sysname;
 DECLARE @ShrinkTargetMB BIGINT;
 DECLARE @ShrinkCommand NVARCHAR(1000);
@@ -97,26 +106,6 @@ IF
 )
     <> (SELECT COUNT(*) FROM @DataFilePlan)
     THROW 52403, 'The reviewed file plan must cover every MDF data file.', 1;
-
-SELECT @MdfFileId = file_id
-FROM sys.database_files
-WHERE type = 0 AND name = @LogicalDataFileName;
-SELECT @MinimumReachableBytes = COALESCE
-(
-    MAX((CONVERT(BIGINT, allocated_page_page_id) + 1) * 8192),
-    CONVERT(BIGINT, 0)
-)
-FROM sys.dm_db_database_page_allocations
-(
-    DB_ID(), NULL, NULL, NULL, N'DETAILED'
-)
-WHERE allocated_page_file_id = @MdfFileId
-  AND is_allocated = 1;
-SET @MinimumReachableSizeMB = CONVERT
-(
-    BIGINT,
-    CEILING(CONVERT(DECIMAL(28, 8), @MinimumReachableBytes) / 1048576.0)
-);
 
 /* Direct current Windows, MDF, transaction-log and tempdb measurements. */
 SELECT @LiveCFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
@@ -150,6 +139,44 @@ WHERE df.type = 0;
 SELECT @OriginalProjectFootprintBytes = SUM(CONVERT(BIGINT, df.size)) * 8192
 FROM sys.database_files AS df;
 
+/* A SHRINKFILE target is a requested final allocation size, not the current
+   highest allocated page.  SQL Server can move allocated pages while
+   shrinking, and can also stop above the requested target.  Use actual
+   FILEPROPERTY(SpaceUsed) pages plus one configured MDF growth increment as
+   the safe target floor; when autogrowth is disabled, retain at least one
+   extent so the floor remains a usable MB-sized target. */
+/* 80% reports the complete original MDF plus LDF footprint; it is not an
+   execution gate. */
+SELECT
+    @MdfUsedPages = CONVERT(BIGINT, COALESCE(FILEPROPERTY(df.name, N'SpaceUsed'), 0)),
+    @MdfGrowthReservePages = CASE
+        WHEN df.is_percent_growth = 1
+            THEN CONVERT
+            (
+                BIGINT,
+                CEILING
+                (
+                    CONVERT(DECIMAL(38, 8), CONVERT(BIGINT, df.size))
+                    * CONVERT(DECIMAL(38, 8), df.growth) / 100.0
+                )
+            )
+        ELSE CONVERT(BIGINT, df.growth)
+    END
+FROM sys.database_files AS df
+WHERE df.type = 0
+  AND df.name = @LogicalDataFileName;
+SET @MdfReservePages = CASE
+    WHEN COALESCE(@MdfGrowthReservePages, 0) > CONVERT(BIGINT, 8)
+        THEN @MdfGrowthReservePages
+    ELSE CONVERT(BIGINT, 8)
+END;
+SET @MinimumSafeTargetPages = @MdfUsedPages + @MdfReservePages;
+SET @MinimumSafeTargetSizeMB = CONVERT
+(
+    BIGINT,
+    CEILING(CONVERT(DECIMAL(38, 8), @MinimumSafeTargetPages) / 128.0)
+);
+
 SELECT @DatabaseAutogrowthReserveBytes = SUM
 (
     CASE WHEN UPPER(LEFT(vs.volume_mount_point, 2)) <> N'C:' THEN 0
@@ -180,7 +207,9 @@ SELECT
     @DataUsedBytes AS mdf_used_bytes,
     @DataInternalFreeBytes AS mdf_internal_free_bytes,
     @OriginalProjectFootprintBytes AS original_project_footprint_bytes_including_mdf_and_ldf,
-    @MinimumReachableSizeMB AS measured_mdf_minimum_reachable_size_mb,
+    @MdfUsedPages AS mdf_used_pages,
+    @MdfReservePages AS reviewed_mdf_target_reserve_pages,
+    @MinimumSafeTargetSizeMB AS measured_mdf_minimum_safe_target_size_mb,
     @LogTotalBytes AS transaction_log_total_bytes,
     @LogUsedBytes AS transaction_log_used_bytes,
     @LogFreeBytes AS transaction_log_free_bytes,
@@ -194,10 +223,12 @@ SELECT
     N'portfolio.recovery_file_plan' AS statement_id,
     p.LogicalDataFileName AS logical_data_file_name,
     p.TargetSizeMB AS configured_target_size_mb,
-    @MinimumReachableSizeMB AS measured_minimum_reachable_size_mb,
+    @MdfUsedPages AS actual_used_pages,
+    @MdfReservePages AS target_reserve_pages,
+    @MinimumSafeTargetSizeMB AS measured_minimum_safe_target_size_mb,
     CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), FILEPROPERTY(p.LogicalDataFileName, N'SpaceUsed')) / 128.0)) AS current_used_size_mb,
     CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), df.size) / 128.0)) AS current_allocated_size_mb,
-    N'REVIEWED_WORKING_COPY_MUST_SET_TARGET_AT_OR_ABOVE_ALLOCATION_HIGH_WATER_MARK_AND_BELOW_CURRENT_ALLOCATED' AS target_contract
+    N'REVIEWED_WORKING_COPY_MUST_SET_TARGET_AT_OR_ABOVE_ACTUAL_USED_SPACE_PLUS_RESERVE_AND_BELOW_CURRENT_ALLOCATED; SHRINKFILE_TARGET_IS_A_REQUEST' AS target_contract
 FROM @DataFilePlan AS p
 JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName AND df.type = 0;
 
@@ -232,20 +263,26 @@ IF @CollectorDisabledConfirmed = 0
    OR NULLIF(@CapacityReviewReference, N'') IS NULL
     THROW 52405, 'Fresh recovery, manifest, consumer, capacity and approval evidence is required.', 1;
 
-IF @MinimumReachableBytes IS NULL OR @MinimumReachableBytes <= 0
-    THROW 52406, 'The MDF allocation high-water mark could not be measured.', 1;
+IF @MdfUsedPages IS NULL
+   OR @MdfUsedPages < 0
+   OR @MdfReservePages IS NULL
+   OR @MdfReservePages < 8
+   OR @MinimumSafeTargetPages <= 0
+   OR @MinimumSafeTargetSizeMB <= 0
+    THROW 52406, 'Actual MDF used space plus the reviewed target reserve could not be measured.', 1;
 IF EXISTS
 (
     SELECT 1
     FROM @DataFilePlan AS p
     JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName AND df.type = 0
     WHERE p.TargetSizeMB IS NULL
+       OR p.TargetSizeMB <= 0
        OR CONVERT(DECIMAL(38, 0), p.TargetSizeMB) * 1048576
-          < CONVERT(DECIMAL(38, 0), @MinimumReachableBytes)
+          < CONVERT(DECIMAL(38, 0), @MinimumSafeTargetPages) * 8192
        OR CONVERT(DECIMAL(38, 0), p.TargetSizeMB) * 1048576
           >= CONVERT(DECIMAL(38, 0), df.size) * 8192
 )
-    THROW 52406, 'The reviewed target cannot be reached or is not below current MDF allocation.', 1;
+    THROW 52406, 'The reviewed target must cover actual MDF used space plus the reviewed reserve and remain below current MDF allocation.', 1;
 
 SET @ProjectedMdfBytes = CONVERT
 (
@@ -283,8 +320,6 @@ SET @ProjectedRecoveryPercent = CONVERT(DECIMAL(19, 6),
 
 IF @ProjectedCFreeBytes < @RequiredCFreeBytes
     THROW 52407, 'Projected worst-case Windows C: free space would cross 12 GiB.', 1;
-IF @ProjectedRecoveryPercent < 80.0
-    THROW 52408, 'Projected recovery of the complete original MDF plus LDF footprint is below the 80% target.', 1;
 IF EXISTS
 (
     SELECT 1 FROM ctl.MddMacCollectorRun
@@ -305,10 +340,17 @@ SELECT
     @ProjectedProjectFootprintBytes AS projected_project_footprint_bytes_including_ldf,
     @ProjectedDatabaseBytes AS projected_database_file_bytes,
     @ProjectedRecoveryPercent AS projected_project_footprint_recovery_percent,
-    @MinimumReachableSizeMB AS measured_minimum_reachable_size_mb,
+    @RecoveryTargetPercent AS reported_recovery_target_percent,
+    CASE WHEN @ProjectedRecoveryPercent >= @RecoveryTargetPercent
+         THEN CONVERT(BIT, 1) ELSE CONVERT(BIT, 0) END AS projected_recovery_target_met,
+    CASE WHEN @ProjectedRecoveryPercent >= @RecoveryTargetPercent
+         THEN N'REPORTED_80_PERCENT_TARGET_MET'
+         ELSE N'REPORTED_80_PERCENT_TARGET_UNATTAINABLE_WITH_THIS_SAFE_PLAN; PARTIAL_RECOVERY_REMAINS_ALLOWED'
+    END AS projected_recovery_target_status,
+    @MinimumSafeTargetSizeMB AS measured_mdf_minimum_safe_target_size_mb,
     p.LogicalDataFileName AS logical_data_file_name,
     p.TargetSizeMB AS target_size_mb,
-    N'REVIEW_THIS_RESULT_SET_AND_EXACT_COMMAND_BEFORE_CONTINUING' AS review_gate
+    N'REVIEW_THIS_RESULT_SET_AND_EXACT_COMMAND_BEFORE_CONTINUING; 80_PERCENT_IS_REPORT_ONLY' AS review_gate
 FROM @DataFilePlan AS p;
 
 SELECT
@@ -392,6 +434,46 @@ BEGIN TRY
         )
             THROW 52415, 'Another active request exists in the target database.', 1;
 
+        /* Recheck the file-specific floor immediately before DBCC.  This
+           uses actual used pages plus the configured growth reserve, not an
+           allocated-page high-water mark.  SHRINKFILE may still stop above
+           the requested target; the post-shrink allocation is reported. */
+        SELECT
+            @CurrentMdfUsedPages = CONVERT
+            (
+                BIGINT,
+                COALESCE(FILEPROPERTY(df.name, N'SpaceUsed'), 0)
+            ),
+            @CurrentMdfGrowthReservePages = CASE
+                WHEN df.is_percent_growth = 1
+                    THEN CONVERT
+                    (
+                        BIGINT,
+                        CEILING
+                        (
+                            CONVERT(DECIMAL(38, 8), CONVERT(BIGINT, df.size))
+                            * CONVERT(DECIMAL(38, 8), df.growth) / 100.0
+                        )
+                    )
+                ELSE CONVERT(BIGINT, df.growth)
+            END
+        FROM sys.database_files AS df
+        WHERE df.type = 0
+          AND df.name = @ShrinkFileName;
+        SET @CurrentMdfReservePages = CASE
+            WHEN COALESCE(@CurrentMdfGrowthReservePages, 0) > CONVERT(BIGINT, 8)
+                THEN @CurrentMdfGrowthReservePages
+            ELSE CONVERT(BIGINT, 8)
+        END;
+        SET @CurrentMinimumSafeTargetPages =
+            @CurrentMdfUsedPages + @CurrentMdfReservePages;
+        IF @CurrentMdfUsedPages IS NULL
+           OR @CurrentMdfUsedPages < 0
+           OR @CurrentMinimumSafeTargetPages <= 0
+           OR CONVERT(DECIMAL(38, 0), @ShrinkTargetMB) * 128
+                < CONVERT(DECIMAL(38, 0), @CurrentMinimumSafeTargetPages)
+            THROW 52418, 'Fresh MDF used-space plus reserve feasibility failed before SHRINKFILE.', 1;
+
         SET @ShrinkCommand = N'DBCC SHRINKFILE (' + QUOTENAME(@ShrinkFileName)
             + N', ' + CONVERT(NVARCHAR(30), @ShrinkTargetMB) + N') WITH NO_INFOMSGS;';
         EXEC sys.sp_executesql @ShrinkCommand;
@@ -411,17 +493,29 @@ FROM sys.database_files AS df;
 SELECT @ActualAfterMdfBytes = SUM(CONVERT(BIGINT, df.size)) * 8192
 FROM sys.database_files AS df
 WHERE df.type = 0;
-IF EXISTS
-(
-    SELECT 1
-    FROM @DataFilePlan AS p
-    JOIN sys.database_files AS df
-      ON df.name = p.LogicalDataFileName
-     AND df.type = 0
-    WHERE CONVERT(DECIMAL(38, 0), df.size) * 8192
-          > CONVERT(DECIMAL(38, 0), p.TargetSizeMB) * 1048576
-)
-    THROW 52417, 'The actual MDF allocation did not reach the reviewed target.', 1;
+
+/* DBCC SHRINKFILE can legally finish above its requested target when the
+   remaining allocation cannot be moved.  That is a measured partial result,
+   not a reason to discard the safe space recovery or claim the request was
+   reached. */
+SELECT
+    N'portfolio.recovery_shrinkfile_target_readback' AS statement_id,
+    p.LogicalDataFileName AS logical_data_file_name,
+    p.TargetSizeMB AS requested_target_size_mb,
+    CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(38, 8), df.size) / 128.0))
+        AS actual_allocated_size_mb,
+    CASE WHEN CONVERT(DECIMAL(38, 0), df.size) * 8192
+              <= CONVERT(DECIMAL(38, 0), p.TargetSizeMB) * 1048576
+         THEN CONVERT(BIT, 1) ELSE CONVERT(BIT, 0) END AS requested_target_reached,
+    CASE WHEN CONVERT(DECIMAL(38, 0), df.size) * 8192
+              <= CONVERT(DECIMAL(38, 0), p.TargetSizeMB) * 1048576
+         THEN N'SHRINKFILE_TARGET_REACHED'
+         ELSE N'The actual MDF allocation did not reach the reviewed target; SQL Server SHRINKFILE stopped above the request.'
+    END AS target_status
+FROM @DataFilePlan AS p
+JOIN sys.database_files AS df
+  ON df.name = p.LogicalDataFileName
+ AND df.type = 0;
 SELECT @ActualAfterCFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
 FROM sys.database_files AS df
 CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
@@ -477,6 +571,17 @@ SELECT
     CONVERT(DECIMAL(19, 6),
         (@ActualBeforeBytes - @ActualAfterBytes) * 100.0
         / NULLIF(@ActualBeforeBytes, 0)) AS actual_project_footprint_recovery_percent,
+    @RecoveryTargetPercent AS reported_recovery_target_percent,
+    CASE WHEN CONVERT(DECIMAL(19, 6),
+                 (@ActualBeforeBytes - @ActualAfterBytes) * 100.0
+                 / NULLIF(@ActualBeforeBytes, 0)) >= @RecoveryTargetPercent
+         THEN CONVERT(BIT, 1) ELSE CONVERT(BIT, 0) END AS actual_recovery_target_met,
+    CASE WHEN CONVERT(DECIMAL(19, 6),
+                 (@ActualBeforeBytes - @ActualAfterBytes) * 100.0
+                 / NULLIF(@ActualBeforeBytes, 0)) >= @RecoveryTargetPercent
+         THEN N'REPORTED_80_PERCENT_TARGET_MET'
+         ELSE N'REPORTED_80_PERCENT_TARGET_UNATTAINABLE; SAFE_PARTIAL_RECOVERY_COMPLETED'
+    END AS actual_recovery_target_status,
     @LogFreeBytes AS transaction_log_free_bytes_after,
     @TempdbFreeBytes AS tempdb_unallocated_bytes_after,
     N'ACTUAL_WINDOWS_MEASUREMENT_ONLY; VERIFY_READBACK_AND_FRAGMENTATION_AGAIN'

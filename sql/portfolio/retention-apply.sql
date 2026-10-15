@@ -16,9 +16,10 @@
       22, 93, 185, 189, 207, 224, 225, 226, 228, 229
 
     The cross-layer manifest is executable.  Its retention predicates are
-    used for retained-row counts, FK-closure checks, and the actual bounded
-    DELETE TOP batches.  Tables not listed here are never deleted by this
-    script.  A listed parent with an unlisted FK child is a hard stop.
+    used for retained-row counts, prospective FK-closure checks, and the
+    actual bounded DELETE TOP batches.  Tables not listed here are never
+    deleted by this script.  A listed parent with an unlisted FK child is a
+    hard stop.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -54,6 +55,8 @@ DECLARE @RequiredCFreeBytes BIGINT = CONVERT(BIGINT, 12) * 1024 * 1024 * 1024;
 DECLARE @Rows BIGINT = 0;
 DECLARE @TotalRows BIGINT = 0;
 DECLARE @AppLockResult INT = -999;
+DECLARE @RecoveryModelDesc NVARCHAR(60);
+DECLARE @LogReuseWaitDesc NVARCHAR(60);
 
 DECLARE @Manifest TABLE
 (
@@ -230,7 +233,8 @@ CREATE TABLE #DataRetentionManifest
     deliberately concrete: there is no TOP, date range, or guessed sample in
     this manifest.  The source-faithful MDD counts total 14,308 timing rows,
     7,504 call rows, 245 service-section rows, 22 attribute rows and 121
-    parser-gap rows across the ten snapshots.
+    parser-gap rows across the ten snapshots.  Each BatchSize below is a
+    reviewed upper bound; the live C:/log/tempdb preflight may only reduce it.
 */
 INSERT #DataRetentionManifest
 (
@@ -483,7 +487,10 @@ CREATE TABLE #ManifestCounts
     BatchSize INT NOT NULL,
     MaxNonRetainedRowBytes BIGINT NOT NULL,
     IndexCount INT NOT NULL,
+    BatchReservePerRowBytes BIGINT NOT NULL,
     WorstCaseBatchReserveBytes BIGINT NOT NULL,
+    CapacityLimitedBatchSize INT NOT NULL,
+    CapacityLimitedBatchReserveBytes BIGINT NOT NULL,
     NonRetainedRows AS (CurrentTotalRows - ActualRetainedRows),
     PRIMARY KEY (SchemaName, TableName)
 );
@@ -497,18 +504,20 @@ DECLARE @CurrentRows BIGINT;
 DECLARE @CountBatchSize INT;
 DECLARE @MaxNonRetainedRowBytes BIGINT;
 DECLARE @IndexCount INT;
+DECLARE @BatchReservePerRowDecimal DECIMAL(38, 0);
+DECLARE @BatchReservePerRowBytes BIGINT;
 DECLARE @BatchReserveDecimal DECIMAL(38, 0);
 DECLARE @WorstCaseBatchReserveBytes BIGINT;
 DECLARE @PostTotalRows BIGINT;
 DECLARE @RowBytesExpression NVARCHAR(MAX);
 DECLARE @Sql NVARCHAR(MAX);
 DECLARE count_cursor CURSOR LOCAL FAST_FORWARD FOR
-    SELECT SchemaName, TableName, RetentionPredicate, ExpectedRetainedRows, BatchSize
+    SELECT SchemaName, TableName, RetentionPredicate, BatchSize, ExpectedRetainedRows
     FROM #DataRetentionManifest
     ORDER BY DeleteOrder, ManifestId;
 OPEN count_cursor;
 FETCH NEXT FROM count_cursor INTO
-    @CountSchema, @CountTable, @CountPredicate, @ExpectedRows, @CountBatchSize;
+    @CountSchema, @CountTable, @CountPredicate, @CountBatchSize, @ExpectedRows;
 WHILE @@FETCH_STATUS = 0
 BEGIN
     SET @ActualRows = NULL;
@@ -552,15 +561,19 @@ BEGIN
       AND index_id > 0
       AND is_hypothetical = 0;
 
-    SET @BatchReserveDecimal =
+    SET @BatchReservePerRowDecimal =
         (
             CONVERT(DECIMAL(38, 0), COALESCE(@MaxNonRetainedRowBytes, 0))
             + CONVERT(DECIMAL(38, 0), 8192)
         )
-        * CONVERT(DECIMAL(38, 0), @CountBatchSize)
         * CONVERT(DECIMAL(38, 0), COALESCE(@IndexCount, 0) + 1)
-        * CONVERT(DECIMAL(38, 0), 4)
+        * CONVERT(DECIMAL(38, 0), 4);
+    SET @BatchReserveDecimal =
+        @BatchReservePerRowDecimal * CONVERT(DECIMAL(38, 0), @CountBatchSize)
         + CONVERT(DECIMAL(38, 0), 65536);
+    IF @BatchReservePerRowDecimal > CONVERT(DECIMAL(38, 0), 9223372036854775807)
+        THROW 52230, 'The measured maximum row payload cannot be represented by a bounded reserve.', 1;
+    SET @BatchReservePerRowBytes = CONVERT(BIGINT, @BatchReservePerRowDecimal);
     IF @BatchReserveDecimal > CONVERT(DECIMAL(38, 0), 9223372036854775807)
         THROW 52230, 'The measured maximum row payload cannot be represented by a bounded reserve.', 1;
     SET @WorstCaseBatchReserveBytes = CONVERT(BIGINT, @BatchReserveDecimal);
@@ -568,16 +581,19 @@ BEGIN
         (
             SchemaName, TableName, ExpectedRetainedRows, ActualRetainedRows,
             CurrentTotalRows, BatchSize, MaxNonRetainedRowBytes, IndexCount,
-            WorstCaseBatchReserveBytes
+            BatchReservePerRowBytes, WorstCaseBatchReserveBytes,
+            CapacityLimitedBatchSize, CapacityLimitedBatchReserveBytes
         )
     VALUES
         (
             @CountSchema, @CountTable, @ExpectedRows, @ActualRows, @CurrentRows,
             @CountBatchSize, COALESCE(@MaxNonRetainedRowBytes, 0),
-            COALESCE(@IndexCount, 0), @WorstCaseBatchReserveBytes
+            COALESCE(@IndexCount, 0), @BatchReservePerRowBytes,
+            @WorstCaseBatchReserveBytes, @CountBatchSize,
+            @WorstCaseBatchReserveBytes
         );
     FETCH NEXT FROM count_cursor INTO
-        @CountSchema, @CountTable, @CountPredicate, @ExpectedRows, @CountBatchSize;
+        @CountSchema, @CountTable, @CountPredicate, @CountBatchSize, @ExpectedRows;
 END;
 CLOSE count_cursor;
 DEALLOCATE count_cursor;
@@ -593,6 +609,9 @@ DECLARE @TempdbAllocatedBytes BIGINT;
 DECLARE @DataInternalFreeBytes BIGINT;
 DECLARE @DatabaseAutogrowthReserveBytes BIGINT;
 DECLARE @TempdbAutogrowthReserveBytes BIGINT;
+DECLARE @ReviewedWorstCaseBatchReserveBytes BIGINT;
+DECLARE @MeasuredCapacityBudgetBytes BIGINT;
+DECLARE @CapacityLimitedWorstCaseBatchReserveBytes BIGINT;
 DECLARE @MeasuredWorstCaseBatchReserveBytes BIGINT;
 
 SELECT @CFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
@@ -646,6 +665,85 @@ SELECT @MeasuredWorstCaseBatchReserveBytes = COALESCE
     CONVERT(BIGINT, 0)
 )
 FROM #ManifestCounts;
+SET @ReviewedWorstCaseBatchReserveBytes = @MeasuredWorstCaseBatchReserveBytes;
+
+/*
+    Derive a capacity-limited batch size without ever increasing the reviewed
+    manifest size.  The budget is the smallest current reserve among the
+    protected C: headroom, transaction-log free bytes and tempdb free bytes.
+    A zero result is reported in dry-run mode and is a hard stop in apply mode;
+    it must never be converted into a DELETE attempt.
+*/
+IF @CFreeBytes IS NULL
+   OR @LogFreeBytes IS NULL
+   OR @TempdbFreeBytes IS NULL
+    SET @MeasuredCapacityBudgetBytes = NULL;
+ELSE
+    SELECT @MeasuredCapacityBudgetBytes = MIN(v.CapacityBytes)
+    FROM
+    (
+        VALUES
+        (
+            @CFreeBytes - @RequiredCFreeBytes
+                - COALESCE(@DatabaseAutogrowthReserveBytes, 0)
+                - COALESCE(@TempdbAutogrowthReserveBytes, 0)
+        ),
+        (@LogFreeBytes),
+        (@TempdbFreeBytes)
+    ) AS v(CapacityBytes);
+
+;WITH CapacityLimited AS
+(
+    SELECT
+        mc.SchemaName,
+        mc.TableName,
+        CapacityLimitedBatchSize = CONVERT
+        (
+            INT,
+            CASE
+                WHEN @MeasuredCapacityBudgetBytes IS NULL
+                  OR @MeasuredCapacityBudgetBytes <= 65536
+                    THEN 0
+                WHEN FLOOR
+                (
+                    CONVERT(DECIMAL(38, 0), @MeasuredCapacityBudgetBytes - 65536)
+                        / CONVERT(DECIMAL(38, 0), mc.BatchReservePerRowBytes)
+                ) < CONVERT(DECIMAL(38, 0), mc.BatchSize)
+                    THEN CONVERT
+                    (
+                        BIGINT,
+                        FLOOR
+                        (
+                            CONVERT(DECIMAL(38, 0), @MeasuredCapacityBudgetBytes - 65536)
+                                / CONVERT(DECIMAL(38, 0), mc.BatchReservePerRowBytes)
+                        )
+                    )
+                ELSE mc.BatchSize
+            END
+        )
+    FROM #ManifestCounts AS mc
+)
+UPDATE mc
+SET CapacityLimitedBatchSize = cl.CapacityLimitedBatchSize,
+    CapacityLimitedBatchReserveBytes = CONVERT
+    (
+        BIGINT,
+        CONVERT(DECIMAL(38, 0), mc.BatchReservePerRowBytes)
+            * CONVERT(DECIMAL(38, 0), cl.CapacityLimitedBatchSize)
+            + CONVERT(DECIMAL(38, 0), 65536)
+    )
+FROM #ManifestCounts AS mc
+JOIN CapacityLimited AS cl
+  ON cl.SchemaName = mc.SchemaName
+ AND cl.TableName = mc.TableName;
+
+SELECT @CapacityLimitedWorstCaseBatchReserveBytes = COALESCE
+(
+    MAX(CapacityLimitedBatchReserveBytes),
+    CONVERT(BIGINT, 0)
+)
+FROM #ManifestCounts;
+SET @MeasuredWorstCaseBatchReserveBytes = @CapacityLimitedWorstCaseBatchReserveBytes;
 
 SELECT
     N'portfolio.retention_capacity_preflight' AS statement_id,
@@ -661,21 +759,12 @@ SELECT
     @DataInternalFreeBytes AS mdf_internal_free_bytes,
     @DatabaseAutogrowthReserveBytes AS database_next_growth_reserve_bytes,
     @TempdbAutogrowthReserveBytes AS tempdb_next_growth_reserve_bytes,
+    @MeasuredCapacityBudgetBytes AS measured_batch_capacity_budget_bytes,
+    @ReviewedWorstCaseBatchReserveBytes AS reviewed_worst_case_batch_reserve_bytes,
+    @CapacityLimitedWorstCaseBatchReserveBytes AS capacity_limited_worst_case_batch_reserve_bytes,
     @MeasuredWorstCaseBatchReserveBytes AS measured_worst_case_batch_reserve_bytes,
-    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD; INDEX_AWARE_RESERVE; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
+    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD; INDEX_AWARE_RESERVE; CAPACITY_LIMITED_BATCHES_NEVER_EXCEED_REVIEWED_BATCHES; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
         AS safety_contract;
-
-IF @CFreeBytes IS NULL
-   OR @LogFreeBytes IS NULL
-   OR @TempdbFreeBytes IS NULL
-   OR @CFreeBytes - @MeasuredWorstCaseBatchReserveBytes
-        - COALESCE(@DatabaseAutogrowthReserveBytes, 0)
-        - COALESCE(@TempdbAutogrowthReserveBytes, 0) < @RequiredCFreeBytes
-    THROW 52209, 'Initial measured capacity cannot prove the 12 GiB floor for a batch.', 1;
-IF @LogFreeBytes < @MeasuredWorstCaseBatchReserveBytes
-    THROW 52210, 'Initial transaction-log reserve is too small for the measured batch.', 1;
-IF @TempdbFreeBytes < @MeasuredWorstCaseBatchReserveBytes
-    THROW 52211, 'Initial tempdb reserve is too small for the measured batch.', 1;
 
 SELECT
     N'portfolio.retention_before_counts' AS statement_id,
@@ -688,6 +777,9 @@ SELECT
     mc.BatchSize AS reviewed_batch_size,
     mc.MaxNonRetainedRowBytes AS maximum_nonretained_row_payload_bytes,
     mc.IndexCount AS index_count_used_for_reserve,
+    mc.BatchReservePerRowBytes AS batch_reserve_per_row_bytes,
+    mc.CapacityLimitedBatchSize AS capacity_limited_batch_size,
+    mc.CapacityLimitedBatchReserveBytes AS capacity_limited_batch_reserve_bytes,
     mc.WorstCaseBatchReserveBytes AS worst_case_batch_reserve_bytes
 FROM #ManifestCounts AS mc
 ORDER BY mc.SchemaName, mc.TableName;
@@ -713,6 +805,30 @@ BEGIN
           and the dry-run readback for operator approval before creating a
           reviewed working copy with @Apply = 1.' AS next_action;
     RETURN;
+END;
+
+/* These gates are intentionally after the @Apply = 0 return.  Dry-run mode
+   must report insufficient capacity; only a destructive run must stop on it. */
+IF @Apply = 1
+BEGIN
+    IF @CFreeBytes IS NULL
+       OR @LogFreeBytes IS NULL
+       OR @TempdbFreeBytes IS NULL
+       OR @MeasuredCapacityBudgetBytes IS NULL
+       OR EXISTS
+          (
+              SELECT 1
+              FROM #ManifestCounts
+              WHERE CapacityLimitedBatchSize < 1
+          )
+       OR @CFreeBytes - @MeasuredWorstCaseBatchReserveBytes
+            - COALESCE(@DatabaseAutogrowthReserveBytes, 0)
+            - COALESCE(@TempdbAutogrowthReserveBytes, 0) < @RequiredCFreeBytes
+        THROW 52209, 'Initial measured capacity cannot prove the 12 GiB floor for a batch.', 1;
+    IF @LogFreeBytes < @MeasuredWorstCaseBatchReserveBytes
+        THROW 52210, 'Initial transaction-log reserve is too small for the measured batch.', 1;
+    IF @TempdbFreeBytes < @MeasuredWorstCaseBatchReserveBytes
+        THROW 52211, 'Initial tempdb reserve is too small for the measured batch.', 1;
 END;
 
 IF @ManifestApproved = 0
@@ -774,10 +890,253 @@ IF EXISTS
 )
     THROW 52216, 'Another active request exists in the target database.', 1;
 
+    /* Check log behavior immediately before the first mutation.  The
+       recovery model is reported rather than changed; a non-NOTHING reuse
+       wait is a hard stop because the bounded deletes must not begin while
+       log reuse is blocked. */
+    SELECT
+        @RecoveryModelDesc = recovery_model_desc,
+        @LogReuseWaitDesc = log_reuse_wait_desc
+    FROM sys.databases
+    WHERE database_id = DB_ID();
+
+    SELECT
+        N'portfolio.retention_log_state_before_apply' AS statement_id,
+        @RecoveryModelDesc AS recovery_model_desc,
+        @LogReuseWaitDesc AS log_reuse_wait_desc,
+        N'REPORT_ONLY_RECOVERY_MODEL; LOG_REUSE_WAIT_MUST_BE_NOTHING_BEFORE_FIRST_DELETE'
+            AS safety_contract;
+
+    IF @RecoveryModelDesc IS NULL
+       OR @RecoveryModelDesc NOT IN (N'SIMPLE', N'FULL', N'BULK_LOGGED')
+        THROW 52237, 'The database recovery model could not be validated before retention apply.', 1;
+    IF @LogReuseWaitDesc IS NULL
+       OR UPPER(@LogReuseWaitDesc) <> N'NOTHING'
+        THROW 52238, 'The transaction-log reuse wait is not NOTHING; retention apply is stopped before mutation.', 1;
+
+    /* Prospective row-level FK closure.  A retained child must resolve to a
+       parent that will also remain after every manifest delete.  Unlisted
+       tables are treated as fully retained.  The alias substitution keeps
+       the executable manifest predicates intact for both sides of every
+       FK, including a self-referencing FK such as dw.DimStop.ParentStopKey.
+       This is deliberately before the delete cursor and therefore before
+       the first DELETE TOP batch. */
+    CREATE TABLE #ProspectiveForeignKeyClosureResults
+    (
+        ForeignKeyObjectId INT NOT NULL PRIMARY KEY,
+        ForeignKeyName sysname NOT NULL,
+        ChildSchema sysname NOT NULL,
+        ChildTable sysname NOT NULL,
+        ParentSchema sysname NOT NULL,
+        ParentTable sysname NOT NULL,
+        IsSelfReferencing BIT NOT NULL,
+        RetainedChildRows BIGINT NOT NULL,
+        ProspectiveParentRows BIGINT NOT NULL,
+        ParentRowsScheduledForDeletion BIGINT NOT NULL,
+        ViolationRows BIGINT NOT NULL
+    );
+
+    DECLARE @ProspectiveFkObjectId INT;
+    DECLARE @ProspectiveFkName sysname;
+    DECLARE @ProspectiveChildSchema sysname;
+    DECLARE @ProspectiveChildTable sysname;
+    DECLARE @ProspectiveParentSchema sysname;
+    DECLARE @ProspectiveParentTable sysname;
+    DECLARE @ProspectiveIsSelfReferencing BIT;
+    DECLARE @ProspectiveChildKeepPredicate NVARCHAR(MAX);
+    DECLARE @ProspectiveParentKeepPredicate NVARCHAR(MAX);
+    DECLARE @ProspectiveFkJoinPredicate NVARCHAR(MAX);
+    DECLARE @ProspectiveFkNotNullPredicate NVARCHAR(MAX);
+    DECLARE @ProspectiveRetainedChildRows BIGINT;
+    DECLARE @ProspectiveParentRows BIGINT;
+    DECLARE @ProspectiveParentRowsBeforeDelete BIGINT;
+    DECLARE @ProspectiveViolationRows BIGINT;
+    DECLARE prospective_fk_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT fk.object_id,
+               fk.name,
+               OBJECT_SCHEMA_NAME(fk.parent_object_id),
+               OBJECT_NAME(fk.parent_object_id),
+               OBJECT_SCHEMA_NAME(fk.referenced_object_id),
+               OBJECT_NAME(fk.referenced_object_id),
+               CONVERT(BIT, CASE WHEN fk.parent_object_id = fk.referenced_object_id
+                                 THEN 1 ELSE 0 END)
+        FROM sys.foreign_keys AS fk
+        JOIN sys.objects AS child_object
+          ON child_object.object_id = fk.parent_object_id
+        JOIN sys.objects AS parent_object
+          ON parent_object.object_id = fk.referenced_object_id
+        WHERE child_object.is_ms_shipped = 0
+          AND parent_object.is_ms_shipped = 0;
+
+    OPEN prospective_fk_cursor;
+    FETCH NEXT FROM prospective_fk_cursor INTO
+        @ProspectiveFkObjectId, @ProspectiveFkName,
+        @ProspectiveChildSchema, @ProspectiveChildTable,
+        @ProspectiveParentSchema, @ProspectiveParentTable,
+        @ProspectiveIsSelfReferencing;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SELECT @ProspectiveChildKeepPredicate = COALESCE
+        (
+            (
+                SELECT TOP (1) RetentionPredicate
+                FROM #DataRetentionManifest
+                WHERE SchemaName = @ProspectiveChildSchema
+                  AND TableName = @ProspectiveChildTable
+            ),
+            N'1 = 1'
+        );
+        SELECT @ProspectiveParentKeepPredicate = COALESCE
+        (
+            (
+                SELECT TOP (1) RetentionPredicate
+                FROM #DataRetentionManifest
+                WHERE SchemaName = @ProspectiveParentSchema
+                  AND TableName = @ProspectiveParentTable
+            ),
+            N'1 = 1'
+        );
+        SET @ProspectiveChildKeepPredicate = REPLACE
+        (
+            @ProspectiveChildKeepPredicate,
+            N'x.',
+            N'c.'
+        );
+        SET @ProspectiveParentKeepPredicate = REPLACE
+        (
+            @ProspectiveParentKeepPredicate,
+            N'x.',
+            N'p.'
+        );
+
+        SELECT @ProspectiveFkJoinPredicate = STUFF
+        (
+            (
+                SELECT N' AND p.' + QUOTENAME(parent_column.name)
+                    + N' = c.' + QUOTENAME(child_column.name)
+                FROM sys.foreign_key_columns AS fkc
+                JOIN sys.columns AS child_column
+                  ON child_column.object_id = fkc.parent_object_id
+                 AND child_column.column_id = fkc.parent_column_id
+                JOIN sys.columns AS parent_column
+                  ON parent_column.object_id = fkc.referenced_object_id
+                 AND parent_column.column_id = fkc.referenced_column_id
+                WHERE fkc.constraint_object_id = @ProspectiveFkObjectId
+                ORDER BY fkc.constraint_column_id
+                FOR XML PATH(N''), TYPE
+            ).value(N'.', N'NVARCHAR(MAX)'), 1, 5, N''
+        );
+        SELECT @ProspectiveFkNotNullPredicate = STUFF
+        (
+            (
+                SELECT N' AND c.' + QUOTENAME(child_column.name) + N' IS NOT NULL'
+                FROM sys.foreign_key_columns AS fkc
+                JOIN sys.columns AS child_column
+                  ON child_column.object_id = fkc.parent_object_id
+                 AND child_column.column_id = fkc.parent_column_id
+                WHERE fkc.constraint_object_id = @ProspectiveFkObjectId
+                ORDER BY fkc.constraint_column_id
+                FOR XML PATH(N''), TYPE
+            ).value(N'.', N'NVARCHAR(MAX)'), 1, 5, N''
+        );
+
+        SET @ProspectiveRetainedChildRows = NULL;
+        SET @ProspectiveParentRows = NULL;
+        SET @ProspectiveParentRowsBeforeDelete = NULL;
+        SET @ProspectiveViolationRows = NULL;
+        SET @Sql = N'
+            SELECT @RetainedChildRows = COUNT_BIG(*)
+            FROM ' + QUOTENAME(@ProspectiveChildSchema) + N'.'
+                + QUOTENAME(@ProspectiveChildTable) + N' AS c
+            WHERE (' + COALESCE(@ProspectiveChildKeepPredicate, N'1 = 1') + N');
+            SELECT @ParentRows = COUNT_BIG(*)
+            FROM ' + QUOTENAME(@ProspectiveParentSchema) + N'.'
+                + QUOTENAME(@ProspectiveParentTable) + N' AS p;
+            SELECT @ProspectiveParentRows = COUNT_BIG(*)
+            FROM ' + QUOTENAME(@ProspectiveParentSchema) + N'.'
+                + QUOTENAME(@ProspectiveParentTable) + N' AS p
+            WHERE (' + COALESCE(@ProspectiveParentKeepPredicate, N'1 = 1') + N');
+            SELECT @Violations = COUNT_BIG(*)
+            FROM ' + QUOTENAME(@ProspectiveChildSchema) + N'.'
+                + QUOTENAME(@ProspectiveChildTable) + N' AS c
+            WHERE (' + COALESCE(@ProspectiveChildKeepPredicate, N'1 = 1') + N')
+              AND (' + COALESCE(@ProspectiveFkNotNullPredicate, N'1 = 0') + N')
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM ' + QUOTENAME(@ProspectiveParentSchema) + N'.'
+                    + QUOTENAME(@ProspectiveParentTable) + N' AS p
+                  WHERE (' + COALESCE(@ProspectiveParentKeepPredicate, N'1 = 1') + N')
+                    AND ' + COALESCE(@ProspectiveFkJoinPredicate, N'1 = 0') + N'
+              );';
+        EXEC sys.sp_executesql @Sql,
+            N'@RetainedChildRows BIGINT OUTPUT,
+              @ParentRows BIGINT OUTPUT,
+              @ProspectiveParentRows BIGINT OUTPUT,
+              @Violations BIGINT OUTPUT',
+            @RetainedChildRows = @ProspectiveRetainedChildRows OUTPUT,
+            @ParentRows = @ProspectiveParentRowsBeforeDelete OUTPUT,
+            @ProspectiveParentRows = @ProspectiveParentRows OUTPUT,
+            @Violations = @ProspectiveViolationRows OUTPUT;
+        INSERT #ProspectiveForeignKeyClosureResults
+        (
+            ForeignKeyObjectId, ForeignKeyName, ChildSchema, ChildTable,
+            ParentSchema, ParentTable, IsSelfReferencing,
+            RetainedChildRows, ProspectiveParentRows,
+            ParentRowsScheduledForDeletion, ViolationRows
+        )
+        VALUES
+        (
+            @ProspectiveFkObjectId, @ProspectiveFkName,
+            @ProspectiveChildSchema, @ProspectiveChildTable,
+            @ProspectiveParentSchema, @ProspectiveParentTable,
+            @ProspectiveIsSelfReferencing,
+            COALESCE(@ProspectiveRetainedChildRows, 0),
+            COALESCE(@ProspectiveParentRows, 0),
+            COALESCE(@ProspectiveParentRowsBeforeDelete, 0)
+                - COALESCE(@ProspectiveParentRows, 0),
+            COALESCE(@ProspectiveViolationRows, 0)
+        );
+        FETCH NEXT FROM prospective_fk_cursor INTO
+            @ProspectiveFkObjectId, @ProspectiveFkName,
+            @ProspectiveChildSchema, @ProspectiveChildTable,
+            @ProspectiveParentSchema, @ProspectiveParentTable,
+            @ProspectiveIsSelfReferencing;
+    END;
+    CLOSE prospective_fk_cursor;
+    DEALLOCATE prospective_fk_cursor;
+
+    SELECT
+        N'portfolio.retention_prospective_fk_closure' AS statement_id,
+        ForeignKeyName AS foreign_key_name,
+        ChildSchema AS child_schema,
+        ChildTable AS child_table,
+        ParentSchema AS parent_schema,
+        ParentTable AS parent_table,
+        IsSelfReferencing AS is_self_referencing,
+        RetainedChildRows AS retained_child_rows,
+        ProspectiveParentRows AS prospective_parent_rows,
+        ParentRowsScheduledForDeletion AS parent_rows_scheduled_for_deletion,
+        ViolationRows AS violation_rows,
+        CASE WHEN ViolationRows = 0 THEN N'PASS' ELSE N'FAIL' END AS status
+    FROM #ProspectiveForeignKeyClosureResults
+    ORDER BY ForeignKeyName;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #ProspectiveForeignKeyClosureResults
+        WHERE ViolationRows > 0
+    )
+        THROW 52231, 'Prospective row-level foreign-key closure failed before any DELETE; retained rows depend on rows scheduled for deletion.', 1;
+
 DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
-                       SELECT SchemaName, TableName, RetentionPredicate, BatchSize
-    FROM #DataRetentionManifest
-    ORDER BY DeleteOrder, ManifestId;
+                       SELECT m.SchemaName, m.TableName, m.RetentionPredicate,
+                              c.CapacityLimitedBatchSize
+    FROM #DataRetentionManifest AS m
+    JOIN #ManifestCounts AS c
+      ON c.SchemaName = m.SchemaName
+     AND c.TableName = m.TableName
+    ORDER BY m.DeleteOrder, m.ManifestId;
 
     OPEN delete_cursor;
     FETCH NEXT FROM delete_cursor INTO
@@ -865,6 +1224,8 @@ DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
 END TRY
 BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    IF CURSOR_STATUS('local', 'prospective_fk_cursor') = 1 CLOSE prospective_fk_cursor;
+    IF CURSOR_STATUS('local', 'prospective_fk_cursor') > -3 DEALLOCATE prospective_fk_cursor;
     IF CURSOR_STATUS('local', 'delete_cursor') = 1 CLOSE delete_cursor;
     IF CURSOR_STATUS('local', 'delete_cursor') > -3 DEALLOCATE delete_cursor;
     IF @AppLockResult >= 0 EXEC sys.sp_releaseapplock
