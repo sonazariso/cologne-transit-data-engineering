@@ -6,7 +6,17 @@ Every stage follows the same control pattern:
 
 No stage is considered authoritative merely because a similar solution existed in the legacy repository.
 
-## Active architecture guardrail — S87 (2026-10-05)
+## S153 portfolio closeout (not a numbered stage)
+
+This pilot is closed for collection, analytics-product, and visualization
+work. The numbered stage history below remains preserved evidence only.
+Collectors are disabled and unloaded; there is no new stage or GitHub push.
+The only pending operational item is an operator-run, read-only SQL result
+that can populate the exact ten-snapshot retention manifest. No destructive
+retention or physical disk-recovery statement is made until the manifest,
+consumer review, recovery point, and fresh C: capacity evidence are signed.
+
+## Historical architecture guardrail — S87 (2026-10-05)
 
 Microsoft SQL Server is the sole authoritative project database.
 `CologneTransitIntelligence` on the current Windows VM is the official project

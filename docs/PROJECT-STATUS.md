@@ -4,6 +4,17 @@
 **Repository:** `sonazariso/cologne-transit-intelligence`
 **Status date:** 2026-10-10
 
+## S153 portfolio closeout (not a numbered stage)
+
+The project is closed for further collection and analytics-product work. The
+historical stages and evidence below are preserved for portfolio context,
+but they are not an instruction to resume Tiered50, Legacy7, Power BI, or
+any other collector. Collectors remain disabled and unloaded. The approved
+retention objective is exactly ten real SQL Server snapshots with all seven
+stg child families and required ctl lineage; the IDs are still pending the
+read-only operator result in the current worktree. No destructive SQL,
+physical file recovery, or GitHub push is claimed.
+
 ## Authoritative status
 
 | Stage | Name | Status |
@@ -28,7 +39,7 @@
 | 16 | Revisit Timing/Data Coverage Issues | Not started |
 | 17 | Actual Physical Delay Productionization | Not started |
 
-## Current active architecture
+## Historical operational architecture (preserved evidence)
 
 ### Current operational cutover — 2026-10-08
 
@@ -608,7 +619,7 @@ provider reset evidence, and Legacy7 is retired.
 - The MDD client is explicitly opt-in, POST/TRIAS 1.2, environment-secret-only, and has no import/init network activity. Default plan/dry-run/simulate paths are offline-safe. Production `live` remains blocked; `live-research` is a separate one-heartbeat Heumarkt mode with explicit storage, credential, target, and quota preconditions.
 - SQLite has two explicit profiles: disposable `DEVELOPMENT` state under `.local/` and durable, non-disposable `LIVE_RESEARCH` state under the configured live root. The live profile preserves claims, audits, parsed snapshots, append-only `timing_observations`, the `LatestSourceRecordedAtTime`/`LastObservedRecordedAtTime` reporting projection, RecordedAtTime evidence, Attribute/GeneralAttribute, Situation, parser-gap, quota, and raw-evidence lineage; parsed history is indefinite, raw forensic bodies are bounded to 24 hours, and three validated daily backups remain required. It is not a production cutover and does not authorize PostgreSQL work.
 - Live research defaults to `~/cologne-transit-data/live-research/collector.sqlite3` when an explicit live root is supplied, with protected `backups/` and `raw-evidence/` directories. Parsed history is retained indefinitely; raw forensic bodies are sanitized, indexed, and retained for at most 24 hours. Validated SQLite online backups retain the three most recent UTC date versions.
-- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 444 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, provisioning-recovery, append-only idempotency, sanitized-evidence, Windows evidence transport, TLS provenance, measured disk headroom, Tiered50 materialization/runtime, quota-baseline reconciliation, bounded-bootstrap, monthly-rollover, exact and bounded baseline authorization, global UTC-12..UTC+14 rollover-envelope evaluation, period-start permit accounting, wall-clock scheduling, deadline classification, live authorization-time, coverage, clock-jump, batched-skip, fixed-capacity, SQL Server skip-audit parameter/idempotency, conservative transport/quota finalization, separate-admin, denied-query, explicit-admin-permission, safe Tiered50 resume, authenticated administrative evidence, bounded rollover policy, competing-worker, stale-evidence, idempotent-resume, SQL-clock resume refresh, stopped/loaded idempotency result contracts, architecture-validator, first-heartbeat HTTP-history reconciliation, orphan/duplicate AuditId detection, Windows SQL result-shape normalization, Windows backup metadata validation, compact-observation envelope round trips, deterministic compact ordering, incremental SQL capacity accounting, signed capacity evidence binding, exact SQL schema metadata, exact compact parity, S149 live-capacity binding, isolated-lab credential separation, retirement reserve gates, V1/V2-only schema-aware historical-audit regression, S150 Timing column-byte audit, S151 Snapshot GZIP one-row recovery, C:-only data-file reclamation assessment, bounded Timing capacity lab, and documentation-drift regressions. The administrator migration, runtime grants, host/VM/SQL preflight, Windows-retirement, scheduler, corrected-era, and six Legacy7-heartbeat gates passed. The first scheduled Tiered50 heartbeat failed its cadence/persistence gate at bucket `5971541` (2 of 18 audits completed), so the agent was stopped and the outage was recorded. The corrected scheduler and additive runtime evidence are prepared, but no production activation or manual MDD request was performed. The exact architecture validator passes; the rollback-only real SQL Skip Audit result is preserved as a reported `REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK` PASS for row counts 1, 16, 18, and 19, with no archived sanitized machine-readable output and no newly replayed production execution in this review. The final offline suite and validators passed in this review.
+- The historical Stage 14 baseline reported 157 tests. The current repository suite reports 450 tests per run with `ResourceWarning` promoted to an error; the current review includes runtime-schema least-privilege, permission-contract, provisioning-recovery, append-only idempotency, sanitized-evidence, Windows evidence transport, TLS provenance, measured disk headroom, Tiered50 materialization/runtime, quota-baseline reconciliation, bounded-bootstrap, monthly-rollover, exact and bounded baseline authorization, global UTC-12..UTC+14 rollover-envelope evaluation, period-start permit accounting, wall-clock scheduling, deadline classification, live authorization-time, coverage, clock-jump, batched-skip, fixed-capacity, SQL Server skip-audit parameter/idempotency, conservative transport/quota finalization, separate-admin, denied-query, explicit-admin-permission, safe Tiered50 resume, authenticated administrative evidence, bounded rollover policy, competing-worker, stale-evidence, idempotent-resume, SQL-clock resume refresh, stopped/loaded idempotency result contracts, architecture-validator, first-heartbeat HTTP-history reconciliation, orphan/duplicate AuditId detection, Windows SQL result-shape normalization, Windows backup metadata validation, compact-observation envelope round trips, deterministic compact ordering, incremental SQL capacity accounting, signed capacity evidence binding, exact SQL schema metadata, exact compact parity, S149 live-capacity binding, isolated-lab credential separation, retirement reserve gates, V1/V2-only schema-aware historical-audit regression, S150 Timing column-byte audit, S151 Snapshot GZIP one-row recovery, C:-only data-file reclamation assessment, bounded Timing capacity lab, documentation-drift regressions, and S153 closeout/retention gates. The administrator migration, runtime grants, host/VM/SQL preflight, Windows-retirement, scheduler, corrected-era, and six Legacy7-heartbeat gates passed. The first scheduled Tiered50 heartbeat failed its cadence/persistence gate at bucket `5971541` (2 of 18 audits completed), so the agent was stopped and the outage was recorded. The corrected scheduler and additive runtime evidence are prepared, but no production activation or manual MDD request was performed. The exact architecture validator passes; the rollback-only real SQL Skip Audit result is preserved as a reported `REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK` PASS for row counts 1, 16, 18, and 19, with no archived sanitized machine-readable output and no newly replayed production execution in this review. The final offline suite and validators passed in this review.
 - The direct path is documented in [the macOS persistence contract](macos-mssql-collector.md). It uses `pymssql==2.3.2`, additive `ctl.MddMac*`/`stg.MddMac*` objects, source-faithful timing/Situation/Attribute/gap rows, durable SQL-backed leases and claims, and a separate versioned Tiered50 `launchd` bundle. The installed Tiered50 artifact is disabled after the failed first scheduled heartbeat, contains no secrets, and does not alter the historical tables or Power BI boundary.
 - The historical corrected Legacy7 runtime selected one SQL-approved target per ten-slot cycle, retained `SamplingSlot`/policy lineage, used `MAC_LEGACY7_PRODUCTION`, and required `CologneTransitCollector` rather than `sa`. Its final run boundary was captured, then the LaunchAgent was unloaded and disabled; Legacy7 is not a fallback.
 - One explicitly authorized S78 research heartbeat ran at `2026-10-01T11:30:00Z` for Köln Heumarkt (`de:05315:11110`): one HTTP 200, 20 parsed results, one persisted snapshot, one confirmed provider attempt, no retry, and 121 historical parser-gap fields retained with sanitized raw evidence. S80 then migrated the same live SQLite file offline from schema 2 to 4 without rewriting snapshot JSON, inserted 995 timing rows and 20 ServiceSection rows, and passed integrity, backup, and RecordedAtTime reconciliation checks. S81 migrated that file offline from schema 4 to 5 at `2026-10-01T15:15:16.410851Z`, kept all required row counts unchanged, validated the corrected reporting views, and refreshed the current-day backup. This remains lineage-separated research evidence, not production cutover evidence; the only production-path MDD requests in this review were the two requests in the first scheduled Tiered50 heartbeat, and no manual Heumarkt request was made.
@@ -925,3 +936,17 @@ and acceptance criteria.
 - The [GTFS-RT historical availability audit](source-contracts/gtfs-rt-historical-availability-audit.md)
   is `BOUNDED VALIDATION COMPLETE`; the tested ±7-day and ±45-day metadata
   windows recovered zero exact-URL captures at both requested horizons.
+
+## S153 final decision
+
+```text
+RETENTION_COUNT: 10
+ACTUAL_SNAPSHOT_IDS: PENDING_READ_ONLY_OPERATOR_EVIDENCE
+DESTRUCTIVE_SQL: NOT_EXECUTED
+PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
+C_DRIVE_FLOOR: 12_GIB
+COLLECTOR_DISABLED: TRUE
+GITHUB_PUSH: NOT_PERFORMED
+```
+
+The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

@@ -287,3 +287,27 @@ EXTERNAL_STORAGE_ADDITION: EXCLUDED_FROM_ACTIVE_PLAN
 DATAFILE_SHRINKFILE: SEPARATE_APPROVAL_ONLY; NO_SHRINK_EXECUTED
 PHYSICAL_WINDOWS_DISK_RECOVERY: NOT_MEASURED; DO_NOT_CLAIM_5.376_GIB_WINDOWS_RECOVERY
 ```
+
+## S153 portfolio retention closeout
+
+The existing Snapshot GZIP recovery work remains historical and is not
+replaced. S153 adds a separate, read-only evidence path for exactly ten
+successful persisted snapshots: inventory, deterministic selection,
+manifest, retention dry run, bounded apply template, and physical-space
+review/apply boundary under sql/portfolio/. The current worktree contains
+no live candidate result, exact SnapshotIds, post-retention counts, or
+before/after Windows C: measurement.
+
+The current decision remains:
+
+```text
+EXACT_RETENTION_COUNT: 10
+ACTUAL_SNAPSHOT_IDS: PENDING_READ_ONLY_OPERATOR_EVIDENCE
+RETENTION_SQL_APPLIED: FALSE
+PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
+COLLECTOR_DISABLED: TRUE
+GITHUB_PUSH: NOT_PERFORMED
+FINAL_DECISION: BLOCKED_UNTIL_EXACT_MANIFEST_AND_CAPACITY_EVIDENCE
+```
+
+The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

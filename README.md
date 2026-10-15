@@ -1,209 +1,61 @@
-# Cologne Transport Intelligence
+# Cologne Transport Intelligence — Data Engineering Pilot
 
-Business Intelligence and data-engineering portfolio project for understanding the **system performance of public transport within Cologne (Köln), Germany**.
+**Python · MDD/TRIAS API · Microsoft SQL Server · ETL/ELT · Data Quality · Source Lineage**
 
-This repository is a clean restart. The previous `cologne-public-transport-intelligence` repository is retained as historical evidence only; its architecture and implementation are not automatically authoritative here.
+A hands-on portfolio project demonstrating how public-transport source data for Cologne (Köln), Germany, can be acquired, parsed, validated, stored, and prepared as reproducible SQL datasets.
 
-## Primary objective
+> **Project scope closed at the successfully demonstrated engineering pilot.** This repository is not a currently running production service or a complete, continuous transport-performance dataset. The Tiered50 scheduled rollout failed its first production heartbeat and is disabled. Its diagnostics remain documented; the earlier bounded pilots and corrected Legacy7 heartbeats did collect and persist real source observations.
 
-Build a management-oriented analytical system that helps a non-technical decision maker understand whether public transport within Cologne is operating well during the period under analysis, where problems are concentrated, how performance changes over time, and what source evidence supports those conclusions.
+## What was demonstrated
 
-The long-term timing objective is **Actual Delay derived from validated
-`RecordedAtTime` evidence**. Stage 02 does not approve that KPI: `Estimated
-Delay` may be reported only when comparable `EstimatedTime` and
-`TimetabledTime` values exist and the label is explicit. The project must not
-rename estimated delay as actual delay if the source does not provide
-sufficient recorded/actual timing evidence.
+| Capability | Implementation / evidence | Status |
+| --- | --- | --- |
+| External API acquisition | Python MDD/TRIAS request/response handling and provider-quota checks | Demonstrated in bounded pilots |
+| Source parsing | Structured extraction of calls, timing, situation, service-section, attribute, and parser-gap evidence | Implemented; tested and historically run |
+| Relational persistence | SQL Server `ctl` control lineage and `stg` source-faithful tables, transactional stored procedure | Historically exercised on real SQL Server |
+| Operational safeguards | Runs, target audit, HTTP attempts, quota permits, leases, retries and skip accounting | Implemented; bounded validation evidence |
+| Data quality and lineage | Source values versus inference, NULL preservation, matching-confidence handling | Documented and implemented in selected paths |
+| Source-to-analytics handoff | SQL read-access views and source-quality/coverage queries | Partial; not a completed governed reporting warehouse |
+| Data collection | 343 successful HTTP responses in the Stage 8 Köln Hbf pilot; six scheduled Legacy7 buckets | Historical success; **not continuous 50-station coverage** |
 
-## Current status
+## Data flow
 
-S87 remains the active architecture decision: **Microsoft SQL Server is the
-sole authoritative project database**, using `CologneTransitIntelligence` on
-the current Windows VM. Under the current Tiered50-only decision, macOS
-launchd is the sole intended production scheduler and the Tiered50 runner is
-the sole intended production collector. The historical Legacy7 implementation,
-observations, and sampling-target IDs 1–7 are preserved, but its LaunchAgent
-has been unloaded and disabled and it is not a production fallback. Power BI
-is unchanged. The existing PostgreSQL contracts and SQLite collector/research
-implementation remain historical/legacy artifacts for deferred cleanup.
+```text
+MDD / TRIAS API
+   -> Python collector (request, response validation, parser)
+   -> run / target / HTTP-attempt / quota lineage (ctl)
+   -> SQL Server source snapshots and normalized evidence (stg)
+   -> SQL read-access and evidence views (stg / analytics)
+   -> SQL read-access / validated sample extracts for downstream consumers
+```
 
-The current production status is **BLOCKED — TIERED50 STOPPED AFTER FAILED FIRST
-SCHEDULED HEARTBEAT; LEGACY7 RETIRED**. The additive SQL migration and exact
-43-row Tiered50 materialization have been applied: target IDs 8–50 are
-represented, and administrator activation committed the target state and
-sampling era. The first scheduled bucket then ran 18 target audits, completed
-2, skipped 16 on the heartbeat budget, and was stopped safely; zero stations
-are currently collecting. Fresh evidence confirms the final Legacy7 boundary,
-six consecutive expected Legacy7 buckets, current SQL capacity and backup
-readiness, the separate versioned Tiered50 bundle, and no competing Legacy7
-writer. The supplied Monitoring screenshot visibly reports 554 cumulative
-requests against a 250000 monthly limit for the selected October 2026
-category. The bounded conservative bootstrap is registered at 806 accounted
-requests including all local evidence through approval; future automatic
-rollover remains fail-closed because provider reset metadata is unverified.
-See the
-[dashboard evidence](docs/operational/mdd-october-monitoring-dashboard-evidence.json),
-[bootstrap evidence](docs/operational/mdd-october-conservative-bootstrap-evidence.json),
-[sanitized validation evidence](docs/operational/tiered50-deployment-validation-evidence.json),
-[fresh operational evidence](docs/operational/tiered50-production-evidence-current.json),
-and [operator report](docs/operational/tiered50-deployment-validation-report.md).
+Read [the implementation walkthrough](docs/DATA_ENGINEERING_PIPELINE.md), [data dictionary and source-quality limitations](docs/DATASET_AND_REPORTING_BOUNDARY.md), [SQL data-retention scope](docs/SQL_RETENTION_SCOPE.md), and [validation/closeout status](docs/PORTFOLIO_CLOSEOUT.md).
 
-- Stage 0 — Project Definition: **APPROVED**
-- Stage 1 — Source Inventory & Permission: **APPROVED**
-- Stage 1A — [SQL Server Stabilization](docs/stages/01-sql-server-stabilization.md): **COMPLETE**. Fresh 2026-10-07 evidence confirms `CologneTransitIntelligence` is ONLINE; the native `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes `RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH CHECKSUM`; and full read-only `DBCC CHECKDB` reports no corruption errors. The verified 606,586,880-byte backup and matching SHA-256 Mac safety copy are retained on the user-provided `CologneTransitData` share. The low-space `C:` volume was not used as the backup destination. The stabilization capture preceded the later operator-confirmed Windows-task retirement documented in the current cutover record.
-- Stage 2 — MDD/TRIAS Source-Contract Audit: **APPROVED**. The S14
-  technical-closure package remains the approved baseline. The previous host
-  run completed the five S15 historical requests, and S16 performed zero MDD
-  requests while correcting their offline analysis.
-- Stage 3 — Static GTFS Profile / Realtime Evidence Validation: **COMPLETE** (source evidence, collection/cadence design, and cross-source matching design).
-- Stage 3A — [Disruption Cause & Alert Evidence Audit](docs/stage-03/03a-disruption-cause-alert-evidence-audit.md): **COMPLETE — APPROVED**. The bounded ten-station MDD discovery contains positive Situation/reason text evidence; approval preserves its evidence limits and does not authorize production implementation.
-- Stage 3B — [Collection Strategy & Cadence Contract](docs/stage-03/03b-collection-strategy-cadence-contract.md): **COMPLETE — APPROVED DESIGN; ACTIVATION DEFERRED**. The cadence policy does not activate a fixed station schedule.
-- Stage 3C — [Cross-Source Matching Design](docs/stage-03/03c-cross-source-matching-design.md): **COMPLETE — APPROVED DESIGN HANDOFF**. Stage 9 now owns the implemented matching/data-quality foundation.
-- Stage 4 — [Cologne Scope & Mode Classification](docs/stages/04-cologne-scope-mode-classification.md): **COMPLETE — APPROVED**. The current official VRS Global-ID static feed validates the direct `de:05315:` stop rule, stop-event-first scope, both-endpoints internal segments, cross-boundary handling, and the source-faithful mode classifier.
-- Stage 5 — [Database Architecture](docs/stages/05-database-architecture.md): **HISTORICAL APPROVED DESIGN — ACTIVE PLATFORM SUPERSEDED BY S87**. The retained PostgreSQL 18 redesign and its [completion decision](docs/stages/05-database-architecture-completion-decision.md) remain historical design evidence; SQL Server is now the sole official database platform.
-- Stage 6 — [Static Warehouse & Analytics Design](docs/stages/06-static-warehouse-analytics-design.md): **HISTORICAL APPROVED DESIGN — ACTIVE PLATFORM SUPERSEDED BY S87**. The retained static warehouse/analytics contract remains reference material and is not a PostgreSQL implementation authorization.
-- Stage 7 — [Realtime Pilot Design](docs/stages/07-realtime-pilot-design.md): **COMPLETE — APPROVED PILOT DESIGN**. The active Stage 8 handoff is MDD/TRIAS-only at Köln Hbf (`de:05315:11201`) under `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`: fixed start-to-start 3-second slots for at most 60 minutes, at most 1200 scheduled logical slots and 1200 normal HTTP attempts, a fixed `DepArrTime` anchor, 20 results, zero retries, sequential/non-concurrent execution, overlap skipping, explicit lineage, append-only `RecordedAtTime` capture, and a temporary raw-response exception. The 3-second cadence is a bounded diagnostic design, not production approval. Stage 7 historically described 207,500–210,000 (83–84%) as a planning target; Stage 13 now governs the approved lower-load design with a 250,000 provider ceiling, a 210,000 normal operational maximum, a 207,500 automatic-retry protection boundary, and no minimum utilization requirement. [Completion decision](docs/stages/07-realtime-pilot-design-completion-decision.md) is authoritative.
-- Stage 8 — [Small Realtime Pilot completion and historical authorization chronology](docs/stages/08-small-realtime-pilot-blocked.md): **COMPLETE**. The corrected local credential configuration produced the successful differential diagnostic at Köln Hbf: Control A (`NumberOfResults=5`) returned HTTP 200 and Control B (`NumberOfResults=20`) returned HTTP 200, both parseable. The classification was `CURRENT_CREDENTIAL_AND_STAGE_8_REQUEST_BREADTH_WORKING`; no request-contract reduction was required. The full Hbf/N20/V3 pilot then completed successfully with 343 HTTP 200 responses, 100% parse/reconciliation over successful HTTP responses, and successful cleanup. The historical 401 and earlier missing-key/credential-configuration attempts remain documented as chronology.
-- Stage 9 — [Matching & Data Quality](docs/stages/09-matching-data-quality.md): **COMPLETE — APPROVED MATCHING & DATA QUALITY SEMANTICS**. The matcher prevents unvalidated StopSeqNumber/direction/operator/endpoint coincidences from changing candidate rank or tie resolution, while validated policies remain usable. The corrected bounded source-backed run made exactly 3 MDD attempts and retained 60 live observations: 53 independently established service dates, 51 core deterministic matches, and 51 `MEDIUM` / 9 `UNMATCHED` decisions. The durable row-level evidence integrity gate passed with exact JSONL-to-summary reconciliation. See the [evidence artifact](docs/stages/09-matching-data-quality-evidence.json), [probe summary](docs/stages/09-source-backed-matching-summary.json), and [row-level evidence](docs/stages/09-source-backed-matching-evidence.jsonl). Railway Köln Hbf remains unresolved.
-- Stage 10 — [Operational Fact](docs/stages/10-operational-fact.md): **NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED**. The canonical `dw.fact_operational_service_event` contract, explicit Stage 9 run/version refresh, HIGH-only eligibility, Stage 10 input-adapter evidence boundary, deterministic first/latest semantics, and repeat-refresh validator are source-controlled. The current checkout has no usable PostgreSQL database or durable source-observation population, and the retained Stage 9 evidence contains zero HIGH rows, so no live Stage 10 PASS is claimed.
-- Stage 11 — [Power BI Model](docs/stages/11-power-bi-model-design.md): **COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED**. The semantic subject areas, table grains, physical-fact versus semantic Scheduled Trip relationship boundary, relationship/filter-direction contract, governed Date strategy, static-versus-canonical identity boundary, DAX measure contract, service-date-scoped matching coverage with separate missing-service-date evidence, threshold/NULL semantics, terminology, and sampling/coverage/reporting limits are approved. `Dim Sampling Era` currently filters only the `Fact Matching Decision` population; Data Quality classifications carried by those decisions inherit that context, while the independent `Fact Data Quality Issue` and `Data Quality Issue Count` are not Sampling-Era-filtered in the base model. Sampling Era is not an operational KPI slicer until validated operational-event lineage exists. [Completion decision](docs/stages/11-power-bi-model-completion-decision.md).
-- Stage 12 — [50-Station Selection](docs/stages/12-50-station-selection.md): **COMPLETE — APPROVED FIXED 50-STATION PANEL**. `TIERED50_PANEL_V1` contains exactly 50 unique validated VRS parent stations, preserves all seven Legacy7 continuity anchors, measures current core-mode representation and geographic concentration, and passes a bounded sequential MDD compatibility probe with 50 HTTP 200/parseable application responses and source `StopPointRef` evidence. The complete sanitized 864-candidate population is retained in [candidate evidence](docs/stages/12-50-station-candidate-evidence.json), and the authoritative selector reproduces the fixed panel offline without the ZIP, network, MDD, or credentials. See the [completion decision](docs/stages/12-50-station-selection-completion-decision.md) and [sanitized evidence artifact](docs/stages/12-50-station-selection-evidence.json).
-- Stage 13 — [Tiered Collector Readiness](docs/stages/13-tiered-collector-readiness.md): **COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED**. Explicit approval recorded in `prompts/S68.md` finalizes `TIERED50_PANEL_V1` as exactly 50 fixed stations with density ranks 1–8 / 9–28 / 29–50 for Tier A/B/C, cadence 5/15/30 minutes, 110 requests per 30-minute super-cycle, Tier A/B/C `NumberOfResults` 20/30/30, bounded concurrency 2, and `MaxAttempts=2` with one approved transient retry. Static support is 50/50 at the approved tier-specific limits; `PROVIDER_MAXIMUM_NOT_ESTABLISHED` and `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT` remain explicit limitations. The 182,980 / 189,076 conservative shared-credential totals are valid safely below the 210,000 normal operational maximum and 207,500 automatic-retry protection boundary; the 31-day guardrail example is 189,076 with 18,424 headroom, while the Tiered50-only component is 180,048. The historical/evaluated 10/20/20 @ 5/15/30 comparison remains unapproved and reconciles to 205,444 for 31 days. See the [completion decision](docs/stages/13-tiered-collector-readiness-completion-decision.md) and [evidence artifact](docs/stages/13-tiered-collector-readiness-evidence.json).
-- Stage 14 — [Collector Implementation and Legacy7 SQL Runtime](docs/stages/14-collector-implementation.md): **TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED**. The historical Python/SQLite research implementation and Legacy7 SQL history remain source-controlled and untouched. The Tiered50-only runtime uses the additive SQL Server contract, IDs 8–50, a separate versioned bundle, and the dedicated `CologneTransitCollector` login; its LaunchAgent was stopped after the first scheduled heartbeat failed its cadence gate.
-- Stage 15A — [Post-Cutover Validation Readiness](docs/stages/15-post-cutover-validation-readiness.md): **IN PROGRESS**. The version-controlled validation contract, read-only backend-neutral analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality evidence, and offline tests are source-controlled. The first scheduled Tiered50 heartbeat did not complete its cadence gate, so Stage 15B live Tiered50 validation remains **NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED**.
-- Stage 4 evidence: [approved reference snapshot](docs/stages/04-cologne-scope-mode-evidence.json), [historical/legacy snapshot](docs/stages/04-cologne-scope-mode-evidence-historical-2026-09-28.json), and [reproducible audit](scripts/stage_04_cologne_scope_mode_audit.py). The approved reference contains 3,137 Cologne stop IDs, 1,144,295 Cologne scheduled stop events, 1,082,490 internal segments, 61,805 Cologne-serving trips, and 137 Cologne-serving route IDs. Approved reference ZIP SHA-256: `6ae1c7f65299438f3b0bc049ed3626734b291378446e114dfecc4bcea4636b6b`; feed version: `VERSION__20260928_0042`. The separate Stage 9 current official snapshot is `VERSION__20260929_0106` with SHA-256 `ca64753223d3908a86b74fc322103b9e4c6c9c90275cfc5cb2c4c624b0082ee0` and passed all 17 Stage 4 revalidation checks.
-- Post-Stage-02 validation: [GTFS-RT Source Feasibility Audit](docs/source-contracts/gtfs-rt-source-feasibility-audit.md) — **BOUNDED LIFECYCLE VALIDATION COMPLETE; NEUMARKT SAMPLES #1 AND #2 RECORDED**. The [GTFS.de identity bridge](docs/source-contracts/gtfsde-static-identity-bridge-audit.md) remains partial because railway Köln Hbf is unresolved; this work does not approve GTFS-RT as a production source or production implementation.
-- Post-Stage-02 validation: [GTFS-RT Historical Availability Audit](docs/source-contracts/gtfs-rt-historical-availability-audit.md) — **BOUNDED VALIDATION COMPLETE**. Both the initial ±7-day exact-URL Wayback test and the separate ±45-day metadata-only test returned zero captures at the 3-month and 6-month targets. This does not establish provider-supported or continuous history or approve GTFS-RT for production; Stage 3A now separately validates current disruption evidence.
-- Approved realtime source direction: **MDD/TRIAS PRIMARY** and **GTFS-RT COMPLEMENTARY**. Source-faithful observations remain separate; the Stage 9 implementation preserves the approved reconciliation guardrails. Neither source currently provides confirmed Actual Time.
-- [Cross-source reconciliation and Cologne scope contract](docs/source-contracts/cross-source-reconciliation-contract.md) — **APPROVED CONTRACT — STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE PASS**. The bounded source-backed Stage 9 gate passed with a lossless row-level decision artifact; optional identity bridges and production activation remain deferred. The contract requires GTFS-RT filtering to Cologne analytical scope; cross-boundary external portions and long-distance services remain outside core Cologne KPI calculations; cross-source disagreement is evaluated only with a validated correlation basis; provider-reported causes remain distinct from proven root causes.
-- [Stage 3 completion decision](docs/stage-03/stage-03-completion-decision.md) is the authoritative closeout record. [Realtime collection design readiness](docs/stage-03/realtime-collection-design-readiness.md) records the completed handoff; it does not authorize production implementation.
-- Stage 02A.1 — Legacy Implementation Audit: **COMPLETED**.
-- Stage 02A.2 — Controlled MDD Raw-Response Audit: **COMPLETED**. The audited
-  request was XML/TRIAS 1.2 and the historical successful `/delfi` response was
-  JSON with HTTP 200; that historical result does not resolve the later Stage
-  8 HTTP 401.
-- Stage 02A.3 — Historical Actual-Time Availability Validation: **COMPLETED**.
-  The corrected offline evidence classifies 1D/7D/30D as
-  `HISTORICAL_TIMETABLE_ONLY` and 90D/180D as `HISTORY_NO_EVENT`. No
-  `EstimatedTime` or `RecordedAtTime` was observed in the historical result
-  sets.
-- The audited response did not contain `RecordedAtTime` or a direct delay
-  field. `RecordedAtTime` remains a TRIAS 1.2 optional actual-time candidate,
-  not a provider-wide absence claim. No Actual Delay KPI is approved. See the
-  [Stage 02 source-contract package](docs/source-contracts/README.md) and
-  [Project Status](docs/PROJECT-STATUS.md) for details.
-- [Realtime collector requirements](docs/collector-design/realtime-collector-requirements.md)
-  are approved Stage 02/Stage 7 design inputs; the Stage 8 pilot handoff is
-  documented and the bounded runtime plus authorization diagnostic exist;
-  activation remains blocked until the live differential decision tree proves
-  the current authorization/request contract.
-- The [future source-observation and persistence contract](docs/source-contracts/future-observation-persistence-contract.md)
-  keeps timetable, estimate, source-provided recorded time, and collector
-  observation time separate and preserves estimate and Situation/Cause history.
-  Its PostgreSQL direction and the S78 SQLite-first direction are historical;
-  S87 supersedes both for the active architecture with SQL Server as the sole
-  official database. The Stage 9 matching migration remains source-controlled
-  historical material and has not been executed or loaded with production data.
-- The [near-event RecordedAtTime lifecycle validation](docs/source-contracts/mdd-trias-event-lifecycle-validation.md)
-  is a separate **POST-STAGE-02 COLLECTOR-DESIGN VALIDATION**. Six bounded
-  live journeys were reviewed (three at Köln Hbf and three at Köln Neumarkt);
-  no `RecordedAtTime` was observed, and the result does not make a
-  provider-wide absence claim or reopen Stage 02.
-- No physical PostgreSQL database has been created or loaded. The live SQL
-  Server baseline and its current `ctl`/`stg`/`wrk`/`dw`/`analytics` objects are
-  recorded in [S87 evidence](docs/stages/01-sql-server-stabilization-evidence.json).
-  The retained PostgreSQL migration/design files remain legacy/deferred
-  cleanup. Power BI semantic design is approved, while PBIP/Desktop work
-  remains deferred.
-- The retained legacy collector/runtime remains untouched. The separately
-  archived `NRWTransportDW` database was removed after its verified native
-  backup and ZIP were confirmed; see the [removal evidence](docs/archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-evidence-20261007T120030Z.json).
-- Confirmed Actual Time is unavailable; Actual Delay and prediction accuracy
-  against confirmed actual timing remain unapproved/unavailable.
+## Architecture and repository map
 
-The historical responses used the provider lexical timestamp form
-`YYYY-MM-DDTHH:mm:ssZ[GMT]`. The terminal `Z` supplies explicit UTC semantics;
-`[GMT]` is a provider suffix. Date comparisons in the Stage 02A.3 audit are
-documented as **DATE-ALIGNMENT ONLY** and do not fabricate a timezone for
-timezone-less values. The five raw artifacts remain temporary evidence outside
-the repository.
+- `src/cologne_transit_collector/`: collector, source parsing and SQL persistence modules.
+- `scripts/`: guarded probes, imports, operator tooling, runtime checks and validation.
+- `sql/mdd-mac-collector/create-source-faithful-persistence.sql`: SQL Server control and observation schema, stored procedures and read views.
+- `docs/stages/` and `docs/source-contracts/`: engineering decisions and evidence, including prototypes that were not productionized.
+- `docs/operational/`: incident, runtime and storage audit history. Some historical documents describe **plans rather than completed work**.
+- `tests/`: automated offline regression coverage. Test success is not equivalent to a live runtime acceptance test.
 
-See [Project Status](docs/PROJECT-STATUS.md), [Stage 0 Project Definition](docs/stages/00-project-definition.md), and [Roadmap](docs/ROADMAP.md).
+## Key engineering decisions
 
-## Prepared direct-persistence collector
+1. Retain source-provided `TimetabledTime`, `EstimatedTime`, `RecordedAtTime` and collector `ObservedAtUtc` **as different fields**, never synthesizing actual event time from estimates.
+2. Preserve row grain, identifiers, call scope (`THIS`/`PREVIOUS`/`ONWARD`), timing context (`ARRIVAL`/`DEPARTURE`) and source/observation lineage.
+3. Separate acquired raw evidence (`stg`) from operational metadata (`ctl`) and derived/report-facing projections (`analytics`).
+4. Use least-privilege SQL runtime access, secrets outside Git and fail-closed collection/quota rules.
+5. Treat incomplete days, missing actual times, and mismatched journey identities as data-quality limitations, not as zero delay or success.
 
-The current checkout also contains a controlled macOS Python path that writes
-source-faithful MDD/TRIAS evidence directly to the authoritative database.
-Its original additive schema and historical cutover evidence are retained;
-the corrected migration adds nullable `SamplingSlot` and
-`SelectionPolicyVersion` lineage. The pinned DB-API dependency, explicit
-SQLite-to-SQL Server importer, Keychain-backed runtime configuration, and
-safe tracked `launchd` template are documented in
-[the macOS persistence contract](docs/macos-mssql-collector.md). The three
-existing seven-target runs are preserved as a bounded oversampling window and
-must not be used as normal Legacy7 cadence. The operator disabled the exact
-Windows task, and the Mac LaunchAgent is active on the corrected five-minute
-schedule after dedicated-login, preflight, and three corrected-heartbeat
-validations passed. The tracked template remains disabled by design. Tiered50
-and Power BI remain unchanged. The sanitized machine-readable closeout record
-is [available here](docs/operational/legacy7-production-transition-closeout-evidence.json).
+## Reproducibility and scope
 
-## Repository principles
+The repository contains source and design artifacts, not live credentials, a reproducible complete local SQL Server dump, or a deployed reporting service. The independent source-provider contract and runtime configuration must be supplied for actual collection; **collectors are intentionally disabled** in the current environment.
 
-1. Review before implementation.
-2. Source evidence before assumptions.
-3. Approval gate at the end of every stage.
-4. No invented operational facts.
-5. Preserve unknown/NULL semantics.
-6. Do not delete legacy realtime history.
-7. Do not start new MDD polling outside an explicitly approved future stage
-   and gate; quota and permission constraints are documented here but no
-   production schedule is approved by Stage 02.
-8. Keep secrets, database dumps, large raw payload archives, PBIX files, and local runtime state out of Git.
-9. Architecture approval does not imply physical database creation, SQL
-   execution, collector activation, or Power BI implementation; each remains
-   owned by its explicitly approved stage.
+The approved closeout retention target is **exactly 10 carefully selected source snapshots**, with their complete dependent evidence and required run/audit lineage. Exact SnapshotIds must be selected from the live database and verified before any removal. Never publish the bulk production dataset. See [database right-sizing](docs/DATABASE_RIGHTSIZING_PLAN.md). Do not commit personal data, secrets, raw provider payloads without distribution rights, or large backups.
 
-## Working environment
+## Outcome
 
-The authoritative Git working copy is intended to live on macOS:
+**Completed engineering proof of concept with real collection and persistence evidence.** Continuous 50-station sampling, validated actual-delay KPIs, and a complete SQL Server warehouse are **not claimed**. A reference set of exactly 10 complete snapshots is planned for retention; actual SQL deletion and disk recovery must be independently verified.
 
-`/Users/admin/Documents/cologne-transit-intelligence/`
-
-Windows hosts the official SQL Server instance and may access the same working
-tree through VMware Shared Folders:
-
-`\\vmware-host\Shared Folders\cologne-transit-intelligence`
-
-Windows should not maintain a second Git clone for this project. The future
-collector/pipeline runtime is planned for Python on macOS; SQL Server remains
-on this VM. The retained Stage 14 collector does not require Windows Task
-Scheduler or PowerShell, and its SQLite research path is legacy/deferred
-cleanup rather than the official database runtime.
-
-## Repository layout
-
-- `docs/` — authoritative project documentation and stage decisions
-- `references/` — pointers/checksums for legacy evidence; not copied legacy implementation
-- `src/` — application/collector source when an implementation stage is approved
-- `sql/` — database source when database architecture is approved
-- `powerbi/` — Power BI semantic-model boundary and later PBIP/TMDL/PBIR source
-- `tests/` — automated/validation tests when implementation begins
-
-The retained Stage 14 implementation details are in
-[Collector Implementation and Legacy7 SQL Runtime](docs/stages/14-collector-implementation.md).
-The scheduler-neutral command is `python scripts/stage_14_collector.py`;
-without a mode it performs an offline `plan`. `dry-run` and `simulate` are
-offline-safe, `live` remains explicitly blocked, and `live-research` requires
-`--allow-live`, an explicit live root/database, `--pilot-target
-de:05315:11110`, and inherited `MDD_API_KEY`.
-
-Stage 15A readiness validation is `python scripts/stage_15_validation.py`.
-It emits the historical SQLite-oriented readiness report and performs no MDD,
-DNS, live-network, PostgreSQL, or production-cutover work. S87 did not execute
-it or alter its runtime contract.
-
-The Stage 14 collector is retained as legacy/deferred implementation evidence.
-The official database is SQL Server; future Python collectors and pipelines
-must connect to `CologneTransitIntelligence` on the Windows VM after the
-stabilization gate is complete.
+The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.
