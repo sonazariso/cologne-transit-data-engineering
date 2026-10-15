@@ -19,12 +19,11 @@
 
     The operator must review the returned ten rows and copy their complete
     evidence into docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md before any APPLY
-    script is considered.  For the S154 closeout, the operator-confirmed IDs
-    are 22, 93, 185, 189, 207, 224, 225, 226, 228 and 229; this candidate
-    query must not override that approved set.  Use the exact-ID readback in
-    replacement-database-dry-run.sql to prove those IDs.  If a desired case
-    is not present, the query does not invent it; the rationale must say which
-    available case was retained.
+    script is considered.  The operator-confirmed IDs are 22, 93, 185, 189,
+    207, 224, 225, 226, 228 and 229; this candidate query must not override
+    that approved set.  The exact-ID readback at the end of this file proves
+    those rows directly.  If a desired case is not present, the query does
+    not invent it; the rationale must say which available case was retained.
 
     This candidate query intentionally selects only the MDD SnapshotId set;
     it is not a cross-layer cleanup authorization.  Run the complete object
@@ -402,3 +401,93 @@ SELECT
 FROM RoundRobin AS r
 WHERE r.RetentionSlot <= 10
 ORDER BY r.RetentionSlot;
+
+/* Exact approved-ID readback.  Read-only source for the literal manifest. */
+WITH ApprovedSnapshotIds AS
+(
+    SELECT CONVERT(bigint, v.SnapshotId) AS SnapshotId
+    FROM (VALUES
+        (22), (93), (185), (189), (207),
+        (224), (225), (226), (228), (229)
+    ) AS v(SnapshotId)
+)
+SELECT
+    N'portfolio.approved_snapshot_exact_readback' AS statement_id,
+    a.SnapshotId,
+    s.RunId,
+    s.AuditId,
+    s.TargetIdentity,
+    s.ObservedAtUtc,
+    r.CollectionContext,
+    r.Status AS RunStatus,
+    ta.Status AS AuditStatus,
+    ta.HttpStatus,
+    ta.ParserOutcome,
+    ta.PersistenceOutcome,
+    CASE
+        WHEN s.SnapshotJson IS NOT NULL AND s.SnapshotJsonGzip IS NULL THEN N'PLAINTEXT'
+        WHEN s.SnapshotJson IS NULL AND s.SnapshotJsonGzip IS NOT NULL THEN N'GZIP'
+        ELSE N'INVALID'
+    END AS payload_representation,
+    CONVERT(bigint, CASE WHEN s.SnapshotJson IS NOT NULL
+                         THEN DATALENGTH(s.SnapshotJson)
+                         ELSE DATALENGTH(DECOMPRESS(s.SnapshotJsonGzip)) END)
+        AS original_utf16_bytes,
+    CONVERT(bit, CASE WHEN s.SnapshotJson IS NOT NULL
+                      AND DATALENGTH(s.SnapshotJson) = 0 THEN 1 ELSE 0 END)
+        AS OriginalWasEmpty,
+    s.PayloadHashSha256,
+    CONVERT(varchar(64), HASHBYTES
+    (
+        'SHA2_256',
+        CASE WHEN s.SnapshotJson IS NOT NULL
+             THEN CONVERT(varbinary(max), s.SnapshotJson)
+             ELSE DECOMPRESS(s.SnapshotJsonGzip) END
+    ), 2) AS OriginalPayloadSha256,
+    t.TimingRows,
+    c.CallRows,
+    sit.SituationRows,
+    sec.ServiceSectionRows,
+    att.AttributeRows,
+    err.ResponseErrorRows,
+    gap.ParserGapRows
+FROM ApprovedSnapshotIds AS a
+LEFT JOIN stg.MddMacSourceSnapshot AS s ON s.SnapshotId = a.SnapshotId
+LEFT JOIN ctl.MddMacTargetAudit AS ta ON ta.AuditId = s.AuditId
+LEFT JOIN ctl.MddMacCollectorRun AS r ON r.RunId = s.RunId
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS TimingRows
+    FROM stg.MddMacTimingObservation AS x WHERE x.SnapshotId = a.SnapshotId
+) AS t
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS CallRows
+    FROM stg.MddMacCallObservation AS x WHERE x.SnapshotId = a.SnapshotId
+) AS c
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS SituationRows
+    FROM stg.MddMacSituationEvidence AS x WHERE x.SnapshotId = a.SnapshotId
+) AS sit
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS ServiceSectionRows
+    FROM stg.MddMacServiceSectionEvidence AS x WHERE x.SnapshotId = a.SnapshotId
+) AS sec
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS AttributeRows
+    FROM stg.MddMacAttributeEvidence AS x WHERE x.SnapshotId = a.SnapshotId
+) AS att
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS ResponseErrorRows
+    FROM stg.MddMacResponseError AS x WHERE x.SnapshotId = a.SnapshotId
+) AS err
+OUTER APPLY
+(
+    SELECT COUNT_BIG(*) AS ParserGapRows
+    FROM stg.MddMacParserGap AS x WHERE x.SnapshotId = a.SnapshotId
+) AS gap
+ORDER BY a.SnapshotId;

@@ -7,12 +7,15 @@
     the evidence needed to decide whether a tiny independently validated
     replacement database can fit on the existing C: drive.
 
-    Preferred method: an isolated, separately measured replacement database
-    containing the COMPLETE EXISTING DATABASE STRUCTURE and a data-only
-    reduced sample.  A replacement database is not permission to replace the
-    schema with an MDD-only subset.  Its rehearsal must preserve every user
-    schema, physical table, column, index, key, foreign key, view, function,
-    stored procedure, and trigger that exists in the source database.
+    This file is an optional historical feasibility check, not the approved
+    cleanup path.  The approved method is bounded in-place retention; no
+    second disk or full database copy is required.  If an operator later
+    rehearses a replacement, it must contain the COMPLETE EXISTING DATABASE
+    STRUCTURE and a data-only reduced sample.  A replacement database is not
+    permission to replace the schema with an MDD-only subset.  Its rehearsal
+    must preserve every user schema, physical table, column, index, key,
+    foreign key, view, function, stored procedure, and trigger that exists in
+    the source database.
 
     The reduced data scope is dependency-aware and must retain:
       * exactly ten approved MDD snapshots and every dependent row;
@@ -28,7 +31,8 @@
 
     The peak must include the copy, transaction log, tempdb, rollback,
     autogrowth, and external-use reserves.  A NULL peak is BLOCKED; this file
-    never estimates safety from payload bytes alone.
+    never estimates safety from payload bytes alone and never creates the
+    replacement database.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -554,15 +558,15 @@ END;
 
 SELECT
     N'portfolio.external_consumer_review' AS statement_id,
-    N'BLOCKED_EXTERNAL_CONSUMER_REVIEW' AS status,
+    N'REVIEW_REQUIRED_FOR_OPTIONAL_HISTORICAL_REHEARSAL' AS status,
     N'SQL metadata cannot prove the absence of direct clients, notebooks,
-      exports, Power BI queries, or manually scheduled scripts. Attach the
-      current consumer review before any replacement or retirement decision.'
+      exports, or manually scheduled scripts. Attach the current consumer
+      review before any optional rehearsal; Power BI is out of scope.'
         AS required_action;
 
 SELECT
     N'portfolio.replacement_peak_fit_gate' AS statement_id,
-    N'PREFERRED_METHOD_NOT_YET_VALIDATED' AS status,
+    N'OPTIONAL_HISTORICAL_FEASIBILITY_REVIEW' AS status,
     CONVERT(bigint, NULL) AS measured_live_c_free_bytes,
     CONVERT(bigint, NULL) AS measured_replacement_peak_reserve_bytes,
     CONVERT(bigint, 12) * CONVERT(bigint, 1024) * CONVERT(bigint, 1024)

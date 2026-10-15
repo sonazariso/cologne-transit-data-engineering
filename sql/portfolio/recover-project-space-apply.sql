@@ -1,23 +1,21 @@
 /*
-    COLOGNE TRANSIT INTELLIGENCE — MANUAL PHYSICAL SPACE RECOVERY
+    COLOGNE TRANSIT INTELLIGENCE — SEPARATELY APPROVED MDF SPACE RECOVERY
 
-    DESTRUCTIVE RESOURCE OPERATION.  Inert by default and never run by Codex.
-    This is a separate, operator-reviewed step after retention-apply.sql,
-    readback validation, and the read-only recovery review.  It does not
-    create a backup, alter recovery/autogrowth, rebuild indexes, or start a
-    collector.
+    This is a destructive resource operation, separate from retention.  It is
+    inert by default and was not run as part of S156.  It never creates a
+    backup, changes recovery/autogrowth, rebuilds indexes, restarts a
+    collector, creates a replacement database, or changes schema/data.
 
-    The script uses a literal data-file plan populated from the read-only
-    result set.  The plan must name every database data file that is in the
-    reviewed project-file scope; it never creates or expands a file.  The
-    target is rejected unless the measured projected C: free space stays at
-    least 12 GiB and the projected project-file recovery is at least 80%.
-    Actual recovery is reported only from the after-measurement result.
+    The live database has one reviewed MDF logical name:
+      CologneTransitIntelligence
 
-    This is physical file recovery only.  It preserves every schema, physical
-    table, column, index, key, foreign key, view, function, procedure, and
-    trigger.  A data-file shrink cannot authorize schema replacement or an
-    unreviewed GTFS/warehouse/lineage data decision.
+    Run this file read-only first.  A separately reviewed SSMS working copy
+    must replace the zero target with an exact target above current used pages,
+    set @ApplyShrink = 1, and complete every approval gate.  The apply branch
+    remeasures Windows C:, the transaction log, tempdb, and active collectors
+    immediately before each shrink command and verifies the actual after
+    measurement.  A data-file shrink is never inferred from logical MDF free
+    pages; only the Windows volume measurement is a recovery result.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -43,40 +41,136 @@ DECLARE @ConsumerReviewConfirmed BIT = 0;
 DECLARE @CapacityReviewConfirmed BIT = 0;
 DECLARE @SchemaPreservationConfirmed BIT = 0;
 DECLARE @CrossLayerRetentionConfirmed BIT = 0;
-DECLARE @LogicalDataFileName sysname = N'REPLACE_WITH_EXACT_LOGICAL_DATA_FILE_NAME';
+DECLARE @LogicalDataFileName sysname = N'CologneTransitIntelligence';
 DECLARE @TargetSizeMB BIGINT = 0;
-DECLARE @MeasuredExternalReserveBytes BIGINT = NULL;
-DECLARE @MeasuredShrinkReserveBytes BIGINT = NULL;
-DECLARE @MeasuredProjectBaselineBytes BIGINT = NULL;
-DECLARE @RequiredCFreeBytes BIGINT =
-    CONVERT(BIGINT, 12) * CONVERT(BIGINT, 1024) * CONVERT(BIGINT, 1024)
-        * CONVERT(BIGINT, 1024);
+DECLARE @RequiredCFreeBytes BIGINT = CONVERT(BIGINT, 12) * 1024 * 1024 * 1024;
 DECLARE @LiveCFreeBytes BIGINT;
-DECLARE @CurrentAllocatedBytes BIGINT;
-DECLARE @CurrentUsedBytes BIGINT;
-DECLARE @CurrentAllocatedPages BIGINT;
-DECLARE @CurrentUsedPages BIGINT;
-DECLARE @ProjectedDataFileBytes BIGINT;
-DECLARE @ProjectedDatabaseFileBytes BIGINT;
+DECLARE @LogTotalBytes BIGINT;
+DECLARE @LogUsedBytes BIGINT;
+DECLARE @LogFreeBytes BIGINT;
+DECLARE @TempdbAllocatedBytes BIGINT;
+DECLARE @TempdbFreeBytes BIGINT;
+DECLARE @DataAllocatedBytes BIGINT;
+DECLARE @DataUsedBytes BIGINT;
+DECLARE @DataInternalFreeBytes BIGINT;
+DECLARE @DatabaseAutogrowthReserveBytes BIGINT;
+DECLARE @TempdbAutogrowthReserveBytes BIGINT;
+DECLARE @ProjectedDatabaseBytes BIGINT;
 DECLARE @ProjectedCFreeBytes BIGINT;
 DECLARE @ProjectedRecoveryPercent DECIMAL(19, 6);
 DECLARE @ActualBeforeBytes BIGINT;
 DECLARE @ActualAfterBytes BIGINT;
 DECLARE @ActualBeforeCFreeBytes BIGINT;
 DECLARE @ActualAfterCFreeBytes BIGINT;
+DECLARE @ShrinkFileName sysname;
+DECLARE @ShrinkTargetMB BIGINT;
+DECLARE @ShrinkCommand NVARCHAR(1000);
+
 DECLARE @DataFilePlan TABLE
 (
     LogicalDataFileName sysname NOT NULL PRIMARY KEY,
     TargetSizeMB BIGINT NOT NULL
 );
 
-/*
-    Replace this literal with one row for every data file in the reviewed
-    project-file scope, using exact logical names and reviewed targets.  The
-    placeholder deliberately blocks execution and prevents file expansion.
-*/
+/* Zero is an intentional disabled plan, not a missing logical-file placeholder. */
 INSERT @DataFilePlan (LogicalDataFileName, TargetSizeMB)
-VALUES (N'REPLACE_WITH_EXACT_LOGICAL_DATA_FILE_NAME', 0);
+VALUES (@LogicalDataFileName, 0);
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.database_files
+    WHERE type = 0 AND name = @LogicalDataFileName
+)
+    THROW 52402, 'The reviewed MDF logical file was not found.', 1;
+IF
+(
+    SELECT COUNT(*) FROM sys.database_files WHERE type = 0
+)
+    <> (SELECT COUNT(*) FROM @DataFilePlan)
+    THROW 52403, 'The reviewed file plan must cover every MDF data file.', 1;
+
+/* Direct current Windows, MDF, transaction-log and tempdb measurements. */
+SELECT @LiveCFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
+FROM sys.database_files AS df
+CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+WHERE UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:';
+
+SELECT
+    @LogTotalBytes = total_log_size_in_bytes,
+    @LogUsedBytes = used_log_space_in_bytes
+FROM sys.dm_db_log_space_usage;
+SET @LogFreeBytes = @LogTotalBytes - @LogUsedBytes;
+
+SELECT
+    @TempdbAllocatedBytes = SUM(CONVERT(BIGINT, df.size)) * 8192,
+    @TempdbFreeBytes = SUM(CONVERT(BIGINT, COALESCE(fsu.unallocated_extent_page_count, 0))) * 8192
+FROM tempdb.sys.database_files AS df
+LEFT JOIN tempdb.sys.dm_db_file_space_usage AS fsu ON fsu.file_id = df.file_id
+WHERE df.type = 0;
+
+SELECT
+    @DataAllocatedBytes = SUM(CONVERT(BIGINT, df.size)) * 8192,
+    @DataUsedBytes = SUM(CONVERT(BIGINT, FILEPROPERTY(df.name, N'SpaceUsed'))) * 8192,
+    @DataInternalFreeBytes = SUM
+    (
+        (CONVERT(BIGINT, df.size) - CONVERT(BIGINT, FILEPROPERTY(df.name, N'SpaceUsed'))) * 8192
+    )
+FROM sys.database_files AS df
+WHERE df.type = 0;
+
+SELECT @DatabaseAutogrowthReserveBytes = SUM
+(
+    CASE WHEN UPPER(LEFT(vs.volume_mount_point, 2)) <> N'C:' THEN 0
+         WHEN df.is_percent_growth = 1
+             THEN CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), df.size) * df.growth / 100.0)) * 8192
+         ELSE CONVERT(BIGINT, df.growth) * 8192 END
+)
+FROM sys.database_files AS df
+CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs;
+
+SELECT @TempdbAutogrowthReserveBytes = SUM
+(
+    CASE WHEN df.is_percent_growth = 1
+             THEN CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), df.size) * df.growth / 100.0)) * 8192
+         ELSE CONVERT(BIGINT, df.growth) * 8192 END
+)
+FROM tempdb.sys.database_files AS df
+WHERE df.type = 0;
+
+SELECT
+    N'portfolio.recovery_live_capacity_preflight' AS statement_id,
+    SYSUTCDATETIME() AS measured_at_utc,
+    @LogicalDataFileName AS logical_data_file_name,
+    @LiveCFreeBytes AS windows_c_free_bytes,
+    @RequiredCFreeBytes AS required_c_free_bytes,
+    @LiveCFreeBytes - @RequiredCFreeBytes AS c_free_headroom_bytes,
+    @DataAllocatedBytes AS mdf_allocated_bytes,
+    @DataUsedBytes AS mdf_used_bytes,
+    @DataInternalFreeBytes AS mdf_internal_free_bytes,
+    @LogTotalBytes AS transaction_log_total_bytes,
+    @LogUsedBytes AS transaction_log_used_bytes,
+    @LogFreeBytes AS transaction_log_free_bytes,
+    @TempdbAllocatedBytes AS tempdb_allocated_bytes,
+    @TempdbFreeBytes AS tempdb_unallocated_bytes,
+    @DatabaseAutogrowthReserveBytes AS database_next_growth_reserve_bytes,
+    @TempdbAutogrowthReserveBytes AS tempdb_next_growth_reserve_bytes,
+    N'READ_ONLY_PREFLIGHT; MDF_FREE_PAGES_ARE_NOT_WINDOWS_C_RECOVERY' AS measurement_basis;
+
+SELECT
+    N'portfolio.recovery_file_plan' AS statement_id,
+    p.LogicalDataFileName AS logical_data_file_name,
+    p.TargetSizeMB AS configured_target_size_mb,
+    CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), FILEPROPERTY(p.LogicalDataFileName, N'SpaceUsed')) / 128.0)) AS current_used_size_mb,
+    CONVERT(BIGINT, CEILING(CONVERT(DECIMAL(28, 8), df.size) / 128.0)) AS current_allocated_size_mb,
+    N'REVIEWED_WORKING_COPY_MUST_SET_TARGET_ABOVE_USED_AND_BELOW_CURRENT_ALLOCATED' AS target_contract
+FROM @DataFilePlan AS p
+JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName AND df.type = 0;
+
+IF @LiveCFreeBytes IS NULL
+   OR @LiveCFreeBytes < @RequiredCFreeBytes
+   OR @LogFreeBytes IS NULL
+   OR @TempdbFreeBytes IS NULL
+    THROW 52404, 'Live C:, transaction-log, or tempdb capacity evidence is missing or below the safety floor.', 1;
 
 IF @ApplyShrink = 0
 BEGIN
@@ -85,7 +179,7 @@ BEGIN
         N'APPLY_SHRINK_DISABLED' AS status,
         @LogicalDataFileName AS logical_data_file_name,
         @TargetSizeMB AS target_size_mb,
-        N'No DBCC command was executed. Review the exact command in a manual working copy.'
+        N'No DBCC command was executed. Review the direct preflight result and set an exact target only in a separately approved working copy.'
             AS next_action;
     RETURN;
 END;
@@ -101,181 +195,124 @@ IF @CollectorDisabledConfirmed = 0
    OR NULLIF(@ManifestVerificationReference, N'') IS NULL
    OR NULLIF(@ConsumerReviewReference, N'') IS NULL
    OR NULLIF(@CapacityReviewReference, N'') IS NULL
-   OR @MeasuredExternalReserveBytes IS NULL
-   OR @MeasuredShrinkReserveBytes IS NULL
-   OR @MeasuredProjectBaselineBytes IS NULL
-    THROW 52402, 'Fresh recovery, manifest, consumer, capacity, and approval evidence is required.', 1;
+    THROW 52405, 'Fresh recovery, manifest, consumer, capacity and approval evidence is required.', 1;
 
 IF EXISTS
 (
     SELECT 1
     FROM @DataFilePlan AS p
-    WHERE p.LogicalDataFileName = N'REPLACE_WITH_EXACT_LOGICAL_DATA_FILE_NAME'
-       OR p.TargetSizeMB <= 0
+    JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName AND df.type = 0
+    WHERE p.TargetSizeMB <= 0
+       OR p.TargetSizeMB * 1048576
+          <= CONVERT(BIGINT, FILEPROPERTY(df.name, N'SpaceUsed')) * 8192
+       OR p.TargetSizeMB * 1048576
+          >= CONVERT(BIGINT, df.size) * 8192
 )
-    THROW 52403, 'Exact logical data-file names and targets are required.', 1;
-IF (SELECT COUNT(*) FROM @DataFilePlan)
-       <> (SELECT COUNT(*) FROM sys.database_files WHERE type = 0)
-    THROW 52404, 'The data-file plan must cover every database data file.', 1;
-IF EXISTS
-(
-    SELECT 1
-    FROM sys.database_files AS df
-    WHERE df.type = 0
-      AND NOT EXISTS
-          (SELECT 1 FROM @DataFilePlan AS p
-           WHERE p.LogicalDataFileName = df.name)
-)
-    THROW 52414, 'Every database data file requires an explicit reviewed plan row.', 1;
+    THROW 52406, 'The reviewed target must be above current used pages and below current MDF allocation.', 1;
 
-SELECT @LiveCFreeBytes = MIN(CONVERT(bigint, vs.available_bytes))
-FROM sys.database_files AS df
-CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
-WHERE df.type = 0
-  AND UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:';
-
-IF EXISTS
-(
-    SELECT 1
-    FROM @DataFilePlan AS p
-    LEFT JOIN sys.database_files AS df
-      ON df.name = p.LogicalDataFileName
-     AND df.type = 0
-    WHERE df.file_id IS NULL
-)
-    THROW 52405, 'An exact planned logical data file was not found.', 1;
-IF @LiveCFreeBytes IS NULL OR @LiveCFreeBytes < @RequiredCFreeBytes
-    THROW 52406, 'Live C: free space is missing or already below the 12 GiB floor.', 1;
-IF EXISTS
-(
-    SELECT 1
-    FROM @DataFilePlan AS p
-    JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName
-        AND df.type = 0
-    WHERE p.TargetSizeMB < CONVERT(BIGINT,
-              (CONVERT(bigint, FILEPROPERTY(df.name, N'SpaceUsed')) + 127) / 128)
-       OR p.TargetSizeMB * CONVERT(BIGINT, 1048576)
-            >= CONVERT(bigint, df.size) * CONVERT(bigint, 8192)
-)
-    THROW 52407, 'A target is below current used pages or does not reduce its exact data file.', 1;
-IF @MeasuredExternalReserveBytes < 0 OR @MeasuredShrinkReserveBytes < 0
-    THROW 52409, 'Measured reserves cannot be negative.', 1;
-
-SELECT @CurrentAllocatedBytes = SUM(CONVERT(bigint, df.size)) * CONVERT(bigint, 8192),
-       @CurrentUsedBytes = SUM(CONVERT(bigint, FILEPROPERTY(df.name, N'SpaceUsed')))
-           * CONVERT(bigint, 8192),
-       @ProjectedDataFileBytes = SUM(p.TargetSizeMB) * CONVERT(bigint, 1048576)
-FROM @DataFilePlan AS p
-JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName
-    AND df.type = 0;
-
-SET @CurrentAllocatedPages = @CurrentAllocatedBytes / CONVERT(bigint, 8192);
-SET @CurrentUsedPages = @CurrentUsedBytes / CONVERT(bigint, 8192);
-SELECT @ProjectedDatabaseFileBytes =
-    SUM(CONVERT(bigint, df.size)) * CONVERT(bigint, 8192)
+SELECT
+    @ProjectedDatabaseBytes = SUM(CONVERT(BIGINT, df.size)) * 8192
 FROM sys.database_files AS df;
-SET @ProjectedDatabaseFileBytes =
-    @ProjectedDatabaseFileBytes - @CurrentAllocatedBytes + @ProjectedDataFileBytes;
-SET @ProjectedCFreeBytes =
-    @LiveCFreeBytes - @MeasuredExternalReserveBytes
-        - @MeasuredShrinkReserveBytes
-        +
-        (
-            SELECT COALESCE(SUM(
-                CASE WHEN UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:'
-                     THEN CONVERT(bigint, df.size) * CONVERT(bigint, 8192)
-                          - p.TargetSizeMB * CONVERT(bigint, 1048576)
-                     ELSE CONVERT(bigint, 0) END), 0)
-            FROM @DataFilePlan AS p
-            JOIN sys.database_files AS df ON df.name = p.LogicalDataFileName
-                AND df.type = 0
-            CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
-        );
-SET @ProjectedRecoveryPercent =
-    CONVERT(DECIMAL(19, 6),
-        (@MeasuredProjectBaselineBytes - @ProjectedDatabaseFileBytes) * 100.0
-        / NULLIF(@MeasuredProjectBaselineBytes, 0));
+SET @ProjectedDatabaseBytes = @ProjectedDatabaseBytes
+    - @DataAllocatedBytes
+    + (SELECT SUM(TargetSizeMB) * 1048576 FROM @DataFilePlan);
+SET @ProjectedCFreeBytes = @LiveCFreeBytes
+    + @DataAllocatedBytes
+    - (SELECT SUM(TargetSizeMB) * 1048576 FROM @DataFilePlan)
+    - COALESCE(@DatabaseAutogrowthReserveBytes, 0)
+    - COALESCE(@TempdbAutogrowthReserveBytes, 0);
+SET @ProjectedRecoveryPercent = CONVERT(DECIMAL(19, 6),
+    (@DataAllocatedBytes - (SELECT SUM(TargetSizeMB) * 1048576 FROM @DataFilePlan))
+    * 100.0 / NULLIF(@DataAllocatedBytes, 0));
 
 IF @ProjectedCFreeBytes < @RequiredCFreeBytes
-    THROW 52410, 'Projected worst-case C: free space would cross 12 GiB.', 1;
+    THROW 52407, 'Projected worst-case Windows C: free space would cross 12 GiB.', 1;
 IF @ProjectedRecoveryPercent < 80.0
-    THROW 52411, 'Projected project-file recovery is below the 80 percent target.', 1;
-
+    THROW 52408, 'Projected MDF recovery is below the separately reviewed 80% target.', 1;
 IF EXISTS
 (
-    SELECT 1
-    FROM ctl.MddMacCollectorRun
+    SELECT 1 FROM ctl.MddMacCollectorRun
     WHERE Status IN (N'RUNNING', N'CLAIMED')
-      AND CollectionContext IN
-          (N'MAC_LEGACY7_PRODUCTION', N'MAC_TIERED50_PRODUCTION')
+      AND CollectionContext IN (N'MAC_LEGACY7_PRODUCTION', N'MAC_TIERED50_PRODUCTION')
 )
-    THROW 52412, 'A collector run is active; space recovery is stopped.', 1;
-IF EXISTS
-(
-    SELECT 1
-    FROM ctl.MddMacProductionLease
-    WHERE Status = N'ACTIVE'
-)
-    THROW 52413, 'An active production lease exists; space recovery is stopped.', 1;
+    THROW 52409, 'A collector run is active; space recovery is stopped.', 1;
+IF EXISTS (SELECT 1 FROM ctl.MddMacProductionLease WHERE Status = N'ACTIVE')
+    THROW 52410, 'An active production lease exists; space recovery is stopped.', 1;
 
 SELECT
-    N'portfolio.recovery_apply_review' AS statement_id,
-    N'ALL_PLANNED_DATA_FILES' AS logical_data_file_name,
-    (SELECT COUNT_BIG(*) FROM @DataFilePlan) AS planned_data_file_count,
-    @LiveCFreeBytes AS live_c_free_bytes,
+    N'portfolio.recovery_exact_review' AS statement_id,
+    @LiveCFreeBytes AS windows_c_free_bytes_before,
     @ProjectedCFreeBytes AS projected_worst_case_c_free_bytes,
     @RequiredCFreeBytes AS required_c_free_bytes,
-    @MeasuredProjectBaselineBytes AS project_baseline_bytes,
-    @ProjectedDatabaseFileBytes AS projected_database_file_bytes,
-    @ProjectedRecoveryPercent AS projected_recovery_percent,
-    N'REVIEW THIS RESULT SET AND THE EXACT DBCC SHRINKFILE COMMAND BEFORE CONTINUING'
-        AS review_gate;
-
-SELECT
-    @ActualBeforeBytes = SUM(CONVERT(bigint, df.size)) * CONVERT(bigint, 8192)
-FROM sys.database_files AS df;
-SELECT @ActualBeforeCFreeBytes = @LiveCFreeBytes;
+    @ProjectedDatabaseBytes AS projected_database_file_bytes,
+    @ProjectedRecoveryPercent AS projected_mdf_recovery_percent,
+    p.LogicalDataFileName AS logical_data_file_name,
+    p.TargetSizeMB AS target_size_mb,
+    N'REVIEW_THIS_RESULT_SET_AND_EXACT_COMMAND_BEFORE_CONTINUING' AS review_gate
+FROM @DataFilePlan AS p;
 
 SELECT
     N'portfolio.recovery_exact_command' AS statement_id,
     p.LogicalDataFileName AS logical_data_file_name,
     p.TargetSizeMB AS target_size_mb,
     N'DBCC SHRINKFILE (' + QUOTENAME(p.LogicalDataFileName) + N', '
-        + CONVERT(nvarchar(30), p.TargetSizeMB) + N') WITH NO_INFOMSGS;'
+        + CONVERT(NVARCHAR(30), p.TargetSizeMB) + N') WITH NO_INFOMSGS;'
         AS exact_reviewed_command,
-    N'NO_SHRINKDATABASE; NO_AUTOGROWTH_CHANGE; NO_RECOVERY_MODEL_CHANGE'
+    N'ONLY_MDF; NO_SHRINKDATABASE; NO_AUTOGROWTH_CHANGE; NO_RECOVERY_MODEL_CHANGE'
         AS command_boundary
-FROM @DataFilePlan AS p
-ORDER BY p.LogicalDataFileName;
+FROM @DataFilePlan AS p;
 
-DECLARE @ShrinkFileName sysname;
-DECLARE @ShrinkTargetMB BIGINT;
-DECLARE @ShrinkCommand nvarchar(1000);
+SELECT @ActualBeforeBytes = SUM(CONVERT(BIGINT, df.size)) * 8192
+FROM sys.database_files AS df;
+SET @ActualBeforeCFreeBytes = @LiveCFreeBytes;
+
 DECLARE shrink_cursor CURSOR LOCAL FAST_FORWARD FOR
     SELECT LogicalDataFileName, TargetSizeMB
     FROM @DataFilePlan
     ORDER BY LogicalDataFileName;
-OPEN shrink_cursor;
-FETCH NEXT FROM shrink_cursor INTO @ShrinkFileName, @ShrinkTargetMB;
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    SET @ShrinkCommand =
-        N'DBCC SHRINKFILE (' + QUOTENAME(@ShrinkFileName) + N', '
-        + CONVERT(nvarchar(30), @ShrinkTargetMB) + N') WITH NO_INFOMSGS;';
-    EXEC sys.sp_executesql @ShrinkCommand;
+BEGIN TRY
+    OPEN shrink_cursor;
     FETCH NEXT FROM shrink_cursor INTO @ShrinkFileName, @ShrinkTargetMB;
-END;
-CLOSE shrink_cursor;
-DEALLOCATE shrink_cursor;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        /* Fresh measurement immediately before every DBCC command. */
+        SELECT @ActualBeforeCFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
+        FROM sys.database_files AS df
+        CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
+        WHERE UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:';
+        SELECT @LogFreeBytes = total_log_size_in_bytes - used_log_space_in_bytes
+        FROM sys.dm_db_log_space_usage;
+        SELECT @TempdbFreeBytes = SUM(CONVERT(BIGINT, COALESCE(fsu.unallocated_extent_page_count, 0))) * 8192
+        FROM tempdb.sys.database_files AS df
+        LEFT JOIN tempdb.sys.dm_db_file_space_usage AS fsu ON fsu.file_id = df.file_id
+        WHERE df.type = 0;
+        IF @ActualBeforeCFreeBytes < @RequiredCFreeBytes
+           OR @LogFreeBytes IS NULL OR @TempdbFreeBytes IS NULL
+            THROW 52411, 'Fresh pre-shrink capacity measurement failed the safety gate.', 1;
 
-SELECT
-    @ActualAfterBytes = SUM(CONVERT(bigint, df.size)) * CONVERT(bigint, 8192)
+        SET @ShrinkCommand = N'DBCC SHRINKFILE (' + QUOTENAME(@ShrinkFileName)
+            + N', ' + CONVERT(NVARCHAR(30), @ShrinkTargetMB) + N') WITH NO_INFOMSGS;';
+        EXEC sys.sp_executesql @ShrinkCommand;
+        FETCH NEXT FROM shrink_cursor INTO @ShrinkFileName, @ShrinkTargetMB;
+    END;
+    CLOSE shrink_cursor;
+    DEALLOCATE shrink_cursor;
+END TRY
+BEGIN CATCH
+    IF CURSOR_STATUS('local', 'shrink_cursor') = 1 CLOSE shrink_cursor;
+    IF CURSOR_STATUS('local', 'shrink_cursor') > -3 DEALLOCATE shrink_cursor;
+    THROW;
+END CATCH;
+
+SELECT @ActualAfterBytes = SUM(CONVERT(BIGINT, df.size)) * 8192
 FROM sys.database_files AS df;
-SELECT @ActualAfterCFreeBytes = MIN(CONVERT(bigint, vs.available_bytes))
+SELECT @ActualAfterCFreeBytes = MIN(CONVERT(BIGINT, vs.available_bytes))
 FROM sys.database_files AS df
 CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
-WHERE df.type = 0
-  AND UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:';
+WHERE UPPER(LEFT(vs.volume_mount_point, 2)) = N'C:';
+
+IF @ActualAfterCFreeBytes < @RequiredCFreeBytes
+    THROW 52412, 'Actual post-shrink Windows C: free space is below the 12 GiB floor.', 1;
 
 SELECT
     N'portfolio.recovery_actual_result' AS statement_id,
@@ -286,7 +323,7 @@ SELECT
     @ActualAfterCFreeBytes AS windows_c_free_bytes_after,
     @ActualAfterCFreeBytes - @ActualBeforeCFreeBytes AS measured_windows_bytes_released,
     CONVERT(DECIMAL(19, 6),
-        (@MeasuredProjectBaselineBytes - @ActualAfterBytes) * 100.0
-        / NULLIF(@MeasuredProjectBaselineBytes, 0)) AS actual_project_recovery_percent,
-    N'ACTUAL_RESULT_ONLY; VERIFY READBACK AND FRAGMENTATION AGAIN'
+        (@DataAllocatedBytes - @ActualAfterBytes) * 100.0
+        / NULLIF(@DataAllocatedBytes, 0)) AS actual_mdf_recovery_percent,
+    N'ACTUAL_WINDOWS_MEASUREMENT_ONLY; VERIFY_READBACK_AND_FRAGMENTATION_AGAIN'
         AS measurement_basis;

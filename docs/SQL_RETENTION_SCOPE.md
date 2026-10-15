@@ -1,9 +1,10 @@
 # SQL retention scope — what “raw data” means here
 
-This engineering closeout is a **data-only retention plan**. It preserves the
-complete deployed SQL Server structure for future Data Analyst training and
-reduces only reviewed, unnecessary historical rows. It does not authorize
-deleting or replacing an entire SQL schema or creating an MDD-only database.
+This engineering closeout is a **data-only retention plan** for the Data
+Engineering portfolio sample. It preserves the complete deployed SQL Server
+structure and reduces only the reviewed historical rows in the executable
+manifest. It does not authorize deleting or replacing an entire SQL schema or
+creating an MDD-only database.
 
 Before cleanup, `sql/portfolio/retention-inventory-readonly.sql` must inventory
 the live database, including every user schema and object. The output must
@@ -23,9 +24,10 @@ keys, columns, and foreign keys are structure and remain preserved.
 | `dw` / `dwh` / `warehouse` objects | Warehouse or curated analytical structures, if deployed | Retain relevant dimension and fact rows plus their required dimension/fact/lineage foreign-key closure |
 | Source code, SQL schema, procedures, tests and docs | Reproducible ETL implementation | Keep in the repository; redact secrets and exclude production datasets/backup files |
 
-**S155 structure invariant:** `stg`, `dw`, `ctl`, `src`, `wrk`, `core`,
-`analytics`, and any other live user schema are retained. A replacement
-database, if independently approved, must reproduce all existing schemas,
+**S156 structure invariant:** `stg`, `dw`, `ctl`, `src`, `wrk`, `core`,
+`analytics`, and any other live user schema are retained. The bounded in-place
+implementation does not require a replacement database or a second disk. If
+an independently approved rehearsal is ever used, it must reproduce all existing schemas,
 physical tables, columns, appropriate indexes, primary/unique/check/default
 keys, foreign keys, views, functions, stored procedures, and triggers before
 data is copied. Empty tables and views still matter for training and must not
@@ -40,7 +42,7 @@ against the complete FK graph, not only MDD foreign keys. Do not claim that
 pruning data alone returns physical space to Windows C:. The 80% target refers
 to measured **project SQL disk footprint**, not RAM.
 
-**User-approved retention policy:** keep exactly 10 complete snapshots with the operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229` and remove other unneeded historical rows only after evidence review. **Not yet executed:** live RunId/AuditId/hash/child-count evidence, external-consumer review, full restore evidence, replacement-database peak fit and the intended physical-space recovery method require review before execution. No physical disk space has been reclaimed yet. The user will publish to GitHub independently.
+**User-approved retention policy:** keep exactly 10 complete snapshots with the operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`. The live RunId/AuditId/hash/child-count evidence, cross-layer sample selectors and direct C:/log/tempdb measurements were captured read-only on 2026-10-15. **Not yet executed:** destructive retention, consumer/backup sign-off and physical MDF recovery. No physical disk space has been reclaimed.
 
 ## Operator-reviewed files
 
@@ -50,15 +52,45 @@ to measured **project SQL disk footprint**, not RAM.
   evidence-backed exactly-ten candidate result; it never writes IDs.
 - `sql/portfolio/retention-dry-run.sql` — literal-manifest validation and
   before/after row-count evidence with no base-table mutation.
-- `sql/portfolio/replacement-database-dry-run.sql` — read-only exact-ID,
-  capacity, backup, dependency, external-consumer, GTFS and warehouse review;
-  it does not create the replacement database.
-- `sql/portfolio/retention-apply.sql` — separate disabled-by-default,
-  bounded-batch, data-only template. It retains the MDD sample and requires a
-  reviewed GTFS/warehouse/lineage manifest and FK closure; it never removes
-  schema objects and has no automatic non-MDD table delete.
+- `sql/portfolio/replacement-database-dry-run.sql` — optional historical,
+  read-only exact-ID/capacity review; it is not required by the approved
+  bounded in-place path and does not create a replacement database.
+- `sql/portfolio/retention-apply.sql` — disabled-by-default bounded-batch
+  in-place implementation. It has literal MDD evidence plus executable GTFS,
+  warehouse, realtime and control selectors; the same predicates drive
+  readback counts and actual `DELETE TOP` batches. It never removes schema
+  objects or touches unlisted tables.
 - `sql/portfolio/recover-project-space-readonly.sql` and
   `sql/portfolio/recover-project-space-apply.sql` — physical file/C: review
-  and separately authorized shrink boundary. Internal MDF free pages are not
-  reported as Windows recovery.
+  and separately authorized shrink boundary. It measures actual Windows C:
+  free bytes before and after a reviewed MDF-only command. Internal MDF free
+  pages are not reported as Windows recovery.
+
+## Exact SSMS operator sequence
+
+Use SSMS against `DataAnalyst-VM`, database `CologneTransitIntelligence`, and
+save every result set as review evidence:
+
+1. Run `retention-inventory-readonly.sql` and
+   `select-ten-snapshots-readonly.sql`. Confirm the exact ten-row readback in
+   `TEN_SNAPSHOT_RETENTION_MANIFEST.md`.
+2. Run `retention-dry-run.sql`. Every cross-layer selected-count row must be
+   `PASS`; review the full schema/object/FK inventory and direct C:/log/tempdb
+   measurements.
+3. Confirm an off-C checked recovery point with
+   `RESTORE VERIFYONLY WITH CHECKSUM`, consumer/SQL-module review, and
+   collector/lease inactivity. Power BI and a reporting product are out of
+   scope for this engineering sample.
+4. In a separately reviewed working copy of `retention-apply.sql`, set
+   `@Apply = 1`, complete all approval gates and evidence references, and run
+   the whole file in one SSMS window. Do not change selectors, remove `GO`,
+   increase batch sizes, or run concurrently. Each batch commits separately;
+   after an interruption, re-read the evidence and rerun the same reviewed
+   working copy.
+5. Review exact hashes, child counts, cross-layer counts, FK checks,
+   `DBCC CHECKCONSTRAINTS`, and the complete post-apply object inventory.
+6. Only after those checks pass, run the recovery read-only review. A separate
+   approval must set an exact MDF target above current used pages and below
+   current allocation in `recover-project-space-apply.sql`; its default
+   `@ApplyShrink = 0` does not execute `DBCC SHRINKFILE`.
 

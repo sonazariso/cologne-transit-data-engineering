@@ -14,7 +14,7 @@ FINAL_CLOSEOUT_SENTENCE = (
 )
 
 
-class S153PortfolioCloseoutTests(unittest.TestCase):
+class S156PortfolioCloseoutTests(unittest.TestCase):
     def test_public_closeout_documents_end_with_required_statement(self) -> None:
         paths = (
             ROOT / "README.md",
@@ -28,14 +28,11 @@ class S153PortfolioCloseoutTests(unittest.TestCase):
             self.assertTrue(path.exists(), path)
             self.assertTrue(path.read_text(encoding="utf-8").rstrip().endswith(FINAL_CLOSEOUT_SENTENCE), path)
 
-    def test_manifest_locks_operator_ids_but_stays_fail_closed_until_live_evidence(self) -> None:
+    def test_manifest_contains_live_evidence_and_locks_operator_ids(self) -> None:
         manifest = (ROOT / "docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md").read_text(encoding="utf-8")
-        self.assertIn("OPERATOR_CONFIRMED_ID_SET", manifest)
-        self.assertIn("LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE", manifest)
-        self.assertIn(
-            "ACTUAL_SNAPSHOT_IDS: OPERATOR_CONFIRMED — 22, 93, 185, 189, 207, 224, 225, 226, 228, 229",
-            manifest,
-        )
+        self.assertIn("LIVE_READ_ONLY_EVIDENCE_CAPTURED_2026-10-15", manifest)
+        self.assertIn("No production `DELETE`, `SHRINK`, `DROP`", manifest)
+        self.assertNotIn("ATTACH LIVE SQL", manifest)
         self.assertEqual(len(re.findall(r"^\| (?:[1-9]|10) \|", manifest, flags=re.MULTILINE)), 10)
         for snapshot_id in (22, 93, 185, 189, 207, 224, 225, 226, 228, 229):
             self.assertRegex(
@@ -91,20 +88,24 @@ class S153PortfolioCloseoutTests(unittest.TestCase):
                 (
                     "DECLARE @Apply BIT = 0",
                     "DECLARE @ManifestApproved BIT = 0",
-                    "DECLARE @BatchSize INT = 1000",
+                    "DECLARE @BatchSize INT = 50",
                     "IF @Apply = 0",
                     "Exactly ten literal manifest rows are required.",
                     "12 GiB",
-                    "ctl history is preserved",
+                    "DELETE TOP (@BatchSize)",
+                    "sys.dm_os_volume_stats",
+                    "sys.dm_db_log_space_usage",
+                    "DBCC CHECKCONSTRAINTS",
                 ),
             ),
             (
                 shrink,
                 (
                     "DECLARE @ApplyShrink BIT = 0",
-                    "REPLACE_WITH_EXACT_LOGICAL_DATA_FILE_NAME",
+                    "CologneTransitIntelligence",
+                    "recovery_live_capacity_preflight",
                     "DBCC SHRINKFILE",
-                    "ProjectedRecoveryPercent",
+                    "@ProjectedRecoveryPercent",
                     "12 GiB",
                     "80%",
                 ),
@@ -128,7 +129,7 @@ class S153PortfolioCloseoutTests(unittest.TestCase):
             ):
                 self.assertIn(token, sql)
             self.assertNotRegex(sql, r"(?im)^\s*(DELETE|DROP|TRUNCATE|ALTER)\b")
-        self.assertIn("PREFERRED_METHOD_NOT_YET_VALIDATED", replacement)
+        self.assertIn("OPTIONAL_HISTORICAL_FEASIBILITY_REVIEW", replacement)
 
     def test_dry_run_and_apply_lock_the_s154_id_set(self) -> None:
         expected = ("22", "93", "185", "189", "207", "224", "225", "226", "228", "229")

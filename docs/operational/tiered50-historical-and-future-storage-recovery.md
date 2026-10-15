@@ -288,30 +288,28 @@ DATAFILE_SHRINKFILE: SEPARATE_APPROVAL_ONLY; NO_SHRINK_EXECUTED
 PHYSICAL_WINDOWS_DISK_RECOVERY: NOT_MEASURED; DO_NOT_CLAIM_5.376_GIB_WINDOWS_RECOVERY
 ```
 
-## S153–S154 portfolio retention closeout
+## S156 portfolio retention closeout
 
 S154 update date: 2026-10-15 (Europe/Berlin).
 
 The existing Snapshot GZIP recovery work remains historical and is not
-replaced. S153/S154 add a separate, read-only evidence path for exactly ten
+replaced. S156 finalizes a read-only evidence path for exactly ten
 operator-confirmed snapshots: `22, 93, 185, 189, 207, 224, 225, 226, 228,
-229`. The path includes inventory, exact-ID readback, replacement-database
-feasibility, manifest, retention dry run, bounded apply template, and
-physical-space review/apply boundary under `sql/portfolio/`. The current
-worktree contains no live row-level candidate attachment, post-retention
-counts, independently measured replacement peak, or before/after Windows C:
-measurement.
+229`. Live RunId/AuditId/hash/child-count evidence, the complete object
+inventory, executable cross-layer selectors and direct C:/log/tempdb
+measurements were captured on 2026-10-15. The path includes inventory,
+exact-ID readback, manifest, retention dry run, bounded in-place apply and
+physical-space review/apply boundary under `sql/portfolio/`.
 
-The preferred cleanup method is a small independently validated replacement
-database if its complete copy/log/tempdb/rollback peak fits on the existing C:
-drive while preserving the 12 GiB floor. The replacement must preserve the
-complete existing SQL Server structure—every schema, physical table, column,
-index, key, foreign key, view, function, procedure and trigger—not only the
-MDD tables. The data manifest must retain the ten complete snapshots, a small
-real coherent GTFS sample, relevant warehouse dimensions/facts and required
-ETL lineage/configuration/audit rows with FK closure. Direct SQL, notebook,
-export, Power BI and other external consumers must be reviewed explicitly.
-The October 14 off-C checked backup remains unchanged; backup metadata and
+The approved cleanup method is bounded in-place. It preserves the complete
+existing SQL Server structure—every schema, physical table, column, index,
+key, foreign key, view, function, procedure and trigger—not only the MDD
+tables. The executable data manifest retains the ten complete snapshots, a
+small real coherent GTFS sample, relevant warehouse dimensions/facts,
+realtime evidence and required ETL lineage/configuration/audit rows with FK
+closure. Direct SQL, notebook, export and raw-payload consumers must be
+reviewed explicitly; Power BI and a reporting product are out of scope. The
+October 14 off-C checked backup remains unchanged; backup metadata and
 operator-run `RESTORE VERIFYONLY WITH CHECKSUM` evidence are required before
 cleanup.
 
@@ -320,15 +318,16 @@ The current decision remains:
 ```text
 EXACT_RETENTION_COUNT: 10
 ACTUAL_SNAPSHOT_IDS: OPERATOR_CONFIRMED — 22, 93, 185, 189, 207, 224, 225, 226, 228, 229
-LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE
+LIVE_ROW_EVIDENCE: CAPTURED_READ_ONLY_2026-10-15
 RETENTION_SQL_APPLIED: FALSE
 PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
-REPLACEMENT_DATABASE: PREFERRED_ONLY_IF_INDEPENDENT_PEAK_FITS_C_WITH_12_GIB_FLOOR
+RETENTION_METHOD: BOUNDED_IN_PLACE; NO_SECOND_DISK_OR_FULL_COPY_REQUIRED
 GTFS_WAREHOUSE_DISPOSITION: COHERENT_SAMPLE_MANIFEST_REQUIRED; NO_AUTOMATIC_DISCARD
 SCHEMA_OBJECT_DISPOSITION: PRESERVE_COMPLETE_EXISTING_SQL_SERVER_STRUCTURE
 COLLECTOR_DISABLED: TRUE
 GITHUB_PUSH: NOT_PERFORMED
-FINAL_DECISION: DRY_RUN_ONLY_UNTIL_LIVE_EVIDENCE_AND_OPERATOR_APPROVAL
+POWER_BI: OUT_OF_SCOPE
+FINAL_DECISION: DRY_RUN_ONLY_UNTIL_OPERATOR_APPROVAL
 ```
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

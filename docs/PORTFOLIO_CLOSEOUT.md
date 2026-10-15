@@ -1,98 +1,98 @@
 # Data Engineering portfolio closeout — evidence and acceptance
 
-**Scope date:** October 15, 2026. Source: latest available sanitized project archive (S152, 444 files), existing authoritative project status, Stage 8/9/14 documents, SQL source schema and October 14 operator audit. This document is an editorial closeout **proposal**; no production deletion, collector activation, GitHub publication or disk reclamation is claimed.
+**Scope date:** October 15, 2026.  This is the final closeout for the
+implemented API-to-SQL Server engineering pilot.  No production deletion,
+collector activation, GitHub publication or disk reclamation was performed.
 
 ## Goal and stop condition
 
-Show a recruiter the **implemented** API-to-SQL Server engineering chain, operational and data-quality engineering decisions, bounded successful acquisition, SQL persistence and limitations. Stop extending ingestion and volume-oriented storage optimization for this project. Preserve **exactly 10 complete and auditable snapshots** with all dependent rows and required run/audit lineage, using the S154 operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`, subject to live evidence, tested rollback and measured disk reclamation. The closeout is data-only: preserve the complete existing SQL Server structure for future Data Analyst training, including all deployed schemas, physical tables, columns, indexes, keys, foreign keys, views, functions, procedures and triggers.
+Present the demonstrated API acquisition, parsing, data-quality, lineage,
+bounded persistence and operational-safety work.  Stop extending collection
+and storage experiments.  The retained portfolio sample is exactly ten
+complete MDD snapshots with dependent rows and run/audit lineage, plus the
+minimum coherent GTFS, warehouse, realtime and control data needed to show
+Data Engineering.  The complete SQL Server schema and object inventory stays
+in place.  The sample is discontinuous and unsuitable as a reporting
+dataset; Power BI and a reporting product are out of scope.
 
-## What worked (grounded historical evidence)
+## What worked
 
 | Area | Evidence | What it proves |
 | --- | --- | --- |
-| MDD/TRIAS credential and request path | Stage 8 documents report a completed Köln Hbf pilot, 343 HTTP-200 responses, parse/reconciliation success | A bounded API acquisition/parse path worked; it does not prove persistent multiweek history |
-| Source-backed matching prototype | Stage 9 evidence reports 60 observations, 51 MEDIUM and 9 UNMATCHED; zero HIGH evidence for the Stage 10 dependency | Matching/data-quality classifications and evidence gates; **not** an approved reliable trip KPI |
-| Legacy7 schedule | Stage 14/source control evidence reports six expected scheduled Legacy7 buckets and preserved corrected heartbeat evidence | A historical limited collection/scheduling path worked |
-| SQL Server | `create-source-faithful-persistence.sql` and recorded validation show `ctl` and `stg` lineage, source snapshots and structured observations | Real relational data landing and operational metadata path |
-| Failure handling | The Tiered50 first scheduled bucket completed 2 of 18 target audits; 16 were skipped, and the collector was stopped | Safe failure/diagnostics are part of the evidence, not a successful Tiered50 rollout |
+| MDD/TRIAS request path | Bounded pilot and persisted SQL evidence | Source acquisition, response validation, parsing and persistence worked |
+| Source-backed matching prototype | Stage 9 evidence | Matching/data-quality classifications and explicit evidence gates |
+| Legacy7 schedule | Historical six-bucket evidence | Bounded scheduling and safe retirement behavior |
+| SQL Server | `ctl` lineage, `stg` snapshots and normalized observations | Real relational landing and operational metadata |
+| Failure handling | First Tiered50 heartbeat stopped after its cadence gate failed | Safe failure and diagnostics are part of the implementation |
 
-## What is not complete
+## Final retention evidence
 
-- No continuous, representative 50-station time series. Missing fields and coverage prevent the desired system-performance KPIs.
-- No validated Actual Delay derived from provider-supplied `RecordedAtTime` at the correct event identity.
-- Historical PostgreSQL Stage 10 operational fact SQL is **not** the active SQL Server reporting implementation; Stage 10 is marked blocked in the original status.
-- The live row-level manifest attachment and fresh post-cleanup Windows C: measurements have not been supplied; the approved ID set is recorded, but cleanup remains dry-run-only.
-- The complete live object inventory and cross-layer data manifest are also not attached. Any future sample must retain a coherent GTFS dataset, relevant warehouse dimensions/facts, and the ETL lineage/configuration/audit rows needed to explain the retained MDD sample.
-
-## Closeout deliverables
-
-1. Public README focused on demonstrated Data Engineering competencies, with precise status caveats.
-2. End-to-end documented data flow and SQL grains; representative code pointers and sanitized validation logs.
-3. An exactly 10-snapshot curated dataset/extract (if provider sharing terms permit), manifest with actual SnapshotIds and checksum(s), enough SQL setup/readback instructions to reproduce a limited demo.
-4. SQL-level integrity checks: FK completeness, target/run/audit lineage, exact counts and hash validation; explicit source missingness/coverage metrics.
-5. Existing verified October 14 backup kept off-C, a new recovery point if changes after its finish require it, and documented rollback before destructive work.
-6. Measured physical C: free-space before/after and MDF/LDF changes; record objective achievement, not estimated payload savings.
-7. Sanitized documentation ready for owner-managed GitHub upload; truthful engineering demo screenshots only if obtained.
-
-## Archival disposition
-
-Retain old decisions, failed runs and complex storage experiments as **historical records**, clearly labeled not active. Do not republish old drafts as current installation instructions. Keep the default source code offline-safe. Active collection remains disabled for portfolio closeout.
-
-## S154–S155 retention decision and method preference
-
-The exact operator-confirmed retention set is:
+The exact approved IDs are:
 
 ```text
 22, 93, 185, 189, 207, 224, 225, 226, 228, 229
 ```
 
-The preferred cleanup method is a small replacement database, but only an
-independent peak measurement can establish that it fits on the existing C:
-drive while preserving the 12 GiB safety floor. The replacement rehearsal
-must preserve the **complete existing structure**—all schemas, physical
-tables, columns, indexes, keys, foreign keys, views, functions, procedures
-and triggers—not just the MDD tables. Its data must include all seven MDD
-child families, source payloads, hashes, NULL/empty state, required `ctl`
-lineage/configuration/audit rows, a coherent GTFS sample and relevant
-warehouse dimensions/facts. If the peak does not fit, the bounded in-place
-data-only fallback requires separate approval.
+The live read-only manifest captured exact RunIds, AuditIds, original payload
+hashes, payload hashes and child counts for all ten rows.  The retained child
+totals are Timing 14,308; Call 7,504; Situation 0; ServiceSection 245;
+Attribute 22; ResponseError 0; ParserGap 121.  Control lineage is six runs,
+ten audits, ten HTTP attempts, nine quota permits, six dispatcher claims, six
+dispatcher claim events, 81 target claims, 81 target-claim events, zero
+production leases, nine lease events and 65 quota-audit rows.
 
-GTFS and warehouse **data** require separate portfolio-necessity and FK
-closure review, while their tables and all other object definitions remain
-preserved. SQL metadata, SQL-Agent jobs, direct clients, notebooks, exports
-and Power BI/external consumers must be reviewed explicitly before any
-physical payload or database change. The inventory must distinguish physical
-tables from views before any retention decision.
+The minimum cross-layer manifest is also live-evidenced: GTFS batch 2 and a
+small coherent route/trip/stop sample; warehouse batch 3 and the selected
+dimension/fact closure; and realtime observation 4, situation 2 and link
+`(4,2)`.  The executable selectors and expected counts are in
+`sql/portfolio/retention-apply.sql` and are not merely documentation.
 
-The final source-controlled SQL path is read-only complete-object inventory →
-exact-ID candidate/readback evidence → cross-layer data/FK manifest →
-schema-complete replacement feasibility review → `retention-dry-run.sql`.
-`retention-apply.sql` and file-space recovery remain disabled-by-default,
-data-only templates and were not executed; they cannot remove schemas or
-replace views, modules, keys, indexes or other structure.
+## Approved implementation path
 
-## Exact operator approval required before cleanup
+The approved implementation is bounded in-place retention.  A second disk or
+full database copy is not required.  `retention-apply.sql` preserves every
+schema, table, column, index, key, foreign key, view, function, procedure and
+trigger.  It uses child-first, bounded `DELETE TOP` batches, an application
+lock, direct C:/log/tempdb measurements before every batch, a 12 GiB floor,
+and resumable reruns.  It does not touch unlisted tables.
 
-The administrator must sign a dated approval that names the ten IDs above,
-attaches the live hashes/counts/lineage, complete schema/object inventory,
-cross-layer GTFS/warehouse/ETL data manifest with FK closure, and
-external-consumer review, verifies an off-C `RESTORE VERIFYONLY WITH CHECKSUM`
-recovery point, and records fresh before/after MDF/LDF/tempdb/C: measurements.
-The approval must confirm that the selected schema-complete method keeps
-worst-case C: free space at or above 12 GiB and does not expand C:. It
-authorizes the dry run only; destructive data apply and any shrink require
-their own explicit approval.
+`recover-project-space-apply.sql` is a separate MDF-only recovery boundary.
+It names the actual logical file, measures actual Windows C: free space and
+remains disabled by default.  A separate approval must set a target above
+current used pages and below allocation; no log shrink or `SHRINKDATABASE` is
+allowed.
 
-## Missing sign-offs
+## Exact SSMS runbook
 
-- **Retention:** user confirmed the exact ten IDs; live row/hash/child evidence, dependencies, executable SQL and rollback boundary still require confirmation.
-- **Capacity:** current live disk/log/SQL allocation preflight, restore point and purge/shrink lab proof.
-- **Consumers:** actual views/jobs, direct SQL consumers, external consumers, GTFS/warehouse necessity and FK dependencies.
-- **GitHub:** owner-managed publication, correct target URL, publication license/permission and secret scan.
+Use SSMS against `DataAnalyst-VM`, database
+`CologneTransitIntelligence`, and save every result set:
 
-**Status:** `OPERATOR_ID_SET_CONFIRMED / SCHEMA_PRESERVATION_REQUIRED / CROSS_LAYER_DATA_MANIFEST_PENDING / DRY_RUN_ONLY / RETENTION_AND_PHYSICAL_RECLAMATION_NOT_EXECUTED`.
+1. Run `retention-inventory-readonly.sql` and
+   `select-ten-snapshots-readonly.sql`. Confirm the exact ten-row manifest.
+2. Run `retention-dry-run.sql`. Every cross-layer selected-count row must be
+   `PASS`; review the complete object/FK inventory and capacity measurements.
+3. Verify the off-C recovery point with `RESTORE VERIFYONLY WITH CHECKSUM`,
+   review direct SQL/module consumers, and confirm collectors and leases are
+   inactive.
+4. Create a reviewed working copy of `retention-apply.sql`, set `@Apply = 1`,
+   complete every evidence gate/reference, and execute the whole file in one
+   SSMS window. Do not change selectors, remove `GO`, increase batch sizes or
+   run concurrently. If interrupted, re-read evidence and rerun the same
+   reviewed working copy.
+5. Review hashes, child counts, cross-layer counts, FK checks,
+   `DBCC CHECKCONSTRAINTS` and the complete post-apply object inventory.
+6. Only after retention verification, run the recovery read-only review. Any
+   MDF shrink needs a second explicit approval and fresh C: measurements.
 
-## Final statement for GitHub
+## Acceptance boundary
+
+- The ten snapshots and all dependent rows pass exact hash/count readback.
+- GTFS, warehouse, realtime and control selectors pass their expected counts.
+- The complete object inventory is unchanged.
+- Actual Windows C: before/after bytes are recorded for any physical recovery.
+- Collectors remain disabled; no continuous coverage or reporting KPI is
+  claimed.
+
+**Status:** `LIVE_READ_ONLY_EVIDENCE_CAPTURED / IN_PLACE_RETENTION_READY / APPLY_NOT_EXECUTED / MDF_RECOVERY_NOT_EXECUTED / POWER_BI_OUT_OF_SCOPE`.
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.
-

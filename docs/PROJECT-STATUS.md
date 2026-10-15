@@ -4,22 +4,24 @@
 **Repository:** `sonazariso/cologne-transit-intelligence`
 **Status date:** 2026-10-15
 
-## S153–S154 portfolio closeout (not a numbered stage)
+## S156 portfolio closeout (not a numbered stage)
 
 The project is closed for further collection and analytics-product work. The
 historical stages and evidence below are preserved for portfolio context,
-but they are not an instruction to resume Tiered50, Legacy7, Power BI, or
-any other collector. Collectors remain disabled and unloaded. The approved
+but they are not an instruction to resume Tiered50, Legacy7, or any other
+collector. Collectors remain disabled and unloaded. The approved
 retention objective is exactly ten real SQL Server snapshots with all seven
 stg child families and required ctl lineage, plus a reviewed coherent GTFS
 sample, relevant warehouse dimensions/facts, and the ETL lineage/configuration/
-audit rows needed for Data Analyst training. The operator-confirmed IDs are
-`22, 93, 185, 189, 207, 224, 225, 226, 228, 229`; live row-level evidence,
-complete schema/object inventory, cross-layer FK closure, external-consumer
-review and capacity fit remain required. Any cleanup is data-only and must
-preserve all existing schemas, physical tables, columns, indexes, keys,
-foreign keys, views, functions, procedures and triggers. No destructive SQL,
-physical file recovery, or GitHub push is claimed.
+audit rows needed to demonstrate Data Engineering. The operator-confirmed IDs
+are `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`; exact live row-level
+evidence, complete schema/object inventory, cross-layer FK closure and direct
+capacity measurements were captured read-only on 2026-10-15. Any cleanup is
+bounded in-place, data-only and must preserve all existing schemas, physical
+tables, columns, indexes, keys, foreign keys, views, functions, procedures and
+triggers. The sample is discontinuous and unsuitable for reporting; Power BI
+is out of scope. No destructive SQL, physical file recovery, or GitHub push is
+claimed.
 
 ## Authoritative status
 
@@ -943,22 +945,23 @@ and acceptance criteria.
   is `BOUNDED VALIDATION COMPLETE`; the tested ±7-day and ±45-day metadata
   windows recovered zero exact-URL captures at both requested horizons.
 
-## S153–S155 final decision
+## S156 final decision
 
 ```text
 RETENTION_COUNT: 10
 ACTUAL_SNAPSHOT_IDS: OPERATOR_CONFIRMED — 22, 93, 185, 189, 207, 224, 225, 226, 228, 229
-LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE
-SCHEMA_OBJECT_INVENTORY: NOT_ATTACHED_IN_WORKTREE
-CROSS_LAYER_DATA_MANIFEST: NOT_ATTACHED_IN_WORKTREE
+LIVE_ROW_EVIDENCE: CAPTURED_READ_ONLY_2026-10-15
+SCHEMA_OBJECT_INVENTORY: CAPTURED_READ_ONLY_2026-10-15
+CROSS_LAYER_DATA_MANIFEST: EXECUTABLE_MANIFEST_CAPTURED_READ_ONLY_2026-10-15
 DESTRUCTIVE_SQL: NOT_EXECUTED
 PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
 C_DRIVE_FLOOR: 12_GIB
-REPLACEMENT_DATABASE: PREFERRED_ONLY_IF_SCHEMA_COMPLETE_AND_PEAK_FITS
+RETENTION_METHOD: BOUNDED_IN_PLACE; NO_SECOND_DISK_OR_FULL_COPY_REQUIRED
 GTFS_WAREHOUSE_REVIEW: COHERENT_SAMPLE_AND_FK_CLOSURE_REQUIRED
 SCHEMA_OBJECT_DISPOSITION: PRESERVE_COMPLETE_EXISTING_STRUCTURE
 COLLECTOR_DISABLED: TRUE
 GITHUB_PUSH: NOT_PERFORMED
+POWER_BI: OUT_OF_SCOPE
 ```
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.
