@@ -28,11 +28,21 @@ class S153PortfolioCloseoutTests(unittest.TestCase):
             self.assertTrue(path.exists(), path)
             self.assertTrue(path.read_text(encoding="utf-8").rstrip().endswith(FINAL_CLOSEOUT_SENTENCE), path)
 
-    def test_manifest_is_fail_closed_until_real_sql_evidence(self) -> None:
+    def test_manifest_locks_operator_ids_but_stays_fail_closed_until_live_evidence(self) -> None:
         manifest = (ROOT / "docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md").read_text(encoding="utf-8")
-        self.assertIn("BLOCKED_UNTIL_READ_ONLY_OPERATOR_EVIDENCE", manifest)
-        self.assertIn("ACTUAL_SNAPSHOT_IDS: PENDING_READ_ONLY_SQL_RESULT", manifest)
+        self.assertIn("OPERATOR_CONFIRMED_ID_SET", manifest)
+        self.assertIn("LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE", manifest)
+        self.assertIn(
+            "ACTUAL_SNAPSHOT_IDS: OPERATOR_CONFIRMED — 22, 93, 185, 189, 207, 224, 225, 226, 228, 229",
+            manifest,
+        )
         self.assertEqual(len(re.findall(r"^\| (?:[1-9]|10) \|", manifest, flags=re.MULTILINE)), 10)
+        for snapshot_id in (22, 93, 185, 189, 207, 224, 225, 226, 228, 229):
+            self.assertRegex(
+                manifest,
+                re.compile(rf"^\| \d+ \| {snapshot_id} \|", re.MULTILINE),
+                msg=str(snapshot_id),
+            )
         for family in (
             "MddMacTimingObservation",
             "MddMacCallObservation",
@@ -103,12 +113,44 @@ class S153PortfolioCloseoutTests(unittest.TestCase):
             for token in tokens:
                 self.assertIn(token, sql)
 
+    def test_s154_read_only_replacement_and_inventory_boundaries(self) -> None:
+        replacement = (ROOT / "sql/portfolio/replacement-database-dry-run.sql").read_text(encoding="utf-8")
+        inventory = (ROOT / "sql/portfolio/retention-inventory-readonly.sql").read_text(encoding="utf-8")
+        for sql in (replacement, inventory):
+            for token in (
+                "12 GiB",
+                "backup_verification",
+                "external_consumer_review",
+                "before_after_measurement_contract",
+                "gtfs_table_review",
+                "warehouse_table_review",
+                "NO_AUTOMATIC_DISCARD",
+            ):
+                self.assertIn(token, sql)
+            self.assertNotRegex(sql, r"(?im)^\s*(DELETE|DROP|TRUNCATE|ALTER)\b")
+        self.assertIn("PREFERRED_METHOD_NOT_YET_VALIDATED", replacement)
+
+    def test_dry_run_and_apply_lock_the_s154_id_set(self) -> None:
+        expected = ("22", "93", "185", "189", "207", "224", "225", "226", "228", "229")
+        for relative in (
+            "sql/portfolio/retention-dry-run.sql",
+            "sql/portfolio/retention-apply.sql",
+            "sql/portfolio/replacement-database-dry-run.sql",
+        ):
+            sql = (ROOT / relative).read_text(encoding="utf-8")
+            for snapshot_id in expected:
+                self.assertIn(snapshot_id, sql, relative)
+        dry_run = (ROOT / "sql/portfolio/retention-dry-run.sql").read_text(encoding="utf-8")
+        self.assertIn("DRY_RUN_ONLY_EVIDENCE", dry_run)
+        self.assertIn("No base rows were changed", dry_run)
+
     def test_inventory_and_recovery_review_are_read_only(self) -> None:
         for relative in (
             "sql/portfolio/retention-inventory-readonly.sql",
             "sql/portfolio/select-ten-snapshots-readonly.sql",
             "sql/portfolio/recover-project-space-readonly.sql",
             "sql/portfolio/retention-dry-run.sql",
+            "sql/portfolio/replacement-database-dry-run.sql",
         ):
             sql = (ROOT / relative).read_text(encoding="utf-8")
             self.assertNotRegex(sql, r"(?im)^\\s*(DELETE|DROP|TRUNCATE|ALTER)\\b", relative)

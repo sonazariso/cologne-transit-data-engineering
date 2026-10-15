@@ -2,14 +2,19 @@
     COLOGNE TRANSIT INTELLIGENCE — TEN-SNAPSHOT RETENTION DRY RUN
 
     Read-only against the base database.  This script intentionally contains
-    no base-table mutation.  The operator must paste exactly ten rows from
-    select-ten-snapshots-readonly.sql into the table variable and set
-    @ManifestApproved = 1 after reviewing the manifest.  The default exits
-    with a blocked result and cannot act on an empty or guessed set.
+    no base-table mutation.  The S154 operator-confirmed ID set is locked to
+    22, 93, 185, 189, 207, 224, 225, 226, 228, 229.  The operator must paste
+    exactly ten evidence rows for these approved IDs from the read-only
+    candidate/readback results into the table variable and set
+    @ManifestApproved = 1 only after reviewing them.
+    The default exits with a blocked result and cannot act on an empty,
+    guessed, or different set.
 
     This dry run keeps all ctl history in scope and reports the seven stg
     child families that the later bounded purge would remove for nonretained
-    snapshots.  It is not a backup or a proof of Windows disk recovery.
+    snapshots.  A small replacement database is preferred if an independent
+    peak measurement fits on C: while preserving the 12 GiB floor.  This file
+    is not a backup, replacement-database build, or proof of Windows recovery.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -32,13 +37,13 @@ DECLARE @Manifest TABLE
 );
 
 /*
-    Paste exactly ten reviewed rows here, for example:
+    Paste exactly ten reviewed rows here, using only the approved IDs:
 
     INSERT @Manifest
         (SnapshotId, RunId, AuditId, OriginalPayloadSha256, PayloadHashSha256)
     VALUES
-        (123, N'<exact RunId>', 456, '<64 hex chars>', '<64 hex chars>'),
-        ... nine more literal rows ...;
+        (22, N'<exact RunId>', 456, '<64 hex chars>', '<64 hex chars>'),
+        ... nine more literal rows for 93, 185, 189, 207, 224, 225, 226, 228 and 229 ...;
 
     Do not replace the values with TOP, a range, or a subquery.
 */
@@ -88,6 +93,20 @@ IF
     SELECT COUNT_BIG(*) FROM @Manifest
 ) <> 10
     THROW 52102, 'The retention manifest must contain exactly ten rows.', 1;
+
+IF
+(
+    SELECT COUNT_BIG(*)
+    FROM @Manifest AS m
+    JOIN (VALUES
+        (CONVERT(bigint, 22)), (CONVERT(bigint, 93)),
+        (CONVERT(bigint, 185)), (CONVERT(bigint, 189)),
+        (CONVERT(bigint, 207)), (CONVERT(bigint, 224)),
+        (CONVERT(bigint, 225)), (CONVERT(bigint, 226)),
+        (CONVERT(bigint, 228)), (CONVERT(bigint, 229))
+    ) AS a(SnapshotId) ON a.SnapshotId = m.SnapshotId
+) <> 10
+    THROW 52108, 'Manifest SnapshotIds do not exactly match the S154 approved ID set.', 1;
 
 IF
 (
@@ -328,11 +347,44 @@ CROSS APPLY sys.dm_os_volume_stats(DB_ID(), df.file_id) AS vs
 ORDER BY df.file_id;
 
 SELECT
+    N'portfolio.replacement_database_fit_gate' AS statement_id,
+    N'PREFERRED_IF_INDEPENDENTLY_VALIDATED_PEAK_FITS' AS preferred_method,
+    CONVERT(bigint, NULL) AS measured_current_c_free_bytes,
+    CONVERT(bigint, NULL) AS measured_replacement_peak_reserve_bytes,
+    CONVERT(bigint, 12) * CONVERT(bigint, 1024) * CONVERT(bigint, 1024)
+        * CONVERT(bigint, 1024) AS required_c_free_bytes,
+    N'BLOCKED_UNTIL_ISOLATED_REPLACEMENT_PEAK_IS_MEASURED; NO DATABASE COPY WAS CREATED'
+        AS status,
+    N'If the peak does not fit, document the separately reviewed bounded in-place fallback.'
+        AS required_action;
+
+SELECT
+    N'portfolio.external_consumer_review' AS statement_id,
+    N'BLOCKED_EXTERNAL_CONSUMER_REVIEW' AS status,
+    N'Attach current direct SQL, notebook, export, Power BI and raw SnapshotJson consumer evidence before cleanup.'
+        AS required_action;
+
+SELECT
+    N'portfolio.backup_verification' AS statement_id,
+    N'REVIEW_REQUIRED' AS status,
+    N'Attach off-C backup metadata and RESTORE VERIFYONLY WITH CHECKSUM evidence; do not overwrite the October 14 recovery point.'
+        AS required_action;
+
+SELECT
     N'portfolio.retention_dry_run_gate' AS statement_id,
-    N'PASS_FOR_REVIEW_ONLY' AS status,
+    N'DRY_RUN_ONLY_EVIDENCE' AS status,
     10 AS required_manifest_rows,
     (SELECT COUNT_BIG(*) FROM @Manifest) AS supplied_manifest_rows,
+    (SELECT STRING_AGG(CONVERT(nvarchar(20), a.SnapshotId), N', ')
+     FROM (VALUES
+         (CONVERT(bigint, 22)), (CONVERT(bigint, 93)),
+         (CONVERT(bigint, 185)), (CONVERT(bigint, 189)),
+         (CONVERT(bigint, 207)), (CONVERT(bigint, 224)),
+         (CONVERT(bigint, 225)), (CONVERT(bigint, 226)),
+         (CONVERT(bigint, 228)), (CONVERT(bigint, 229))
+     ) AS a(SnapshotId)) AS approved_snapshot_ids,
     @OperatorEvidenceReference AS operator_evidence_reference,
     N'No base rows were changed. Review the result sets, backup coverage,
-      consumer evidence, capacity projection, and exact APPLY file separately.'
+      consumer evidence, replacement peak or fallback capacity projection,
+      and the exact APPLY file separately.'
         AS next_gate;

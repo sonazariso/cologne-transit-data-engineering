@@ -288,26 +288,43 @@ DATAFILE_SHRINKFILE: SEPARATE_APPROVAL_ONLY; NO_SHRINK_EXECUTED
 PHYSICAL_WINDOWS_DISK_RECOVERY: NOT_MEASURED; DO_NOT_CLAIM_5.376_GIB_WINDOWS_RECOVERY
 ```
 
-## S153 portfolio retention closeout
+## S153–S154 portfolio retention closeout
+
+S154 update date: 2026-10-15 (Europe/Berlin).
 
 The existing Snapshot GZIP recovery work remains historical and is not
-replaced. S153 adds a separate, read-only evidence path for exactly ten
-successful persisted snapshots: inventory, deterministic selection,
-manifest, retention dry run, bounded apply template, and physical-space
-review/apply boundary under sql/portfolio/. The current worktree contains
-no live candidate result, exact SnapshotIds, post-retention counts, or
-before/after Windows C: measurement.
+replaced. S153/S154 add a separate, read-only evidence path for exactly ten
+operator-confirmed snapshots: `22, 93, 185, 189, 207, 224, 225, 226, 228,
+229`. The path includes inventory, exact-ID readback, replacement-database
+feasibility, manifest, retention dry run, bounded apply template, and
+physical-space review/apply boundary under `sql/portfolio/`. The current
+worktree contains no live row-level candidate attachment, post-retention
+counts, independently measured replacement peak, or before/after Windows C:
+measurement.
+
+The preferred cleanup method is a small independently validated replacement
+database if its complete copy/log/tempdb/rollback peak fits on the existing C:
+drive while preserving the 12 GiB floor. GTFS, warehouse and analytics
+objects are separate portfolio-necessity reviews; working ETL/SQL structures,
+source payloads, all seven child families and required `ctl` lineage remain in
+scope. Direct SQL, notebook, export, Power BI and other external consumers
+must be reviewed explicitly. The October 14 off-C checked backup remains
+unchanged; backup metadata and operator-run `RESTORE VERIFYONLY WITH CHECKSUM`
+evidence are required before cleanup.
 
 The current decision remains:
 
 ```text
 EXACT_RETENTION_COUNT: 10
-ACTUAL_SNAPSHOT_IDS: PENDING_READ_ONLY_OPERATOR_EVIDENCE
+ACTUAL_SNAPSHOT_IDS: OPERATOR_CONFIRMED — 22, 93, 185, 189, 207, 224, 225, 226, 228, 229
+LIVE_ROW_EVIDENCE: NOT_ATTACHED_IN_WORKTREE
 RETENTION_SQL_APPLIED: FALSE
 PHYSICAL_PROJECT_RECOVERY: NOT_MEASURED
+REPLACEMENT_DATABASE: PREFERRED_ONLY_IF_INDEPENDENT_PEAK_FITS_C_WITH_12_GIB_FLOOR
+GTFS_WAREHOUSE_DISPOSITION: SEPARATE_REVIEW; NO_AUTOMATIC_DISCARD
 COLLECTOR_DISABLED: TRUE
 GITHUB_PUSH: NOT_PERFORMED
-FINAL_DECISION: BLOCKED_UNTIL_EXACT_MANIFEST_AND_CAPACITY_EVIDENCE
+FINAL_DECISION: DRY_RUN_ONLY_UNTIL_LIVE_EVIDENCE_AND_OPERATOR_APPROVAL
 ```
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

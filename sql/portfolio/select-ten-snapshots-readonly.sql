@@ -19,8 +19,12 @@
 
     The operator must review the returned ten rows and copy their complete
     evidence into docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md before any APPLY
-    script is considered.  If a desired case is not present, the query does
-    not invent it; the rationale must say which available case was retained.
+    script is considered.  For the S154 closeout, the operator-confirmed IDs
+    are 22, 93, 185, 189, 207, 224, 225, 226, 228 and 229; this candidate
+    query must not override that approved set.  Use the exact-ID readback in
+    replacement-database-dry-run.sql to prove those IDs.  If a desired case
+    is not present, the query does not invent it; the rationale must say which
+    available case was retained.
 */
 USE [CologneTransitIntelligence];
 GO

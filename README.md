@@ -52,10 +52,10 @@ Read [the implementation walkthrough](docs/DATA_ENGINEERING_PIPELINE.md), [data 
 
 The repository contains source and design artifacts, not live credentials, a reproducible complete local SQL Server dump, or a deployed reporting service. The independent source-provider contract and runtime configuration must be supplied for actual collection; **collectors are intentionally disabled** in the current environment.
 
-The approved closeout retention target is **exactly 10 carefully selected source snapshots**, with their complete dependent evidence and required run/audit lineage. Exact SnapshotIds must be selected from the live database and verified before any removal. Never publish the bulk production dataset. See [database right-sizing](docs/DATABASE_RIGHTSIZING_PLAN.md). Do not commit personal data, secrets, raw provider payloads without distribution rights, or large backups.
+The approved closeout retention set is **exactly 10 source snapshots** — `22, 93, 185, 189, 207, 224, 225, 226, 228, 229` — with their complete dependent evidence and required run/audit lineage. The IDs are operator-confirmed; live row/hash/consumer evidence must still be verified before any removal. Never publish the bulk production dataset. See [the retention manifest](docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md) and [database right-sizing](docs/DATABASE_RIGHTSIZING_PLAN.md). Do not commit personal data, secrets, raw provider payloads without distribution rights, or large backups.
 
 ## Outcome
 
-**Completed engineering proof of concept with real collection and persistence evidence.** Continuous 50-station sampling, validated actual-delay KPIs, and a complete SQL Server warehouse are **not claimed**. A reference set of exactly 10 complete snapshots is planned for retention; actual SQL deletion and disk recovery must be independently verified.
+**Completed engineering proof of concept with real collection and persistence evidence.** Continuous 50-station sampling, validated actual-delay KPIs, and a complete SQL Server warehouse are **not claimed**. The ten-snapshot ID set is confirmed for a dry-run closeout; actual SQL deletion and disk recovery have not been executed and require independent evidence, explicit approval, and a measured 12 GiB C: safety-floor check.
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

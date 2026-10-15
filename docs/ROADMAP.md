@@ -6,15 +6,17 @@ Every stage follows the same control pattern:
 
 No stage is considered authoritative merely because a similar solution existed in the legacy repository.
 
-## S153 portfolio closeout (not a numbered stage)
+## S153–S154 portfolio closeout (not a numbered stage)
 
 This pilot is closed for collection, analytics-product, and visualization
 work. The numbered stage history below remains preserved evidence only.
 Collectors are disabled and unloaded; there is no new stage or GitHub push.
-The only pending operational item is an operator-run, read-only SQL result
-that can populate the exact ten-snapshot retention manifest. No destructive
-retention or physical disk-recovery statement is made until the manifest,
-consumer review, recovery point, and fresh C: capacity evidence are signed.
+The operator-confirmed retention IDs are `22, 93, 185, 189, 207, 224, 225,
+226, 228, 229`. The remaining operational item is an operator-run,
+read-only SQL result that proves their live row-level evidence and capacity
+fit. No destructive retention or physical disk-recovery statement is made
+until the manifest, external-consumer review, recovery point, replacement
+peak/fallback decision, and fresh C: capacity evidence are signed.
 
 ## Historical architecture guardrail — S87 (2026-10-05)
 

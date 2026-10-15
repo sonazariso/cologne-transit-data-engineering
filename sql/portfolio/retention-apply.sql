@@ -1,19 +1,26 @@
 /*
     COLOGNE TRANSIT INTELLIGENCE — BOUNDED TEN-SNAPSHOT RETENTION APPLY
 
-    DESTRUCTIVE OPERATOR SCRIPT.  It is inert by default:
+    DESTRUCTIVE OPERATOR SCRIPT.  It is inert by default and is not run by
+    Codex.  The S154 ID set is locked to:
+      22, 93, 185, 189, 207, 224, 225, 226, 228, 229
+
+    It is inert by default:
       @Apply = 0
       @ManifestApproved = 0
-      all recovery, capacity, consumer, and collector gates are 0/NULL
+      all recovery, capacity, consumer, replacement-choice, and collector
+      gates are 0/NULL
 
     Codex must not run this file.  An administrator may create a reviewed
     working copy only after the exact ten rows from
     select-ten-snapshots-readonly.sql, the dry-run result sets, backup
     coverage, dependency review, and the C: projection have been signed off.
 
-    Scope is deliberately narrow: retain the ten literal SnapshotIds and
+    Scope is deliberately narrow: retain the ten literal approved SnapshotIds and
     remove only nonretained rows from the seven stg child families followed
     by nonretained stg.MddMacSourceSnapshot rows.  ctl history is preserved.
+    GTFS, warehouse, analytics, working ETL/SQL structures, and unrelated ctl
+    history are outside this file's delete scope and require separate review.
     Every table is processed in small committed batches; rerunning after a
     verified interruption is idempotent.  No schema, recovery model,
     autogrowth, collector state, or existing backup is changed.
@@ -33,12 +40,17 @@ IF @@TRANCOUNT <> 0
 DECLARE @Apply BIT = 0;
 DECLARE @ManifestApproved BIT = 0;
 DECLARE @BackupCoverageConfirmed BIT = 0;
+DECLARE @BackupVerificationConfirmed BIT = 0;
 DECLARE @DependencyReviewConfirmed BIT = 0;
+DECLARE @ExternalConsumerReviewConfirmed BIT = 0;
 DECLARE @CapacityProjectionConfirmed BIT = 0;
+DECLARE @ReplacementDecisionConfirmed BIT = 0;
+DECLARE @InPlaceFallbackApproved BIT = 0;
 DECLARE @CollectorsDisabledConfirmed BIT = 0;
 DECLARE @ApprovalReference NVARCHAR(400) = N'';
 DECLARE @BackupEvidenceReference NVARCHAR(400) = N'';
 DECLARE @DependencyEvidenceReference NVARCHAR(400) = N'';
+DECLARE @ExternalConsumerEvidenceReference NVARCHAR(400) = N'';
 DECLARE @CapacityEvidenceReference NVARCHAR(400) = N'';
 DECLARE @MeasuredCurrentCFreeBytes BIGINT = NULL;
 DECLARE @MeasuredWorstCasePurgeReserveBytes BIGINT = NULL;
@@ -50,6 +62,14 @@ DECLARE @RequiredCFreeBytes BIGINT =
 DECLARE @BatchSize INT = 1000;
 DECLARE @Rows BIGINT;
 DECLARE @TotalRows BIGINT = 0;
+
+DECLARE @ApprovedSnapshotIds TABLE
+(
+    SnapshotId BIGINT NOT NULL PRIMARY KEY
+);
+
+INSERT @ApprovedSnapshotIds (SnapshotId)
+VALUES (22), (93), (185), (189), (207), (224), (225), (226), (228), (229);
 
 DECLARE @Manifest TABLE
 (
@@ -83,12 +103,17 @@ END;
 
 IF @ManifestApproved = 0
    OR @BackupCoverageConfirmed = 0
+   OR @BackupVerificationConfirmed = 0
    OR @DependencyReviewConfirmed = 0
+   OR @ExternalConsumerReviewConfirmed = 0
    OR @CapacityProjectionConfirmed = 0
+   OR @ReplacementDecisionConfirmed = 0
+   OR @InPlaceFallbackApproved = 0
    OR @CollectorsDisabledConfirmed = 0
    OR NULLIF(@ApprovalReference, N'') IS NULL
    OR NULLIF(@BackupEvidenceReference, N'') IS NULL
    OR NULLIF(@DependencyEvidenceReference, N'') IS NULL
+   OR NULLIF(@ExternalConsumerEvidenceReference, N'') IS NULL
    OR NULLIF(@CapacityEvidenceReference, N'') IS NULL
     THROW 52202, 'All reviewed retention gates and evidence references are required.', 1;
 
@@ -96,6 +121,13 @@ IF @BatchSize < 1 OR @BatchSize > 1000
     THROW 52203, 'BatchSize must remain between 1 and 1000.', 1;
 IF (SELECT COUNT_BIG(*) FROM @Manifest) <> 10
     THROW 52204, 'Exactly ten literal manifest rows are required.', 1;
+IF
+(
+    SELECT COUNT_BIG(*)
+    FROM @Manifest AS m
+    JOIN @ApprovedSnapshotIds AS a ON a.SnapshotId = m.SnapshotId
+) <> 10
+    THROW 52216, 'Manifest SnapshotIds do not exactly match the S154 approved ID set.', 1;
 IF @MeasuredCurrentCFreeBytes IS NULL
    OR @MeasuredWorstCasePurgeReserveBytes IS NULL
    OR @ProjectBaselineBytes IS NULL
@@ -359,6 +391,7 @@ SELECT
     @ApprovalReference AS approval_reference,
     @BackupEvidenceReference AS backup_evidence_reference,
     @DependencyEvidenceReference AS dependency_evidence_reference,
+    @ExternalConsumerEvidenceReference AS external_consumer_evidence_reference,
     @CapacityEvidenceReference AS capacity_evidence_reference,
     N'No ctl rows were removed. MDF free pages are not Windows C: recovery.'
         AS physical_recovery_warning;

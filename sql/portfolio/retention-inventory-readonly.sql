@@ -7,8 +7,10 @@
     file, or change collector state.
 
     The result sets are evidence inputs for the separately reviewed
-    select-ten-snapshots-readonly.sql and retention-*-apply.sql files.  The
-    database name is deliberately exact: do not adapt it by guesswork.
+    select-ten-snapshots-readonly.sql, replacement-database-dry-run.sql and
+    retention-dry-run.sql files.  The database name is deliberately exact: do
+    not adapt it by guesswork.  GTFS, warehouse and analytics objects are
+    emitted as separate review sets and are never discarded automatically.
 */
 USE [CologneTransitIntelligence];
 GO
@@ -96,6 +98,50 @@ JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
 WHERE sch.name IN (N'ctl', N'stg', N'dw', N'analytics')
 GROUP BY sch.name, obj.name
 ORDER BY reserved_bytes_all_indexes DESC, sch.name, obj.name;
+
+SELECT
+    N'portfolio.gtfs_table_review' AS statement_id,
+    sch.name AS schema_name,
+    obj.name AS table_name,
+    SUM(CONVERT(bigint, ps.reserved_page_count)) * CONVERT(bigint, 8192) AS reserved_bytes,
+    SUM(CONVERT(bigint, ps.used_page_count)) * CONVERT(bigint, 8192) AS used_bytes,
+    N'REVIEW_SEPARATELY; NO_AUTOMATIC_DISCARD' AS disposition
+FROM sys.dm_db_partition_stats AS ps
+JOIN sys.objects AS obj ON obj.object_id = ps.object_id AND obj.type = 'U'
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE LOWER(sch.name) LIKE N'%gtfs%'
+   OR LOWER(obj.name) LIKE N'%gtfs%'
+GROUP BY sch.name, obj.name
+ORDER BY reserved_bytes DESC, sch.name, obj.name;
+
+SELECT
+    N'portfolio.warehouse_table_review' AS statement_id,
+    sch.name AS schema_name,
+    obj.name AS table_name,
+    SUM(CONVERT(bigint, ps.reserved_page_count)) * CONVERT(bigint, 8192) AS reserved_bytes,
+    SUM(CONVERT(bigint, ps.used_page_count)) * CONVERT(bigint, 8192) AS used_bytes,
+    N'REVIEW_SEPARATELY; NO_AUTOMATIC_DISCARD' AS disposition
+FROM sys.dm_db_partition_stats AS ps
+JOIN sys.objects AS obj ON obj.object_id = ps.object_id AND obj.type = 'U'
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE LOWER(sch.name) IN (N'dw', N'dwh', N'warehouse')
+   OR LOWER(obj.name) LIKE N'%warehouse%'
+GROUP BY sch.name, obj.name
+ORDER BY reserved_bytes DESC, sch.name, obj.name;
+
+SELECT
+    N'portfolio.analytics_table_review' AS statement_id,
+    sch.name AS schema_name,
+    obj.name AS table_name,
+    SUM(CONVERT(bigint, ps.reserved_page_count)) * CONVERT(bigint, 8192) AS reserved_bytes,
+    SUM(CONVERT(bigint, ps.used_page_count)) * CONVERT(bigint, 8192) AS used_bytes,
+    N'REVIEW_SEPARATELY; PRESERVE WORKING SQL STRUCTURES' AS disposition
+FROM sys.dm_db_partition_stats AS ps
+JOIN sys.objects AS obj ON obj.object_id = ps.object_id AND obj.type = 'U'
+JOIN sys.schemas AS sch ON sch.schema_id = obj.schema_id
+WHERE LOWER(sch.name) = N'analytics'
+GROUP BY sch.name, obj.name
+ORDER BY reserved_bytes DESC, sch.name, obj.name;
 
 SELECT
     N'portfolio.snapshot_population' AS statement_id,
@@ -190,7 +236,42 @@ BEGIN
     WHERE js.command LIKE N'%MddMac%'
        OR js.command LIKE N'%Snapshot%'
        OR js.command LIKE N'%CologneTransitIntelligence%';
+
+    SELECT TOP (20)
+        N'portfolio.backup_verification' AS statement_id,
+        bs.database_name,
+        bs.backup_start_date,
+        bs.backup_finish_date,
+        bs.is_copy_only,
+        bs.has_backup_checksums,
+        bs.compressed_backup_size,
+        bmf.physical_device_name,
+        N'RESTORE_VERIFYONLY_WITH_CHECKSUM_REQUIRED; ATTACH_OPERATOR_RESULT'
+            AS verification_status
+    FROM msdb.dbo.backupset AS bs
+    LEFT JOIN msdb.dbo.backupmediafamily AS bmf
+        ON bmf.media_set_id = bs.media_set_id
+    WHERE bs.database_name = DB_NAME()
+      AND bs.type = 'D'
+    ORDER BY bs.backup_finish_date DESC, bs.backup_set_id DESC;
 END;
+
+SELECT
+    N'portfolio.active_sessions' AS statement_id,
+    req.session_id,
+    req.status,
+    req.command,
+    req.wait_type,
+    req.blocking_session_id,
+    ses.login_name,
+    ses.host_name,
+    ses.program_name,
+    req.start_time
+FROM sys.dm_exec_requests AS req
+JOIN sys.dm_exec_sessions AS ses ON ses.session_id = req.session_id
+WHERE req.session_id <> @@SPID
+  AND req.database_id = DB_ID()
+ORDER BY req.start_time, req.session_id;
 
 SELECT
     N'portfolio.external_consumer_review' AS statement_id,
@@ -200,12 +281,32 @@ SELECT
       consumer evidence before physical payload changes.' AS required_action;
 
 SELECT
+    N'portfolio.replacement_database_fit_gate' AS statement_id,
+    N'PREFERRED_IF_INDEPENDENTLY_VALIDATED_PEAK_FITS' AS preferred_method,
+    CONVERT(bigint, NULL) AS measured_current_c_free_bytes,
+    CONVERT(bigint, NULL) AS measured_replacement_peak_reserve_bytes,
+    CONVERT(bigint, 12) * CONVERT(bigint, 1024) * CONVERT(bigint, 1024)
+        * CONVERT(bigint, 1024) AS required_c_free_bytes,
+    N'BLOCKED_UNTIL_ISOLATED_REPLACEMENT_PEAK_IS_MEASURED; NO DATABASE COPY WAS CREATED'
+        AS status,
+    N'Use the separate replacement-database-dry-run.sql result and preserve the 12 GiB floor.'
+        AS required_action;
+
+SELECT
+    N'portfolio.before_after_measurement_contract' AS statement_id,
+    N'REQUIRED_BEFORE_AND_AFTER' AS status,
+    N'Measure Windows C: free bytes, MDF/LDF allocation and used pages,
+      tempdb, autogrowth, active sessions, retained row/hash/FK counts, and
+      external-consumer readback before and after any separately authorized
+      operation.' AS measurement_contract;
+
+SELECT
     N'portfolio.collector_state_review' AS statement_id,
-    COUNT_BIG(CASE WHEN r.Status IN (N'RUNNING', N'CLAIMED') THEN 1 END)
+    (SELECT COUNT_BIG(*) FROM ctl.MddMacCollectorRun AS r
+     WHERE r.Status IN (N'RUNNING', N'CLAIMED'))
         AS active_collector_run_rows,
-    COUNT_BIG(CASE WHEN l.Status = N'ACTIVE' THEN 1 END)
+    (SELECT COUNT_BIG(*) FROM ctl.MddMacProductionLease AS l
+     WHERE l.Status = N'ACTIVE')
         AS active_production_lease_rows,
     N'EXPECTED_ZERO; COLLECTORS MUST REMAIN DISABLED' AS expected_state
-FROM ctl.MddMacCollectorRun AS r
-FULL OUTER JOIN ctl.MddMacProductionLease AS l
-    ON l.Status = N'ACTIVE';
+;

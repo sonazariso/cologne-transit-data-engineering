@@ -4,7 +4,7 @@
 
 ## Goal and stop condition
 
-Show a recruiter the **implemented** API-to-SQL Server engineering chain, operational and data-quality engineering decisions, bounded successful acquisition, SQL persistence and limitations. Stop extending ingestion and volume-oriented storage optimization for this project. Preserve **exactly 10 complete and auditable snapshots** with all dependent rows and required run/audit lineage, subject to live selection, tested rollback and measured disk reclamation.
+Show a recruiter the **implemented** API-to-SQL Server engineering chain, operational and data-quality engineering decisions, bounded successful acquisition, SQL persistence and limitations. Stop extending ingestion and volume-oriented storage optimization for this project. Preserve **exactly 10 complete and auditable snapshots** with all dependent rows and required run/audit lineage, using the S154 operator-confirmed IDs `22, 93, 185, 189, 207, 224, 225, 226, 228, 229`, subject to live evidence, tested rollback and measured disk reclamation.
 
 ## What worked (grounded historical evidence)
 
@@ -21,7 +21,7 @@ Show a recruiter the **implemented** API-to-SQL Server engineering chain, operat
 - No continuous, representative 50-station time series. Missing fields and coverage prevent the desired system-performance KPIs.
 - No validated Actual Delay derived from provider-supplied `RecordedAtTime` at the correct event identity.
 - Historical PostgreSQL Stage 10 operational fact SQL is **not** the active SQL Server reporting implementation; Stage 10 is marked blocked in the original status.
-- A complete portable SQL demo dataset and fresh post-cleanup Windows C: measurements have not been supplied.
+- The live row-level manifest attachment and fresh post-cleanup Windows C: measurements have not been supplied; the approved ID set is recorded, but cleanup remains dry-run-only.
 
 ## Closeout deliverables
 
@@ -37,14 +37,49 @@ Show a recruiter the **implemented** API-to-SQL Server engineering chain, operat
 
 Retain old decisions, failed runs and complex storage experiments as **historical records**, clearly labeled not active. Do not republish old drafts as current installation instructions. Keep the default source code offline-safe. Active collection remains disabled for portfolio closeout.
 
+## S154 retention decision and method preference
+
+The exact operator-confirmed retention set is:
+
+```text
+22, 93, 185, 189, 207, 224, 225, 226, 228, 229
+```
+
+The preferred cleanup method is a small replacement database, but only an
+independent peak measurement can establish that it fits on the existing C:
+drive while preserving the 12 GiB safety floor. The replacement rehearsal
+must preserve all seven child families, source payloads, hashes, NULL/empty
+state, `ctl` lineage, foreign keys and working ETL/SQL structures. If the peak
+does not fit, the bounded in-place fallback requires separate approval.
+
+GTFS and warehouse tables are reviewed separately for portfolio necessity;
+they are not automatic cleanup targets. SQL metadata, SQL-Agent jobs, direct
+clients, notebooks, exports and Power BI/external consumers must be reviewed
+explicitly before any physical payload or database change.
+
+The final source-controlled SQL path is read-only inventory → exact-ID
+candidate/readback evidence → replacement feasibility review →
+`retention-dry-run.sql`. `retention-apply.sql` and file-space recovery remain
+disabled-by-default templates and were not executed.
+
+## Exact operator approval required before cleanup
+
+The administrator must sign a dated approval that names the ten IDs above,
+attaches the live hashes/counts/lineage and external-consumer review, verifies
+an off-C `RESTORE VERIFYONLY WITH CHECKSUM` recovery point, and records fresh
+before/after MDF/LDF/tempdb/C: measurements. The approval must confirm that
+the selected method keeps worst-case C: free space at or above 12 GiB. It
+authorizes the dry run only; destructive apply and any shrink require their
+own explicit approval.
+
 ## Missing sign-offs
 
-- **Retention:** user approved the exact count of 10 and removal of other historical data, but the IDs, dependencies, executable SQL and rollback boundary still require confirmation.
+- **Retention:** user confirmed the exact ten IDs; live row/hash/child evidence, dependencies, executable SQL and rollback boundary still require confirmation.
 - **Capacity:** current live disk/log/SQL allocation preflight, restore point and purge/shrink lab proof.
-- **Consumers:** actual views/jobs, direct SQL consumers and FK dependencies.
+- **Consumers:** actual views/jobs, direct SQL consumers, external consumers, GTFS/warehouse necessity and FK dependencies.
 - **GitHub:** owner-managed publication, correct target URL, publication license/permission and secret scan.
 
-**Status:** `DOCUMENTATION_DRAFT_COMPLETE / RETENTION_AND_PHYSICAL_RECLAMATION_NOT_YET_EXECUTED`.
+**Status:** `OPERATOR_ID_SET_CONFIRMED / DRY_RUN_ONLY / RETENTION_AND_PHYSICAL_RECLAMATION_NOT_EXECUTED`.
 
 ## Final statement for GitHub
 
