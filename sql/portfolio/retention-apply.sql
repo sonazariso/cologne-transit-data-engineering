@@ -52,6 +52,7 @@ DECLARE @CapacityEvidenceReference NVARCHAR(400) = N'';
 DECLARE @SchemaInventoryEvidenceReference NVARCHAR(400) = N'';
 DECLARE @CrossLayerRetentionEvidenceReference NVARCHAR(400) = N'';
 DECLARE @RequiredCFreeBytes BIGINT = CONVERT(BIGINT, 12) * 1024 * 1024 * 1024;
+DECLARE @TempdbSafetyReserveBytes BIGINT = CONVERT(BIGINT, 4) * 1024 * 1024;
 DECLARE @Rows BIGINT = 0;
 DECLARE @TotalRows BIGINT = 0;
 DECLARE @AppLockResult INT = -999;
@@ -696,7 +697,9 @@ SET @ReviewedWorstCaseBatchReserveBytes = @MeasuredWorstCaseBatchReserveBytes;
 /*
     Derive a capacity-limited batch size without ever increasing the reviewed
     manifest size.  The budget is the smallest current reserve among the
-    protected C: headroom, transaction-log free bytes and tempdb free bytes.
+    protected C: headroom, transaction-log free bytes and tempdb free bytes
+    after a protected 4 MiB safety reserve.  The tempdb reserve is not
+    available to any DELETE batch.
     A zero result is reported in dry-run mode and is a hard stop in apply mode;
     it must never be converted into a DELETE attempt.
 */
@@ -715,7 +718,7 @@ ELSE
                 - COALESCE(@TempdbAutogrowthReserveBytes, 0)
         ),
         (@LogFreeBytes),
-        (@TempdbFreeBytes)
+        (@TempdbFreeBytes - @TempdbSafetyReserveBytes)
     ) AS v(CapacityBytes);
 
 ;WITH CapacityLimited AS
@@ -788,6 +791,8 @@ SELECT
     @LogFreeBytes AS transaction_log_free_bytes,
     @TempdbAllocatedBytes AS tempdb_allocated_bytes,
     @TempdbFreeBytes AS tempdb_unallocated_bytes,
+    @TempdbSafetyReserveBytes AS tempdb_safety_reserve_bytes,
+    @TempdbFreeBytes - @TempdbSafetyReserveBytes AS tempdb_batch_capacity_bytes,
     @DataInternalFreeBytes AS mdf_internal_free_bytes,
     @DatabaseAutogrowthReserveBytes AS database_next_growth_reserve_bytes,
     @TempdbAutogrowthReserveBytes AS tempdb_next_growth_reserve_bytes,
@@ -795,7 +800,7 @@ SELECT
     @ReviewedWorstCaseBatchReserveBytes AS reviewed_worst_case_batch_reserve_bytes,
     @CapacityLimitedWorstCaseBatchReserveBytes AS capacity_limited_worst_case_batch_reserve_bytes,
     @MeasuredWorstCaseBatchReserveBytes AS measured_worst_case_batch_reserve_bytes,
-    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD_CHARGED_ONCE; EIGHT_8K_INDEX_OR_HEAP_BASE_ENVELOPE_PAGES_PER_STRUCTURE; CAPACITY_LIMITED_BATCHES_NEVER_EXCEED_REVIEWED_BATCHES; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
+    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD_CHARGED_ONCE; EIGHT_8K_INDEX_OR_HEAP_BASE_ENVELOPE_PAGES_PER_STRUCTURE; TEMPDB_CAPACITY_EXCLUDES_4_MIB_SAFETY_RESERVE; CAPACITY_LIMITED_BATCHES_NEVER_EXCEED_REVIEWED_BATCHES; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB; STOP_IF_TEMPDB_FREE_MINUS_4_MIB_IS_BELOW_BATCH_RESERVE'
         AS safety_contract;
 
 SELECT
@@ -861,8 +866,8 @@ BEGIN
         THROW 52209, 'Initial measured capacity cannot prove the 12 GiB floor for a batch.', 1;
     IF @LogFreeBytes < @MeasuredWorstCaseBatchReserveBytes
         THROW 52210, 'Initial transaction-log reserve is too small for the measured batch.', 1;
-    IF @TempdbFreeBytes < @MeasuredWorstCaseBatchReserveBytes
-        THROW 52211, 'Initial tempdb reserve is too small for the measured batch.', 1;
+    IF @TempdbFreeBytes - @TempdbSafetyReserveBytes < @MeasuredWorstCaseBatchReserveBytes
+        THROW 52211, 'Initial tempdb reserve is too small for the measured batch plus the protected 4 MiB headroom.', 1;
 END;
 
 IF @ManifestApproved = 0
@@ -1235,8 +1240,8 @@ DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
                 THROW 52217, 'Measured C: headroom would cross the 12 GiB floor; no batch started.', 1;
             IF @CurrentLogFreeBytes < @CurrentBatchReserveBytes
                 THROW 52218, 'Measured transaction-log reserve is too small; no batch started.', 1;
-            IF @CurrentTempdbFreeBytes < @CurrentBatchReserveBytes
-                THROW 52219, 'Measured tempdb reserve is too small; no batch started.', 1;
+            IF @CurrentTempdbFreeBytes - @TempdbSafetyReserveBytes < @CurrentBatchReserveBytes
+                THROW 52219, 'Measured tempdb reserve is too small to preserve the protected 4 MiB headroom; no batch started.', 1;
 
             SET @Rows = NULL;
             SET @DeleteSql = N'DELETE TOP (@BatchSize) FROM '
