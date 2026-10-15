@@ -171,9 +171,13 @@ FROM ctl.MddMacHttpAttempt AS h
 JOIN #RetainedAuditIds AS a ON a.AuditId = h.AuditId
 WHERE h.QuotaPermitId IS NOT NULL;
 
-CREATE TABLE #RetainedGtfsTripIds (TripId NVARCHAR(510) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY);
+DECLARE @RetainedGtfsTripId NVARCHAR(510) =
+    N'10536-1025-005-36.7.72:102100-20-3_DF3BB3B8-1D8B-46B1-A405-B4B30149F393';
+IF DATALENGTH(@RetainedGtfsTripId) > 400
+    THROW 52239, 'The retained GTFS TripId exceeds the validated NVARCHAR(200) temporary key width.', 1;
+CREATE TABLE #RetainedGtfsTripIds (TripId NVARCHAR(200) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY);
 INSERT #RetainedGtfsTripIds VALUES
-(N'10536-1025-005-36.7.72:102100-20-3_DF3BB3B8-1D8B-46B1-A405-B4B30149F393');
+(@RetainedGtfsTripId);
 CREATE TABLE #RetainedGtfsStopIds (StopId NVARCHAR(200) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY);
 INSERT #RetainedGtfsStopIds VALUES
 (N'de:05315:11201'), (N'de:05315:11201:7:80');
@@ -487,6 +491,7 @@ CREATE TABLE #ManifestCounts
     BatchSize INT NOT NULL,
     MaxNonRetainedRowBytes BIGINT NOT NULL,
     IndexCount INT NOT NULL,
+    IndexEnvelopePerRowBytes BIGINT NOT NULL,
     BatchReservePerRowBytes BIGINT NOT NULL,
     WorstCaseBatchReserveBytes BIGINT NOT NULL,
     CapacityLimitedBatchSize INT NOT NULL,
@@ -504,6 +509,9 @@ DECLARE @CurrentRows BIGINT;
 DECLARE @CountBatchSize INT;
 DECLARE @MaxNonRetainedRowBytes BIGINT;
 DECLARE @IndexCount INT;
+DECLARE @IndexEnvelopePagesPerStructure BIGINT;
+DECLARE @IndexEnvelopePerRowDecimal DECIMAL(38, 0);
+DECLARE @IndexEnvelopePerRowBytes BIGINT;
 DECLARE @BatchReservePerRowDecimal DECIMAL(38, 0);
 DECLARE @BatchReservePerRowBytes BIGINT;
 DECLARE @BatchReserveDecimal DECIMAL(38, 0);
@@ -511,6 +519,7 @@ DECLARE @WorstCaseBatchReserveBytes BIGINT;
 DECLARE @PostTotalRows BIGINT;
 DECLARE @RowBytesExpression NVARCHAR(MAX);
 DECLARE @Sql NVARCHAR(MAX);
+SET @IndexEnvelopePagesPerStructure = CONVERT(BIGINT, 8);
 DECLARE count_cursor CURSOR LOCAL FAST_FORWARD FOR
     SELECT SchemaName, TableName, RetentionPredicate, BatchSize, ExpectedRetainedRows
     FROM #DataRetentionManifest
@@ -520,9 +529,9 @@ FETCH NEXT FROM count_cursor INTO
     @CountSchema, @CountTable, @CountPredicate, @CountBatchSize, @ExpectedRows;
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    SET @ActualRows = NULL;
-    SET @CurrentRows = NULL;
-    SET @MaxNonRetainedRowBytes = NULL;
+    SET @ActualRows = CONVERT(BIGINT, 0);
+    SET @CurrentRows = CONVERT(BIGINT, 0);
+    SET @MaxNonRetainedRowBytes = CONVERT(BIGINT, 0);
     SET @IndexCount = NULL;
     SET @RowBytesExpression = NULL;
     SELECT @RowBytesExpression = STUFF
@@ -538,15 +547,15 @@ BEGIN
         ).value(N'.', N'NVARCHAR(MAX)'), 1, 3, N''
     );
     SET @RowBytesExpression = COALESCE(@RowBytesExpression, N'CONVERT(BIGINT, 0)');
-    SET @Sql = N'SELECT
-            @Actual = COALESCE(SUM(CASE WHEN ' + @CountPredicate + N'
-                                       THEN CONVERT(BIGINT, 1)
-                                       ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0)),
-            @Total = COUNT_BIG(*),
-            @MaxRowBytes = COALESCE(MAX(CASE WHEN NOT (' + @CountPredicate + N')
-                                             THEN ' + @RowBytesExpression + N'
-                                             ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0))
-        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x;';
+    SET @Sql = N'SELECT @Actual = COUNT_BIG(*)
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x
+        WHERE (' + @CountPredicate + N');
+        SELECT @Total = COUNT_BIG(*)
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x;
+        SELECT TOP (1) @MaxRowBytes = ' + @RowBytesExpression + N'
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable) + N' AS x
+        WHERE NOT (' + @CountPredicate + N')
+        ORDER BY ' + @RowBytesExpression + N' DESC;';
     EXEC sys.sp_executesql @Sql,
         N'@Actual BIGINT OUTPUT, @Total BIGINT OUTPUT, @MaxRowBytes BIGINT OUTPUT',
         @Actual = @ActualRows OUTPUT,
@@ -561,13 +570,27 @@ BEGIN
       AND index_id > 0
       AND is_hypothetical = 0;
 
+    /*
+        The measured row payload already includes the complete value of every
+        column, including an off-row MAX payload.  Charge that measured
+        payload once: deleting a clustered/heap row does not duplicate the
+        LOB value once for every nonclustered index.  Add a separately
+        measurable fixed envelope of eight 8-KiB pages per indexed/heap base
+        structure for index records, row locators, allocation and
+        transaction-log metadata.
+        This remains index-aware and maximum-row based without multiplying the
+        largest LOB by the number of indexes.
+    */
+    SET @IndexEnvelopePerRowDecimal =
+        CONVERT(DECIMAL(38, 0), 8192)
+            * CONVERT(DECIMAL(38, 0), COALESCE(@IndexCount, 0) + 1)
+            * CONVERT(DECIMAL(38, 0), @IndexEnvelopePagesPerStructure);
+    IF @IndexEnvelopePerRowDecimal > CONVERT(DECIMAL(38, 0), 9223372036854775807)
+        THROW 52230, 'The measured index envelope cannot be represented by a bounded reserve.', 1;
+    SET @IndexEnvelopePerRowBytes = CONVERT(BIGINT, @IndexEnvelopePerRowDecimal);
     SET @BatchReservePerRowDecimal =
-        (
-            CONVERT(DECIMAL(38, 0), COALESCE(@MaxNonRetainedRowBytes, 0))
-            + CONVERT(DECIMAL(38, 0), 8192)
-        )
-        * CONVERT(DECIMAL(38, 0), COALESCE(@IndexCount, 0) + 1)
-        * CONVERT(DECIMAL(38, 0), 4);
+        CONVERT(DECIMAL(38, 0), COALESCE(@MaxNonRetainedRowBytes, 0))
+        + @IndexEnvelopePerRowDecimal;
     SET @BatchReserveDecimal =
         @BatchReservePerRowDecimal * CONVERT(DECIMAL(38, 0), @CountBatchSize)
         + CONVERT(DECIMAL(38, 0), 65536);
@@ -581,6 +604,7 @@ BEGIN
         (
             SchemaName, TableName, ExpectedRetainedRows, ActualRetainedRows,
             CurrentTotalRows, BatchSize, MaxNonRetainedRowBytes, IndexCount,
+            IndexEnvelopePerRowBytes,
             BatchReservePerRowBytes, WorstCaseBatchReserveBytes,
             CapacityLimitedBatchSize, CapacityLimitedBatchReserveBytes
         )
@@ -588,7 +612,8 @@ BEGIN
         (
             @CountSchema, @CountTable, @ExpectedRows, @ActualRows, @CurrentRows,
             @CountBatchSize, COALESCE(@MaxNonRetainedRowBytes, 0),
-            COALESCE(@IndexCount, 0), @BatchReservePerRowBytes,
+            COALESCE(@IndexCount, 0), @IndexEnvelopePerRowBytes,
+            @BatchReservePerRowBytes,
             @WorstCaseBatchReserveBytes, @CountBatchSize,
             @WorstCaseBatchReserveBytes
         );
@@ -664,7 +689,8 @@ SELECT @MeasuredWorstCaseBatchReserveBytes = COALESCE
     MAX(WorstCaseBatchReserveBytes),
     CONVERT(BIGINT, 0)
 )
-FROM #ManifestCounts;
+FROM #ManifestCounts
+WHERE NonRetainedRows > 0;
 SET @ReviewedWorstCaseBatchReserveBytes = @MeasuredWorstCaseBatchReserveBytes;
 
 /*
@@ -701,6 +727,8 @@ ELSE
         (
             INT,
             CASE
+                WHEN mc.NonRetainedRows = 0
+                    THEN 0
                 WHEN @MeasuredCapacityBudgetBytes IS NULL
                   OR @MeasuredCapacityBudgetBytes <= 65536
                     THEN 0
@@ -728,9 +756,12 @@ SET CapacityLimitedBatchSize = cl.CapacityLimitedBatchSize,
     CapacityLimitedBatchReserveBytes = CONVERT
     (
         BIGINT,
-        CONVERT(DECIMAL(38, 0), mc.BatchReservePerRowBytes)
-            * CONVERT(DECIMAL(38, 0), cl.CapacityLimitedBatchSize)
-            + CONVERT(DECIMAL(38, 0), 65536)
+        CASE
+            WHEN mc.NonRetainedRows = 0 THEN CONVERT(DECIMAL(38, 0), 0)
+            ELSE CONVERT(DECIMAL(38, 0), mc.BatchReservePerRowBytes)
+                * CONVERT(DECIMAL(38, 0), cl.CapacityLimitedBatchSize)
+                + CONVERT(DECIMAL(38, 0), 65536)
+        END
     )
 FROM #ManifestCounts AS mc
 JOIN CapacityLimited AS cl
@@ -742,7 +773,8 @@ SELECT @CapacityLimitedWorstCaseBatchReserveBytes = COALESCE
     MAX(CapacityLimitedBatchReserveBytes),
     CONVERT(BIGINT, 0)
 )
-FROM #ManifestCounts;
+FROM #ManifestCounts
+WHERE NonRetainedRows > 0;
 SET @MeasuredWorstCaseBatchReserveBytes = @CapacityLimitedWorstCaseBatchReserveBytes;
 
 SELECT
@@ -763,7 +795,7 @@ SELECT
     @ReviewedWorstCaseBatchReserveBytes AS reviewed_worst_case_batch_reserve_bytes,
     @CapacityLimitedWorstCaseBatchReserveBytes AS capacity_limited_worst_case_batch_reserve_bytes,
     @MeasuredWorstCaseBatchReserveBytes AS measured_worst_case_batch_reserve_bytes,
-    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD; INDEX_AWARE_RESERVE; CAPACITY_LIMITED_BATCHES_NEVER_EXCEED_REVIEWED_BATCHES; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
+    N'MAXIMUM_MEASURED_NONRETAINED_ROW_PAYLOAD_CHARGED_ONCE; EIGHT_8K_INDEX_OR_HEAP_BASE_ENVELOPE_PAGES_PER_STRUCTURE; CAPACITY_LIMITED_BATCHES_NEVER_EXCEED_REVIEWED_BATCHES; REMEASURE_BEFORE_EVERY_BATCH; STOP_IF_C_FREE_MINUS_BATCH_AND_NEXT_GROWTH_RESERVE_IS_BELOW_12_GIB'
         AS safety_contract;
 
 SELECT
@@ -777,6 +809,7 @@ SELECT
     mc.BatchSize AS reviewed_batch_size,
     mc.MaxNonRetainedRowBytes AS maximum_nonretained_row_payload_bytes,
     mc.IndexCount AS index_count_used_for_reserve,
+    mc.IndexEnvelopePerRowBytes AS index_envelope_per_row_bytes,
     mc.BatchReservePerRowBytes AS batch_reserve_per_row_bytes,
     mc.CapacityLimitedBatchSize AS capacity_limited_batch_size,
     mc.CapacityLimitedBatchReserveBytes AS capacity_limited_batch_reserve_bytes,
@@ -819,7 +852,8 @@ BEGIN
           (
               SELECT 1
               FROM #ManifestCounts
-              WHERE CapacityLimitedBatchSize < 1
+              WHERE NonRetainedRows > 0
+                AND CapacityLimitedBatchSize < 1
           )
        OR @CFreeBytes - @MeasuredWorstCaseBatchReserveBytes
             - COALESCE(@DatabaseAutogrowthReserveBytes, 0)
@@ -1129,6 +1163,16 @@ IF EXISTS
     )
         THROW 52231, 'Prospective row-level foreign-key closure failed before any DELETE; retained rows depend on rows scheduled for deletion.', 1;
 
+    /* No pending table may enter the delete cursor with an unusable batch. */
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #ManifestCounts
+        WHERE NonRetainedRows > 0
+          AND CapacityLimitedBatchSize < 1
+    )
+        THROW 52240, 'A table has pending retention deletions but no capacity-proven batch of at least one row.', 1;
+
 DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
                        SELECT m.SchemaName, m.TableName, m.RetentionPredicate,
                               c.CapacityLimitedBatchSize
@@ -1136,6 +1180,7 @@ DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
     JOIN #ManifestCounts AS c
       ON c.SchemaName = m.SchemaName
      AND c.TableName = m.TableName
+    WHERE c.NonRetainedRows > 0
     ORDER BY m.DeleteOrder, m.ManifestId;
 
     OPEN delete_cursor;
@@ -1143,6 +1188,8 @@ DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
         @CurrentSchema, @CurrentTable, @CurrentPredicate, @CurrentBatchSize;
     WHILE @@FETCH_STATUS = 0
     BEGIN
+        IF @CurrentBatchSize < 1
+            THROW 52240, 'A pending retention table reached the delete cursor with an effective batch size below one.', 1;
         WHILE 1 = 1
         BEGIN
             /* Every batch obtains fresh SQL Server volume/log/tempdb evidence. */
@@ -1173,7 +1220,7 @@ DECLARE delete_cursor CURSOR LOCAL FAST_FORWARD FOR
             )
             FROM tempdb.sys.database_files AS df
             WHERE df.type = 0;
-            SELECT @CurrentBatchReserveBytes = WorstCaseBatchReserveBytes
+            SELECT @CurrentBatchReserveBytes = CapacityLimitedBatchReserveBytes
             FROM #ManifestCounts
             WHERE SchemaName = @CurrentSchema
               AND TableName = @CurrentTable;
@@ -1289,12 +1336,13 @@ OPEN post_count_cursor;
 FETCH NEXT FROM post_count_cursor INTO @CountSchema, @CountTable, @CountPredicate, @ExpectedRows;
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    SET @ActualRows = NULL;
-    SET @PostTotalRows = NULL;
-    SET @Sql = N'SELECT @Actual = COALESCE(SUM(CASE WHEN '
-        + @CountPredicate + N' THEN CONVERT(BIGINT, 1) ELSE CONVERT(BIGINT, 0) END), CONVERT(BIGINT, 0)),
-        @Total = COUNT_BIG(*) FROM '
-        + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable)
+    SET @ActualRows = CONVERT(BIGINT, 0);
+    SET @PostTotalRows = CONVERT(BIGINT, 0);
+    SET @Sql = N'SELECT @Actual = COUNT_BIG(*)
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable)
+        + N' AS x WHERE (' + @CountPredicate + N');
+        SELECT @Total = COUNT_BIG(*)
+        FROM ' + QUOTENAME(@CountSchema) + N'.' + QUOTENAME(@CountTable)
         + N' AS x;';
     EXEC sys.sp_executesql @Sql,
         N'@Actual BIGINT OUTPUT, @Total BIGINT OUTPUT',
