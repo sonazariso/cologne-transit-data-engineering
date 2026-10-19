@@ -75,11 +75,11 @@ class S157PortfolioRegressionTests(unittest.TestCase):
             "@OriginalProjectFootprintBytes",
             "@ProjectedProjectFootprintBytes",
             "complete original MDF plus LDF footprint",
-            "sys.dm_db_database_page_allocations",
-            "@MinimumReachableBytes",
+            "sys.dm_db_log_space_usage",
+            "@MinimumSafeTargetSizeMB",
             "@ActualBeforeMdfBytes",
             "@ActualAfterMdfBytes",
-            "The actual MDF allocation did not reach the reviewed target.",
+            "@MinimumSafeTargetPages",
         ):
             self.assertIn(token, self.recovery)
         self.assertRegex(

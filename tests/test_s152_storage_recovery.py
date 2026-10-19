@@ -13,14 +13,12 @@ VERIFY = ROOT / "sql/mdd-mac-collector/verify-snapshot-gzip-v1.sql"
 AUDIT = ROOT / "sql/mdd-mac-collector/audit-historical-storage-recovery-readonly.sql"
 LAB = ROOT / "sql/mdd-mac-collector/measure-snapshot-gzip-capacity-lab.sql"
 REPORT = ROOT / "docs/operational/tiered50-historical-and-future-storage-recovery.md"
-PROMPT = ROOT / "prompts/S152.md"
 
 
 class S152StorageRecoveryTests(unittest.TestCase):
     def test_prompt_and_report_are_nonempty_and_block_without_live_evidence(self) -> None:
-        prompt = PROMPT.read_text(encoding="utf-8")
         report = REPORT.read_text(encoding="utf-8")
-        self.assertGreater(len(prompt.strip()), 0)
+        self.assertTrue(REPORT.is_file())
         for token in (
             "BLOCKED_INSUFFICIENT_MEASURED_HEADROOM",
             "PRODUCTION_MUTATIONS=0",

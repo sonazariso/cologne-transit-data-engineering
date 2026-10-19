@@ -1,5 +1,8 @@
 # Tiered50 Storage Optimization V3 capacity review
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Review date:** 2026-10-13 (Europe/Berlin)  
 **Decision:** `STORAGE_V3_CAPACITY_DECISION: NO_GO`  
 **Scope:** repository implementation and bounded offline/read-only validation only. No production deployment was authorized or performed.

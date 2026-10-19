@@ -1,5 +1,8 @@
 # Future Source-Observation and Persistence Contract
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** `APPROVED SEMANTIC/DESIGN GUARDRAIL — SOURCE PERSISTENCE DEFERRED; STAGE 9 REGRESSION IMPLEMENTED; SOURCE-BACKED ACCEPTANCE PASS`<br>
 **Current stage:** Stage 3 `COMPLETE`; Stage 3A is `COMPLETE — APPROVED`,
 Stage 3B/3C design contracts are approved, and Stage 9 consumes this contract

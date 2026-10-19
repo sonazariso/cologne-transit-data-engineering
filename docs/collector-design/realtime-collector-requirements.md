@@ -1,5 +1,8 @@
 # Realtime Collector Requirements
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 > **Stage 02 approved source requirements; Stage 3B collection/cadence policy
 > approved; Stage 7 pilot design approved; implementation and activation are
 > deferred.**

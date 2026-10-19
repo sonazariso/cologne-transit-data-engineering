@@ -1,5 +1,8 @@
 # Stage 15 — Post-Cutover Validation Readiness
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 > **Current status note (2026-10-08):** This readiness record remains the
 > version-controlled offline contract for later Tiered50 validation. SQL Server
 > is the sole authoritative project database. The first scheduled Tiered50

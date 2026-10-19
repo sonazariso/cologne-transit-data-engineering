@@ -1,5 +1,8 @@
 # SQL retention scope — what “raw data” means here
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 This engineering closeout is a **data-only retention plan** for the Data
 Engineering portfolio sample. It preserves the complete deployed SQL Server
 structure and reduces only the reviewed historical rows in the executable

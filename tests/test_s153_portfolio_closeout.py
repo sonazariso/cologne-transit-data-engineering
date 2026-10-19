@@ -163,9 +163,9 @@ class S156PortfolioCloseoutTests(unittest.TestCase):
     def test_closeout_keeps_collector_and_publication_boundaries(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         status = (ROOT / "docs/PROJECT-STATUS.md").read_text(encoding="utf-8")
-        self.assertIn("collectors are intentionally disabled", readme)
-        self.assertIn("Collectors remain disabled and unloaded.", status)
-        self.assertIn("GITHUB_PUSH: NOT_PERFORMED", status)
+        self.assertIn("both Tiered50 and Legacy7 were subsequently disabled", readme)
+        self.assertIn("STOPPED / DISABLED", status)
+        self.assertIn("push via GitHub Desktop", (ROOT / "docs/GITHUB_RELEASE_CHECKLIST.md").read_text(encoding="utf-8"))
         self.assertFalse((ROOT / "powerbi/README.md").exists())
 
 

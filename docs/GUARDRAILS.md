@@ -1,5 +1,8 @@
 # Semantic and Data Guardrails
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 These guardrails apply from project foundation unless explicitly replaced by a later approved decision.
 
 The approved Stage 02 source-contract package hands future collector work to

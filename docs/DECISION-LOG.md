@@ -1,5 +1,8 @@
 # Decision Log
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 This file indexes approved project-level decisions. Detailed records may later be added under `docs/decisions/` when a decision needs alternatives/rationale captured separately.
 
 | ID | Date | Decision | Status |

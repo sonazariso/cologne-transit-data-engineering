@@ -1,5 +1,8 @@
 # Tiered50 scheduled runtime contract
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 The single Tiered50 LaunchAgent is wall-clock aligned with twelve local
 `StartCalendarInterval` minute entries: `00, 05, 10, ..., 55`. `RunAtLoad` and
 catch-up execution remain disabled, and the Tiered50 plist does not override

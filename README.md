@@ -1,61 +1,94 @@
-# Cologne Transport Intelligence — Data Engineering Pilot
+# Cologne Transit Data Engineering
 
-**Python · MDD/TRIAS API · Microsoft SQL Server · ETL/ELT · Data Quality · Source Lineage**
+**A documented, bounded public-transport API ingestion and SQL Server data-engineering project for Cologne (Köln), Germany.**
 
-A hands-on portfolio project demonstrating how public-transport source data for Cologne (Köln), Germany, can be acquired, parsed, validated, stored, and prepared as reproducible SQL datasets.
+`Python` · `MDD / TRIAS` · `VRS GTFS` · `Microsoft SQL Server` · `ELT` · `Data quality` · `Lineage` · `Quota-aware scheduling`
 
-> **Project scope closed at the successfully demonstrated engineering pilot.** This repository is not a currently running production service or a complete, continuous transport-performance dataset. The Tiered50 scheduled rollout failed its first production heartbeat and is disabled. Its diagnostics remain documented; the earlier bounded pilots and corrected Legacy7 heartbeats did collect and persist real source observations.
+> **Project status — closed and offline (19 October 2026).** Actual provider responses were acquired and persisted during bounded historical runs. A deterministic 50-station tiered collection system was designed, implemented and partially exercised, **but uninterrupted 50-station production coverage was never demonstrated**. The first scheduled Tiered50 heartbeat failed its cadence deadline; both Tiered50 and Legacy7 were subsequently disabled. No live monitoring service, public API, dashboard or production SLO is advertised.
 
-## What was demonstrated
+## Why this project exists
 
-| Capability | Implementation / evidence | Status |
+An external transit feed does not arrive as a clean table. The engineering challenge is to acquire bounded source observations, preserve their original meaning, record *which call generated which rows*, detect missing/error evidence, and keep storage, API consumption and operational cost under control. This repository is a case study in building that pathway **and documenting its capacity/rollout failure honestly**.
+
+## Implemented evidence and boundaries
+
+| Capability | Demonstrated / implemented | Boundary |
 | --- | --- | --- |
-| External API acquisition | Python MDD/TRIAS request/response handling and provider-quota checks | Demonstrated in bounded pilots |
-| Source parsing | Structured extraction of calls, timing, situation, service-section, attribute, and parser-gap evidence | Implemented; tested and historically run |
-| Relational persistence | SQL Server `ctl` control lineage and `stg` source-faithful tables, transactional stored procedure | Historically exercised on real SQL Server |
-| Operational safeguards | Runs, target audit, HTTP attempts, quota permits, leases, retries and skip accounting | Implemented; bounded validation evidence |
-| Data quality and lineage | Source values versus inference, NULL preservation, matching-confidence handling | Documented and implemented in selected paths |
-| Source-to-analytics handoff | SQL read-access views and source-quality/coverage queries | Partial; not a completed governed reporting warehouse |
-| Data collection | 343 successful HTTP responses in the Stage 8 Köln Hbf pilot; six scheduled Legacy7 buckets | Historical success; **not continuous 50-station coverage** |
+| Provider integration | Real MDD/TRIAS calls in bounded pilots; 50 station identities passed a minimal compatibility probe | Not evidence of continuous service |
+| Scheduling and governance | UTC bucket selection, tier/phase schedule, durable claims, quota permits, retry policy, launchd templates | First scheduled Tiered50 run failed; collector stopped |
+| Source-faithful parsing | Calls, timing, situation, service sections, attributes, response errors and parser gaps | Source timestamps cannot be inferred from collector time |
+| Persistence | SQL Server `ctl` lineage, `stg` snapshots and structured child evidence; transactional SQL boundary | Historical observations only; sample reduced for closeout |
+| Data quality | Source identity/missingness, request outcome, skip reasons, parse consistency, stage-specific matching evidence | No validated citywide punctuality or passenger-demand measure |
+| Data operations | Migration, SQL permissions, read-only preflights, incident analysis, quota/capacity modelling, safe stop | No measured production SLA or disaster-recovery restore test |
+| Storage lifecycle | Exactly 10 approved historical snapshot IDs; October 16 database right-sizing and Windows cleanup | Exact **post-retention** row inventory and new full-backup verification remain to be independently captured |
 
-## Data flow
+## Pipeline at a glance
 
 ```text
-MDD / TRIAS API
-   -> Python collector (request, response validation, parser)
-   -> run / target / HTTP-attempt / quota lineage (ctl)
-   -> SQL Server source snapshots and normalized evidence (stg)
-   -> SQL read-access and evidence views (stg / analytics)
-   -> SQL read-access / validated sample extracts for downstream consumers
+     VRS GTFS static reference                 MDD / TRIAS live HTTP feed
+            (design context)                              |
+                  |                             Tiered50 / Legacy7 Python
+                  |                             bucket scheduling + quota
+                  |                                       |
+                  +---------------------------> request / parse / validate
+                                                          |
+                                          SQL Server (CologneTransitIntelligence)
+                                             ctl: run, audit, quota lineage
+                                             stg: snapshot + 7 child families
+                                                          |
+                                          SQL inspection / verified sample
 ```
 
-Read [the implementation walkthrough](docs/DATA_ENGINEERING_PIPELINE.md), [data dictionary and source-quality limitations](docs/DATASET_AND_REPORTING_BOUNDARY.md), [SQL data-retention scope](docs/SQL_RETENTION_SCOPE.md), and [validation/closeout status](docs/PORTFOLIO_CLOSEOUT.md).
+No visualization or business-intelligence layer is part of the active deliverable. Historical warehouse prototypes remain only where needed to preserve SQL sample/lineage or trace architectural decisions.
 
-## Architecture and repository map
+## Fifty-station panel
 
-- `src/cologne_transit_collector/`: collector, source parsing and SQL persistence modules.
-- `scripts/`: guarded probes, imports, operator tooling, runtime checks and validation.
-- `sql/mdd-mac-collector/create-source-faithful-persistence.sql`: SQL Server control and observation schema, stored procedures and read views.
-- `docs/stages/` and `docs/source-contracts/`: engineering decisions and evidence, including prototypes that were not productionized.
-- `docs/operational/`: incident, runtime and storage audit history. Some historical documents describe **plans rather than completed work**.
-- `tests/`: automated offline regression coverage. Test success is not equivalent to a live runtime acceptance test.
+The **fixed `TIERED50_PANEL_V1`** contains 50 distinct Cologne VRS parent-station StopPointRefs, including the seven prior Legacy7 identities. The approved policy is:
 
-## Key engineering decisions
+| Tier | Stations | Interval | `NumberOfResults` | Nominal requests/day |
+| --- | ---: | ---: | ---: | ---: |
+| A | 8 | 5 minutes | 20 | 2,304 |
+| B | 20 | 15 minutes | 30 | 1,920 |
+| C | 22 | 30 minutes | 30 | 1,056 |
+| **Total** | **50** | **six 5-minute phases** | — | **5,280** |
 
-1. Retain source-provided `TimetabledTime`, `EstimatedTime`, `RecordedAtTime` and collector `ObservedAtUtc` **as different fields**, never synthesizing actual event time from estimates.
-2. Preserve row grain, identifiers, call scope (`THIS`/`PREVIOUS`/`ONWARD`), timing context (`ARRIVAL`/`DEPARTURE`) and source/observation lineage.
-3. Separate acquired raw evidence (`stg`) from operational metadata (`ctl`) and derived/report-facing projections (`analytics`).
-4. Use least-privilege SQL runtime access, secrets outside Git and fail-closed collection/quota rules.
-5. Treat incomplete days, missing actual times, and mismatched journey identities as data-quality limitations, not as zero delay or success.
+Concurrency is capped at **2**; retries are bounded at **2 total attempts**. The planned 30-minute supercycle has **110 station requests** across phases **19/18/18/18/19/18**. Nominal uninterrupted operation would require **158,400 calls in 30 days**, *before retries*; quota authorization can still prevent them. These are design arithmetic, **not achieved production metrics**.
 
-## Reproducibility and scope
+For every station's name, StopPointRef, tier, interval, phase and the exact run/authorization protocol, see [50-station collector](docs/50-STATION-COLLECTOR.md) and [`config/tiered50_runtime_manifest.json`](config/tiered50_runtime_manifest.json).
 
-The repository contains source and design artifacts, not live credentials, a reproducible complete local SQL Server dump, or a deployed reporting service. The independent source-provider contract and runtime configuration must be supplied for actual collection; **collectors are intentionally disabled** in the current environment.
+## Engineering documentation
 
-The approved closeout retention set is **exactly 10 source snapshots** — `22, 93, 185, 189, 207, 224, 225, 226, 228, 229` — with their complete dependent evidence and required run/audit lineage. Exact live RunId/AuditId/hash/child-count evidence, cross-layer selectors and direct C:/log/tempdb measurements were captured read-only on 2026-10-15. Any cleanup is bounded in-place, data-only, preserves the complete SQL Server structure (all schemas, tables, columns, indexes, keys, foreign keys, views, functions, procedures and triggers), and retains a coherent GTFS sample plus relevant warehouse dimension/fact rows. The sample is discontinuous and unsuitable for reporting; Power BI is out of scope. No destructive SQL or physical recovery has been executed. See [the retention manifest](docs/TEN_SNAPSHOT_RETENTION_MANIFEST.md), [SQL retention scope](docs/SQL_RETENTION_SCOPE.md), and [database right-sizing](docs/DATABASE_RIGHTSIZING_PLAN.md). Do not commit personal data, secrets, raw provider payloads without distribution rights, or large backups.
+Start with [documentation index](docs/README.md) for the current technical reference. Core pages:
 
-## Outcome
+- [Architecture and boundaries](docs/ARCHITECTURE.md) · [Data ingestion and SQL pipeline](docs/DATA_ENGINEERING_PIPELINE.md)
+- [50-station collector, all 50 IDs, schedule and failure modes](docs/50-STATION-COLLECTOR.md)
+- [Source contracts and data dictionary](docs/DATA-CONTRACTS.md) · [Quality, lineage and observability](docs/DATA-QUALITY-AND-OBSERVABILITY.md)
+- [Quota and capacity](docs/QUOTA-CAPACITY-RETENTION.md) · [Operations, security, backup](docs/OPERATIONS-RUNBOOK.md)
+- [Verified evidence and limitations](docs/VALIDATION-RESULTS.md) · [Current project state](docs/PROJECT-STATUS.md)
+- [Offline reproducibility](docs/REPRODUCIBILITY.md) · [Historical evidence index](docs/HISTORICAL-RECORDS.md)
 
-**Completed engineering proof of concept with real collection and persistence evidence.** Continuous 50-station sampling, validated actual-delay KPIs, and a complete SQL Server warehouse are **not claimed**. The ten-snapshot manifest and live evidence are captured for a dry-run closeout; actual SQL deletion and disk recovery have not been executed and require independent evidence, explicit approval, and a measured 12 GiB C: safety-floor check.
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `src/cologne_transit_collector/` | Collector, scheduling, TRIAS parsing and persistence code |
+| `src/cologne_transit_stage15/` | Historical verification and evidence model |
+| `config/` | Versioned fixed panel and validation contracts (templates, not live state) |
+| `sql/mdd-mac-collector/` | SQL Server schema, stored procedures and storage experiments |
+| `sql/portfolio/` | Historical bounded-retention tooling: **not for casual execution** |
+| `scripts/` | Offline validators, guarded diagnostics and operator-only scripts |
+| `deployment/launchd/` | Disabled, reviewed macOS scheduler templates |
+| `tests/` | Offline code regressions; passing tests cannot prove a live heartbeat |
+| `docs/` | Current engineering guide plus clearly labelled historical records |
+
+## Safety and reproducibility
+
+Real API access needs provider authorization; the **250,000-request/month** MDD account ceiling is a shared credential limit, not an allowance per script. No secret, raw real-time payload export, `.bak`, database file, admin capture or local diagnostic log is published in this repository. The runtime should not be started just to reproduce the docs. Run offline tests and inspect versioned/sanitized evidence; see [reproducibility](docs/REPRODUCIBILITY.md).
+
+## Closeout and what remains unverified
+
+Approved source snapshots: **`22, 93, 185, 189, 207, 224, 225, 226, 228, 229`** (plus dependent evidence). SQL Server data and log files were reduced on **16 October 2026** to **3,072 MiB MDF / 264 MiB LDF**; the operator's final C: free-space reading was **46.86 GiB**. `DBCC CHECKDB` reported no errors. These facts do **not** independently prove the exact retained rows, backup integrity or restore readiness. [Closeout details](docs/PROJECT-STATUS.md).
+
+**Project name:** Cologne Transit Data Engineering. **Existing repository URL:** `sonazariso/cologne-transit-intelligence`; rename of the remote is deferred until the edited local files are committed, pushed and links/CI/clone paths are checked. History remains under its original names; executable Python/SQL identifiers are not blindly renamed.
 
 The project was stopped due to the high volume of collected data and insufficient available storage capacity. Successful bounded ingestion and SQL Server persistence were demonstrated; continuous coverage was not achieved.

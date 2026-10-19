@@ -1,5 +1,8 @@
 # MDD/TRIAS Raw-Payload Retention Decision
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
 **Decision state:** Approved Stage 02 default; Stage 7 adds a bounded Stage 8 pilot exception<br>
 **Scope:** Full raw MDD XML/JSON response payloads

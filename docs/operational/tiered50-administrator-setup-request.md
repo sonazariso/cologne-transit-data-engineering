@@ -1,5 +1,8 @@
 # One-time Tiered50 administrator setup request
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 This is the reusable one-time setup template. The 2026-10-09 administrator
 refresh has now proven the separate administrator path with the existing
 operator-configured identity, and the narrow schema repair is complete. Tiered50

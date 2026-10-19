@@ -1,5 +1,8 @@
 # Ten-snapshot retention manifest — live evidence and operator boundary
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 **Status: `LIVE_READ_ONLY_EVIDENCE_CAPTURED_2026-10-15 / IN_PLACE_RETENTION / APPLY_NOT_EXECUTED`.**
 
 This is the finalized Data Engineering portfolio sample.  The evidence below

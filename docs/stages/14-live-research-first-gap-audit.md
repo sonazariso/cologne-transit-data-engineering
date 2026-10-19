@@ -1,5 +1,8 @@
 # Stage 14 live-research first-gap audit and S80 migration reconciliation
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 This artifact records the read-only S78 Köln Heumarkt audit and the subsequent
 offline S80 correction of the existing `LIVE_RESEARCH` SQLite file at
 `~/cologne-transit-data/live-research/collector.sqlite3`. No new MDD request,

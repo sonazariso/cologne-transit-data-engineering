@@ -1,5 +1,8 @@
 # Stage 5 — Database Architecture
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 > **S87 supersession note (2026-10-05):** This document records the earlier
 > PostgreSQL architecture design. It remains historical/deferred-cleanup
 > material; Microsoft SQL Server is now the sole authoritative project

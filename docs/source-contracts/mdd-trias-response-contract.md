@@ -1,5 +1,8 @@
 # MDD/TRIAS Response Contract
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit<br>
 **Document state:** Approved Stage 02 source contract; synchronized with post-Stage-02 consolidation<br>
 **Semantic version:** TRIAS 1.2<br>

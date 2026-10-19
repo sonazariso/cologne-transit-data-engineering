@@ -1,5 +1,8 @@
 # Stage 14 — Collector Implementation and Legacy7 SQL Runtime
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 > **Current status (2026-10-08):** The earlier SQLite-first/deferred-runtime
 > position and the corrected Legacy7 SQL runtime are retained as historical
 > chronology. The current production design is Tiered50-only; the first

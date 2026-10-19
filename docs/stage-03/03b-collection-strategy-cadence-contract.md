@@ -1,5 +1,8 @@
 # Stage 3B — Collection Strategy & Cadence Contract
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** `COMPLETE — APPROVED DESIGN CONTRACT — ACTIVATION DEFERRED`<br>
 **Completion date:** `2026-09-28`<br>
 **Project state:** Stage 0 **APPROVED**; Stage 1 **APPROVED**; Stage 2

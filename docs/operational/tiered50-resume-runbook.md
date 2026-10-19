@@ -1,5 +1,8 @@
 # Tiered50 resume runbook
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 This runbook resumes an already activated and materialized `TIERED50_PANEL_V1`
 after a stopped LaunchAgent. It is not a second cutover. The resume operation
 does not accept an effective timestamp, recreate a sampling era, rewrite target

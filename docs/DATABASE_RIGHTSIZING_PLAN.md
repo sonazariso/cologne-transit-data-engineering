@@ -1,5 +1,8 @@
 # Database right-sizing for the Data Engineering portfolio sample — NOT EXECUTED
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 **Status date:** October 15, 2026.  The approved outcome is bounded,
 in-place, data-only retention: exactly ten complete MDD snapshots, their
 dependent rows, and the minimum coherent GTFS, warehouse, realtime and

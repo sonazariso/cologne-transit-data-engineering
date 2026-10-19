@@ -1,14 +1,12 @@
-# Contributing / Project Discipline
+# Contributing to the Data Engineering portfolio
 
-This is currently a controlled portfolio project. Changes should preserve the stage-gated review model.
+This repository is a **closed and offline engineering case study**. Contributions should be documentation/bugfixes reviewed against preserved source evidence, not unauthorized reactivation of live API collectors.
 
-Before implementing a new architectural or semantic decision:
+1. State exactly which source/code artifact supports each claim and its observation date.
+2. Distinguish design, offline test, bounded live pilot and continuous-production evidence.
+3. Keep source time, call/arrival context, repeated observations, event identity, sampling era and NULL semantics intact.
+4. Never commit provider keys, SQL administrator evidence, raw logs, backups, live payloads or personal paths.
+5. Keep the fixed 50-station manifest unchanged unless a new selection version, quota plan and operator approval exist.
+6. Data-changing SQL scripts and runtime activation require explicit review, verified backups and capacity gates. No instruction here grants permission to execute them.
 
-1. identify the roadmap stage;
-2. document evidence and assumptions;
-3. define tests/validation;
-4. obtain approval;
-5. implement narrowly;
-6. update status/decision documentation.
-
-Avoid “cleanup” changes that silently alter semantics, especially around timing, cancellation, matching, scope, sampling, and NULL handling.
+See [current project documentation](docs/README.md) and [historical evidence](docs/HISTORICAL-RECORDS.md).

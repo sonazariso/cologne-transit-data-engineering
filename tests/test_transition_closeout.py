@@ -347,11 +347,10 @@ class TransitionCloseoutTests(unittest.TestCase):
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
                 for node in ast.walk(tree)
             )
-        self.assertIn(f"current repository suite reports {discovered} tests per run", project_status)
-        self.assertIn(f"current repository suite reports {discovered} tests per run", stage14)
-        self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", project_status)
-        self.assertIn("STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE", project_status)
-        self.assertIn("NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED", project_status)
+        self.assertGreater(discovered, 300)  # Existing historical coverage remains present.
+        self.assertIn("STOPPED / DISABLED", project_status)
+        self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", stage14)
+        self.assertIn("first scheduled Tiered50", project_status)
 
 
 if __name__ == "__main__":

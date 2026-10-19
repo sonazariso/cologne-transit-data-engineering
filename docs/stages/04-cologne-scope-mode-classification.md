@@ -1,5 +1,8 @@
 # Stage 4 — Cologne Scope & Mode Classification
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** `COMPLETE — APPROVED`  
 **Completion date:** 2026-09-28  
 **Scope:** static-source validation and analytical design contract only

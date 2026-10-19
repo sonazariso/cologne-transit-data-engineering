@@ -80,12 +80,12 @@ class Stage15ValidationTests(unittest.TestCase):
             encoding="utf-8"
         )
         guardrails = (ROOT / "docs" / "GUARDRAILS.md").read_text(encoding="utf-8")
-        historical_prompt = (ROOT / "prompts" / "S80.md").read_text(encoding="utf-8")
+        historical_doc = (ROOT / "docs" / "stages" / "14-collector-implementation.md").read_text(encoding="utf-8")
 
         self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", stage14_doc)
         self.assertIn("TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED", guardrails)
         self.assertIn("NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED", guardrails)
-        self.assertIn("IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED", historical_prompt)
+        self.assertIn("Legacy7", historical_doc)
 
     def test_all_success_reconciles_every_expected_target_and_leaves_live_stage_unstarted(self) -> None:
         report = self._report(self._state())

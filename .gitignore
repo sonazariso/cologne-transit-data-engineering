@@ -58,3 +58,18 @@ __pycache__/
 *.7z
 *.tar
 *.gz
+
+# Collector diagnostic artifacts and confidential evidence
+*admin-evidence*.json
+*discovery*.jsonl
+*.pem
+*.p12
+*.key
+*.pfx
+*.dmp
+*.dump
+*.csv
+!docs/examples/*.csv
+
+# Python source editor backups
+*.py.bak

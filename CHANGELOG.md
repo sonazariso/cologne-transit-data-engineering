@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-19 — Data Engineering portfolio documentation and public source curation
+
+- Adopted **Cologne Transit Data Engineering** display name, without breaking historical SQL/database/python/launchd identifiers.
+- Replaced the active documentation with an engineering-only architecture, exact 50-station schedule/identity contract, source dictionary, quality/lineage, quota/storage, runbook, result matrix, closeout and GitHub Desktop handoff.
+- Corrected obsolete pre-16-October no-shrink/no-cleanup status with operator-observed MDF/LDF sizes, CHECKDB and C: free-space readings; explicitly left post-retention counts and new verified backup as open.
+- Removed source distribution of nested archives, live discovery logs, admin captures, Power BI-only documents, analytics-only script and iterative prompt history. Preserved remaining historical stages/operational evidence under dated banners.
+- **No collector activation, live API request, SQL mutation, database verification, Git commit or GitHub push.**
+
+---
+
+## Previous implementation history (historical, may describe superseded runtime status)
+
+# Changelog
+
 ## Unreleased
 
 - Corrected Windows backup evidence discovery so one-row backup-media results

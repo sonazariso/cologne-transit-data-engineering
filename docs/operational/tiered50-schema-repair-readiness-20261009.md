@@ -1,5 +1,8 @@
 # Tiered50 schema-repair closeout
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 Captured 2026-10-09 from the separate administrator path. The scoped schema
 repair is complete. It created only
 `ctl.MddMacProductionResumeEvent` from the authoritative source-faithful DDL;

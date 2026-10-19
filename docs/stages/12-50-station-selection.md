@@ -1,5 +1,8 @@
 # Stage 12 — 50-Station Selection
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** `COMPLETE — APPROVED FIXED 50-STATION PANEL`
 
 **Panel version:** `TIERED50_PANEL_V1`
