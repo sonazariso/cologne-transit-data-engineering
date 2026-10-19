@@ -1,0 +1,390 @@
+{
+  "artifact_version": "LEGACY7_PRODUCTION_TRANSITION_CLOSEOUT_EVIDENCE_V1",
+  "evidence_capture_timestamp_utc": "2026-10-07T20:53:40.744Z",
+  "authoritative_database": {
+    "database_name": "CologneTransitIntelligence",
+    "readback_status": "PASS",
+    "sql_readback_scope": "READ_ONLY_ADMIN_CATALOG_AND_RUNTIME_EVIDENCE"
+  },
+  "current_status": {
+    "stage_14_overall": "LEGACY7 SQL SERVER RUNTIME ACTIVE — TIERED50 CUTOVER DEFERRED",
+    "stage_14_collector": "STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE",
+    "stage_15b": "NOT STARTED — AWAITS TIERED50 CUTOVER",
+    "collection_context": "MAC_LEGACY7_PRODUCTION",
+    "selection_policy_version": "LEGACY7_SQL_SLOT_V1"
+  },
+  "sanitization": {
+    "credentials_included": false,
+    "secret_values_included": false,
+    "api_keys_included": false,
+    "passwords_included": false,
+    "keychain_values_included": false,
+    "raw_mdd_payloads_included": false
+  },
+  "windows_legacy7_retirement": {
+    "operator_task_name": "\\Cologne Transit Realtime Collector",
+    "operator_task_state": "DISABLED",
+    "final_windows_collector_run_id": 40393,
+    "final_windows_run_started_at_utc": "2026-10-07T13:43:54Z",
+    "final_windows_run_completed_at_utc": "2026-10-07T13:43:56Z",
+    "final_windows_observation_timestamp_utc": "2026-10-07T13:43:55Z",
+    "final_windows_run_status": "Succeeded",
+    "final_windows_http_status": 200,
+    "final_windows_sampling_target_id": 5,
+    "final_windows_sampling_slot": 9,
+    "retirement_evidence_boundary_utc": "2026-10-07T16:37:17.988028Z",
+    "proof_no_newer_windows_writer": {
+      "observation_boundaries": 2,
+      "newer_windows_collector_runs": 0,
+      "newer_windows_realtime_observations": 0,
+      "writer_state": "NO_NEW_ACTIVITY",
+      "status": "PASS"
+    }
+  },
+  "legacy7_sampling_targets": {
+    "sampling_target_ids_1_through_7_preserved": true,
+    "sampling_target_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "target_rows": [
+      {
+        "sampling_target_id": 1,
+        "stop_point_ref": "de:05315:11110",
+        "target_name": "Köln Heumarkt",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 2,
+        "stop_point_ref": "de:05315:11201",
+        "target_name": "Köln Hbf",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 3,
+        "stop_point_ref": "de:05315:12711",
+        "target_name": "Köln Rodenkirchen Bf",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 4,
+        "stop_point_ref": "de:05315:14201",
+        "target_name": "Köln Bf Ehrenfeld",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 5,
+        "stop_point_ref": "de:05315:16601",
+        "target_name": "Köln Worringen S-Bahn",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 6,
+        "stop_point_ref": "de:05315:17311",
+        "target_name": "Köln Porz Markt",
+        "number_of_results": 5,
+        "is_enabled": true
+      },
+      {
+        "sampling_target_id": 7,
+        "stop_point_ref": "de:05315:19201",
+        "target_name": "Köln Bf Mülheim",
+        "number_of_results": 5,
+        "is_enabled": true
+      }
+    ],
+    "preservation_result": "PASS"
+  },
+  "legacy7_slot_mapping": {
+    "rule_classification": "PASS",
+    "bucket_to_slot_rule": "UTC_EPOCH_BUCKET_MOD_10_PLUS_1",
+    "selector_procedure": "ctl.uspGetMddRealtimeSamplingTarget",
+    "enabled_slot_count": 10,
+    "selection_shape": "ONE_TARGET_PER_UTC_FIVE_MINUTE_BUCKET",
+    "live_selector_reconciliation": "PASS",
+    "slots": [
+      {
+        "sampling_slot": 1,
+        "sampling_target_id": 2
+      },
+      {
+        "sampling_slot": 2,
+        "sampling_target_id": 7
+      },
+      {
+        "sampling_slot": 3,
+        "sampling_target_id": 1
+      },
+      {
+        "sampling_slot": 4,
+        "sampling_target_id": 4
+      },
+      {
+        "sampling_slot": 5,
+        "sampling_target_id": 6
+      },
+      {
+        "sampling_slot": 6,
+        "sampling_target_id": 2
+      },
+      {
+        "sampling_slot": 7,
+        "sampling_target_id": 7
+      },
+      {
+        "sampling_slot": 8,
+        "sampling_target_id": 1
+      },
+      {
+        "sampling_slot": 9,
+        "sampling_target_id": 5
+      },
+      {
+        "sampling_slot": 10,
+        "sampling_target_id": 3
+      }
+    ]
+  },
+  "migration_readback": {
+    "migration_table_count": 26,
+    "migration_routine_view_count": 4,
+    "legacy7_lineage_columns": [
+      "SamplingSlot",
+      "SelectionPolicyVersion"
+    ],
+    "status": "PASS"
+  },
+  "oversampling_methodology_evidence": {
+    "methodology_evidence_id": 1,
+    "era_code": "MAC_CUTOVER_VALIDATION_OVERSAMPLING",
+    "panel_version": "MDD_MAC_LEGACY7_EXISTING_V1",
+    "collection_context": "MAC_PYTHON_MSSQL_PREPARED",
+    "methodology_version": "LEGACY7_CADENCE_REVIEW_V1",
+    "affected_run_ids": [
+      "127809b0-70fa-4770-9943-664942be5fc3",
+      "83c3f261-5bf0-484e-8de6-b6f0e0724a49",
+      "5a7e014c-6266-421c-b402-98c4f1cb89b6"
+    ],
+    "actual_initial_attempts": 21,
+    "historical_equivalent_initial_attempts": 3,
+    "excess_initial_attempts": 18,
+    "recorded_at_utc": "2026-10-07T18:45:07.308359Z",
+    "per_run_shape": [
+      {
+        "run_id": "127809b0-70fa-4770-9943-664942be5fc3",
+        "target_audit_count": 7,
+        "initial_attempt_count": 7,
+        "snapshot_count": 7,
+        "historical_equivalent_initial_attempts": 1
+      },
+      {
+        "run_id": "83c3f261-5bf0-484e-8de6-b6f0e0724a49",
+        "target_audit_count": 7,
+        "initial_attempt_count": 7,
+        "snapshot_count": 7,
+        "historical_equivalent_initial_attempts": 1
+      },
+      {
+        "run_id": "5a7e014c-6266-421c-b402-98c4f1cb89b6",
+        "target_audit_count": 7,
+        "initial_attempt_count": 7,
+        "snapshot_count": 7,
+        "historical_equivalent_initial_attempts": 1
+      }
+    ],
+    "status": "PASS"
+  },
+  "corrected_sampling_era": {
+    "sampling_era_id": 1,
+    "era_code": "MAC_LEGACY7_PRODUCTION",
+    "panel_version": "MDD_MAC_LEGACY7_EXISTING_V1",
+    "effective_at_utc": "2026-10-07T19:51:46.041Z",
+    "timestamp_kind": "FIRST_CORRECTED_SCHEDULED_HEARTBEAT",
+    "is_active": true,
+    "is_synthetic": false,
+    "status": "PASS"
+  },
+  "dedicated_runtime_security": {
+    "login_name": "CologneTransitCollector",
+    "role_name": "CologneTransitCollectorRuntime",
+    "database_name": "CologneTransitIntelligence",
+    "preflight_status": "PASS",
+    "server_roles": {
+      "sysadmin": false,
+      "serveradmin": false,
+      "securityadmin": false
+    },
+    "broad_database_roles": {
+      "db_owner": false,
+      "db_datareader": false,
+      "db_datawriter": false
+    },
+    "role_membership": "CologneTransitCollector IS MEMBER OF CologneTransitCollectorRuntime",
+    "exact_effective_object_grant_count": 24,
+    "exact_effective_object_grant_set": [
+      "GRANT INSERT ON OBJECT::ctl.MddMacCollectorRun TO [CologneTransitCollectorRuntime]",
+      "GRANT UPDATE ON OBJECT::ctl.MddMacCollectorRun TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacDispatcherClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddMacDispatcherClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT UPDATE ON OBJECT::ctl.MddMacDispatcherClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacDispatcherClaimEvent TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacHttpAttempt TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacQuotaAudit TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacQuotaPermit TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddMacQuotaPermit TO [CologneTransitCollectorRuntime]",
+      "GRANT UPDATE ON OBJECT::ctl.MddMacQuotaPermit TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacTargetAudit TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddMacTargetAudit TO [CologneTransitCollectorRuntime]",
+      "GRANT UPDATE ON OBJECT::ctl.MddMacTargetAudit TO [CologneTransitCollectorRuntime]",
+      "GRANT VIEW DEFINITION ON OBJECT::ctl.MddMacTargetAudit TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacTargetClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddMacTargetClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT UPDATE ON OBJECT::ctl.MddMacTargetClaim TO [CologneTransitCollectorRuntime]",
+      "GRANT INSERT ON OBJECT::ctl.MddMacTargetClaimEvent TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddRealtimeSamplingSlot TO [CologneTransitCollectorRuntime]",
+      "GRANT SELECT ON OBJECT::ctl.MddRealtimeSamplingTarget TO [CologneTransitCollectorRuntime]",
+      "GRANT EXECUTE ON OBJECT::ctl.uspGetMddRealtimeSamplingTarget TO [CologneTransitCollectorRuntime]",
+      "GRANT VIEW DEFINITION ON OBJECT::ctl.uspGetMddRealtimeSamplingTarget TO [CologneTransitCollectorRuntime]",
+      "GRANT EXECUTE ON OBJECT::stg.uspPersistMddMacSnapshot TO [CologneTransitCollectorRuntime]"
+    ],
+    "stale_unexpected_grant_audit": {
+      "expected_effective_grant_count": 24,
+      "observed_effective_grant_count": 24,
+      "stale_grant_count": 0,
+      "unexpected_grant_count": 0,
+      "direct_login_grant_count": 0,
+      "deny_grant_count": 0,
+      "status": "PASS"
+    }
+  },
+  "runtime_configuration": {
+    "runtime_json_path": "/Users/admin/Library/Application Support/CologneTransitIntelligence/runtime.json",
+    "runtime_json_mode": "0o600",
+    "username": "CologneTransitCollector",
+    "database": "CologneTransitIntelligence",
+    "secret_keys_present": [],
+    "pending_keychain_credential_absent": true,
+    "final_keychain_credential_available": true,
+    "keychain_value_disclosed": false
+  },
+  "launch_agent": {
+    "installed_path": "/Users/admin/Library/LaunchAgents/com.cologne-transit-intelligence.mdd-collector.plist",
+    "installed_sha256": "051958af675218f61fca5da6def595e1b83597b5f2b8b4f46ac54f0376688f1f",
+    "start_interval_seconds": 300,
+    "throttle_interval_seconds": 300,
+    "run_at_load": false,
+    "plist_disabled": false,
+    "launchctl_loaded": true,
+    "launchctl_enabled": true,
+    "launchctl_state_at_capture": "not running",
+    "last_exit_code": 0,
+    "launch_count_at_capture": 6,
+    "active_state": "ACTIVE_LOADED_ENABLED"
+  },
+  "corrected_heartbeats": [
+    {
+      "run_id": "85d2d601-ff66-4fd1-b3e6-105a1a384478",
+      "logical_bucket": 5971342,
+      "sampling_slot": 3,
+      "sampling_target_id": 1,
+      "target_identity": "de:05315:11110",
+      "collection_context": "MAC_LEGACY7_PRODUCTION",
+      "selection_policy_version": "LEGACY7_SQL_SLOT_V1",
+      "started_at_utc": "2026-10-07T19:51:46.041Z",
+      "completed_at_utc": "2026-10-07T19:51:53.136Z",
+      "http_status": 200,
+      "http_outcome": "HTTP_RESPONSE",
+      "target_audit_count": 1,
+      "initial_attempt_count": 1,
+      "snapshot_count": 1,
+      "run_status": "COMPLETE",
+      "audit_status": "SUCCEEDED",
+      "parser_outcome": "PARSED",
+      "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT",
+      "sql_login_used": "NOT_PROVEN_IN_CURRENT_READBACK"
+    },
+    {
+      "run_id": "8286961f-0edc-4b64-b5ef-15ae776c1389",
+      "logical_bucket": 5971343,
+      "sampling_slot": 4,
+      "sampling_target_id": 4,
+      "target_identity": "de:05315:14201",
+      "collection_context": "MAC_LEGACY7_PRODUCTION",
+      "selection_policy_version": "LEGACY7_SQL_SLOT_V1",
+      "started_at_utc": "2026-10-07T19:56:54.008Z",
+      "completed_at_utc": "2026-10-07T19:57:00.083Z",
+      "http_status": 200,
+      "http_outcome": "HTTP_RESPONSE",
+      "target_audit_count": 1,
+      "initial_attempt_count": 1,
+      "snapshot_count": 1,
+      "run_status": "COMPLETE",
+      "audit_status": "SUCCEEDED",
+      "parser_outcome": "PARSED",
+      "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT",
+      "sql_login_used": "NOT_PROVEN_IN_CURRENT_READBACK"
+    },
+    {
+      "run_id": "24cb4cab-38f9-4629-bedf-6bf41c52b57a",
+      "logical_bucket": 5971344,
+      "sampling_slot": 5,
+      "sampling_target_id": 6,
+      "target_identity": "de:05315:17311",
+      "collection_context": "MAC_LEGACY7_PRODUCTION",
+      "selection_policy_version": "LEGACY7_SQL_SLOT_V1",
+      "started_at_utc": "2026-10-07T20:02:00.931Z",
+      "completed_at_utc": "2026-10-07T20:02:08.421Z",
+      "http_status": 200,
+      "http_outcome": "HTTP_RESPONSE",
+      "target_audit_count": 1,
+      "initial_attempt_count": 1,
+      "snapshot_count": 1,
+      "run_status": "COMPLETE",
+      "audit_status": "SUCCEEDED",
+      "parser_outcome": "PARSED",
+      "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT",
+      "sql_login_used": "NOT_PROVEN_IN_CURRENT_READBACK"
+    }
+  ],
+  "nominal_legacy7_cadence_reconciliation": {
+    "heartbeat_interval_seconds": 300,
+    "targets_per_heartbeat": 1,
+    "logical_requests_per_hour": 12,
+    "logical_requests_per_day": 288,
+    "logical_requests_per_30_day_month": 8640,
+    "logical_requests_per_31_day_month": 8928,
+    "oversampling_window_excluded_from_nominal_volume": true,
+    "status": "PASS"
+  },
+  "tiered50": {
+    "active_result": "INACTIVE",
+    "active_tiered50_sampling_era_count": 0,
+    "new_tiered50_production_target_ids": [],
+    "cutover_status": "DEFERRED",
+    "stage_15b_status": "NOT STARTED — AWAITS TIERED50 CUTOVER"
+  },
+  "power_bi": {
+    "status": "UNCHANGED",
+    "changes_made_by_this_closeout": false
+  },
+  "manual_heumarkt": {
+    "request_issued": false,
+    "confirmation": "NO_MANUAL_HEUMARKT_REQUEST"
+  },
+  "read_only_capture_scope": {
+    "sql_queries_read_only": true,
+    "sql_writes_issued": 0,
+    "mdd_requests_issued": 0,
+    "historical_values_not_proven_marker": "NOT_PROVEN_IN_CURRENT_READBACK"
+  }
+}

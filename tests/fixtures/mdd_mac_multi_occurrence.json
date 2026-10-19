@@ -1,0 +1,57 @@
+{
+  "serviceDelivery": {
+    "status": "OK",
+    "responseTimestamp": "2026-10-01T12:00:00Z[GMT]",
+    "deliveryPayload": {
+      "stopEventResponse": {
+        "stopEventResult": [
+          {
+            "resultId": "multi-occurrence-result-1",
+            "stopEvent": {
+              "service": {
+                "operatingDayRef": "2026-10-01",
+                "journeyRef": "multi-occurrence-journey-1",
+                "lineRef": "line-parent",
+                "serviceSection": [
+                  {
+                    "lineRef": "line-section-1",
+                    "directionRef": "north",
+                    "operatorRef": "operator-1",
+                    "mode": {"ptMode": "tram"},
+                    "name": "section one",
+                    "via": "via one"
+                  },
+                  {
+                    "lineRef": "line-section-2",
+                    "directionRef": "south",
+                    "operatorRef": "operator-2",
+                    "mode": {"ptMode": "bus"},
+                    "name": "section two",
+                    "via": "via two"
+                  }
+                ],
+                "incidentCall": {
+                  "attribute": [
+                    {"code": "INC-1", "text": "first provider attribute"},
+                    {"code": "INC-2", "text": "second provider attribute"}
+                  ]
+                }
+              },
+              "thisCall": {
+                "callAtStop": {
+                  "stopPointRef": "de:05315:multi",
+                  "stopSeqNumber": 4,
+                  "serviceArrival": {
+                    "timetabledTime": "2026-10-01T12:00:00Z[GMT]",
+                    "estimatedTime": "2026-10-01T12:01:00Z[GMT]",
+                    "recordedAtTime": "2026-10-01T12:00:42Z[GMT]"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

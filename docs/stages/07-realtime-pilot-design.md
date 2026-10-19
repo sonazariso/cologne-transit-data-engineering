@@ -1,5 +1,8 @@
 # Stage 7 — Realtime Pilot Design
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** `COMPLETE — APPROVED PILOT DESIGN`  
 **Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Date:** `2026-09-28`  
@@ -247,11 +250,15 @@ shared-quota, and readiness analysis.
 ### 5.3 Quota accounting
 
 The conservative project ceiling remains **250,000 MDD HTTP requests per
-month**. The approved operational planning envelope is **83–84%** of that
-ceiling: **207,500–210,000 MDD HTTP requests per month**. Preserve the
+month**. The historical Stage 7 operational planning target was **83–84%** of
+that ceiling: **207,500–210,000 MDD HTTP requests per month**. Preserve the
 remaining **40,000–42,500 requests per month**, approximately **16–17%**, as
 unallocated headroom. Normal scheduled production traffic must not be planned
-against the full 250,000-request ceiling.
+against the full 250,000-request ceiling. Stage 13's explicitly approved
+lower-load design supersedes any interpretation of `207,500` as a minimum
+utilization requirement; Stage 13 uses `210,000` as the normal operational
+maximum, `207,500` as the automatic-retry protection boundary, and no minimum
+utilization gate.
 
 For the 3-second / 60-minute Stage 8 pilot, the maximum is **1200 scheduled
 logical slots** and **1200 normal HTTP attempts** because retries are zero.
@@ -263,8 +270,8 @@ skipped for overlap does not create an HTTP attempt.
 `NumberOfResults` never counts as HTTP attempts. This is a bounded diagnostic
 pilot budget, not a production cadence approval; Stage 13 owns final
 production station tiers, cadence, staggering, retry policy, overlap analysis,
-and the full monthly request projection, sized inside the operational planning
-envelope unless the user later changes this decision.
+and the full monthly request projection under its explicit normal operational
+maximum and automatic-retry protection boundary.
 
 The pilot does not claim knowledge of total account usage by other external
 callers sharing the credential. Stage 13 remains responsible for production
@@ -830,7 +837,7 @@ production `NumberOfResults` decision.
 | 5 | The `TimeWindow` decision is explicit. | PASS — omitted; semantically available but not selected. |
 | 6 | Cadence, duration, and request ceiling are explicit. | PASS — V3 3-second fixed start-to-start slots, 60-minute maximum, 1200 scheduled slots and normal HTTP attempts. |
 | 7 | Timeout and retry behavior are explicit. | PASS — 30 seconds, zero retries. |
-| 8 | Quota accounting is explicit. | PASS — actual attempts counted; 250,000/month remains the conservative ceiling; 207,500–210,000/month (83–84%) is the operational planning envelope; the 1200-attempt maximum is 0.48% of the full ceiling and approximately 0.57–0.58% of the envelope. |
+| 8 | Quota accounting is explicit. | PASS — actual attempts counted; 250,000/month remains the conservative ceiling; the historical Stage 7 207,500–210,000/month (83–84%) planning target is recorded; the 1200-attempt maximum is 0.48% of the full ceiling. |
 | 9 | Overlap and catch-up behavior are explicit. | PASS — no concurrency or catch-up; overlap slot skipped. |
 | 10 | Authentication, rate-limit, and failure stop rules are explicit. | PASS — Section 6. |
 | 11 | Field retention is tied to approved prior contracts. | PASS — Sections 2 and 7. |

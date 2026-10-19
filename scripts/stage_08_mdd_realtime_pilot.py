@@ -16,11 +16,13 @@ used.
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 import re
 import shutil
 import socket
+import ssl
 import tempfile
 import time
 import uuid
@@ -74,6 +76,18 @@ RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS = (
     "RECORDED_AT_TIME_EVIDENCE_RETAINED_MAX_24_HOURS"
 )
 TEMP_FAILURE_RETENTION_STATUS = "PENDING_MAX_24_HOURS"
+
+TRANSPORT_FAILURE_CATEGORIES = frozenset(
+    {
+        "DNS_RESOLUTION_FAILED",
+        "NETWORK_UNREACHABLE",
+        "CONNECTION_REFUSED",
+        "TLS_FAILURE",
+        "PROXY_OR_ENVIRONMENT_FAILURE",
+        "TIMEOUT",
+        "OTHER_NETWORK_FAILURE",
+    }
+)
 
 SUCCESS_APPLICATION_STATUSES = {"ok", "success", "successful", "completed", "true"}
 
@@ -859,6 +873,65 @@ def clean_error(value: Any, api_key: str) -> str:
     return (text or type(value).__name__)[:MAX_ERROR_CHARS]
 
 
+def classify_transport_failure(error: Any) -> str:
+    """Classify a transport failure without returning its message.
+
+    The returned value is intentionally a small allow-listed category.  Callers
+    may retain the category in evidence, but must not retain the exception
+    message, URL, headers, proxy configuration, or credential material.
+    """
+
+    candidates = [error]
+    reason = getattr(error, "reason", None)
+    if reason is not None and reason is not error:
+        candidates.insert(0, reason)
+
+    for candidate in candidates:
+        if isinstance(candidate, (socket.timeout, TimeoutError)):
+            return "TIMEOUT"
+        if isinstance(candidate, (ssl.SSLError, ssl.CertificateError)):
+            return "TLS_FAILURE"
+        if isinstance(candidate, (ConnectionRefusedError,)):
+            return "CONNECTION_REFUSED"
+        candidate_errno = getattr(candidate, "errno", None)
+        if candidate_errno == errno.ECONNREFUSED:
+            return "CONNECTION_REFUSED"
+        if candidate_errno in {errno.ENETUNREACH, errno.EHOSTUNREACH}:
+            return "NETWORK_UNREACHABLE"
+        if isinstance(candidate, socket.gaierror):
+            return "DNS_RESOLUTION_FAILED"
+        if candidate_errno in {
+            getattr(socket, "EAI_AGAIN", object()),
+            getattr(socket, "EAI_FAIL", object()),
+            getattr(socket, "EAI_NONAME", object()),
+            getattr(socket, "EAI_NODATA", object()),
+        }:
+            return "DNS_RESOLUTION_FAILED"
+
+        # These checks use only a lower-cased type/message discriminator.  The
+        # original text is never returned by this function.
+        type_name = type(candidate).__name__.casefold()
+        safe_marker = str(candidate).casefold()
+        if "proxy" in type_name or "proxy" in safe_marker or "tunnel connection failed" in safe_marker:
+            return "PROXY_OR_ENVIRONMENT_FAILURE"
+        if any(marker in safe_marker for marker in (
+            "name or service not known",
+            "nodename nor servname",
+            "temporary failure in name resolution",
+            "no such host",
+            "getaddrinfo failed",
+        )):
+            return "DNS_RESOLUTION_FAILED"
+        if "connection refused" in safe_marker:
+            return "CONNECTION_REFUSED"
+        if any(marker in safe_marker for marker in ("network is unreachable", "host is unreachable")):
+            return "NETWORK_UNREACHABLE"
+        if "tls" in type_name or "ssl" in type_name or "certificate" in type_name:
+            return "TLS_FAILURE"
+
+    return "OTHER_NETWORK_FAILURE"
+
+
 def sanitize_for_artifact(value: Any, api_key: str) -> Any:
     """Sanitize values before any diagnostic JSONL or stdout write."""
 
@@ -1089,20 +1162,20 @@ def perform_http_request(
         failure_detail = clean_error(error, api_key)
     except (socket.timeout, TimeoutError) as error:
         failure = "TIMEOUT"
-        failure_detail = clean_error(error, api_key)
+        # Transport evidence is intentionally category-only.  Persisting the
+        # timeout exception text could expose endpoint, proxy, or credential
+        # material supplied by the host environment.
+        failure_detail = failure
     except URLError as error:
         reason = getattr(error, "reason", error)
-        if isinstance(reason, (socket.timeout, TimeoutError)):
-            failure = "TIMEOUT"
-        else:
-            failure = "NETWORK_OR_DNS_FAILURE"
-        failure_detail = clean_error(reason, api_key)
+        failure = classify_transport_failure(reason)
+        failure_detail = failure
     except OSError as error:
-        failure = "NETWORK_OR_DNS_FAILURE"
-        failure_detail = clean_error(error, api_key)
+        failure = classify_transport_failure(error)
+        failure_detail = failure
     except Exception as error:  # pragma: no cover - defensive host-runtime boundary
-        failure = "NETWORK_OR_DNS_FAILURE"
-        failure_detail = clean_error(error, api_key)
+        failure = classify_transport_failure(error)
+        failure_detail = failure
     ended = time.perf_counter()
     return HTTPResult(
         request_timestamp=request_timestamp,
@@ -2661,7 +2734,7 @@ class PilotMetrics:
         self.response_durations_ms.append(round(result.elapsed_ms, 3))
         if result.failure == "TIMEOUT":
             self.timeout_count += 1
-        elif result.failure == "NETWORK_OR_DNS_FAILURE":
+        elif result.failure in TRANSPORT_FAILURE_CATEGORIES:
             self.network_failure_count += 1
 
     def record_outcome(self, outcome: str) -> None:
@@ -3097,8 +3170,8 @@ def percentile(values: Sequence[float], fraction: float) -> Optional[float]:
 def classification_for_http(result: HTTPResult) -> str:
     if result.failure == "TIMEOUT":
         return "TIMEOUT"
-    if result.failure == "NETWORK_OR_DNS_FAILURE":
-        return "NETWORK_OR_DNS_FAILURE"
+    if result.failure in TRANSPORT_FAILURE_CATEGORIES:
+        return result.failure
     if result.http_status in {401, 403}:
         return "AUTHENTICATION_OR_AUTHORIZATION_FAILURE"
     if result.http_status == 429:

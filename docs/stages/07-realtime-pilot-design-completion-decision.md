@@ -1,5 +1,8 @@
 # Stage 7 — Realtime Pilot Design Completion Decision
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Date:** `2026-09-28`  
 **Decision:** [D-033](../DECISION-LOG.md#d-033--stage-7-3-second-pilot-and-operational-planning-envelope), superseding the historical policy detail in [D-032](../DECISION-LOG.md#d-032--stage-7-pilot-cadence-and-recordedattime-correction)<br>
 **Final status:** `COMPLETE — APPROVED PILOT DESIGN`  
@@ -74,16 +77,19 @@ The following Stage 8 design is approved and fixed:
   authentication/authorization evidence; 429 stops for rate-limit evidence;
   three consecutive failed request slots stop the pilot. A successful request
   resets the consecutive-failure count.
-- **Quota:** the conservative ceiling remains `250,000` MDD HTTP requests per
-  month. The operational planning envelope is `207,500–210,000` requests per
-  month (`83–84%`), with `40,000–42,500` requests (`16–17%`) unallocated as
-  headroom. The 1200-attempt one-hour pilot maximum is `0.48%` of the full
-  ceiling and approximately `0.57–0.58%` of the operational planning
-  envelope; actual consumption can be lower because skipped-overlap slots do
-  not create HTTP attempts. This is a bounded diagnostic pilot cadence, not an approved
+- **Quota:** the absolute provider ceiling remains `250,000` MDD HTTP requests
+  per month. The historical Stage 7 operational planning target was
+  `207,500–210,000` requests per month (`83–84%`), with `40,000–42,500`
+  requests (`16–17%`) unallocated as headroom. The 1200-attempt one-hour
+  pilot maximum is `0.48%` of the full ceiling. Stage 13's explicitly approved
+  lower-load design supersedes any interpretation of `207,500` as a minimum
+  utilization requirement; Stage 13 uses `210,000` as the normal operational
+  maximum and `207,500` as the automatic-retry protection boundary. Actual
+  consumption can be lower because skipped-overlap slots do not create HTTP
+  attempts. This remains a bounded diagnostic pilot cadence, not an approved
   production cadence; Stage 13 owns production station tiers, cadence,
   staggering, retry policy, overlap analysis, and the full monthly request
-  projection inside that envelope.
+  projection.
 - **Sampling lineage:** every observation identifies the versioned,
   non-production policy `MDD_STAGE_8_KOELN_HBF_3S_60MIN_V3`. V1 (60 seconds)
   and V2 (10-second fixed-anchor) remain historical policy records.

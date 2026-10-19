@@ -1,5 +1,8 @@
 # Stage 02 — MDD/TRIAS Source-Contract Audit
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Stage:** 02 — MDD/TRIAS Source-Contract Audit  
 **Stage status:** APPROVED — STAGE 02A.1/02A.2/02A.3 COMPLETED
 **Audit date:** 2026-09-25  

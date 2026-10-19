@@ -1,0 +1,90 @@
+{
+  "serviceDelivery": {
+    "status": "OK",
+    "responseTimestamp": "2026-10-01T12:00:00Z[GMT]",
+    "deliveryPayload": {
+      "stopEventResponse": {
+        "stopEventResult": [
+          {
+            "resultId": "equivalent-result-1",
+            "stopEvent": {
+              "service": {
+                "operatingDayRef": "2026-10-01",
+                "journeyRef": "journey-equivalent-1",
+                "lineRef": "line-equivalent",
+                "directionRef": "outbound",
+                "operatorRef": "operator-equivalent",
+                "origin": "origin-equivalent",
+                "destination": "destination-equivalent",
+                "situationFullRef": ["situation-equivalent-1"]
+              },
+              "previousCall": [
+                {
+                  "callAtStop": {
+                    "stopPointRef": "de:05315:previous",
+                    "stopPointName": "Previous Stop",
+                    "stopSeqNumber": 3,
+                    "serviceArrival": {
+                      "timetabledTime": "2026-10-01T11:55:00Z[GMT]",
+                      "estimatedTime": "2026-10-01T11:56:00Z[GMT]",
+                      "recordedAtTime": "2026-10-01T11:56:30Z[GMT]",
+                      "estimatedTimeLow": "2026-10-01T11:55:30Z[GMT]",
+                      "estimatedTimeHigh": "2026-10-01T11:56:30Z[GMT]"
+                    },
+                    "serviceDeparture": {
+                      "timetabledTime": "2026-10-01T11:56:00Z[GMT]",
+                      "recordedAtTime": "2026-10-01T11:56:45Z[GMT]"
+                    }
+                  }
+                }
+              ],
+              "thisCall": {
+                "callAtStop": {
+                  "stopPointRef": "de:05315:this",
+                  "stopPointName": "This Stop",
+                  "stopSeqNumber": 4,
+                  "serviceArrival": {
+                    "timetabledTime": "2026-10-01T12:00:00Z[GMT]",
+                    "estimatedTime": "2026-10-01T12:01:00Z[GMT]",
+                    "recordedAtTime": "2026-10-01T12:01:30Z[GMT]",
+                    "estimatedTimeLow": "2026-10-01T12:00:30Z[GMT]",
+                    "estimatedTimeHigh": "2026-10-01T12:01:30Z[GMT]"
+                  },
+                  "serviceDeparture": {
+                    "timetabledTime": "2026-10-01T12:02:00Z[GMT]",
+                    "recordedAtTime": "2026-10-01T12:02:30Z[GMT]"
+                  },
+                  "plannedBay": "A",
+                  "estimatedBay": "B",
+                  "cancelled": false,
+                  "deviation": true,
+                  "unplannedStop": false,
+                  "notServicedStop": false,
+                  "noBoardingAtStop": true,
+                  "noAlightingAtStop": false
+                }
+              },
+              "onwardCall": [
+                {
+                  "callAtStop": {
+                    "stopPointRef": "de:05315:onward",
+                    "stopPointName": "Onward Stop",
+                    "stopSeqNumber": 5,
+                    "serviceArrival": {
+                      "timetabledTime": "2026-10-01T12:05:00Z[GMT]",
+                      "recordedAtTime": "2026-10-01T12:05:30Z[GMT]"
+                    },
+                    "serviceDeparture": {
+                      "timetabledTime": "2026-10-01T12:06:00Z[GMT]",
+                      "recordedAtTime": "2026-10-01T12:06:30Z[GMT]"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

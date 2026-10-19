@@ -1,0 +1,708 @@
+from __future__ import annotations
+
+import json
+import socket
+import sys
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+
+import stage_08_mdd_realtime_pilot as stage8  # noqa: E402
+import stage_13_tiered_collector_readiness as stage13  # noqa: E402
+
+
+FINAL_STATUS = "COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED"
+
+
+class Stage13TieredCollectorReadinessTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.evidence_path = REPOSITORY_ROOT / "docs/stages/13-tiered-collector-readiness-evidence.json"
+        cls.evidence = json.loads(cls.evidence_path.read_text(encoding="utf-8"))
+
+    def test_final_status_panel_and_density_rank_membership(self) -> None:
+        self.assertEqual(self.evidence["stage_13_status"], FINAL_STATUS)
+        stage12 = self.evidence["stage_12_gate"]
+        self.assertEqual(stage12["approved_panel_version"], "TIERED50_PANEL_V1")
+        self.assertEqual(stage12["panel_station_count"], 50)
+
+        density = self.evidence["static_event_density"]
+        self.assertEqual(density["tier_assignment"]["tier_counts"], {"A": 8, "B": 20, "C": 22})
+        rows = sorted(density["station_tier_rows"], key=lambda row: row["density_rank"])
+        self.assertEqual(len(rows), 50)
+        self.assertEqual([row["density_rank"] for row in rows], list(range(1, 51)))
+        self.assertEqual([row["production_tier"] for row in rows], ["A"] * 8 + ["B"] * 20 + ["C"] * 22)
+        self.assertFalse(density["tier_assignment"]["stage12_selection_rank_used"])
+        self.assertEqual(
+            density["analysis_contract"]["final_tier_membership_basis"],
+            "density ranks 1–8 / 9–28 / 29–50 from retained exact-feed metrics",
+        )
+
+    def test_final_cadence_math_is_8_20_22_at_5_15_30(self) -> None:
+        cadence = stage13.candidate_cadence()
+        self.assertEqual(cadence["logical_requests_per_hour"], 220)
+        self.assertEqual(cadence["logical_requests_per_day"], 5280)
+        self.assertEqual(cadence["monthly_logical_requests"], {"30_day": 158400, "31_day": 163680})
+        self.assertEqual(cadence["reconciliation"], {
+            "requests_per_30_minutes": 110,
+            "requests_per_hour_from_30_minute_super_cycle": 220,
+        })
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in cadence["tiers"]],
+            [("A", 8, 5), ("B", 20, 15), ("C", 22, 30)],
+        )
+        historical = stage13.candidate_cadence(stage13.HISTORICAL_TIERED50_PLAN, status="HISTORICAL_COMPARISON")
+        self.assertEqual(historical["logical_requests_per_hour"], 240)
+        self.assertEqual(historical["logical_requests_per_day"], 5760)
+        self.assertEqual(historical["monthly_logical_requests"], {"30_day": 172800, "31_day": 178560})
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in historical["tiers"]],
+            [("A", 10, 5), ("B", 20, 15), ("C", 20, 30)],
+        )
+
+    def test_5_15_30_historical_and_approved_alternatives_are_distinct(self) -> None:
+        alternatives = {
+            row["label"]: row
+            for row in self.evidence["candidate_cadence"]["cadence_selection_alternatives"]
+        }
+        historical = alternatives["10_20_20_at_5_15_30_evaluated_option"]
+        approved = alternatives["8_20_22_at_5_15_30"]
+
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in historical["tiers"]],
+            [("A", 10, 5), ("B", 20, 15), ("C", 20, 30)],
+        )
+        self.assertEqual(historical["logical_requests_per_hour"], 240)
+        self.assertFalse(historical["user_approved_design"])
+        self.assertTrue(historical["technically_evaluated_option"])
+        self.assertEqual(
+            historical["31_day_approved_retry_reserve_with_legacy_and_diagnostics"][
+                "conservative_total_http_requests"
+            ],
+            205444,
+        )
+        self.assertEqual(historical["static_density_fit_at_n30"]["station_count"], 50)
+        self.assertEqual(historical["static_density_fit_at_n30"]["station_p95_supported_count"], 50)
+
+        self.assertEqual(
+            [(row["tier"], row["station_count"], row["interval_minutes"]) for row in approved["tiers"]],
+            [("A", 8, 5), ("B", 20, 15), ("C", 22, 30)],
+        )
+        self.assertEqual(approved["logical_requests_per_hour"], 220)
+        self.assertTrue(approved["user_approved_design"])
+        self.assertNotEqual(historical["tiers"], approved["tiers"])
+        self.assertNotEqual(historical["logical_requests_per_hour"], approved["logical_requests_per_hour"])
+
+    def test_static_support_is_recalculated_from_retained_evidence(self) -> None:
+        support = self.evidence["static_event_density"]["final_approved_static_support"]
+        self.assertEqual(support["station_count"], 50)
+        self.assertEqual(support["station_p95_supported_count"], 50)
+        self.assertTrue(support["all_station_p95_supported"])
+        expected = {
+            "A": (8, 20, 19.0, 20.0),
+            "B": (20, 30, 23.0, 23.0),
+            "C": (22, 30, 29.0, 29.0),
+        }
+        for tier, values in expected.items():
+            row = support["by_tier"][tier]
+            self.assertEqual(
+                (
+                    row["station_count"],
+                    row["result_limit"],
+                    row["maximum_station_p95"],
+                    row["maximum_observed_static_scheduled_arrival_count"],
+                ),
+                values,
+            )
+
+    def test_approved_number_of_results_policy_preserves_live_limitations(self) -> None:
+        result_limit = self.evidence["number_of_results"]
+        self.assertEqual(result_limit["production_number_of_results"], {"A": 20, "B": 30, "C": 30})
+        self.assertEqual(result_limit["production_number_of_results_policy"], "A20/B30/C30")
+        self.assertEqual(result_limit["provider_maximum_status"], "PROVIDER_MAXIMUM_NOT_ESTABLISHED")
+        self.assertEqual(
+            result_limit["corrected_live_limitation"],
+            "CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT",
+        )
+        self.assertEqual(result_limit["historical_provider_acceptance"]["accepted_result_limits"], [20, 30])
+        self.assertFalse(result_limit["historical_provider_acceptance"]["provider_wide_maximum_established"])
+        comparison = self.evidence["number_of_results_comparison"]
+        self.assertEqual(comparison["fixed_n20"]["static_cadence_window_fit"]["station_p95_supported_count"], 32)
+        self.assertEqual(comparison["fixed_n30"]["static_cadence_window_fit"]["station_p95_supported_count"], 50)
+        self.assertEqual(
+            comparison["tier_specific_a20_b30_c30"]["decision"],
+            "APPROVED_USER_DESIGN_STATIC_SUPPORTED_LIVE_LIMITATION_RETAINED",
+        )
+
+    def test_quota_reserve_math_and_guardrail(self) -> None:
+        quota = stage13.quota_projection_set(
+            220,
+            legacy_reserved_requests=stage13.LEGACY7_RESERVED_MONTHLY_REQUESTS,
+            diagnostic_reserved_requests=100,
+        )
+        approved = next(item for item in quota["projections"] if item["label"] == "approved_normal_retry_reserve")
+        self.assertEqual(
+            (
+                approved["30_day"]["base_logical_requests"],
+                approved["30_day"]["retry_reserve_requests"],
+                approved["30_day"]["projected_http_requests"],
+                approved["30_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+            ),
+            (158400, 15840, 174240.0, 182980),
+        )
+        self.assertEqual(
+            (
+                approved["31_day"]["base_logical_requests"],
+                approved["31_day"]["retry_reserve_requests"],
+                approved["31_day"]["projected_http_requests"],
+                approved["31_day"]["conservative_reserve_reconciliation"]["conservative_total_http_requests"],
+            ),
+            (163680, 16368, 180048.0, 189076),
+        )
+        self.assertEqual(quota["absolute_provider_ceiling"], 250000)
+        self.assertEqual(quota["normal_operational_maximum"], 210000)
+        self.assertEqual(quota["automatic_retry_protection_boundary"], 207500)
+        self.assertTrue(quota["no_minimum_utilization_requirement"])
+        self.assertEqual(
+            quota["historical_stage7_planning_target_band"]["interpretation"],
+            "Historical Stage 7 planning target only; Stage 13 explicitly supersedes its interpretation of the lower endpoint as a minimum utilization requirement.",
+        )
+        for day, expected_total, expected_headroom in (
+            ("30_day", 182980, 24520),
+            ("31_day", 189076, 18424),
+        ):
+            reconciliation = approved[day]["conservative_reserve_reconciliation"]
+            self.assertEqual(reconciliation["conservative_total_http_requests"], expected_total)
+            self.assertEqual(
+                reconciliation["headroom_to_automatic_retry_protection_boundary"],
+                expected_headroom,
+            )
+            self.assertTrue(reconciliation["within_provider_ceiling"])
+            self.assertTrue(reconciliation["within_normal_operational_maximum"])
+            self.assertTrue(reconciliation["within_automatic_retry_protection_boundary"])
+        self.assertNotIn("base_within_normal_envelope", repr(quota))
+        self.assertNotIn("projected_within_normal_envelope", repr(quota))
+        zero_load = stage13.quota_projection(0, 30)
+        self.assertTrue(zero_load["within_provider_ceiling"])
+        self.assertTrue(zero_load["within_normal_operational_maximum"])
+        self.assertTrue(zero_load["within_automatic_retry_protection_boundary"])
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["automatic_retry_protection_boundary"],
+            207500,
+        )
+        self.assertEqual(self.evidence["quota"]["approved_production_design"]["absolute_provider_ceiling"], 250000)
+        self.assertEqual(self.evidence["quota"]["approved_production_design"]["normal_operational_maximum"], 210000)
+        self.assertTrue(self.evidence["quota"]["approved_production_design"]["no_minimum_utilization_requirement"])
+        guardrail = stage13.automatic_retry_guardrail(0, 189076)
+        self.assertEqual(
+            (
+                guardrail["current_shared_credential_month_requests"],
+                guardrail["projected_additional_shared_credential_requests"],
+                guardrail["projected_shared_credential_monthly_consumption"],
+            ),
+            (0, 189076, 189076),
+        )
+        self.assertEqual(guardrail["headroom_to_automatic_retry_protection_boundary"], 18424)
+        self.assertEqual(guardrail["headroom_to_normal_operational_maximum"], 20924)
+        self.assertEqual(guardrail["headroom_to_provider_ceiling"], 60924)
+        self.assertTrue(guardrail["automatic_retries_allowed"])
+        self.assertTrue(guardrail["within_automatic_retry_protection_boundary"])
+        legacy_retry_only_field = "_".join(("projected", "automatic", "retry", "requests"))
+        self.assertNotIn(legacy_retry_only_field, repr(guardrail))
+        self.assertNotIn("_".join(("projected", "monthly", "consumption")), repr(guardrail))
+        self.assertFalse(stage13.automatic_retry_guardrail(207500, 1)["automatic_retries_allowed"])
+        self.assertTrue(stage13.automatic_retry_guardrail(207499, 1)["automatic_retries_allowed"])
+
+        approved_guardrail = self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail"]
+        self.assertEqual(approved_guardrail["projected_shared_credential_monthly_consumption"], 189076)
+        self.assertEqual(approved_guardrail["headroom_to_automatic_retry_protection_boundary"], 18424)
+        self.assertTrue(approved_guardrail["within_automatic_retry_protection_boundary"])
+        self.assertTrue(approved_guardrail["within_normal_operational_maximum"])
+        self.assertTrue(approved_guardrail["within_provider_ceiling"])
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["thirty_one_day_tiered50_component_with_retry_reserve"],
+            180048.0,
+        )
+
+    def test_runtime_guardrail_contract_covers_shared_credential_consumers(self) -> None:
+        contract = stage13.shared_credential_retry_guardrail_contract()
+        self.assertEqual(contract["scope"], "all_known_shared_credential_consumers")
+        self.assertTrue(contract["current_legacy7_usage_must_not_be_fabricated"])
+        self.assertTrue(contract["tiered50_is_not_the_only_credential_consumer"])
+        self.assertEqual(
+            {item["name"] for item in contract["runtime_inputs"]},
+            {
+                "actual_audited_shared_credential_attempts_current_month",
+                "projected_remaining_unavoidable_non_retry_consumption",
+                "candidate_automatic_retry_attempt",
+                "approved_reserved_shared_credential_consumption",
+            },
+        )
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail_scope"],
+            "all_known_shared_credential_consumers",
+        )
+        self.assertEqual(
+            self.evidence["quota"]["approved_production_design"]["automatic_retry_guardrail_current_usage_status"],
+            "NOT_OBSERVED_OFFLINE_PLANNING_BASELINE; ZERO_IS_NOT_A_CURRENT_USAGE_CLAIM",
+        )
+
+    def test_retry_policy_max_attempts_statuses_and_station_isolation(self) -> None:
+        policy = stage13.retry_policy_contract()
+        self.assertEqual(policy["max_attempts"], 2)
+        self.assertEqual(policy["automatic_retry_count_max"], 1)
+        for status in (408, 429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                self.assertTrue(stage13.retry_eligible(http_status=status))
+        for status in (401, 403):
+            with self.subTest(status=status):
+                self.assertFalse(stage13.retry_eligible(http_status=status))
+        self.assertTrue(stage13.retry_eligible(transport_failure_category="TIMEOUT"))
+        self.assertTrue(policy["respect_retry_after_for_http_429"])
+        self.assertTrue(policy["one_failed_station_does_not_abort_other_due_targets"])
+
+    def test_final_phase_distribution_and_identity_assignments(self) -> None:
+        phase = stage13.heartbeat_phase_distribution()
+        self.assertEqual(phase["total_due_targets_by_heartbeat"], [19, 18, 18, 18, 19, 18])
+        self.assertEqual(sorted(phase["total_due_targets_by_heartbeat"]), [18, 18, 18, 18, 19, 19])
+        self.assertEqual(phase["super_cycle_total_logical_requests"], 110)
+        self.assertEqual(phase["hour_total_logical_requests"], 220)
+        self.assertEqual(phase["max_due_targets_in_one_heartbeat"], 19)
+        self.assertEqual(
+            [row["phase_target_counts"] for row in phase["tier_phase_distribution"]],
+            [[8], [7, 7, 6], [4, 3, 4, 3, 4, 4]],
+        )
+        rows = json.loads(json.dumps(self.evidence["static_event_density"]["station_tier_rows"]))
+        assignments = self.evidence["phase_staggering"]["phase_assignments"]
+        self.assertEqual(len(assignments), 50)
+        self.assertEqual(assignments, stage13.phase_assignments_for_tier_rows(rows))
+        shuffled = list(reversed(rows))
+        for index, row in enumerate(shuffled, start=1):
+            row["density_rank"] = index
+        self.assertEqual(assignments, stage13.phase_assignments_for_tier_rows(shuffled))
+        self.assertTrue(all("phase_capacity" in row for row in assignments))
+
+    def test_phase_identity_is_parent_stoppointref_and_ignores_future_database_ids(self) -> None:
+        self.assertFalse(hasattr(stage13, "deterministic_phase_index"))
+        contract = stage13.heartbeat_phase_distribution()["phase_assignment_contract"]
+        self.assertEqual(contract["assignment_key"], "source_parent_station_id / parent StopPointRef")
+        self.assertEqual(
+            contract["assignment_hash"],
+            "SHA-256(panel version + tier + source_parent_station_id)",
+        )
+        rows = json.loads(json.dumps(self.evidence["static_event_density"]["station_tier_rows"]))
+        baseline = stage13.phase_assignments_for_tier_rows(rows)
+        with_future_ids = [
+            {**row, "SamplingTargetId": f"future-db-id-{index}"}
+            for index, row in enumerate(rows, start=1)
+        ]
+        self.assertEqual(baseline, stage13.phase_assignments_for_tier_rows(with_future_ids))
+        self.assertTrue(all("SamplingTargetId" not in row for row in baseline))
+        self.assertTrue(
+            all(
+                row["phase_assignment_identity"] == row["source_parent_station_id"]
+                and row["phase_assignment_identity_type"] == "source_parent_station_id / parent StopPointRef"
+                for row in baseline
+            )
+        )
+
+    def test_detailed_decision_log_remains_chronological(self) -> None:
+        decision_log = (REPOSITORY_ROOT / "docs/DECISION-LOG.md").read_text(encoding="utf-8")
+        positions = [decision_log.index(f"## {decision}") for decision in ("D-046", "D-047", "D-048", "D-049", "D-050")]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_existing_50_phase_indexes_reproduce_and_stage14_must_materialize_them(self) -> None:
+        phase = self.evidence["phase_staggering"]
+        assignments = phase["phase_assignments"]
+        recomputed = stage13.phase_assignments_for_tier_rows(
+            json.loads(json.dumps(self.evidence["static_event_density"]["station_tier_rows"]))
+        )
+        self.assertEqual(
+            {row["source_parent_station_id"]: row["phase_index"] for row in assignments},
+            {row["source_parent_station_id"]: row["phase_index"] for row in recomputed},
+        )
+        self.assertTrue(phase["phase_assignment_reproduction"]["phase_indexes_reproduced_exactly"])
+        self.assertEqual(phase["phase_assignment_reproduction"]["compared_assignment_count"], 50)
+        contract = phase["phase_assignment_contract"]
+        self.assertTrue(contract["phase_assignment_finalized_in_stage13"])
+        self.assertFalse(contract["production_phase_index_persisted"])
+        self.assertTrue(contract["phase_index_must_be_persisted_in_stage14"])
+        self.assertEqual(contract["materialization_status"], "DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED")
+        self.assertTrue(contract["stage14_must_materialize_without_recomputing_from_database_ids"])
+
+    def test_gate_concurrency_overlap_continuity_and_stage14_boundary(self) -> None:
+        gate = self.evidence["user_decision_gate"]
+        for flag in (
+            "production_number_of_results_approved",
+            "production_concurrency_approved",
+            "production_cadence_approved",
+            "production_tier_membership_approved",
+            "production_retry_policy_approved",
+            "user_approval_received",
+            "all_material_design_choices_user_approved",
+            "stage_13_complete_allowed",
+        ):
+            self.assertTrue(gate[flag])
+        concurrency = self.evidence["sequential_vs_bounded_concurrency"]
+        self.assertEqual(concurrency["maximum_concurrency"], 2)
+        self.assertEqual(concurrency["decision"], "APPROVED_MAXIMUM_CONCURRENCY_2")
+        self.assertTrue(concurrency["values_above_two_require_new_evidence_and_decision"])
+        self.assertIn("actual persistence/database behavior", concurrency["stage14_activation_condition"])
+        contract = self.evidence["overlap_and_duplicate_execution_contract"]
+        self.assertEqual(contract["unique_execution_identity"], ["SamplingTargetId", "LogicalDueBucket"])
+        self.assertFalse(contract["catch_up_behavior"])
+        self.assertFalse(self.evidence["historical_continuity"]["cutover_performed"])
+        readiness = self.evidence["readiness_decision"]
+        self.assertEqual(readiness["stage_14_status"], "NOT STARTED")
+        self.assertFalse(readiness["stage_14_started"])
+        self.assertFalse(readiness["tiered50_activated"])
+        self.assertEqual(readiness["production_activation"], "NOT_STARTED")
+        self.assertFalse(readiness["production_database_objects_created"])
+        self.assertFalse(readiness["windows_scheduled_tasks_created"])
+        self.assertFalse(readiness["power_bi_modified"])
+
+    def test_retained_population_accounting_is_distinct(self) -> None:
+        result_limit = self.evidence["number_of_results"]
+        historical = self.evidence["sequential_vs_bounded_concurrency"]["sequential_live_diagnostic"]
+        self.assertEqual(
+            (historical["client_request_attempts_issued"], historical["http_responses_received"], historical["confirmed_provider_http_attempts"]),
+            (24, 24, 24),
+        )
+        cap2 = self.evidence["sequential_vs_bounded_concurrency"]["bounded_live_diagnostic"]
+        self.assertEqual(
+            (cap2["client_request_attempts_issued"], cap2["http_responses_received"], cap2["confirmed_provider_http_attempts"]),
+            (6, 6, 6),
+        )
+        failed = result_limit["failed_corrected_diagnostic_audit"]
+        self.assertEqual(
+            (failed["client_request_attempts_issued"], failed["http_responses_received"], failed["confirmed_provider_http_attempts"]),
+            (24, 0, 0),
+        )
+        self.assertEqual(
+            failed["provider_quota_consumption_status"],
+            stage13.PROVIDER_QUOTA_UNKNOWN_BECAUSE_NO_HTTP_RESPONSE,
+        )
+        self.assertEqual(failed["conservative_quota_accounting_attempts"], 24)
+        gate = result_limit["additional_request_gate"]
+        self.assertEqual(
+            (
+                gate["historical_initial_diagnostic_budget"],
+                gate["prior_cumulative_client_request_invocations"],
+                gate["explicit_additional_user_authorization"],
+                gate["authorized_cumulative_client_attempt_ceiling"],
+            ),
+            (100, 90, 24, 114),
+        )
+        self.assertTrue(all(row["forward_temporal_span_status"] == "INVALID_FOR_FORWARD_COVERAGE_DECISION" for row in result_limit["historical_invalidated_sequential_records"]))
+
+    def test_evidence_validation_is_offline_and_reproducible(self) -> None:
+        with patch.object(stage13.socket, "getaddrinfo", side_effect=AssertionError("network access in offline validation")):
+            stage13.validate_evidence(self.evidence)
+            rebuilt = stage13.build_evidence(
+                root=REPOSITORY_ROOT,
+                generated_at_utc="2026-09-30T00:00:00Z",
+                reuse_existing_live=True,
+            )
+            stage13.validate_evidence(rebuilt)
+        self.assertEqual(rebuilt["stage_13_status"], FINAL_STATUS)
+        self.assertEqual(rebuilt["static_event_density"]["final_approved_static_support"], self.evidence["static_event_density"]["final_approved_static_support"])
+
+    def test_normal_heartbeat_timing_is_separate_from_degraded_timeout_pressure(self) -> None:
+        heartbeat = self.evidence["heartbeat_feasibility"]
+        normal = heartbeat["NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY"]
+        degraded = heartbeat["DEGRADED_MODE_HEARTBEAT_BUDGET"]
+        self.assertTrue(normal["successful_observation_only"])
+        self.assertTrue(normal["not_a_guarantee_under_timeout_or_retry_failure"])
+        self.assertTrue(normal["observed_p95_within_300_second_heartbeat"])
+        self.assertTrue(normal["observed_max_within_300_second_heartbeat"])
+        self.assertEqual(
+            (
+                degraded["max_due_targets"],
+                degraded["maximum_concurrency"],
+                degraded["per_attempt_timeout_seconds"],
+                degraded["max_attempts"],
+                degraded["theoretical_timeout_heavy_attempt_count"],
+                degraded["theoretical_timeout_heavy_wall_seconds_at_cap2"],
+            ),
+            (19, 2, 30, 2, 38, 570),
+        )
+        self.assertTrue(degraded["unconstrained_timeout_heavy_batch_exceeds_300_seconds"])
+
+    def test_degraded_heartbeat_budget_skips_work_and_retry_without_cross_bucket_replay(self) -> None:
+        initial = stage13.dispatcher_heartbeat_budget_decision(275)
+        self.assertFalse(initial["start_allowed"])
+        self.assertEqual(initial["outcome"], stage13.SKIPPED_HEARTBEAT_BUDGET)
+
+        retry = stage13.dispatcher_heartbeat_budget_decision(
+            250,
+            retry=True,
+            retry_after_seconds=30,
+        )
+        self.assertFalse(retry["start_allowed"])
+        self.assertEqual(retry["outcome"], stage13.RETRY_SKIPPED_HEARTBEAT_BUDGET)
+        self.assertTrue(retry["retry_after_respected"])
+        allowed_retry = stage13.dispatcher_heartbeat_budget_decision(
+            240,
+            retry=True,
+            retry_after_seconds=20,
+        )
+        self.assertTrue(allowed_retry["start_allowed"])
+        self.assertIsNone(allowed_retry["outcome"])
+
+        contract = stage13.heartbeat_degraded_mode_contract()
+        self.assertFalse(contract["budget_outcomes_trigger_catch_up"])
+        self.assertTrue(contract["per_target_budget_isolation"])
+        self.assertTrue(contract["budget_exhaustion_does_not_abort_unrelated_targets"])
+        self.assertTrue(contract["retry_after_cannot_cross_heartbeat_deadline"])
+        self.assertTrue(contract["expired_dispatcher_cannot_execute_prior_bucket"])
+        self.assertEqual(contract["target_budget_exhaustion_outcome"], "SKIPPED_HEARTBEAT_BUDGET")
+        self.assertEqual(contract["retry_budget_exhaustion_outcome"], "RETRY_SKIPPED_HEARTBEAT_BUDGET")
+        self.assertFalse(stage13.may_execute_bucket(101, 100))
+        self.assertFalse(contract["persistence_cleanup_safety_margin"]["arbitrary_stage13_duration_invented"])
+        self.assertIsNone(contract["persistence_cleanup_safety_margin"]["stage13_concrete_seconds"])
+
+    def test_forward_coverage_uses_thiscall_arrivals_only(self) -> None:
+        anchor = "2026-09-30T10:40:00Z"
+        bundle = {
+            "stop_events": [
+                {
+                    "timetabled_time": "2026-09-30T10:42:00Z",
+                    "call_observations": [
+                        {
+                            "call_scope": "PREVIOUS",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T09:12:00Z"]}}],
+                            "departure_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T09:13:00Z"]}}],
+                        },
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T10:42:00Z"]}}],
+                            "departure_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T10:43:00Z"]}}],
+                        },
+                        {
+                            "call_scope": "ONWARD",
+                            "arrival_timing": [{"field_values": {"TimetabledTime": ["2026-09-30T12:45:00Z"]}}],
+                        },
+                    ],
+                },
+                {"timetabled_time": "2026-09-30T11:15:00Z", "call_observations": []},
+            ]
+        }
+        metrics = stage13._forward_coverage_metrics(bundle, anchor)
+        self.assertEqual(metrics["returned_thiscall_event_count"], 2)
+        self.assertEqual(metrics["events_before_anchor_count"], 0)
+        self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
+
+    def test_thiscall_arrival_before_anchor_is_counted_but_not_forward_coverage(self) -> None:
+        anchor = "2026-09-30T10:40:00Z"
+        bundle = {
+            "stop_events": [
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:30:00Z"]}}
+                            ],
+                            "departure_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:31:00Z"]}}
+                            ],
+                        },
+                        {
+                            "call_scope": "ONWARD",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T23:00:00Z"]}}
+                            ],
+                        },
+                        {
+                            "call_scope": "PREVIOUS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T09:00:00Z"]}}
+                            ],
+                        },
+                    ]
+                },
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T10:42:00Z"]}}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "call_observations": [
+                        {
+                            "call_scope": "THIS",
+                            "arrival_timing": [
+                                {"field_values": {"TimetabledTime": ["2026-09-30T11:15:00Z"]}}
+                            ]
+                        }
+                    ]
+                },
+            ]
+        }
+        metrics = stage13._forward_coverage_metrics(bundle, anchor)
+        self.assertEqual(metrics["returned_thiscall_event_count"], 3)
+        self.assertEqual(metrics["events_before_anchor_count"], 1)
+        self.assertEqual(metrics["events_at_or_after_anchor_count"], 2)
+        self.assertEqual(metrics["forward_coverage_seconds"], 2100.0)
+
+    def test_network_preflight_failure_issues_zero_mdd_requests(self) -> None:
+        failed_preflight = {
+            "status": "DNS_RESOLUTION_FAILED",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 0,
+            "address_families": [],
+            "safe_failure_category": "DNS_RESOLUTION_FAILED",
+        }
+        with patch.object(stage13, "_network_dns_preflight", return_value=failed_preflight), patch.object(
+            stage8,
+            "perform_http_request",
+            side_effect=AssertionError("MDD HTTP request issued after failed preflight"),
+        ):
+            result = stage13._run_live_diagnostics(
+                [],
+                api_key="offline-test-key-123",
+                include_concurrency_probe=False,
+                attempt_budget=24,
+            )
+        self.assertEqual(result["client_request_attempts_issued"], 0)
+        self.assertEqual(result["stop_reason"], "DNS_RESOLUTION_FAILED_ZERO_MDD_REQUESTS_ISSUED")
+
+    def test_smoke_gate_and_authorization_failures_stop_immediately(self) -> None:
+        rows = self.evidence["static_event_density"]["station_tier_rows"]
+        preflight = {
+            "status": "DNS_RESOLUTION_OK",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 1,
+            "address_families": ["IPv4"],
+            "safe_failure_category": None,
+        }
+        for status in (401, 403):
+            with self.subTest(status=status):
+                calls: list[object] = []
+                auth_result = stage8.HTTPResult(
+                    request_timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+                    request_timestamp_utc="2026-09-30T00:00:00Z",
+                    http_status=status,
+                    content_type="application/xml",
+                    body=b"",
+                    elapsed_ms=1.0,
+                    request_started_mono=1.0,
+                    request_ended_mono=2.0,
+                    failure=None,
+                    failure_detail=f"HTTP_{status}",
+                )
+
+                def fake_request(*_args: object, **_kwargs: object) -> stage8.HTTPResult:
+                    calls.append(object())
+                    return auth_result
+
+                with patch.object(stage13, "_network_dns_preflight", return_value=preflight), patch.object(
+                    stage8, "perform_http_request", side_effect=fake_request
+                ):
+                    result = stage13._run_live_diagnostics(
+                        rows,
+                        api_key="offline-test-key-123",
+                        include_concurrency_probe=False,
+                        attempt_budget=24,
+                    )
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(result["client_request_attempts_issued"], 1)
+                self.assertEqual(result["stop_reason"], "SMOKE_GATE_STOPPED_HTTP_401_OR_403")
+
+    def test_smoke_gate_network_failure_after_dns_issues_exactly_one_request(self) -> None:
+        rows = self.evidence["static_event_density"]["station_tier_rows"]
+        calls: list[object] = []
+        failed_result = stage8.HTTPResult(
+            request_timestamp=datetime(2026, 9, 30, tzinfo=timezone.utc),
+            request_timestamp_utc="2026-09-30T00:00:00Z",
+            http_status=None,
+            content_type=None,
+            body=b"",
+            elapsed_ms=30_000.0,
+            request_started_mono=1.0,
+            request_ended_mono=30_001.0,
+            failure="NETWORK_UNREACHABLE",
+            failure_detail="NETWORK_UNREACHABLE",
+        )
+
+        def fake_request(*_args: object, **_kwargs: object) -> stage8.HTTPResult:
+            calls.append(object())
+            return failed_result
+
+        preflight = {
+            "status": "DNS_RESOLUTION_OK",
+            "hostname": stage13.MDD_HOSTNAME,
+            "port": stage13.MDD_PORT,
+            "resolved_address_count": 1,
+            "address_families": ["IPv4"],
+            "safe_failure_category": None,
+        }
+        secret = "offline-secret-api-key-123"
+        with patch.object(stage13, "_network_dns_preflight", return_value=preflight), patch.object(
+            stage8, "perform_http_request", side_effect=fake_request
+        ):
+            result = stage13._run_live_diagnostics(
+                rows,
+                api_key=secret,
+                include_concurrency_probe=False,
+                attempt_budget=24,
+            )
+        self.assertEqual(result["network_preflight"]["status"], "DNS_RESOLUTION_OK")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["client_request_attempts_issued"], 1)
+        self.assertEqual(24 - len(calls), 23)
+        self.assertEqual(
+            result["stop_reason"],
+            "SMOKE_GATE_STOPPED_ENVIRONMENT_FAILURE_NETWORK_UNREACHABLE",
+        )
+        self.assertEqual(result["result_limit_probe"]["smoke_gate"]["status"], "FAILED")
+        record = result["result_limit_probe"]["sequential_records"][0]
+        self.assertEqual(record["transport_failure_category"], "NETWORK_UNREACHABLE")
+        self.assertNotIn(secret, repr(result))
+        self.assertFalse(result["raw_payloads_persisted"])
+
+    def test_transport_categories_are_allow_listed_and_secret_free(self) -> None:
+        secret = "offline-secret-api-key-123"
+        self.assertEqual(
+            stage8.classify_transport_failure(socket.gaierror("private host detail")),
+            "DNS_RESOLUTION_FAILED",
+        )
+        self.assertEqual(stage8.classify_transport_failure(ConnectionRefusedError(secret)), "CONNECTION_REFUSED")
+        self.assertEqual(stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"), "OTHER_NETWORK_FAILURE")
+        self.assertIn(stage13._safe_transport_failure_category("NETWORK_OR_DNS_FAILURE"), stage13.SAFE_TRANSPORT_FAILURE_CATEGORIES)
+
+        captured_stdout = StringIO()
+        captured_stderr = StringIO()
+
+        class FailingOpener:
+            def open(self, *_args: object, **_kwargs: object) -> object:
+                raise stage8.URLError(f"proxy credentials {secret} leaked")
+
+        with patch.object(stage8, "build_opener", return_value=FailingOpener()), redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
+            result = stage8.perform_http_request(secret, pilot_anchor_dep_arr_time="2026-09-30T00:00:00Z")
+        self.assertEqual(result.failure, "PROXY_OR_ENVIRONMENT_FAILURE")
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(secret, captured_stdout.getvalue())
+        self.assertNotIn(secret, captured_stderr.getvalue())
+
+    def test_no_secret_or_raw_payload_persistence(self) -> None:
+        rendered = self.evidence_path.read_text(encoding="utf-8").lower()
+        for forbidden in ('"x-api-key:', '"authorization:', '"body"', '"response_body"', '"api_key_persisted": true'):
+            self.assertNotIn(forbidden, rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

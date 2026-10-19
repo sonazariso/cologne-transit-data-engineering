@@ -1,9 +1,13 @@
 # Decision Log
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 This file indexes approved project-level decisions. Detailed records may later be added under `docs/decisions/` when a decision needs alternatives/rationale captured separately.
 
 | ID | Date | Decision | Status |
 |---|---|---|---|
+| D-060 | 2026-10-05 | S87 SQL Server stabilization: Microsoft SQL Server is the sole authoritative project database; `CologneTransitIntelligence` is the official database, PostgreSQL/SQLite/Ubuntu/Docker are not active architecture, and the current Windows-VM SQL Server baseline must be backed up and verified before collector/pipeline connection | COMPLETE — current native FULL backup, restore verification, and DBCC CHECKDB passed; see [Stage 1 evidence](stages/01-sql-server-stabilization-evidence.json) |
 | D-001 | 2026-09-25 | New project name: **Cologne Transport Intelligence** | Approved |
 | D-002 | 2026-09-25 | New GitHub repository: `sonazariso/cologne-transit-intelligence` | Approved |
 | D-003 | 2026-09-25 | Legacy repository remains reference/evidence and is not bulk-copied | Approved |
@@ -46,6 +50,68 @@ This file indexes approved project-level decisions. Detailed records may later b
 | D-040 | 2026-09-29 | Stage 9 evidence-integrity correction: serialize the live in-memory match decisions losslessly in the row-level JSONL, require semantic JSONL-to-summary reconciliation before PASS, and retain the current VRS snapshot/version/hash | Bounded source-backed acceptance PASS after one corrected live run; 60 rows, 53 established service dates, 51 core matches, 51 MEDIUM / 9 UNMATCHED, row-level integrity PASS; Stage 10+ remain NOT STARTED |
 | D-041 | 2026-09-29 | Stage 10 operational-fact contract: derive one deterministic outcome per approved HIGH-confidence canonical service event and service date, preserve explicit Stage 9 run/version lineage, first/latest and NULL timing semantics, PlannedBay/EstimatedBay evidence, and non-causal Situation linkage | NOT COMPLETE — IMPLEMENTATION CORRECTED; SOURCE/DATABASE VALIDATION BLOCKED. The current checkout has no usable PostgreSQL/source-observation population and the current Stage 9 evidence contains zero HIGH rows |
 | D-042 | 2026-09-29 | Stage 11 Power BI semantic-model design: approved subject areas, table grains, single-direction relationships, governed Date strategy, static/canonical identity boundary, explicit DAX measures, estimated-delay threshold, NULL/bay/Situation semantics, and sampling/reporting boundaries | COMPLETE — APPROVED DESIGN; PBIP/DESKTOP IMPLEMENTATION DEFERRED |
+| D-044 | 2026-09-30 | Stage 12 fixed panel and versioning: approve `TIERED50_PANEL_V1` with 50 validated VRS parent stations, Legacy7 continuity, deterministic static evidence, current core-mode/geographic review, bounded final-panel MDD compatibility, and fixed-membership versioning | COMPLETE — APPROVED FIXED 50-STATION PANEL; Stage 13 production work and Stage 14 remain NOT STARTED |
+| D-045 | 2026-09-30 | Stage 12 durable candidate-universe replay correction: retain the exact 864-candidate sanitized input population and verify the approved panel offline through the authoritative selector | COMPLETE — APPROVED FIXED 50-STATION PANEL unchanged; Stage 13 production work and Stage 14 remain NOT STARTED |
+| D-046 | 2026-09-30 | Stage 13 tiered collector readiness closeout: historical record of the exact-feed density tiers, 5/15/30-minute cadence option, `NumberOfResults=30` option, 240 logical requests/hour, zero automatic retries option, cap-2 bounded concurrency option, heartbeat/claim/failure-isolation controls, and conservative Legacy7 quota treatment | SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL |
+| D-047 | 2026-09-30 | Reopen Stage 13 after the required user-approval gate: retain D-046 evidence, invalidate its mixed-call forward-span metric for result-limit coverage, keep all material production choices as technically evaluated options, and gate the corrected 24-invocation diagnostic | IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED; Stage 14 remains NOT STARTED |
+| D-048 | 2026-09-30 | Corrected Stage 13 result-limit diagnostic: 24 additional client invocations, 0 HTTP responses, 0 confirmed provider attempts, unknown provider quota consumption, and no final result-limit decision from live coverage | Historical corrected diagnostic result; superseded by D-049 |
+| D-049 | 2026-09-30 | Explicit final approval of Stage 13 tiered collector readiness: fixed TIERED50_PANEL_V1, density ranks 1–8/9–28/29–50, 8/20/22 at 5/15/30 minutes, A20/B30/C30, concurrency 2, MaxAttempts=2 with one approved transient retry, 10% retry reserve, exact quota guardrail, phase sequence 19/18/18/18/19/18, and atomic overlap contract | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
+| D-050 | 2026-09-30 | Stage 13 post-closeout contract hardening: separate normal-observed timing from degraded heartbeat-budget feasibility, correct phase assignment to source_parent_station_id / parent StopPointRef, clarify design-time versus production phase-index materialization, and restore critical offline regressions without changing approved production values | COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED; Stage 14 NOT STARTED |
+| D-051 | 2026-09-30 | Stage 14 collector-first implementation: implement a Python cross-platform scheduler-neutral collector with minimal runtime dependencies, remove future architectural dependence on Windows/VM-specific execution, defer PostgreSQL host/runtime and production cutover, keep the collector persistence-neutral, and permit SQLite only as disposable local development durability | IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-052 | 2026-10-01 | S73/S74 Stage 14 collector hardening: correct durable dispatcher and just-in-time target claims, preserve parser/RecordedAtTime retention, finalize quota permits atomically across no-network, conservative-live, and confirmed-provider states, add explicit transport safety metadata, preserve Legacy7 lineage, correct the final quota-attempt lifecycle, and close owned SQLite simulation resources | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-053 | 2026-10-01 | S75 Stage 14 source-faithful parser hardening and retry safety: remove call-to-event/service fallback, separate event/service operational fields, restore identity/display and parser-gap retention, and classify unexpected client exceptions as non-retryable `CLIENT_EXECUTION_FAILURE` | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-054 | 2026-10-01 | S76 Stage 14 final source-contract retention correction: separate JourneyRef/VehicleJourneyRef/DatedVehicleJourneyRef and DirectionRef/Direction, retain candidate identity extensions and service-scoped identity/display fields with lineage, preserve Attribute/GeneralAttribute and affected-entity evidence, and close recognized-but-unmapped parser-gap loss | STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED |
+| D-055 | 2026-10-01 | S77 Stage 15A post-cutover validation readiness: add a versioned validation contract, backend-neutral read-only analyzer, SQLite evidence adapter, expected-vs-actual reconciliation, dispatcher/claim/retry/quota/coverage/quality diagnostics, and offline regression coverage without starting live Stage 15 | Stage 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage 15 live NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-056 | 2026-10-01 | S78 Single-Station Live SQLite Research Pilot: `SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.` Use durable `LIVE_RESEARCH` SQLite for the bounded `LIVE_RESEARCH_SINGLE_1` Köln Heumarkt pilot; retain parsed evidence, bound raw forensics to 24 hours, and keep three validated daily backups without starting Tiered50 production or Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; collector implementation COMPLETE; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-057 | 2026-10-01 | S79 timing-history and first-gap correction: append normalized source timing observations with deterministic MDD-local identity and reporting lineage; preserve the existing `recorded_at_time_evidence`; audit the actual S78 Heumarkt database read-only; correct only clear structural parser gaps; keep ambiguous ServiceSection fields under review; measure timing history in Stage 15A without starting Stage 15B | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+| D-059 | 2026-10-01 | S81 reporting-lineage and migration correction: use `recorded_at_time_source_path` for all RecordedAtTime reporting paths, replace schema-4 reporting views through an explicit schema-5 migration, add genuine schema-v2/schema-v4 regressions, and correct the ServiceSection evidence wording without rewriting historical source facts | Stage 14 IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER |
+
+## D-060 — S87 SQL Server Stabilization
+
+**Status:** COMPLETE — verified native FULL backup and integrity gate passed
+
+Microsoft SQL Server is the sole authoritative project database. The official
+database is `CologneTransitIntelligence` on the current Windows VM. Future
+collectors and pipelines are planned as Python on macOS; SQL Server remains on
+the VM; Power BI consumes SQL Server analytical/warehouse data.
+
+The live database is ONLINE and its read-only inventory is captured in the
+[Stage 1 stabilization record](stages/01-sql-server-stabilization.md) and
+[machine-readable evidence](stages/01-sql-server-stabilization-evidence.json).
+`NRWTransportDW` remains an untouched `LEGACY_REFERENCE`. Earlier PostgreSQL
+architecture and the SQLite research runtime remain version-controlled
+historical/deferred-cleanup material; no code cleanup occurs in S87.
+
+Fresh 2026-10-07 evidence found only `C:` visible as a fixed SQL Server volume,
+but verified the user-provided `\\vmware-host\Shared Folders\CologneTransitData`
+destination by an actual SQL Server service-account native backup write. The
+new timestamped `COPY_ONLY`, compressed, `CHECKSUM` FULL backup passes
+`RESTORE HEADERONLY`, `RESTORE FILELISTONLY`, and `RESTORE VERIFYONLY WITH
+CHECKSUM`; its 606,586,880-byte VM file and separate Mac safety copy have the
+same SHA-256. Full read-only `DBCC CHECKDB` reports no corruption errors.
+The September 30 candidate was not reused or overwritten. No schema change,
+project-data DML, collector activation, MDD/API request, GTFS load, or Power BI
+change was made by this work. Existing Windows collector appends observed during
+the window are recorded separately, and its current Task Scheduler/process
+state remains `WINDOWS_COLLECTOR_RUNTIME_STATE_UNCONFIRMED`.
+
+## Operational archive-removal record — 2026-10-07
+
+`NRWTransportDW` was classified `LEGACY_SAFE_TO_ARCHIVE` after the final
+dependency review. No required Köln asset needed migration, and the user had
+confirmed that the verified native backup archive had been copied to external
+USB storage and hash-checked. The controlled `SINGLE_USER` transition and
+`DROP DATABASE` removed only `NRWTransportDW` from the Windows VM.
+
+`CologneTransitIntelligence` remains the only project SQL Server database. Its
+post-removal state is `ONLINE` / `MULTI_USER`; `DBCC CHECKDB` with
+`PHYSICAL_ONLY, NO_INFOMSGS` passed; the seven sampling-target IDs remain; and
+the latest realtime observation recorded by the validation was
+`2026-10-07T11:58:55Z`. The operation recovered 40,241,139,712 bytes
+(37.477 GiB) on C:. The native `.bak`, archive ZIP, manifest, inventory, and
+restore instructions were not deleted. Full machine-readable evidence is in
+the [removal evidence](archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-evidence-20261007T120030Z.json)
+and the [human-readable report](archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-removal-report-20261007T120030Z.md).
 
 ## D-023 — Realtime Source Roles — MDD Primary, GTFS-RT Complementary
 
@@ -543,6 +609,12 @@ The active decision is:
   `NumberOfResults=20` is not an HTTP request count. Actual consumption may be
   lower because overlapping slots are skipped.
 
+D-033 is historical Stage 7 planning context. Stage 13's explicitly approved
+lower-load design supersedes any interpretation of `207,500` as a minimum
+utilization requirement; the current semantics are a `250,000` absolute
+provider ceiling, a `210,000` normal operational maximum, a `207,500`
+automatic-retry protection boundary, and no minimum utilization gate.
+
 D-033 authorized no MDD request, GTFS-RT request, other network request, SQL or
 database work, or runtime pilot code at that design stage. It did not start
 Stage 8 at that time. Historical V1
@@ -783,3 +855,671 @@ interaction QA, and save round-trip validation. No PBIP/TMDL/PBIR/PBIX artifact,
 Power BI Desktop execution, PostgreSQL work, SQL execution, or data load was
 performed. Stage 10 retains its blocked runtime-validation status and Stage 12
 was not started.
+
+## D-043 — Stage 13 Tiered Collector Readiness Audit
+
+Stage 13 performed an offline, evidence-based readiness audit for the future
+Tiered50 collector. The historical `10/20/20` candidate reconciles to `280`
+logical requests/hour, `6,720`/day, `201,600` in a 30-day month, and `208,320`
+in a 31-day month. The full ceiling remains `250,000`, with normal planning at
+`207,500–210,000`; retries are additional HTTP requests and
+`NumberOfResults` is not a request multiplier. The candidate remains a
+calculated provisional population, not an approved production cadence.
+
+No authoritative Stage 12 completion artifact or fixed 50-station panel is
+present. The bounded N5 and N20 MDD samples reached their configured limits,
+so no production result limit was selected and
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit. The approved Stage 4
+artifact is aggregate-only in this checkout, so station/tier static density and
+forward-horizon coverage were not manufactured. Current production shared-
+credential usage and SQL Server `ctl.MddCollectorRun` history are unavailable;
+the historical Legacy snapshot's 35 additional attempts among 1,629 HTTP
+attempts are labeled historical sensitivity only.
+
+The deterministic five-minute phase design reconciles
+`24, 23, 23, 24, 23, 23` due targets, `140` per 30-minute super-cycle, and
+`280` per hour. Future execution identity is an atomic unique
+`(SamplingTargetId, LogicalDueBucket)` claim; stale/incomplete runs remain
+observable and missed historical buckets are never replayed. One failed target
+does not abort the remaining due targets. Small bounded concurrency with a
+conditional maximum of two is the design direction, but provider-safe
+concurrent behavior is not measured and production concurrency is not
+approved. Unbounded concurrency, Stage 14, and Tiered50 activation remain
+prohibited.
+
+**Final Stage 13 status:** `CONDITIONALLY BLOCKED —
+STAGE_12_PANEL_APPROVAL_REQUIRED; PROVIDER_MAXIMUM_NOT_ESTABLISHED;
+STATIC_EVENT_DENSITY_NOT_ESTABLISHED; CURRENT_PRODUCTION_MDD_AUDIT_UNAVAILABLE;
+CONCURRENCY_BEHAVIOR_NOT_ESTABLISHED`.
+
+## D-044 — Stage 12 Fixed 50-Station Panel and Versioning
+
+Stage 12 re-evaluated the current validated VRS Global-ID parent-station
+population and approved the fixed panel version `TIERED50_PANEL_V1`. The current
+official snapshot is `VERSION__20260930_0053`, retrieved at
+`2026-09-30T10:42:58Z`, with ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`. It has
+864 unique Cologne `location_type=1` parent-station candidates; all 864 have
+scheduled child-stop evidence, with 1,146,295 parent-level scheduled events.
+
+The identity rule remains validated source `stop_id` beginning with
+`de:05315:`. Parent membership comes from the source `parent_station`
+hierarchy. The seven Legacy7 IDs all resolve as current parent stations with
+scheduled service and are retained unchanged. The policy combines those
+continuity anchors, current core-mode coverage, a fixed secondary geographic
+cell-spread pass, and an explicit lexicographic operational-richness key. It
+does not use passenger counts, station fame, names, operators, coordinates, or
+route labels to establish Cologne identity, and it does not use a hidden
+weighted score.
+
+All six current core modes are represented and measured. The 50-station panel
+represents 25 of 57 occupied fixed geographic cells; the largest selected cell
+contains 12 stations. Proximity review retained distinct parent identities in
+central-station, Deutz, Mülheim, and other interchange areas when their source
+IDs and scheduled services were distinct.
+
+The final panel compatibility diagnostic made 50 sequential requests to the
+approved MDD/TRIAS endpoint with one attempt per station, zero retries,
+`NumberOfResults=1`, arrival scope, realtime data, and the approved
+previous/onward-call behavior. All 50 were HTTP 200, parseable valid TRIAS
+application responses with one returned event and matching source
+`StopPointRef` evidence. No replacement was required; raw responses were not
+persisted.
+
+The versioning contract fixes membership after approval. A membership change is
+not dynamic and requires a new version recording effective date/time, reason,
+and predecessor. Legacy7 history is never deleted, future cutover preserves
+historical sampling identities where applicable, and reporting distinguishes
+panel eras. `SelectionRank` is not a production tier.
+
+This decision does not approve production cadence, tier membership,
+`NumberOfResults`, concurrency, retries, overlap claiming, a scheduler, Power
+BI, or Stage 14. Stage 13 production work remains NOT STARTED; the pre-existing
+Stage 13 readiness audit remains conditionally blocked.
+
+## D-045 — Stage 12 Durable Candidate-Universe Replay Correction
+
+The Stage 12 approval result and `TIERED50_PANEL_V1` membership remain
+unchanged. The exact approved Stage 12 source snapshot was available locally
+and matched feed version `VERSION__20260930_0053` and ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`. A
+sanitized repository artifact now retains all 864 eligible parent-station
+candidates and the exact selection-policy parameters, without raw GTFS or MDD
+payloads.
+
+The authoritative `select_panel` function replays that artifact offline and
+reproduces the approved 50 IDs, ranks, phases, first 25 reserves, all seven
+Legacy7 anchors, 25 selected geographic cells, and the same core-mode coverage
+outcome. The Stage 12 acceptance gates now distinguish deterministic algorithm
+reproducibility from durable exact-input replayability, and both are required
+for COMPLETE. No new MDD request was issued. Stage 13 production work and Stage
+14 remain NOT STARTED.
+
+## D-046 — Stage 13 Tiered Collector Readiness Design Closeout (Historical; Superseded)
+
+**Status:** `SUPERSEDED / REOPENED — NOT VALID AS FINAL USER APPROVAL`
+
+This section preserves the historical Stage 13 closeout evidence. The prior
+autonomous approval is no longer valid because the user required explicit
+approval of all material design choices. D-047 is the current Stage 13 state;
+no new final decision is recorded here.
+
+The historical D-046 record documented readiness evidence for the Stage
+12-approved fixed panel `TIERED50_PANEL_V1`. The exact VRS Global-ID feed is
+`VERSION__20260930_0053` with ZIP SHA-256
+`288c26f23f91a2069078be82167cfa70eb5b2948e06cfeee9e23584910817147`.
+Static scheduled-arrival density was expanded over the exact feed calendar and
+`calendar_dates` exceptions and measured with 5-, 10-, 15-, and 30-minute
+rolling windows. Tier membership is deterministic density evidence and does
+not use Stage 12 `SelectionRank` as a production tier.
+
+The technically evaluated tier plan is 10 Tier A stations at five-minute
+cadence, 20 Tier B stations at 15-minute cadence, and 20 Tier C stations at
+30-minute cadence.
+It reconciles to 240 logical requests/hour, 5,760/day, 172,800 in a 30-day
+month, and 178,560 in a 31-day month. The six-heartbeat 30-minute distribution
+is `[21, 21, 19, 20, 20, 19]`, with 120 requests per super-cycle. The
+alternative historical 10/20/20 plan at 5/10/30 minutes remains a comparison
+only at 280 requests/hour; the selected 15-minute middle tier preserves the
+station count split while reducing quota pressure.
+
+Bounded live diagnostics used a fixed `DepArrTime` anchor and six deterministic
+high-, middle-, low-density, interchange, Legacy7, and urban bus/tram
+representatives. Sequential N5/N10/N20/N30 diagnostics made 24 valid HTTP 200
+requests; all tested limits saturated. A separate three-pair cap-2 diagnostic
+made six valid responses without a pressure signal or failure propagation.
+The technically evaluated option is `NumberOfResults=30`, while
+`PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit because the provider's
+theoretical maximum was not established. The cap-2 result is a bounded design
+maximum, not a provider-wide rate-limit claim.
+
+The normal policy is one attempt per logical target with zero automatic retries.
+The full documented Legacy7 cadence is reserved conservatively at 8,640/8,928
+requests for 30/31-day months because current shared-credential production
+usage is unavailable; it is not represented as zero. The Stage 13 diagnostic
+budget is capped at 100 attempts. Historical retry evidence is retained as
+sensitivity only. Future execution identity remains the atomic
+`(SamplingTargetId, LogicalDueBucket)` claim, missed buckets are never replayed,
+each target records its own failure, and Legacy7 history and identities are
+preserved.
+
+**Historical Stage 13 status at the time of D-046:** `COMPLETE — APPROVED
+TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED`. This historical
+status is superseded and is not valid as final user approval.
+
+This closeout does not create a scheduler, database objects, Windows scheduled
+tasks, Power BI artifacts, or a collector activation, and it does not start
+Stage 14. The current shared-credential audit remains a prerequisite for any
+future activation decision.
+
+## D-047 — Stage 13 Reopened for Explicit User Design Approval
+
+The latest Stage 13 state is `IN PROGRESS — EVIDENCE READY; USER DESIGN
+APPROVAL REQUIRED`. D-046 remains historical evidence only and is superseded;
+its autonomous approval of cadence, result limit, concurrency, and retry policy
+must not be treated as a valid final user decision.
+
+The retained 24 sequential N5/N10/N20/N30 records and six cap-2 records remain
+usable for HTTP status, parser success, returned counts, saturation, source
+reference consistency, duration, and provider-pressure analysis. Their old
+`forward_temporal_span_seconds` values are explicitly
+`INVALID_FOR_FORWARD_COVERAGE_DECISION` because the algorithm mixed
+PreviousCall, ThisCall, OnwardCall, and departure timings. The corrected metric
+uses only ThisCall arrival values at or after the requested `DepArrTime` anchor.
+
+Raw MDD responses were not retained, so the corrected coverage comparison
+could not be reconstructed from the original sanitized aggregates. The user
+then explicitly approved the separate gate, and exactly 24 corrected
+sequential client-side request invocations were issued, increasing cumulative
+client request invocations from 90 to 114. All 24 ended in sanitized
+`NETWORK_OR_DNS_FAILURE` before an HTTP response; 0 HTTP responses were
+received; 0 provider HTTP attempts were confirmed from response evidence; and
+provider quota consumption is unknown/not confirmed. The historical 100-attempt
+diagnostic ceiling is unchanged and no cap-2 rerun was performed.
+
+## D-048 — Corrected Stage 13 NumberOfResults Diagnostic Result
+
+The corrected implementation used only the requested StopEventResult's
+THIS-call arrival timing at or after the requested `DepArrTime` anchor. The
+user-approved run used six deterministic representative stations, N5/N10/N20/N30,
+sequential execution, `MaxAttempts=1`, zero diagnostic retries, one fixed
+comparable anchor (`2026-09-30T11:54:56Z`), no raw response persistence, and the
+401/403 stop rule.
+
+Exactly 24 additional client-side request invocations were issued. Every
+invocation ended with `NETWORK_OR_DNS_FAILURE`; 0 HTTP responses were received;
+0 provider HTTP attempts were confirmed from response evidence; provider quota
+consumption is unknown/not confirmed; and 24 is retained separately as
+`conservative_quota_accounting_attempts`. No returned result count,
+saturation, THIS-call arrival, pre-anchor count, or forward-coverage value was
+available. The sanitized duration and error evidence is retained. The
+historical 24 sequential records remain separately preserved with
+`INVALID_FOR_FORWARD_COVERAGE_DECISION`, and the six historical cap-2 records
+were not rerun.
+
+The corrected comparison therefore leaves fixed N20, fixed N30, and the
+tier-specific A20/B30/C30 candidate undecided. Exact-feed static planning
+supports N30 for 50/50 cadence windows and A20/B30/C30 for 50/50, but static
+support does not establish realtime response coverage or a provider maximum.
+No NumberOfResults decision was finalized.
+
+The requested 10/20/20 versus 8/20/22 density-ranked comparison produces four
+tier changes, not two: Köln Friesenplatz and Köln Ebertplatz move A→B, while
+Köln Porz Markt and Köln Ubierring move B→C. Their canonical route refs,
+modes, child-stop counts, Legacy7 status, and density boundary rationale are
+retained in the machine-readable evidence.
+
+Current user recommendations remain unapproved: review `8/20/22 @ 5/15/30`,
+consider bounded concurrency 2 subject to Stage 14 dry-run validation, and
+consider `MaxAttempts=2` with one bounded retry for approved transient failures.
+Stage 13 remains `IN PROGRESS — EVIDENCE READY; USER DESIGN APPROVAL REQUIRED`.
+
+## D-049 — Explicit Final Approval of Stage 13 Tiered Collector Readiness
+
+**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
+NOT STARTED
+
+The explicit approval recorded in prompts/S68.md finalizes the Stage 13
+readiness design. The fixed Stage 12 panel TIERED50_PANEL_V1 remains exactly
+50 stations and Stage 12 evidence is unchanged. Density ranks 1–8, 9–28, and
+29–50 define Tier A/B/C counts of 8, 20, and 22 at five-, fifteen-, and
+thirty-minute cadence. The approved load is 110 logical requests per
+30-minute super-cycle and 220 per hour.
+
+The approved result limits are Tier A/B/C NumberOfResults 20/30/30. Retained
+station-level exact-feed evidence recalculates maximum station P95 and maximum
+observed static scheduled-arrival counts as A 19/20, B 23/23, and C 29/29,
+with 50/50 total P95 support. This is static planning evidence only. The
+limitations PROVIDER_MAXIMUM_NOT_ESTABLISHED and
+CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT remain
+explicit; no provider-wide maximum, guaranteed realtime completeness,
+guaranteed 20/30 availability, or complete forward-coverage claim is made.
+
+Maximum concurrency 2 is approved as a bounded design. MaxAttempts=2 permits
+one automatic retry for HTTP 408, 429, 500, 502, 503, 504 and approved
+transient transport failures; Retry-After is respected for HTTP 429, while
+401/403 and deterministic request, parser/schema, and TRIAS application
+failures are not retryable. The normal retry reserve is 10% of nominal
+Tiered50 requests. The 30-day accounting is 158,400 nominal, 15,840 reserve,
+174,240 Tiered50 with reserve, 8,640 Legacy7 reserve, and 100 diagnostic
+reserve, totaling 182,980. The 31-day accounting is 163,680, 16,368,
+180,048, 8,928, and 100, totaling 189,076. These approved lower-load totals
+are valid safely below the `210,000` normal operational maximum and the
+`207,500` automatic-retry protection boundary; no minimum monthly utilization
+is required. Automatic retries are blocked when projected/current monthly
+consumption would exceed the `207,500` boundary.
+
+The approved phase sequence is 19/18/18/18/19/18 with capacities A 8,
+B 7/7/6, and C 4/3/4/3/4/4. The execution identity remains
+(SamplingTargetId, LogicalDueBucket); claims are atomic, duplicate invocation
+does not issue HTTP, missed buckets are not replayed, and one failed station
+does not abort other due targets. Legacy7 history and identities remain
+preserved.
+
+The final evidence records all material design approvals as true, Stage 13
+complete, production activation not started, and Stage 14 not started. No
+database object, scheduler, Windows task, target row, Power BI artifact, or
+Tiered50 activation was created. This closeout issued zero MDD requests and
+required no DNS/live-network operation.
+
+## D-050 — Stage 13 Contract-Hardening Correction
+
+**Status:** COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION
+NOT STARTED
+
+D-050 is a post-closeout correctness correction. D-046 through D-049 remain
+historical decision records and are not rewritten. The authoritative current
+Stage 13 evidence now separates `NORMAL_OBSERVED_HEARTBEAT_FEASIBILITY` from
+`DEGRADED_MODE_HEARTBEAT_BUDGET`. Retained successful cap-2 timing supports
+normal observed feasibility (`9,585.91 ms` P95 estimate and `9,771.31 ms`
+observed-max estimate), but it is not a degraded-mode guarantee. The
+theoretical maximum normal batch has 19 due targets, concurrency 2, a
+30-second per-attempt timeout, and MaxAttempts 2: 38 timeout-heavy attempts
+produce 570 seconds of wall-time pressure at cap-2, exceeding the 300-second
+heartbeat if unconstrained.
+
+The bounded degraded-mode contract is explicit: a dispatcher owns only its
+current logical heartbeat; it must not extend work into later logical buckets;
+it must not start an initial attempt or retry without sufficient remaining
+budget; in-flight work obeys the heartbeat deadline/cancellation contract;
+budget exhaustion is recorded as `SKIPPED_HEARTBEAT_BUDGET` or
+`RETRY_SKIPPED_HEARTBEAT_BUDGET`; those outcomes do not trigger catch-up and
+are collection-quality outcomes rather than service-operational conclusions;
+and one target's exhausted budget does not abort unrelated targets. HTTP 429
+continues to respect `Retry-After` but cannot sleep or retry past the current
+deadline. Stage 14 must determine and validate a concrete nonzero
+persistence/cleanup safety margin with end-to-end dry-run measurements; Stage
+13 assigns no arbitrary duration.
+
+The authoritative phase-assignment identity is corrected to
+`source_parent_station_id / parent StopPointRef`, with hash
+`SHA-256(panel version + tier + source_parent_station_id)`. All 50 approved
+phase indexes reproduce exactly; future database-generated `SamplingTargetId`
+values cannot change them. The production overlap/claim identity remains
+`(SamplingTargetId, LogicalDueBucket)`. Phase assignment is finalized in Stage
+13, but `production_phase_index_persisted = false` and
+`phase_index_must_be_persisted_in_stage14 = true`; the status remains
+`DESIGN_ONLY_STAGE14_MATERIALIZATION_REQUIRED`.
+
+The offline regression suite restores independent coverage for THIS-call
+pre-anchor timing, post-DNS smoke-gate transport failure, degraded heartbeat
+budget/deadline behavior, and parent-StopPointRef phase identity, including
+the existing DNS-zero-request and 401/403 safeguards. No MDD request, DNS
+lookup, or live-network operation was issued for this correction. The approved
+`TIERED50_PANEL_V1`, 8/20/22 tiers, 5/15/30 cadence, A20/B30/C30 result limits,
+MaximumConcurrency 2, MaxAttempts 2, one approved transient retry, 10% retry
+reserve, quota boundary, phase sequence, no-catch-up rule, and Legacy7
+continuity remain unchanged. Stage 14 remains `NOT STARTED`.
+
+The same post-closeout cleanup makes the quota semantics explicit: `250,000`
+is the absolute provider ceiling, `210,000` is the normal operational maximum,
+and `207,500` is the automatic-retry protection boundary. Stage 7's historical
+`207,500–210,000` / 83–84% planning target is retained as history, but the
+explicitly approved Stage 13 lower-load design supersedes any interpretation
+of `207,500` as a minimum utilization requirement. The approved `182,980` and
+`189,076` conservative totals are valid safely-below-boundary designs.
+
+## D-051 — Stage 14 Collector-First Implementation
+
+**Status:** IN PROGRESS — COLLECTOR IMPLEMENTATION COMPLETE; PRODUCTION
+CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+The explicit S72 decision is implemented as a reusable Python collector with a
+cross-platform, scheduler-neutral execution contract. The collector core uses
+standard-library components, keeps domain/policy code separate from transport
+and persistence, and exposes one current-heartbeat command rather than a
+permanent scheduler loop. Future architecture no longer depends on a
+Windows-specific runtime, virtual machine, shell environment, or host-local
+task scheduler.
+
+The versioned `TIERED50_PANEL_V1` runtime manifest contains the exact 50
+approved targets, fixed Stage 13 phases, the 7/43 Legacy7/new continuity
+classification, approved 8/20/22 tier counts, 5/15/30 cadence, and A20/B30/C30
+result limits. Phase indexes are loaded and reconciled against Stage 13
+evidence; they are not recomputed from mutable rank, list order, station name,
+or future database IDs. The retained evidence contains no concrete
+`SamplingTargetId` values, so no production IDs are invented.
+
+The implemented flow is configuration/manifest -> pure UTC schedule -> bounded
+dispatcher -> atomic claim port -> quota guard -> MDD client port -> TRIAS
+parser -> persistence port -> audit/result. Maximum concurrency remains 2 and
+MaxAttempts remains 2. The approved transient retry categories, Retry-After
+deadline rule, `SKIPPED_HEARTBEAT_BUDGET`,
+`RETRY_SKIPPED_HEARTBEAT_BUDGET`, shared-credential retry boundary, failure
+isolation, no-catch-up rule, and source-faithful parser semantics are covered
+by offline simulations and tests.
+
+SQLite is permitted only as disposable development/test durability. It
+implements stable local claims, duplicate audit, run/target audit, HTTP
+attempt accounting, parsed snapshot persistence without raw payloads, shared
+usage values, sampling-era metadata, and stale/incomplete claim visibility.
+The future production overlap identity remains
+`(SamplingTargetId, LogicalDueBucket)`, and the future production persistence
+adapter/schema is intentionally not implemented.
+
+`plan`, `dry-run`, and `simulate` are offline-safe. The real POST/TRIAS client
+is explicitly opt-in, reads the key only from `MDD_API_KEY`, and performs no
+network work on import or initialization. CLI `live` remains blocked until the
+production adapter, safety state, authorized dry-run, and cutover gates exist.
+No MDD request, DNS preflight, quota consumption, production database object,
+target activation, deployment schedule, or real Tiered50 cutover timestamp was
+created or recorded for D-051.
+
+Required later work remains: select the PostgreSQL host/runtime; implement its
+adapter and production schema; materialize and retain real target IDs; perform
+the seven-to-50 migration; record the real sampling-era timestamp; select the
+deployment platform and final safety margin; execute an authorized live
+dry-run; activate Tiered50; and run post-activation smoke/continuity/quota
+validation. These are explicit deferrals, not defects in the offline
+implementation.
+
+## D-052 — Stage 14 Collector Hardening and Final Offline Closeout
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S73's durable dispatcher claim correction and just-in-time target claims remain
+the successful foundation: the dispatcher claim is keyed by panel version and
+logical due bucket, duplicate bucket invocations issue zero target transports,
+and target claims are made immediately before submission. D-052 preserves the
+exact 50-target manifest, Legacy7 lineage IDs 1 through 7, 43 new targets with
+null production IDs, all fixed Stage 13 phase/tier/cadence/result/concurrency
+values, and stale/incomplete claim visibility without historical replay.
+
+The parser hardening remains source-faithful and append-only. JSON and XML
+normalize equivalently, and nullable lexical `RecordedAtTime` values remain
+retained for PREVIOUS/THIS/ONWARD arrival/departure contexts without synthesis.
+
+Quota authorization now has a durable pending lifecycle followed by exactly one
+of no-network release, conservative live-attempt consumption, or confirmed
+provider HTTP-attempt confirmation. The finalization is committed with the
+attempt audit, so a live permit cannot be reused between network invocation and
+accounting. Client-side live invocation, HTTP response receipt, confirmed
+provider attempt, provider-quota-unknown transport failure, and conservative
+quota protection remain distinct. Credential/request-contract failures and
+simulation calls do not consume provider or conservative live headroom.
+
+Transport results explicitly report whether a network operation was attempted
+and whether an HTTP response was received; metrics use those facts rather than
+the client class. The owned `run_simulation` path closes SQLite in all outcomes,
+while `build_simulation` documents caller ownership. The closeout remains
+offline-only: no PostgreSQL objects, deployment, live dry-run, MDD request,
+DNS activity, production target materialization, Power BI change, or cutover
+was performed.
+
+## D-053 — Stage 14 Source-Faithful Parser Hardening and Retry Safety
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S75's final parser-hardening correction is complete without reopening the
+accepted S74 quota-permit accounting, cadence, concurrency, dispatcher claims,
+SQLite lifecycle, or any Stage 13 decision. Call-level StopPointRef,
+display text, sequence, bay, stop flags, and arrival/departure timing now read
+only from the current call/`CallAtStop` source scope. Missing values remain
+NULL and exact call source paths are retained; no StopEvent/Service fallback is
+performed.
+
+`Cancelled`/`JourneyCancelled` and `Deviation` remain separate operational
+event/service fields with source paths and are not copied into call
+observations. `PtMode`, nullable `RailSubmode`/submode,
+`PublishedLineName`, and origin/destination stop identity and display text are
+retained independently, including nested Origin/Destination source shapes.
+The Stage 8 recognized-source vocabulary and relevance filter are restored for
+sanitized parser-gap evidence with result/event/call context, while unrelated
+envelope fields do not become defects.
+
+An unexpected unstructured exception escaping the client abstraction is now a
+sanitized, deterministic non-retryable `CLIENT_EXECUTION_FAILURE` with
+`network_attempted=false` by default. Its permit finalizes as
+`RELEASED_NO_NETWORK`; expected structured `LiveMddClient` transport failures
+retain their approved transient categories and retry behavior. The regression
+suite covers one-attempt RuntimeError behavior, zero confirmed or conservative
+provider attempts, and no persisted exception text.
+
+The complete offline repository suite contains 118 tests and passed five
+consecutive times with `ResourceWarning` promoted to an error. The Stage 14
+validator passed with the approved 50/7/43 panel split, phase sequence
+`[19,18,18,18,19,18]`, 220 requests/hour, and zero live-network calls.
+Compilation/static architecture checks and `git diff --check` passed. No MDD,
+DNS, PostgreSQL, scheduler deployment, production cutover, or Power BI change
+was performed, and Stage 15 remains `NOT STARTED`.
+
+## D-054 — Stage 14 Final Source-Contract Retention Correction
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 NOT STARTED
+
+S76's final focused parser correction is complete without reopening the
+accepted S73/S74 dispatcher, concurrency, accounting, transport, quota,
+heartbeat, cadence, or SQLite lifecycle decisions, and without changing
+Stage 12, Stage 13, Power BI, or production-cutover state.
+
+The normalized event now retains `JourneyRef`, `VehicleJourneyRef`, and
+`DatedVehicleJourneyRef` independently with independent source paths. A
+missing `JourneyRef` remains NULL when either richer candidate identity is
+present. `DirectionRef` and `Direction` are likewise independent. The
+candidate evidence extensions `AffectedVehicleJourney`,
+`VehicleJourneys`, `OperatingDaysDescription`, `Origins`, and
+`Destinations` are retained separately and are never promoted to universal
+keys.
+
+`PtMode`, submode, `PublishedLineName`, and origin/destination identity/text
+are read only from the `Service` scope. StopEvent/call lookalikes remain NULL
+for service identity and are retained only as bounded source-contract gap
+evidence where they are relevant. Service `Attribute` and
+`GeneralAttribute` occurrences, including `IncidentCall` service-information
+structures, retain Code, sibling Text, exact source paths, safe source
+representations, association context, result/event lineage, and an explicit
+provider-reported evidence label. No normalized cause or measured-delay claim
+is derived.
+
+Situation representations now expose source-faithful affected-entity context
+for `Affects`, `AffectedEntity`, `AffectedJourney`, and `AffectedLine`
+with field paths. Parser-gap coverage is path-based rather than
+vocabulary-based: structural containers, explicitly retained paths, safe
+generic metadata, and bounded unmapped relevant fields are distinct states.
+Explicitly retained attributes and Situation objects are not duplicated as
+parser gaps; unrelated envelope metadata remains ignored.
+
+Offline JSON/XML regressions and the retention-coverage regression pass. The
+full repository suite contains 120 tests per run and passed five consecutive
+times with `ResourceWarning` promoted to an error. The Stage 14 validator,
+Python compilation, static architecture checks, and whitespace validation
+pass. No MDD, DNS, live-network, PostgreSQL, scheduler deployment, production
+cutover, or Power BI activity was performed. Stage 15 remains `NOT STARTED`.
+
+## D-055 — Stage 15A Post-Cutover Validation Readiness
+
+**Status:** STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE; overall Stage 14 IN
+PROGRESS — PRODUCTION CUTOVER DEFERRED; Stage 15 readiness IN PROGRESS; Stage
+15 live NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S77 establishes Stage 15A as a pre-cutover readiness iteration. The authoritative
+readiness document and machine-readable contract define the distinction between
+offline framework work and the real Stage 15B post-cutover validation. The
+contract encodes only approved panel, schedule, execution, quota, and Legacy7
+continuity invariants. Failure-rate, retry-rate, timeout-rate, coverage,
+parser-gap, and heartbeat-duration thresholds remain user-approval decisions.
+
+The reusable `cologne_transit_stage15` package consumes an evidence-adapter
+protocol. Its SQLite adapter opens the disposable Stage 14 development file in
+read-only mode; a future production evidence adapter can provide the same
+evidence vocabulary without changing validation logic. The analyzer derives
+expected due targets from the approved manifest, pure schedule engine, and
+logical bucket, and classifies actual evidence as explicit success, failure,
+skip, missing, duplicate-prevented, or unexpected execution. It separately
+reports dispatcher ownership, duplicate and stale claims, target claims,
+structural retry violations, quota dimensions and boundaries, station/tier
+coverage, deterministic duration statistics, parser/persistence outcomes, and
+sampling-era continuity readiness.
+
+No validator action claims a bucket, mutates target state, repairs claims,
+finalizes a quota permit, persists a parsed snapshot, or sends transport. No
+MDD request, DNS/live-network activity, PostgreSQL activity, production object,
+production target materialization, scheduler deployment, Power BI change, or
+real cutover timestamp was performed. Because Tiered50 has not been activated,
+Stage 15B remains not started and no post-cutover production claim is made.
+
+## D-056 — S78 Single-Station Live SQLite Research Pilot
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 14 collector implementation COMPLETE; Stage 15A IN PROGRESS;
+Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S78 supersedes the previously discussed PostgreSQL direction for the active
+roadmap with the following decision:
+
+`SQLite Live Research First; final durable storage decision deferred until stable repeated collector evidence exists.`
+
+The active implementation uses one explicit durable `LIVE_RESEARCH` SQLite
+profile outside the repository. Its recommended root is
+`~/cologne-transit-data/live-research/`, with `collector.sqlite3`, protected
+`backups/`, and protected `raw-evidence/` directories. The database is
+non-disposable, additive-schema, owner-protected, and identified by metadata
+including role, schema version, creation time, last migration time, and
+`LIVE_RESEARCH_SINGLE_1` collection context. Existing live state is never
+reset or recreated automatically.
+
+The dedicated `live-research` command requires explicit `--allow-live`, an
+explicit live root or database, the inherited `MDD_API_KEY`, and the approved
+pilot target `de:05315:11110` / Köln Heumarkt. It executes one current
+five-minute bucket only, retains parsed source-faithful snapshots and
+RecordedAtTime/Attribute/GeneralAttribute/Situation/parser-gap evidence
+indefinitely, and keeps provider-wide shared quota unknown when no trusted
+baseline exists. Automatic retry fails closed in that unknown state.
+
+Ordinary successful raw bodies are not retained. Sanitized raw evidence is
+temporary forensic material only, indexed with a maximum 24-hour lifetime,
+refused when the current API key is detected, and cleaned at startup, after a
+heartbeat, or by explicit maintenance. SQLite online backups are integrity
+checked, atomically published, refreshed for the current UTC date, and rotated
+to the three most recent daily versions. No Tiered50 active sampling-era row,
+production cutover timestamp, new production target ID, scheduler, Power BI
+change, Stage 16 work, or Stage 15B validation is created by this decision.
+PostgreSQL work is not currently planned or authorized; historical decisions
+that mention it remain unchanged.
+
+The single controlled S78 heartbeat completed in the `2026-10-01T11:30:00Z`
+bucket for Köln Heumarkt (`de:05315:11110`). It made exactly one provider HTTP
+attempt, received HTTP 200, parsed and durably stored 20 results, and recorded
+no retry. The source response exposed 121 parser-gap fields, so sanitized raw
+evidence was retained under the bounded forensic policy. The resulting SQLite
+backup passed integrity validation. Shared provider quota remained explicitly
+unknown; the run therefore made no retry claim. This evidence is read-only
+Stage 15A input and does not start Stage 15B or create a Tiered50 cutover.
+
+## D-057 — S79 Timing History and First-Gap Correction
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 15A IN PROGRESS; Stage 15B NOT STARTED — AWAITS TIERED50
+CUTOVER
+
+S79 preserves the source timing distinction among `TimetabledTime`,
+`EstimatedTime`, `RecordedAtTime`, and collection observation time. The
+collector now appends one normalized timing row per source timing context per
+snapshot to `timing_observations`, with nullable values, source paths, audit /
+snapshot / run lineage, and collection context. A later NULL `RecordedAtTime`
+does not erase an earlier non-NULL row. The source-event identity is
+deterministic and MDD-local, excludes `ResultId` and mutable timing or
+observation values, and returns an explicit insufficient status rather than
+guessing when required context is absent.
+
+The derived reporting projection exposes latest snapshot value and lineage as
+`LatestSourceRecordedAtTime`, the latest historical non-NULL value and lineage
+as `LastObservedRecordedAtTime`, first-observed lineage, and the non-NULL
+observation count. `recorded_at_time_evidence` remains the append-only source
+evidence table; the projection is not counted as a second source occurrence.
+Stage 15A reports timing-observation count, estimate-revision history,
+non-NULL source-evidence count, events with a last observed value, and
+latest-NULL/history-non-NULL count as measurement-only values. Stage 15B keeps
+the exact status `NOT STARTED — AWAITS TIERED50 CUTOVER`.
+
+The actual S78 Heumarkt SQLite database and its retained sanitized raw
+artifact were inspected read-only without a new request. The first-gap audit
+is recorded in [the Markdown summary](stages/14-live-research-first-gap-audit.md)
+and [the machine-readable artifact](stages/14-live-research-first-gap-audit.json).
+Of 121 observed gaps, 21 clear structural-container occurrences are corrected
+for future parser output and 100 ServiceSection fields remain
+`NEEDS_SEMANTIC_REVIEW`; the live S78 database was not rewritten and the parser
+was not forced to report zero gaps. DEVELOPMENT SQLite remains disposable;
+LIVE_RESEARCH SQLite remains durable outside the repository with indefinite
+parsed history, raw evidence bounded to 24 hours, and three validated daily
+backups. Final storage selection remains deferred until repeated evidence is
+stable, and PostgreSQL is not an active Stage 14 completion gate.
+
+## D-058 — S80 Identity, ServiceSection, Backfill, and Historical-Window Correction
+
+**Status:** IN PROGRESS — LIVE SQLITE RESEARCH PILOT; PRODUCTION CUTOVER
+DEFERRED; Stage 14 collector implementation COMPLETE; Stage 15A IN PROGRESS;
+Stage 15B NOT STARTED — AWAITS TIERED50 CUTOVER
+
+S80 corrects the S79 implementation without changing the approved Tiered50
+panel, production boundary, or storage direction. The timing identity version
+is `MDD_SOURCE_EVENT_V2` and hashes only OperatingDayRef, JourneyRef,
+StopPointRef, TimetabledTime, and timing context. Optional lineage remains
+available for evidence and same-snapshot core collisions receive an explicit
+`SOURCE_EVENT_IDENTITY_AMBIGUOUS_CORE` status rather than being merged.
+
+`ServiceSection` is now an explicit parser representation and durable evidence
+grain. Multiple sections are retained with exact source paths, source
+representations, field-level values, and event/result lineage; an unknown
+relevant extension remains a parser gap. Existing parsed snapshots are
+backfilled idempotently without changing their JSON, with a uniqueness
+constraint at the timing observation grain and explicit RecordedAtTime
+reconciliation.
+
+The existing LIVE_RESEARCH database was migrated offline from schema 2 to 4.
+The migration inserted 995 timing rows and 20 ServiceSection rows, passed
+SQLite integrity/quick checks, refreshed the validated current-day backup, and
+removed the temporary safety backup only after validation. No MDD request, DNS
+activity, live-network attempt, scheduler, PostgreSQL, Power BI, or cutover
+activity occurred. Stage 15 historical analysis now filters raw timing rows by
+window before grouping; the global reporting view remains current-state only.
+
+## D-059 — S81 Reporting Lineage and Migration Correction
+
+S81 corrects the S80 reporting implementation without changing the accepted
+source-event identity, timing-history, ServiceSection, raw-retention, backup,
+or Stage 15 semantics. The `MDD_SOURCE_EVENT_V2` hash remains defined only by
+OperatingDayRef, JourneyRef, StopPointRef, TimetabledTime, and timing context;
+optional source fields remain lineage/disambiguation evidence and never alter
+that hash.
+
+The current SQLite reporting projections now expose the exact
+`recorded_at_time_source_path` for latest, last-observed, and first-observed
+RecordedAtTime values. A latest NULL value exposes a NULL latest source path;
+no earlier path is borrowed. Schema 4 to schema 5 explicitly replaces only the
+two affected reporting views in a transaction, preserves all table data, and
+keeps the migration timestamp stable on subsequent schema-5 opens. Deterministic
+schema-v2 and schema-v4 fixtures cover backfill, snapshot preservation,
+idempotency, integrity, and view replacement. The historical S78/S80 facts are
+unchanged: the original snapshot JSON was not rewritten, and ServiceSection
+fields reconstructed from retained raw evidence are documented as such.
+
+The actual live file was migrated offline from schema `4` to `5` at
+`2026-10-01T15:15:16.410851Z`. Counts remained unchanged at 1 parsed snapshot,
+995 timing observations, 0 RecordedAtTime evidence rows, and 20 ServiceSection
+rows; integrity/quick checks, reconciliation, and corrected reporting-view
+validation passed. The current-day backup was refreshed and the temporary
+safety backup was removed only after validation.

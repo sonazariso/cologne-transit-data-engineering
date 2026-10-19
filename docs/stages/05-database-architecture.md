@@ -1,6 +1,15 @@
 # Stage 5 — Database Architecture
 
-**Status:** COMPLETE — APPROVED ARCHITECTURE
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
+> **S87 supersession note (2026-10-05):** This document records the earlier
+> PostgreSQL architecture design. It remains historical/deferred-cleanup
+> material; Microsoft SQL Server is now the sole authoritative project
+> database for the active roadmap. No migration or physical implementation was
+> performed by S87.
+
+**Status:** HISTORICAL APPROVED DESIGN — ACTIVE PLATFORM SUPERSEDED BY S87
 **Decision:** [D-029](../DECISION-LOG.md#d-029--stage-5-database-architecture)
 **Date:** 2026-09-28
 
@@ -637,11 +646,14 @@ as started by the Stage 5 approval.
 
 ## 24. Final decision
 
-**APPROVED ARCHITECTURE DECISION:** Stage 5 is **COMPLETE — APPROVED
-ARCHITECTURE**. PostgreSQL 18 is the future authoritative platform direction,
-implemented as a clean redesign with durable source-faithful evidence and
-derived analytical layers. The [completion decision](05-database-architecture-completion-decision.md)
-records the classifications, carried-forward risks, and final closeout.
+**HISTORICAL ARCHITECTURE DECISION:** Stage 5 was **COMPLETE — APPROVED
+ARCHITECTURE** at its closeout. PostgreSQL 18 was the future authoritative
+platform direction, implemented as a clean redesign with durable source-faithful
+evidence and derived analytical layers. S87 supersedes that direction for the
+active roadmap and makes Microsoft SQL Server the sole authoritative project
+database. The [completion decision](05-database-architecture-completion-decision.md)
+records the historical classifications, carried-forward risks, and final
+closeout.
 
 **STAGE BOUNDARY:** No PostgreSQL database, schema, table, migration, SQL
 execution, collector, scheduler, matching implementation, warehouse

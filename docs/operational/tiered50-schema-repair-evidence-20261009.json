@@ -1,0 +1,91 @@
+{
+  "artifact_version": "TIERED50_SCHEMA_REPAIR_EVIDENCE_V1",
+  "captured_on": "2026-10-09",
+  "target": {
+    "host": "172.16.192.128",
+    "port": 1433,
+    "server_name": "DataAnalyst-VM",
+    "database_name": "CologneTransitIntelligence",
+    "effective_login": "sa"
+  },
+  "authoritative_ddl": "sql/mdd-mac-collector/create-source-faithful-persistence.sql",
+  "operation": {
+    "command": "python3 scripts/repair_mdd_mac_schema.py --apply --authorize-production-ddl",
+    "approved_object": "ctl.MddMacProductionResumeEvent",
+    "excluded_operations": [
+      "GENERAL_MIGRATION",
+      "SAMPLING_ERA_CREATION",
+      "CUTOVER_REPEAT",
+      "QUOTA_REWRITE",
+      "RESUME_EVENT_INSERT",
+      "COLLECTOR_ACTIVATION"
+    ],
+    "status": "PASS",
+    "creation_status": "CREATED_BY_THIS_OPERATION",
+    "created_objects": ["ctl.MddMacProductionResumeEvent"],
+    "transaction_final_state": "COMMITTED",
+    "transaction_final_state_unknown": false,
+    "schema_verification_before_commit": "PASS",
+    "schema_verification_after_commit": "PASS",
+    "reconciliation": "PASS"
+  },
+  "preconditions": {
+    "administrator_authorization": "PASS",
+    "initial_missing_required_objects": ["ctl.MddMacProductionResumeEvent"],
+    "backup_restore_verifyonly_with_checksum": "PASS",
+    "capacity_gate": "PASS",
+    "competing_collectors_or_leases": "NONE",
+    "mdd_requests_issued": 0
+  },
+  "independent_post_repair_verification": {
+    "fresh_admin_connection": "PASS",
+    "table_present_in_ctl": true,
+    "column_count": 10,
+    "columns_match_authoritative_definition": true,
+    "constraints_match_authoritative_definition": true,
+    "indexes_match_authoritative_definition": true,
+    "permissions_proven": true,
+    "resume_event_rows": 0,
+    "former_sql_error_208": {
+      "before_repair_known_count": 1,
+      "after_repair_count": 0,
+      "status": "RESOLVED"
+    }
+  },
+  "preservation": {
+    "legacy_target_ids": [1, 2, 3, 4, 5, 6, 7],
+    "tiered50_target_id_range": {"first": 8, "last": 50, "count": 43},
+    "before_after_controlled_evidence_match": true,
+    "repair_created_only_approved_object": true,
+    "power_bi_or_legacy7_changed": false
+  },
+  "rollback_validation": {
+    "status": "PASS",
+    "validation_mode": "REAL_SQL_SERVER_TRANSACTION_ROLLED_BACK",
+    "tested_row_counts": [1, 16, 18, 19],
+    "rows_after_rollback": 0,
+    "historical_production_audits_modified": false,
+    "mdd_requests_issued": 0
+  },
+  "current_operational_state": {
+    "tiered50_active": false,
+    "scheduler_active": false,
+    "resume_executed": false,
+    "launchagent_activated_by_this_operation": false,
+    "legacy7_retired": true,
+    "stations_actually_collecting": 0
+  },
+  "current_admin_evidence": {
+    "artifact": "tiered50-production-evidence-current-20261009.json",
+    "generated_at_utc": "2026-10-09T08:56:15.668899Z",
+    "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
+    "signature_status": "UNSIGNED",
+    "signature_blocker": "operator-controlled signing key was not supplied",
+    "mdd_requests_issued": 0,
+    "writes_performed": 0
+  },
+  "resume_gate": {
+    "status": "NOT_EXECUTED",
+    "reason": "schema DDL approval is separate from signed evidence and explicit Resume authorization"
+  }
+}

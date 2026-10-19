@@ -1,0 +1,996 @@
+{
+  "artifact_integrity": {
+    "payload_sha256": "b84b6f39df2b3bd84c7bafd6ea18822e53fc6a6a4bf5fa11f7e024ab246f79e7",
+    "reason": "operator-controlled signing key was not supplied",
+    "status": "UNSIGNED"
+  },
+  "artifact_version": "TIERED50_ADMIN_EVIDENCE_V3",
+  "capture_provenance": {
+    "authentication_source": "MSSQL_ADMIN_*_KEYCHAIN",
+    "captured_at_utc": "2026-10-09 08:56:17.419055",
+    "database_name": "CologneTransitIntelligence",
+    "effective_login": "sa",
+    "execution_path": "SEPARATE_SQL_LOGIN",
+    "read_only": true,
+    "required_check_ids": [
+      "admin.identity",
+      "admin.permissions",
+      "admin.sql_runtime_health",
+      "backup.latest_full_backup_history",
+      "backup.restore_verifyonly_with_checksum",
+      "capacity.database_files",
+      "capacity.database_log_space_dm_db_log_space_usage",
+      "capacity.volume_capacity_dm_os_volume_stats",
+      "collector.competing_production_writers",
+      "collector.production_cutover_history",
+      "collector_runtime_history_or_materialization",
+      "quota.current_shared_ledger"
+    ],
+    "server_name": "DataAnalyst-VM",
+    "sql_instance_identity": {
+      "database_name": "colognetransitintelligence",
+      "machine_name": "dataanalyst-vm",
+      "server_name": "dataanalyst-vm"
+    },
+    "status": "PASS",
+    "windows_integrated_auth_supported": true
+  },
+  "capture_role": "CURRENT_READ_ONLY_ROLE_SEPARATED_CAPTURE",
+  "current_status": {
+    "current_evidence_basis": [
+      "fresh_launchd_state",
+      "immutable_sql_activation_state",
+      "latest_tiered50_collection_evidence"
+    ],
+    "historical_outage_evidence": "OUTAGE_RECORD_PRESENT",
+    "historical_outage_preserved": true,
+    "latest_run_status": "COMPLETE",
+    "resume_event_present": false,
+    "scheduler_active": false,
+    "sql_activation_valid": true,
+    "stations_actually_collecting": 0,
+    "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
+    "tiered50_active": false
+  },
+  "generated_at_utc": "2026-10-09T08:56:15.668899Z",
+  "host": {
+    "legacy7_launchd": {
+      "command": "/bin/launchctl",
+      "returncode": 113,
+      "stderr": "Bad request.\nCould not find service \"com.cologne-transit-intelligence.mdd-collector\" in domain for user gui: 501\n",
+      "stdout": ""
+    },
+    "legacy7_plist": {
+      "contains_secret_marker": false,
+      "disabled": true,
+      "exists": true,
+      "program_arguments": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "/Users/admin/Library/Application Support/CologneTransitIntelligence/runtime-bundle/macos_launchd_entry.py"
+      ],
+      "run_at_load": false,
+      "schedule_type": "RELATIVE_INTERVAL",
+      "start_calendar_interval_minutes": null,
+      "start_interval_seconds": 300
+    },
+    "mac_disk": {
+      "free_bytes": 79158349824,
+      "total_bytes": 250685575168
+    },
+    "power_assertions": {
+      "command": "/usr/bin/pmset",
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "2026-10-09 10:56:15 +0200 \nAssertion status system-wide:\n   BackgroundTask                 0\n   PreventDiskIdle                1\n   ApplePushServiceTask           0\n   UserIsActive                   1\n   PreventUserIdleDisplaySleep    1\n   PreventSystemSleep             1\n   ExternalMedia                  0\n   PreventUserIdleSystemSleep     1\n   NetworkClientActive            0\nListed by owning process:\n   pid 162(WindowServer): [0x00000015000980b5] 00:02:50 UserIsActive named: \"com.apple.iohideventsystem.queue.tickle serviceID:100000772 service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11\"  \n   pid 1027(caffeinate): [0x0000021c000182cf] 02:00:57 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000582d0] 02:00:57 PreventUserIdleDisplaySleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000782d1] 02:00:57 PreventSystemSleep named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\n   pid 1027(caffeinate): [0x0000021c000f82d2] 02:00:57 PreventDiskIdle named: \"caffeinate command-line tool\"  \n\tDetails: caffeinate asserting forever\n\tLocalized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.\nKernel Assertions: 0x100=MAGICWAKE\n   id=507  level=255 0x100=MAGICWAKE creat=09.10.26, 08:55  mod=09.10.26, 09:38 description=en0 owner=IOSkywalkNetworkBSDClient\nIdle sleep preventers: IODisplayWrangler\n"
+    },
+    "tiered50_launchd": {
+      "command": "/bin/launchctl",
+      "returncode": 113,
+      "stderr": "Bad request.\nCould not find service \"com.cologne-transit-intelligence.mdd-tiered50-collector\" in domain for user gui: 501\n",
+      "stdout": ""
+    },
+    "tiered50_plist": {
+      "contains_secret_marker": false,
+      "disabled": true,
+      "exists": true,
+      "program_arguments": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "/Users/admin/Library/Application Support/CologneTransitIntelligence/runtime-bundles/tiered50-v1-f12437b7d3681544/macos_launchd_entry.py",
+        "--mode",
+        "tiered50"
+      ],
+      "run_at_load": false,
+      "schedule_type": "START_CALENDAR_INTERVAL_LOCAL_WALL_CLOCK",
+      "start_calendar_interval_minutes": [
+        0,
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55
+      ],
+      "start_interval_seconds": null
+    },
+    "uptime": {
+      "command": "/usr/bin/uptime",
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "10:56  up  2:10, 2 users, load averages: 3.81 3.95 3.97\n"
+    },
+    "vmware": {
+      "command": "/Applications/VMware Fusion.app/Contents/Public/vmrun",
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "Total running VMs: 1\n/Users/admin/Virtual Machines.localized/Windows 11 Enterprise.vmwarevm/Windows 11 Enterprise.vmx\n"
+    }
+  },
+  "mdd_requests_issued": 0,
+  "sql": {
+    "admin_authorization": {
+      "reason": null,
+      "required_query_statuses": {
+        "competing_production_writers": "PASS",
+        "current_quota_ledger": "PASS",
+        "database_files": "PASS",
+        "latest_full_backup_history": "PASS",
+        "log_space": "PASS",
+        "operational_history": "PASS",
+        "production_cutover_history": "PASS",
+        "runtime_health": "PASS",
+        "tiered50_audit_history": "PASS",
+        "volume_capacity": "PASS"
+      },
+      "status": "PASS"
+    },
+    "admin_connection": {
+      "authorization_status": "PASS",
+      "connection": {
+        "database": "CologneTransitIntelligence",
+        "host": "172.16.192.128",
+        "login_timeout_seconds": 8,
+        "password_configured": true,
+        "port": 1433,
+        "query_timeout_seconds": 30,
+        "user_configured": true
+      },
+      "connection_status": "PASS",
+      "evidence_role": "PRIVILEGED_READ_ONLY_ADMIN",
+      "status": "PASS"
+    },
+    "admin_identity_gate": {
+      "effective_login": "sa",
+      "reason": null,
+      "runtime_login_match": false,
+      "status": "PASS"
+    },
+    "admin_permissions": {
+      "denied_permissions": [],
+      "has_backup_database": 1,
+      "has_create_any_database": null,
+      "has_database_select": 1,
+      "has_msdb_backupmediafamily_select": 1,
+      "has_msdb_backupset_select": 1,
+      "has_view_database_state": 1,
+      "has_view_definition": 1,
+      "has_view_server_performance_state": null,
+      "has_view_server_state": null,
+      "is_db_owner": 1,
+      "is_dbcreator": 1,
+      "is_securityadmin": 1,
+      "is_serveradmin": 1,
+      "is_sysadmin": true,
+      "missing_permissions": [],
+      "permission_checks": {
+        "backup_history_backupmediafamily_select": true,
+        "backup_history_backupset_select": true,
+        "backup_verifyonly_authorization": true,
+        "database_view_definition": true,
+        "database_view_state": true,
+        "operational_history_database_select": true,
+        "server_dmv_state": true
+      },
+      "permission_states": {
+        "backup_history_backupmediafamily_select": "GRANTED_BY_METADATA",
+        "backup_history_backupset_select": "GRANTED_BY_METADATA",
+        "backup_verifyonly_authorization": "GRANTED_BY_SYSADMIN_OR_DBCREATOR",
+        "database_view_definition": "GRANTED_BY_METADATA",
+        "database_view_state": "GRANTED_BY_METADATA",
+        "operational_history_database_select": "GRANTED_BY_METADATA",
+        "server_dmv_state": "GRANTED_BY_SUCCESSFUL_DMV_ACCESS"
+      },
+      "product_major_version": 17,
+      "server_dmv_required_permission": "VIEW SERVER PERFORMANCE STATE",
+      "status": "PASS",
+      "sysadmin_membership_state": "GRANTED",
+      "unknown_permissions": [],
+      "verified_dmv_access": true
+    },
+    "admin_role_source": "MSSQL_ADMIN_*_KEYCHAIN",
+    "backup_gate": {
+      "reason": null,
+      "required_statement_id": "backup.restore_verifyonly_with_checksum",
+      "status": "PASS"
+    },
+    "backup_headeronly": {
+      "media": [
+        {
+          "checksum_verified": false,
+          "header_row_count": 1,
+          "statement": "RESTORE HEADERONLY FROM DISK = N'<backup path redacted>'",
+          "statement_id": "backup.restore_headeronly",
+          "status": "PASS"
+        }
+      ],
+      "media_count": 1,
+      "status": "PASS"
+    },
+    "backup_server_side_access": {
+      "media": [
+        {
+          "execution_context": "SQL_SERVER_SERVICE_ACCOUNT",
+          "file_exists": true,
+          "parent_directory_exists": true,
+          "statement": "EXEC master.dbo.xp_fileexist N'<backup path redacted>'",
+          "statement_id": "backup.server_side_file_access",
+          "status": "PASS"
+        }
+      ],
+      "media_count": 1,
+      "status": "PASS"
+    },
+    "backup_verifyonly": {
+      "cause_classification": "VERIFIED",
+      "checksum_verified": true,
+      "media_count": 1,
+      "statement": "RESTORE VERIFYONLY FROM DISK = N'<backup path redacted>' WITH CHECKSUM",
+      "statement_id": "backup.restore_verifyonly_with_checksum",
+      "status": "PASS"
+    },
+    "capacity_gate": {
+      "reason": null,
+      "required_statement_ids": [
+        "capacity.volume_capacity_dm_os_volume_stats",
+        "capacity.database_log_space_dm_db_log_space_usage"
+      ],
+      "status": "PASS"
+    },
+    "competing_production_writers": [],
+    "competing_production_writers_evidence": {
+      "statement_id": "collector.competing_production_writers",
+      "status": "PASS"
+    },
+    "current_quota_ledger": [],
+    "current_quota_ledger_evidence": {
+      "statement_id": "quota.current_shared_ledger",
+      "status": "PASS"
+    },
+    "database_files": [
+      {
+        "growth": 8192,
+        "is_percent_growth": false,
+        "max_size_pages": -1,
+        "name": "CologneTransitIntelligence",
+        "size_pages": 736032,
+        "space_used_pages": 728888,
+        "type": "ROWS"
+      },
+      {
+        "growth": 8192,
+        "is_percent_growth": false,
+        "max_size_pages": 268435456,
+        "name": "CologneTransitIntelligence_log",
+        "size_pages": 238592,
+        "space_used_pages": 4144,
+        "type": "LOG"
+      }
+    ],
+    "database_files_evidence": {
+      "statement_id": "capacity.database_files",
+      "status": "PASS"
+    },
+    "final_legacy7_run": {
+      "completed_at_utc": "2026-10-08 09:57:32.860000",
+      "logical_due_bucket": 5971511,
+      "run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
+      "status": "COMPLETE"
+    },
+    "final_legacy7_run_evidence": {
+      "statement_id": "collector.legacy7_final_run",
+      "status": "PASS"
+    },
+    "first_tiered50_scheduled_cycle": {
+      "attempts_without_permit": 0,
+      "audit_error_count": 0,
+      "completed_at_utc": "2026-10-08 12:30:47.931000",
+      "confirmed_permits": 2,
+      "coverage": null,
+      "failed_target_audits": 0,
+      "http_attempts": 2,
+      "http_responses": 2,
+      "initial_permits": 2,
+      "logical_due_bucket": 5971541,
+      "network_attempts": 2,
+      "observed": true,
+      "permitted_amount": 2,
+      "persisted_target_audits": 2,
+      "persistence_outcomes": [
+        {
+          "count": 16,
+          "persistence_outcome": "NONE"
+        },
+        {
+          "count": 2,
+          "persistence_outcome": "PERSISTED_PARSED_SNAPSHOT"
+        }
+      ],
+      "query_evidence": {
+        "attempts": {
+          "statement_id": "collector.tiered50_first_run_attempts",
+          "status": "PASS"
+        },
+        "audits": {
+          "statement_id": "collector.tiered50_first_run_audits",
+          "status": "PASS"
+        },
+        "permits": {
+          "statement_id": "collector.tiered50_first_run_permits",
+          "status": "PASS"
+        },
+        "persistence": {
+          "statement_id": "collector.tiered50_first_run_persistence",
+          "status": "PASS"
+        }
+      },
+      "quota_permits": 2,
+      "retry_attempts": 0,
+      "retry_permits": 0,
+      "run_id": "177056c4-1e5a-4db8-9f8d-fa3eaabf0661",
+      "run_status": "COMPLETE",
+      "skipped_target_audits": 16,
+      "started_at_utc": "2026-10-08 12:29:03.586000",
+      "successful_target_audits": 2,
+      "target_audits": 18,
+      "timing": null,
+      "transport_error_attempts": 0,
+      "uncertain_permits": 0,
+      "validation_status": "FAILED_CADENCE_OR_PERSISTENCE_GATE"
+    },
+    "identity": {
+      "captured_at_utc": "2026-10-09 08:56:17.419055",
+      "configured_server_name": "DataAnalyst-VM",
+      "database_name": "CologneTransitIntelligence",
+      "instance_name": "",
+      "login_name": "sa",
+      "machine_name": "DataAnalyst-VM",
+      "server_name": "DataAnalyst-VM",
+      "sql_instance_identity": {
+        "database_name": "colognetransitintelligence",
+        "machine_name": "dataanalyst-vm",
+        "server_name": "dataanalyst-vm"
+      },
+      "status": "PASS"
+    },
+    "latest_cutover_evidence": {
+      "statement_id": "collector.latest_cutover",
+      "status": "PASS"
+    },
+    "latest_cutover_record": {
+      "activation_at_utc": "2026-10-08 12:32:47.759000",
+      "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842Z:OUTAGE_AFTER_HEARTBEAT_5971541",
+      "recorded_at_utc": "2026-10-08 12:32:48.033308",
+      "status": "OUTAGE"
+    },
+    "latest_full_backup": {
+      "backup_finish_date": "2026-10-07 09:00:52",
+      "backup_set_id": 1,
+      "complete_media_set_proven": true,
+      "compressed_backup_size": 606591622,
+      "copy_only": true,
+      "has_backup_checksums": true,
+      "media_count": 1,
+      "media_set_id": 1
+    },
+    "latest_full_backup_evidence": {
+      "statement_id": "backup.latest_full_backup_history",
+      "status": "PASS"
+    },
+    "latest_full_backup_media_evidence": {
+      "statement_id": "backup.latest_full_backup_media_set",
+      "status": "PASS"
+    },
+    "latest_tiered50_resume": null,
+    "latest_tiered50_run": {
+      "completed_at_utc": "2026-10-08 12:30:47.931000",
+      "coverage": null,
+      "failed_target_audits": 0,
+      "logical_due_bucket": 5971541,
+      "query_evidence": {
+        "audits": {
+          "statement_id": "collector.tiered50_latest_run_audits",
+          "status": "PASS"
+        },
+        "run": {
+          "statement_id": "collector.tiered50_latest_run",
+          "status": "PASS"
+        }
+      },
+      "run_id": "177056c4-1e5a-4db8-9f8d-fa3eaabf0661",
+      "run_status": "COMPLETE",
+      "skipped_target_audits": 16,
+      "started_at_utc": "2026-10-08 12:29:03.586000",
+      "successful_target_audits": 2,
+      "target_audits": 18
+    },
+    "legacy7_audit_history_evidence": {
+      "statement_id": "collector.legacy7_audit_history",
+      "status": "PASS"
+    },
+    "legacy7_recent_audit_buckets": [
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:57:32.621000",
+        "logical_due_bucket": 5971511,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:52:23.010000",
+        "logical_due_bucket": 5971510,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:47:16.162000",
+        "logical_due_bucket": 5971509,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:42:06.324000",
+        "logical_due_bucket": 5971508,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:36:57.656000",
+        "logical_due_bucket": 5971507,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:31:49.971000",
+        "logical_due_bucket": 5971506,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:26:39.326000",
+        "logical_due_bucket": 5971505,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:21:30.992000",
+        "logical_due_bucket": 5971504,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:16:22.126000",
+        "logical_due_bucket": 5971503,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:11:15.282000",
+        "logical_due_bucket": 5971502,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:06:07.533000",
+        "logical_due_bucket": 5971501,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      },
+      {
+        "audit_count": 1,
+        "last_completed_at_utc": "2026-10-08 09:00:54.979000",
+        "logical_due_bucket": 5971500,
+        "skipped_count": 0,
+        "succeeded_count": 1
+      }
+    ],
+    "log_space": {
+      "total_bytes": 1954537472,
+      "used_bytes": 33947648,
+      "used_percent": 1.7368634939193726
+    },
+    "log_space_evidence": {
+      "statement_id": "capacity.database_log_space_dm_db_log_space_usage",
+      "status": "PASS"
+    },
+    "log_space_gate": {
+      "reason": null,
+      "required_statement_id": "capacity.database_log_space_dm_db_log_space_usage",
+      "status": "PASS"
+    },
+    "permission_error_297": [],
+    "privileged_query_failures": [],
+    "production_cutover_history": [
+      {
+        "cutover_key": "TIERED50_PANEL_V1:2026-10-08T09:58:07.991246+00:00:OUTAGE",
+        "final_legacy7_run_id": null,
+        "panel_version": "TIERED50_PANEL_V1",
+        "recorded_at_utc": "2026-10-08 09:58:08.618114",
+        "tiered50_activation_at_utc": "2026-10-08 09:58:07.991000",
+        "tiered50_activation_status": "OUTAGE"
+      },
+      {
+        "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842+00:00:ACTIVATED",
+        "final_legacy7_run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
+        "panel_version": "TIERED50_PANEL_V1",
+        "recorded_at_utc": "2026-10-08 12:24:02.672130",
+        "tiered50_activation_at_utc": "2026-10-08 12:24:01.212000",
+        "tiered50_activation_status": "ACTIVATED"
+      },
+      {
+        "cutover_key": "TIERED50_PANEL_V1:2026-10-08T12:24:01.212842Z:OUTAGE_AFTER_HEARTBEAT_5971541",
+        "final_legacy7_run_id": null,
+        "panel_version": "TIERED50_PANEL_V1",
+        "recorded_at_utc": "2026-10-08 12:32:48.033308",
+        "tiered50_activation_at_utc": "2026-10-08 12:32:47.759000",
+        "tiered50_activation_status": "OUTAGE"
+      }
+    ],
+    "production_cutover_history_evidence": {
+      "statement_id": "collector.production_cutover_history",
+      "status": "PASS"
+    },
+    "quota_integrity": {
+      "accounting_model": "EXCLUSIVE_CREDENTIAL",
+      "active_reset_contract_key": null,
+      "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "automatic_rollover": {
+        "mdd_requests_issued": 0,
+        "reason": "October bounded bootstrap remains inside its approved interval",
+        "status": "NOT_APPLICABLE"
+      },
+      "baseline_as_of_utc": "2026-10-08T12:19:11Z",
+      "baseline_component_total": 806,
+      "bounded_timezone_uncertainty": true,
+      "confirmed_provider_attempts": 721,
+      "conservative_live_attempts": 87,
+      "contract_verification_status": "NOT_APPLICABLE",
+      "evidence_role": "SQL_LEDGER_REFRESH",
+      "http_responses_received": 721,
+      "known_total": 808,
+      "live_client_invocations": 2,
+      "local_usage_included_through_utc": "2026-10-08T12:19:11Z",
+      "month_key": "2026-10",
+      "post_cutoff_local_usage": {
+        "confirmed": 2,
+        "conservative": 0,
+        "pending": 0,
+        "total": 2
+      },
+      "projected_non_retry_attempts": 0,
+      "provider_measurement_cutoff_utc": null,
+      "provider_period_metadata_source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "provider_period_metadata_verified": false,
+      "provider_period_timezone": null,
+      "provider_quota_unknown_attempts": 87,
+      "reconciliation_key": "MDD-OCTOBER-CONSERVATIVE-BOOTSTRAP:2026-10-08T12:19:11Z",
+      "reserved_shared_usage": 0,
+      "source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59",
+      "stale_after_utc": "2026-10-30T23:00:00Z",
+      "state_available": true,
+      "status": "PASS",
+      "supported_reset_timezones": null
+    },
+    "quota_usage": {
+      "accounting_model": "EXCLUSIVE_CREDENTIAL",
+      "active_reset_contract_key": null,
+      "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "automatic_rollover": {
+        "mdd_requests_issued": 0,
+        "reason": "October bounded bootstrap remains inside its approved interval",
+        "status": "NOT_APPLICABLE"
+      },
+      "baseline_as_of_utc": "2026-10-08T12:19:11Z",
+      "baseline_component_total": 806,
+      "bounded_timezone_uncertainty": true,
+      "confirmed_provider_attempts": 721,
+      "conservative_live_attempts": 87,
+      "contract_verification_status": "NOT_APPLICABLE",
+      "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+      "http_responses_received": 721,
+      "known_total": 808,
+      "live_client_invocations": 2,
+      "local_usage_included_through_utc": "2026-10-08T12:19:11Z",
+      "month_key": "2026-10",
+      "post_cutoff_local_usage": {
+        "confirmed": 2,
+        "conservative": 0,
+        "pending": 0,
+        "total": 2
+      },
+      "projected_non_retry_attempts": 0,
+      "provider_measurement_cutoff_utc": null,
+      "provider_period_metadata_source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "provider_period_metadata_verified": false,
+      "provider_period_timezone": null,
+      "provider_quota_unknown_attempts": 87,
+      "reconciliation_key": "MDD-OCTOBER-CONSERVATIVE-BOOTSTRAP:2026-10-08T12:19:11Z",
+      "reserved_shared_usage": 0,
+      "source": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+      "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59",
+      "stale_after_utc": "2026-10-30T23:00:00Z",
+      "state_available": true,
+      "status": "PASS",
+      "supported_reset_timezones": null
+    },
+    "recent_http_attempts": [
+      {
+        "completed_at_utc": "2026-10-08 09:57:26.984000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:52:20.320000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:47:10.397000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:42:02.286000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:36:54.143000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:31:43.970000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:26:35.126000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:21:26.313000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:16:19.485000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:11:11.646000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:06:00.079000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 09:00:50.920000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 08:55:40.655000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 08:50:31.082000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 08:45:23.531000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 08:40:14.580000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 08:35:04.095000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 07:49:26.185000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 07:44:16.836000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      },
+      {
+        "completed_at_utc": "2026-10-08 07:39:10.134000",
+        "http_response_received": true,
+        "http_status": 200,
+        "network_attempted": true,
+        "provider_quota_status": "CONFIRMED"
+      }
+    ],
+    "recent_http_attempts_evidence": {
+      "statement_id": "collector_runtime_history_or_materialization",
+      "status": "PASS"
+    },
+    "runtime_connection": {
+      "database": "CologneTransitIntelligence",
+      "host": "172.16.192.128",
+      "login_timeout_seconds": 8,
+      "password_configured": true,
+      "port": 1433,
+      "query_timeout_seconds": 30,
+      "user_configured": true
+    },
+    "runtime_health": {
+      "database_name": "CologneTransitIntelligence",
+      "database_status": "ONLINE",
+      "evidence": {
+        "statement_id": "admin.sql_runtime_health",
+        "status": "PASS"
+      },
+      "recovery_model": "SIMPLE",
+      "status": "PASS",
+      "valid_recovery_models": [
+        "BULK_LOGGED",
+        "FULL",
+        "SIMPLE"
+      ]
+    },
+    "runtime_login": {
+      "configured_server_name": "DataAnalyst-VM",
+      "database_name": "CologneTransitIntelligence",
+      "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+      "instance_name": "",
+      "is_db_datareader": false,
+      "is_db_datawriter": false,
+      "is_db_owner": false,
+      "is_securityadmin": false,
+      "is_serveradmin": false,
+      "is_sysadmin": false,
+      "login_name": "CologneTransitCollector",
+      "machine_name": "DataAnalyst-VM",
+      "server_name": "DataAnalyst-VM",
+      "status": "PASS"
+    },
+    "runtime_role_source": "BASE_MSSQL_*_FALLBACK",
+    "runtime_schema": {
+      "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+      "expected_routine_count": 3,
+      "expected_table_count": 16,
+      "missing": [],
+      "required_legacy7_audit_columns": [
+        "SamplingSlot",
+        "SelectionPolicyVersion"
+      ],
+      "status": "PASS",
+      "unrelated_import_objects_required": false,
+      "validation_scope": "PRODUCTION_RUNTIME"
+    },
+    "runtime_sql_instance_identity": {
+      "database_name": "colognetransitintelligence",
+      "machine_name": "dataanalyst-vm",
+      "server_name": "dataanalyst-vm"
+    },
+    "six_consecutive_expected_heartbeats": {
+      "accounted_buckets": [
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:31:49.971000",
+          "logical_due_bucket": 5971506,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        },
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:36:57.656000",
+          "logical_due_bucket": 5971507,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        },
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:42:06.324000",
+          "logical_due_bucket": 5971508,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        },
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:47:16.162000",
+          "logical_due_bucket": 5971509,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        },
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:52:23.010000",
+          "logical_due_bucket": 5971510,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        },
+        {
+          "audit_count": 1,
+          "last_completed_at_utc": "2026-10-08 09:57:32.621000",
+          "logical_due_bucket": 5971511,
+          "skipped_count": 0,
+          "succeeded_count": 1
+        }
+      ],
+      "all_accounted": true,
+      "all_succeeded": true,
+      "expected_buckets": [
+        5971506,
+        5971507,
+        5971508,
+        5971509,
+        5971510,
+        5971511
+      ]
+    },
+    "tiered50_audit_history_evidence": {
+      "statement_id": "collector.tiered50_audit_history",
+      "status": "PASS"
+    },
+    "tiered50_materialization": {
+      "active_count": 43,
+      "maximum_id": 50,
+      "minimum_id": 8,
+      "prepared_count": 0,
+      "status": "PASS",
+      "target_count": 43
+    },
+    "tiered50_materialization_evidence": {
+      "statement_id": "collector.tiered50_materialization",
+      "status": "PASS"
+    },
+    "tiered50_recent_audit_buckets": [
+      {
+        "audit_count": 18,
+        "failed_count": 0,
+        "http_attempts": 2,
+        "last_completed_at_utc": "2026-10-08 12:30:47.705000",
+        "logical_due_bucket": 5971541,
+        "skipped_count": 16,
+        "succeeded_count": 2
+      }
+    ],
+    "tiered50_resume_history": [],
+    "tiered50_resume_history_evidence": {
+      "statement_id": "collector.tiered50_resume_history",
+      "status": "PASS"
+    },
+    "tiered50_schema": {
+      "evidence_role": "DEDICATED_RUNTIME_LOGIN",
+      "expected_routine_count": 3,
+      "expected_table_count": 17,
+      "missing": [],
+      "required_claim_identity_columns": [
+        "ctl.MddMacTargetClaim.SamplingTargetId",
+        "ctl.MddMacTargetClaimEvent.SamplingTargetId"
+      ],
+      "required_target_columns": [
+        "ActivationStatus",
+        "CadenceMinutes",
+        "ContinuityClassification",
+        "IsEnabled",
+        "NumberOfResults",
+        "PanelVersion",
+        "ParentStopPointRef",
+        "PhaseCount",
+        "PhaseIndex",
+        "SamplingEra",
+        "SamplingTargetId",
+        "SourceParentStationId",
+        "Tier"
+      ],
+      "status": "PASS",
+      "tiered50_target_table": "ctl.MddMacTiered50ProductionTarget",
+      "validation_scope": "TIERED50_PRODUCTION_RUNTIME"
+    },
+    "tiered50_six_bucket_cycle": {
+      "expected_distribution": [
+        19,
+        18,
+        18,
+        18,
+        19,
+        18
+      ],
+      "status": "NOT_PROVEN"
+    },
+    "volume_capacity": [
+      {
+        "available_bytes": 44967096320,
+        "total_bytes": 95511638016,
+        "volume": "C:\\"
+      }
+    ],
+    "volume_capacity_evidence": {
+      "statement_id": "capacity.volume_capacity_dm_os_volume_stats",
+      "status": "PASS"
+    }
+  },
+  "status": "BLOCKED — TIERED50 STOPPED; LEGACY7 RETIRED",
+  "writes_performed": 0
+}

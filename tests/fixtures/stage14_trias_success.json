@@ -1,0 +1,44 @@
+{
+  "serviceDelivery": {
+    "status": "OK",
+    "responseTimestamp": "2026-09-30T12:00:00Z[GMT]",
+    "deliveryPayload": {
+      "stopEventResponse": {
+        "stopEventResult": [
+          {
+            "resultId": "fixture-result-1",
+            "stopEvent": {
+              "service": {
+                "journeyRef": "fixture-journey-1",
+                "operatingDayRef": "2026-09-30",
+                "lineRef": "fixture-line",
+                "directionRef": "inward",
+                "operatorRef": "fixture-operator",
+                "situationFullRef": []
+              },
+              "thisCall": {
+                "callAtStop": {
+                  "stopPointRef": "de:05315:11201:7:71",
+                  "stopSeqNumber": 8,
+                  "serviceArrival": {
+                    "timetabledTime": "2026-09-30T12:05:00Z[GMT]",
+                    "estimatedTime": null,
+                    "recordedAtTime": null
+                  },
+                  "plannedBay": "7",
+                  "estimatedBay": null,
+                  "notServicedStop": null,
+                  "noBoardingAtStop": null,
+                  "noAlightingAtStop": null,
+                  "unplannedStop": null
+                }
+              },
+              "previousCall": [{"callAtStop": {"stopPointRef": "fixture-previous"}}],
+              "onwardCall": [{"callAtStop": {"stopPointRef": "fixture-onward"}}]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

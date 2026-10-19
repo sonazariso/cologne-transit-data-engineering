@@ -1,0 +1,4 @@
+# macOS Python runtime dependency for the direct Microsoft database adapter.
+# The pinned wheel is available for the repository's current Python 3.9
+# x86_64 environment and carries its DB-Library client dependency.
+pymssql==2.3.2

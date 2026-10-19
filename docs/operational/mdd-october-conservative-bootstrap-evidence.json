@@ -1,0 +1,76 @@
+{
+  "artifact_version": "MDD_OCTOBER_CONSERVATIVE_BOOTSTRAP_EVIDENCE_V1",
+  "status": "REGISTERED_ACTIVE_BOUNDED",
+  "authorization_mode": "CONSERVATIVE_OCTOBER_BOOTSTRAP",
+  "accounting_model": "EXCLUSIVE_CREDENTIAL",
+  "month_key": "2026-10",
+  "proposal": {
+    "path": "mdd-october-conservative-bootstrap-proposal.json",
+    "approved_field_remains_false": true,
+    "approval_is_separate_explicit_operator_authorization": true
+  },
+  "dashboard_evidence": {
+    "cumulative_requests": 554,
+    "monthly_limit": 250000,
+    "source_image_sha256": "9b25d4d28cf57f77feccb3b1da30e7e2c8629cec2319ff5a46877e3fac23088f",
+    "operator_attestation": "OPERATOR_CONFIRMED_NOT_INDEPENDENTLY_VERIFIED",
+    "credential_scope": "credential_exclusivity_for_this_account_and_application",
+    "measurement_cutoff_verified": false,
+    "reset_timezone_verified": false,
+    "provider_scope_verified": false
+  },
+  "operator_approval": {
+    "approved_at_utc": "2026-10-08T12:19:11Z",
+    "statement": "I explicitly approve the bounded October 2026 conservative MDD quota bootstrap: use the observed dashboard value of 554 requests with the operator-confirmed exclusive credential model, conservatively include every locally observed October permit through approval, stop authorization no later than 2026-10-30 23:00 UTC, fail closed on SQL, accounting, permit, external-usage, or expiry anomalies, and never reactivate Legacy7.",
+    "statement_sha256": "2be5613c9e0cad154e5ba72893abafa0bafa479a04b10ead6e7e760546ef1f21"
+  },
+  "local_evidence_through_approval": {
+    "confirmed_permits": 165,
+    "uncertain_permit_rows": 14,
+    "pending_permits": 0,
+    "known_prebootstrap_research_attempts": 73,
+    "known_prebootstrap_research_context": "LIVE_RESEARCH_SINGLE_1",
+    "unresolved_attempts_without_permit": 0,
+    "released_no_network_excluded": 0,
+    "conservative_local_total": 252,
+    "conservative_unknown_component": 87
+  },
+  "conservative_accounting": {
+    "formula": "554 dashboard lower bound + 165 confirmed local permits + 14 uncertain permit rows + 0 pending permits + 73 explicitly identified pre-bootstrap research attempts",
+    "accounted_total_at_approval": 806,
+    "headroom": {
+      "normal_operational_maximum_210000": 209194,
+      "retry_protection_boundary_207500": 206694,
+      "provider_ceiling_250000": 249194
+    }
+  },
+  "validity": {
+    "valid_from_utc": "2026-10-08T12:19:11Z",
+    "stop_at_utc": "2026-10-30T23:00:00Z",
+    "stop_is_policy_boundary_not_provider_metadata": true,
+    "provider_measurement_cutoff": "NOT_ESTABLISHED",
+    "provider_reset_timezone": "NOT_ESTABLISHED",
+    "automatic_future_month_rollover": "FAIL_CLOSED_UNTIL_VERIFIED_PROVIDER_RESET_CONTRACT"
+  },
+  "sql_registration": {
+    "status": "APPLIED",
+    "writes_performed": 1,
+    "idempotent_authorization_key": "MDD-OCTOBER-CONSERVATIVE-BOOTSTRAP:2026-10-08T12:19:11Z",
+    "source_evidence_hash": "15888d1852700cd1c7b13a3984b76fc07cba85deedbd36725ca50e0cb1c17a59"
+  },
+  "follow_up_operational_evidence": {
+    "mdd_requests_issued_after_registration": 2,
+    "requests_were_from_scheduled_tiered50_runtime": true,
+    "manual_requests_issued": false,
+    "first_scheduled_bucket": 5971541,
+    "first_scheduled_target_audits": 18,
+    "first_scheduled_successes": 2,
+    "first_scheduled_skips": 16,
+    "first_scheduled_failures": 0,
+    "validation_status": "FAILED_CADENCE_OR_PERSISTENCE_GATE",
+    "launch_agent_stopped_after_failure": true,
+    "legacy7_reactivated": false,
+    "stations_currently_collecting": 0,
+    "evidence": "tiered50-production-evidence.json"
+  }
+}

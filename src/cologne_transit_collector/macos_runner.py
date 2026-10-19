@@ -1,0 +1,425 @@
+"""Fail-closed Mac production runner for one SQL-backed heartbeat.
+
+Legacy7 and Tiered50 are intentionally separate runtime modes. The tracked
+LaunchAgent templates disable both modes by default; a production invocation
+must pass the mode-specific human-controlled gates before credentials are
+resolved or an MDD client can be used.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import sys
+import time
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .collector import Collector, LiveModeBlocked
+from .configuration import CollectorSettings
+from .domain import (
+    MAC_SQL_COLLECTION_CONTEXT,
+    MAC_SQL_CUTOVER_APPROVED_ENV,
+    MAC_SQL_ENABLED_ENV,
+    MAC_SQL_MODE_ENV,
+    MAC_SQL_REQUIRED_RUNTIME_STATE,
+    MAC_SQL_REQUIRED_TARGET_SCOPE,
+    MAC_SQL_REQUIRED_VALIDATION_POLICY,
+    MAC_SQL_RUNTIME_STATE_ENV,
+    MAC_SQL_TARGET_SCOPE_ENV,
+    MAC_SQL_VALIDATION_POLICY_ENV,
+    MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT,
+    MAC_TIERED50_CUTOVER_APPROVED_ENV,
+    MAC_TIERED50_ENABLED_ENV,
+    MAC_TIERED50_REQUIRED_TARGET_SCOPE,
+    MAC_TIERED50_REQUIRED_VALIDATION_POLICY,
+    MAC_TIERED50_TARGET_SCOPE_ENV,
+    MAC_TIERED50_VALIDATION_POLICY_ENV,
+)
+from .manifest import load_default_manifest
+from .mssql_persistence import (
+    MssqlConnectionSettings,
+    MssqlDependencyError,
+    MssqlPersistence,
+    MssqlSafetyError,
+    MssqlSchemaError,
+)
+from .quota import QuotaGuard
+from .runtime_configuration import (
+    EXPECTED_SQL_DATABASE,
+    SecretRequired,
+    merge_non_secret_runtime_values,
+    resolve_required_secrets,
+)
+from .schedule import schedule_reconciliation
+from .transport import LiveMddClient, validate_api_key_format
+
+
+LEGACY7_MODE = "legacy7"
+TIERED50_MODE = "tiered50"
+
+# These are the earliest timestamps available to the Python process.  They
+# are useful runtime observations, but they are not independent evidence of
+# the exact launchd calendar-trigger instant.
+_PYTHON_MODULE_ENTRY_AT_UTC = datetime.now(timezone.utc)
+_PYTHON_MODULE_ENTRY_MONOTONIC = time.monotonic()
+
+
+def _parse_utc(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        raise argparse.ArgumentTypeError("--at must include a UTC offset")
+    return parsed.astimezone(timezone.utc)
+
+
+def _duration_ms(started_monotonic: float) -> float:
+    return max(0.0, (time.monotonic() - started_monotonic) * 1000.0)
+
+
+def require_cutover_gate(environ: dict[str, str] | None = None) -> None:
+    """Reject Legacy7 network collection until its existing gates pass."""
+
+    values = os.environ if environ is None else environ
+    if values.get(MAC_SQL_MODE_ENV) not in {None, "LEGACY7"}:
+        raise LiveModeBlocked("Legacy7 runner mode does not match the configured runtime mode")
+    if values.get(MAC_SQL_ENABLED_ENV) != "1":
+        raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
+    if values.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+        raise LiveModeBlocked(
+            "current Windows collector runtime is not confirmed retired; no network request performed"
+        )
+    if values.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
+        raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
+    if values.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
+        raise LiveModeBlocked(
+            "explicit existing-seven-target scope approval is missing; no network request performed"
+        )
+    if values.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+        raise LiveModeBlocked(
+            "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+        )
+    if validate_api_key_format(values.get("MDD_API_KEY")) != "VALID":
+        raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
+
+
+def require_tiered50_cutover_gate(environ: dict[str, str] | None = None) -> None:
+    """Reject Tiered50 collection unless its independent gates pass."""
+
+    values = os.environ if environ is None else environ
+    if values.get(MAC_SQL_MODE_ENV) != "TIERED50":
+        raise LiveModeBlocked("Tiered50 runner requires COLLECTOR_MAC_SQL_MODE=TIERED50")
+    if values.get(MAC_TIERED50_ENABLED_ENV) != "1":
+        raise LiveModeBlocked("Tiered50 collection is disabled; no network request performed")
+    if values.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+        raise LiveModeBlocked(
+            "current Windows collector runtime is not confirmed retired; no network request performed"
+        )
+    if values.get(MAC_TIERED50_CUTOVER_APPROVED_ENV) != "1":
+        raise LiveModeBlocked("explicit Tiered50 cutover approval is missing; no network request performed")
+    if values.get(MAC_TIERED50_TARGET_SCOPE_ENV) != MAC_TIERED50_REQUIRED_TARGET_SCOPE:
+        raise LiveModeBlocked("explicit approved Tiered50 target scope is missing; no network request performed")
+    if values.get(MAC_TIERED50_VALIDATION_POLICY_ENV) != MAC_TIERED50_REQUIRED_VALIDATION_POLICY:
+        raise LiveModeBlocked(
+            "Tiered50 requires completed offline validation before live collection; no network request performed"
+        )
+    if validate_api_key_format(values.get("MDD_API_KEY")) != "VALID":
+        raise LiveModeBlocked("MDD_API_KEY is missing or invalid; no network request performed")
+
+
+def _require_nonsecret_cutover_gate(environ: dict[str, str], *, mode: str) -> None:
+    """Check mode-specific non-secret gates before touching Keychain secrets."""
+
+    if mode == LEGACY7_MODE:
+        if environ.get(MAC_SQL_ENABLED_ENV) != "1":
+            raise LiveModeBlocked("direct Mac collection is disabled; no network request performed")
+        if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+            raise LiveModeBlocked(
+                "current Windows collector runtime is not confirmed retired; no network request performed"
+            )
+        if environ.get(MAC_SQL_CUTOVER_APPROVED_ENV) != "1":
+            raise LiveModeBlocked("explicit cutover approval is missing; no network request performed")
+        if environ.get(MAC_SQL_TARGET_SCOPE_ENV) != MAC_SQL_REQUIRED_TARGET_SCOPE:
+            raise LiveModeBlocked(
+                "explicit existing-seven-target scope approval is missing; no network request performed"
+            )
+        if environ.get(MAC_SQL_VALIDATION_POLICY_ENV) != MAC_SQL_REQUIRED_VALIDATION_POLICY:
+            raise LiveModeBlocked(
+                "cutover requires offline SQLite reconciliation; no manual Heumarkt validation is a runtime gate"
+            )
+        return
+    if mode == TIERED50_MODE:
+        if environ.get(MAC_SQL_MODE_ENV) != "TIERED50":
+            raise LiveModeBlocked("Tiered50 runner requires COLLECTOR_MAC_SQL_MODE=TIERED50")
+        if environ.get(MAC_TIERED50_ENABLED_ENV) != "1":
+            raise LiveModeBlocked("Tiered50 collection is disabled; no network request performed")
+        if environ.get(MAC_SQL_RUNTIME_STATE_ENV) != MAC_SQL_REQUIRED_RUNTIME_STATE:
+            raise LiveModeBlocked(
+                "current Windows collector runtime is not confirmed retired; no network request performed"
+            )
+        if environ.get(MAC_TIERED50_CUTOVER_APPROVED_ENV) != "1":
+            raise LiveModeBlocked("explicit Tiered50 cutover approval is missing; no network request performed")
+        if environ.get(MAC_TIERED50_TARGET_SCOPE_ENV) != MAC_TIERED50_REQUIRED_TARGET_SCOPE:
+            raise LiveModeBlocked("explicit approved Tiered50 target scope is missing; no network request performed")
+        if environ.get(MAC_TIERED50_VALIDATION_POLICY_ENV) != MAC_TIERED50_REQUIRED_VALIDATION_POLICY:
+            raise LiveModeBlocked(
+                "Tiered50 requires completed offline validation before live collection; no network request performed"
+            )
+        return
+    raise ValueError(f"unsupported Mac runtime mode: {mode}")
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run one explicitly approved direct-database MDD heartbeat.")
+    parser.add_argument(
+        "--mode",
+        choices=(LEGACY7_MODE, TIERED50_MODE),
+        default=TIERED50_MODE,
+        help="Tiered50 is the only production runtime; legacy7 is accepted only to emit a retirement block",
+    )
+    parser.add_argument("--at", dest="at_utc", help="UTC ISO-8601 time for deterministic validation")
+    return parser
+
+
+def _validate_runtime_login(login_status: dict[str, object], *, mode: str) -> None:
+    if str(login_status.get("login_name", "")).casefold() in {"", "sa"}:
+        raise MssqlSafetyError(f"Mac {mode} runtime requires the dedicated non-sa SQL login")
+    if any(
+        bool(login_status.get(name))
+        for name in (
+            "is_sysadmin",
+            "is_serveradmin",
+            "is_securityadmin",
+            "is_db_owner",
+            "is_db_datareader",
+            "is_db_datawriter",
+        )
+    ):
+        raise MssqlSafetyError(f"Mac {mode} runtime login has a prohibited broad privilege")
+
+
+def main(argv: list[str] | None = None) -> int:
+    main_function_entry_at = datetime.now(timezone.utc)
+    main_function_entry_monotonic = time.monotonic()
+    args = _parser().parse_args(argv)
+    preflight_started_at = datetime.now(timezone.utc)
+    preflight_started_monotonic = time.monotonic()
+    configured_root = os.environ.get("COLLECTOR_RUNTIME_ROOT")
+    root = Path(configured_root).expanduser().resolve() if configured_root else Path(__file__).resolve().parents[2]
+    runtime_mode = args.mode
+    try:
+        if args.at_utc is not None:
+            _parse_utc(args.at_utc)
+            raise LiveModeBlocked(
+                "--at is restricted to isolated offline validation; the live Tiered50 runner "
+                "always uses the current runtime clock"
+            )
+        if runtime_mode == LEGACY7_MODE:
+            raise LiveModeBlocked("Legacy7 production runtime is retired; no network request performed")
+        if runtime_mode != TIERED50_MODE:
+            raise LiveModeBlocked(f"unsupported production runtime mode: {runtime_mode}")
+        collector_mode = "mac-tiered50"
+        collection_context = MAC_TIERED50_PRODUCTION_COLLECTION_CONTEXT
+        phase_durations_ms: dict[str, float] = {}
+        phase_started = time.monotonic()
+        base_configuration = merge_non_secret_runtime_values()
+        _require_nonsecret_cutover_gate(dict(base_configuration.values), mode=runtime_mode)
+        phase_durations_ms["nonsecret_configuration_and_gate_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        configuration = resolve_required_secrets(base_configuration)
+        runtime_values = dict(configuration.values)
+        phase_durations_ms["secret_resolution_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        require_tiered50_cutover_gate(runtime_values)
+        mssql_settings = MssqlConnectionSettings.from_environment(runtime_values)
+        if mssql_settings.database != EXPECTED_SQL_DATABASE:
+            raise MssqlSafetyError(f"selected target database must be {EXPECTED_SQL_DATABASE}")
+        phase_durations_ms["runtime_configuration_validation_ms"] = _duration_ms(phase_started)
+
+        # The logical bucket is selected from the earliest process timestamp
+        # available to Python.  It is not an exact launchd trigger timestamp.
+        logical_bucket_at_utc = _PYTHON_MODULE_ENTRY_AT_UTC
+
+        phase_started = time.monotonic()
+        base_manifest = load_default_manifest(root)
+        phase_durations_ms["manifest_load_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        persistence = MssqlPersistence(
+            settings=mssql_settings,
+            raw_evidence_directory=runtime_values.get("MSSQL_RAW_EVIDENCE_DIR"),
+            collection_context=collection_context,
+        )
+        phase_durations_ms["persistence_construction_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        login_status = persistence.runtime_login_status()
+        _validate_runtime_login(login_status, mode=runtime_mode)
+        phase_durations_ms["runtime_login_validation_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        schema = persistence.validate_runtime_schema()
+        phase_durations_ms["runtime_schema_validation_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        tiered_schema = persistence.validate_tiered50_runtime_schema()
+        phase_durations_ms["tiered50_schema_validation_ms"] = _duration_ms(phase_started)
+
+        phase_started = time.monotonic()
+        targets = persistence.load_tiered50_production_targets(base_manifest)
+        phase_durations_ms["target_materialization_ms"] = _duration_ms(phase_started)
+        manifest = replace(
+            base_manifest,
+            status="ACTIVE_TIERED50_PRODUCTION",
+            activation_status="EXPLICIT_CUTOVER_APPROVED",
+            targets=targets,
+        )
+        manifest.validate_production_binding()
+        selection_policy_version = "TIERED50_UTC_PHASE_V1"
+        selection_details = {
+            "production_sampling_target_ids": sorted(
+                int(target.production_sampling_target_id or 0) for target in targets
+            ),
+            "schedule_reconciliation": schedule_reconciliation(targets),
+        }
+        schema_details = {"base": schema, "tiered50": tiered_schema}
+        quota_recovery_started = time.monotonic()
+        quota_recovery = persistence.recover_stale_quota_permits(at_utc=datetime.now(timezone.utc))
+        phase_durations_ms["quota_permit_recovery_ms"] = max(
+            0.0, (time.monotonic() - quota_recovery_started) * 1000.0
+        )
+
+        settings_started_at = datetime.now(timezone.utc)
+        settings_started_monotonic = time.monotonic()
+        settings = CollectorSettings.for_repository(root, environ=runtime_values)
+        settings_completed_at = datetime.now(timezone.utc)
+        phase_durations_ms["settings_initialization_ms"] = _duration_ms(settings_started_monotonic)
+
+        collector_construction_started_at = datetime.now(timezone.utc)
+        collector_construction_started_monotonic = time.monotonic()
+        collector = Collector(
+            manifest=manifest,
+            persistence=persistence,
+            mdd_client=LiveMddClient(
+                settings.endpoint,
+                requestor_ref=settings.requestor_ref,
+                api_key=runtime_values["MDD_API_KEY"],
+                enabled=True,
+            ),
+            quota_guard=QuotaGuard(persistence, reservation_scope="LIVE_PROVIDER"),
+            safety_margin_seconds=settings.safety_margin_seconds,
+        )
+        collector_construction_completed_at = datetime.now(timezone.utc)
+        phase_durations_ms["collector_construction_ms"] = _duration_ms(collector_construction_started_monotonic)
+        preflight_completed_at = datetime.now(timezone.utc)
+        preflight_completed_monotonic = time.monotonic()
+        runtime_timing = {
+            "python_module_entry_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "python_module_entry_time_source": "PYTHON_MODULE_IMPORT_OBSERVED_NOT_EXACT_LAUNCHD_TRIGGER",
+            "observed_process_entry_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "observed_process_entry_time_source": "PYTHON_MODULE_IMPORT_OBSERVED_NOT_EXACT_LAUNCHD_TRIGGER",
+            "main_function_entry_at_utc": main_function_entry_at.isoformat().replace("+00:00", "Z"),
+            "main_function_entry_time_source": "PYTHON_MAIN_ENTRY_OBSERVED",
+            "scheduler_trigger_at_utc": _PYTHON_MODULE_ENTRY_AT_UTC.isoformat().replace("+00:00", "Z"),
+            "scheduler_trigger_time_source": "PYTHON_PROCESS_ENTRY_OBSERVED_NOT_LAUNCHD_TRIGGER",
+            "expected_launchd_calendar_boundary_at_utc": None,
+            "launchd_trigger_at_utc": None,
+            "launchd_trigger_time_source": "NOT_INDEPENDENTLY_OBSERVED",
+            "preflight_started_at_utc": preflight_started_at.isoformat().replace("+00:00", "Z"),
+            "preflight_completed_at_utc": preflight_completed_at.isoformat().replace("+00:00", "Z"),
+            "settings_initialization_started_at_utc": settings_started_at.isoformat().replace("+00:00", "Z"),
+            "settings_initialization_completed_at_utc": settings_completed_at.isoformat().replace("+00:00", "Z"),
+            "collector_construction_started_at_utc": collector_construction_started_at.isoformat().replace("+00:00", "Z"),
+            "collector_construction_completed_at_utc": collector_construction_completed_at.isoformat().replace("+00:00", "Z"),
+            "preflight_and_sql_initialization_duration_ms": _duration_ms(preflight_started_monotonic),
+            "preflight_duration_ms": _duration_ms(preflight_started_monotonic),
+            "main_function_entry_delay_ms": max(
+                0.0, (main_function_entry_monotonic - _PYTHON_MODULE_ENTRY_MONOTONIC) * 1000.0
+            ),
+            "process_startup_observed_duration_ms": max(
+                0.0, (preflight_completed_monotonic - _PYTHON_MODULE_ENTRY_MONOTONIC) * 1000.0
+            ),
+            "quota_recovery_duration_ms": phase_durations_ms["quota_permit_recovery_ms"],
+            "phase_durations_ms": phase_durations_ms,
+            "clock_source_provenance": {
+                "python_process_entry": "PYTHON_MODULE_IMPORT_WALL_CLOCK_UTC",
+                "main_function_entry": "PYTHON_MAIN_WALL_CLOCK_UTC",
+                "preflight": "PYTHON_WALL_CLOCK_UTC",
+                "phase_durations": "MONOTONIC_CLOCK",
+                "dispatcher_entry": "COLLECTOR_WALL_CLOCK_UTC_CAPTURED_INSIDE_RUN_ONCE",
+                "sql_authorization": "SQL_SYSUTCDATETIME",
+                "absolute_bucket_deadline": "UTC_BUCKET_END_DERIVED_FROM_LOGICAL_BUCKET",
+                "launchd_trigger": "NOT_INDEPENDENTLY_OBSERVED",
+            },
+        }
+        previous_handlers: dict[int, object] = {}
+        for signal_name in ("SIGINT", "SIGTERM"):
+            signal_number = getattr(signal, signal_name, None)
+            if signal_number is not None:
+                previous_handlers[signal_number] = signal.getsignal(signal_number)
+                signal.signal(signal_number, lambda _signum, _frame: collector.request_shutdown())
+        try:
+            result = collector.run_once(
+                mode=collector_mode,
+                allow_live=True,
+                execution_started_at_utc=_PYTHON_MODULE_ENTRY_AT_UTC,
+                execution_started_monotonic=_PYTHON_MODULE_ENTRY_MONOTONIC,
+                logical_bucket_at_utc=logical_bucket_at_utc,
+                runtime_timing=runtime_timing,
+            )
+        finally:
+            for signal_number, handler in previous_handlers.items():
+                signal.signal(signal_number, handler)
+        payload = {
+            "status": result.status,
+            "mode": collector_mode,
+            "runtime_scope": runtime_mode,
+            "collection_context": collection_context,
+            "target_count": len(targets),
+            "selection_policy_version": selection_policy_version,
+            "logical_due_bucket": int(logical_bucket_at_utc.timestamp() // 300),
+            "sql_login_status": login_status,
+            "schema": schema_details,
+            "selection": selection_details,
+            "quota_recovery": quota_recovery,
+            "result": result.to_dict(),
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+        return 0 if result.status in {"COMPLETE", "DUPLICATE_NO_WORK"} else 1
+    except SecretRequired as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except (LiveModeBlocked, MssqlDependencyError, MssqlSafetyError, MssqlSchemaError) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "BLOCKED",
+                    "reason": str(exc),
+                    "simulated_transport_calls": 0,
+                    "live_network_calls": 0,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except (ValueError, OSError) as exc:
+        print(json.dumps({"status": "ERROR", "reason": str(exc)}, sort_keys=True), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # Do not echo DB-API/provider exception text; it may contain endpoint
+        # or credential-adjacent diagnostics. Audit tables receive sanitized
+        # detail once a run has been opened.
+        print(json.dumps({"status": "ERROR", "error_type": type(exc).__name__}, sort_keys=True), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

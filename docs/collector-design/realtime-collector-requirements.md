@@ -1,5 +1,8 @@
 # Realtime Collector Requirements
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 > **Stage 02 approved source requirements; Stage 3B collection/cadence policy
 > approved; Stage 7 pilot design approved; implementation and activation are
 > deferred.**
@@ -387,16 +390,19 @@ interval, from sub-second observations to approximately 2 seconds. This
 supports the bounded diagnostic interval but does not guarantee completion
 within 3 seconds or prevent skipped slots.
 
-The conservative monthly ceiling remains `250,000` MDD HTTP requests. Normal
-operational planning must use the approved `83–84%` envelope of
-`207,500–210,000` requests/month and preserve `40,000–42,500` requests/month
-(`16–17%`) as unallocated headroom; it must not silently plan against the full
-ceiling. The theoretical 1200-attempt pilot maximum is `0.48%` of the full
-ceiling and approximately `0.57–0.58%` of the operational planning envelope.
-`NumberOfResults=20` is a per-response result limit, not an HTTP request count.
+The absolute provider ceiling remains `250,000` MDD HTTP requests/month. The
+normal operational maximum is `210,000`; automatic retries must be blocked when
+projected/current shared-credential consumption would exceed the separate
+`207,500` protection boundary. There is no minimum utilization requirement, so
+the approved Stage 13 lower-load design is valid and preserves additional quota
+headroom. The theoretical 1200-attempt pilot maximum is `0.48%` of the full
+ceiling. Stage 7's historical `207,500–210,000` / 83–84% planning target is
+retained as historical context only. `NumberOfResults=20` is a per-response
+result limit, not an HTTP request count.
 The pilot is a bounded diagnostic budget, not a production cadence approval;
-Stage 13 owns production cadence/readiness analysis and must size production
-inside the operational envelope. Every successful 3-second response is a
+Stage 13 owns production cadence/readiness analysis and applies the explicit
+210,000 normal operational maximum and 207,500 automatic-retry protection
+boundary. Every successful 3-second response is a
 distinct observation, even when values are unchanged. Three-second polling
 reduces but cannot mathematically guarantee capture of a transient
 `RecordedAtTime`; `RECORDED_AT_TIME_NOT_OBSERVED_IN_STAGE_08_PILOT` means
@@ -405,6 +411,60 @@ not authorize Stage 8 host execution, runtime code, PostgreSQL, GTFS-RT
 collection, production cadence, or Actual Delay. The [Stage 7 completion
 decision](../stages/07-realtime-pilot-design-completion-decision.md) is the
 authoritative approval record.
+
+## 20. Stage 13 readiness handoff
+
+The Stage 13 audit is recorded in
+[`13-tiered-collector-readiness.md`](../stages/13-tiered-collector-readiness.md)
+and its [machine-readable evidence](../stages/13-tiered-collector-readiness-evidence.json).
+Stage 12 now approves fixed panel version `TIERED50_PANEL_V1`. The historical
+`10/20/20` Tiered50 candidate is a separate historical/evaluated comparison at
+5/15/30 minutes, not a production tier assignment. Its arithmetic is `240`
+logical requests/hour, `5,760`/day, `172,800` in a 30-day month, and `178,560`
+in a 31-day month; its 31-day 10% retry reserve plus conservative Legacy7 and
+diagnostic reserves reconciles to `205,444`. It remains technically evaluated
+and not user approved. The separately approved production plan is 8/20/22 at
+5/15/30 minutes and 220 logical requests/hour.
+
+The readiness handoff adds the following future collector requirements:
+
+- production target identity is `(SamplingTargetId, LogicalDueBucket)`;
+- `LogicalDueBucket` is a deterministic UTC five-minute bucket;
+- claim insertion is atomic under a unique target/bucket constraint, and only
+  the winning claim may issue HTTP;
+- stale/incomplete claims remain observable, but missed historical buckets are
+  never replayed or fabricated;
+- phase assignments use the immutable approved panel identity
+  `source_parent_station_id / parent StopPointRef` and the equivalent hash
+  `SHA-256(panel version + tier + source_parent_station_id)`; Stage 14 must
+  persist/materialize the finalized indexes without recomputing from database
+  `SamplingTargetId` values, and assignments remain independent of mutable
+  ranking;
+- one failed target does not abort other due targets, and per-target audit,
+  status, attempts, duration, parser, persistence, and error metadata remain
+  independent; and
+- unbounded concurrency is prohibited; and
+- the Stage 14 automatic-retry guardrail must evaluate all known shared-
+  credential consumers using actual audited current-month attempts, projected
+  remaining unavoidable/non-retry consumption, the candidate retry, and any
+  approved reserved shared-account consumption. A retry must be blocked if the
+  resulting projected/current shared-credential monthly total would exceed
+  `207,500`; current Legacy7 usage must not be fabricated, and the conservative
+  Legacy7 reservation remains until that audit path exists.
+
+Stage 13 approves the production `NumberOfResults` policy A20/B30/C30 and
+retains `PROVIDER_MAXIMUM_NOT_ESTABLISHED`: bounded historical N20/N30
+acceptance is not a provider-wide maximum or realtime completeness guarantee.
+Retained exact-feed station-level evidence supports the approved density tiers
+at 50/50 P95 support, but static schedule density remains planning evidence and
+does not establish realtime response coverage.
+
+The conditional design direction is small bounded concurrency with a maximum
+of two workers, subject to a separately approved provider-safe validation. This
+is not an activation approval. The current production shared-credential audit
+and SQL Server `ctl.MddCollectorRun` history are unavailable in the restart
+repository; any external Legacy Collector usage must be reconciled before
+activation. Stage 14 remains outside this handoff.
 
 ## Handoff gate
 

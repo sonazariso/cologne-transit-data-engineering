@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Trias xmlns="http://www.vdv.de/trias" version="1.2">
+  <ServiceDelivery>
+    <Status>OK</Status>
+    <ResponseTimestamp>2026-10-01T12:00:00Z[GMT]</ResponseTimestamp>
+    <DeliveryPayload>
+      <StopEventResponse>
+        <StopEventResult>
+          <ResultId>source-faithful-result-1</ResultId>
+          <StopEvent>
+            <Cancelled>true</Cancelled>
+            <Service>
+              <OperatingDayRef>2026-10-01</OperatingDayRef>
+              <JourneyRef>journey-source-faithful-1</JourneyRef>
+              <LineRef>line-source-faithful</LineRef>
+              <DirectionRef>outbound</DirectionRef>
+              <OperatorRef>operator-source-faithful</OperatorRef>
+              <PtMode><Value>tram</Value></PtMode>
+              <RailSubmode><Value>lightRail</Value></RailSubmode>
+              <PublishedLineName><Text>Line 18</Text></PublishedLineName>
+              <Deviation>true</Deviation>
+              <StopPointRef>de:05315:service-context</StopPointRef>
+              <PlannedBay>SERVICE-BAY</PlannedBay>
+              <Origin>
+                <StopPointRef><Value>de:05315:origin</Value></StopPointRef>
+                <Text><Text>Origin Station</Text></Text>
+              </Origin>
+              <Destination>
+                <StopPointRef>de:05315:destination</StopPointRef>
+                <Name>Destination Station</Name>
+              </Destination>
+            </Service>
+            <PreviousCall>
+              <CallAtStop>
+                <StopSeqNumber>3</StopSeqNumber>
+                <NotServicedStop>true</NotServicedStop>
+                <ServiceArrival>
+                  <TimetabledTime>2026-10-01T11:55:00Z[GMT]</TimetabledTime>
+                </ServiceArrival>
+              </CallAtStop>
+            </PreviousCall>
+            <ThisCall>
+              <CallAtStop>
+                <StopPointRef>de:05315:this</StopPointRef>
+                <StopPointName>This Stop</StopPointName>
+                <StopSeqNumber>4</StopSeqNumber>
+                <PlannedBay>B</PlannedBay>
+                <ServiceArrival>
+                  <TimetabledTime>2026-10-01T12:00:00Z[GMT]</TimetabledTime>
+                  <EstimatedTime>2026-10-01T12:01:00Z[GMT]</EstimatedTime>
+                  <UnknownEstimatedQuality><Value>raw-estimate-evidence</Value></UnknownEstimatedQuality>
+                </ServiceArrival>
+              </CallAtStop>
+            </ThisCall>
+            <OnwardCall>
+              <CallAtStop>
+                <StopPointName>Onward Stop</StopPointName>
+                <StopSeqNumber>5</StopSeqNumber>
+                <ServiceDeparture>
+                  <TimetabledTime>2026-10-01T12:06:00Z[GMT]</TimetabledTime>
+                </ServiceDeparture>
+              </CallAtStop>
+            </OnwardCall>
+          </StopEvent>
+        </StopEventResult>
+      </StopEventResponse>
+    </DeliveryPayload>
+  </ServiceDelivery>
+</Trias>

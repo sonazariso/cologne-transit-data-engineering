@@ -1,0 +1,152 @@
+{
+  "artifact_version": "TIERED50_DEPLOYMENT_VALIDATION_EVIDENCE_V2",
+  "evidence_capture_timestamp_utc": "2026-10-08T09:59:38Z",
+  "production_status": "BLOCKED — TIERED50 INACTIVE; LEGACY7 RETIRED",
+  "tiered50_active": false,
+  "stations_actually_collecting": {
+    "tiered50": 0,
+    "legacy7": 0,
+    "basis": "fresh launchd and SQL evidence; Tiered50 remains disabled and Legacy7 was retired"
+  },
+  "authoritative_database": "CologneTransitIntelligence",
+  "execution_host": "macOS",
+  "windows_collectors": "RETIRED_AND_NOT_REENABLED",
+  "manifest": {
+    "panel_version": "TIERED50_PANEL_V1",
+    "sampling_era": "Tiered50",
+    "target_count": 50,
+    "legacy7_continuity_anchors": 7,
+    "new_targets": 43,
+    "tier_counts": {"A": 8, "B": 20, "C": 22},
+    "cadence_minutes": {"A": 5, "B": 15, "C": 30},
+    "number_of_results": {"A": 20, "B": 30, "C": 30},
+    "phase_counts": [19, 18, 18, 18, 19, 18],
+    "activation_status": "DEFERRED_NOT_ACTIVE"
+  },
+  "offline_validation": {
+    "status": "PASS",
+    "mdd_requests_issued": 0,
+    "writes_performed": 0,
+    "six_phase_counts": [19, 18, 18, 18, 19, 18],
+    "nominal_requests_per_30_minutes": 110,
+    "nominal_requests_per_hour": 220,
+    "concurrency": 2,
+    "max_attempts": 2,
+    "request_timeout_seconds": 30,
+    "no_catch_up": true,
+    "claim_identity": "SamplingTargetId + LogicalDueBucket",
+    "credential_gate_fail_closed": true,
+    "source_field_persistence_contract": "PASS",
+    "actual_time_fabrication": false,
+    "parser_gap_preservation": true,
+    "transactional_sql_persistence_contract": "PASS_STATIC_REVIEW"
+  },
+  "sql_materialization": {
+    "migration_file": "sql/mdd-mac-collector/materialize-tiered50-production.sql",
+    "static_validation": "PASS",
+    "applied_to_live_database": true,
+    "prepared_new_rows": 43,
+    "assigned_new_ids": "8..50",
+    "active_tiered50_rows": 0,
+    "legacy_ids_1_through_7_preserved": true,
+    "materialization_write_mdd_requests": 0
+  },
+  "runtime_and_deployment": {
+    "production_runner": "Tiered50 only; Legacy7 mode retired and blocked",
+    "separate_collection_context": "MAC_TIERED50_PRODUCTION",
+    "tiered50_launch_agent_template": "deployment/launchd/com.cologne-transit-intelligence.mdd-tiered50-collector.plist",
+    "tiered50_launch_agent_installed": true,
+    "tiered50_launch_agent_disabled": true,
+    "tiered50_versioned_bundle": "~/Library/Application Support/CologneTransitIntelligence/runtime-bundles/tiered50-v1-707688926440b991",
+    "legacy7_launch_agent_disabled": true,
+    "legacy7_launchctl_state": "NOT_LOADED",
+    "durable_sql_writer_lease": "IMPLEMENTED; no Tiered50 run was started",
+    "secrets_in_plists_or_bundle_manifest": false
+  },
+  "legacy7_availability": {
+    "source": "docs/operational/tiered50-production-evidence.json",
+    "final_run_id": "05d97f32-7c4a-4a6c-993c-fd496c609cb8",
+    "final_logical_due_bucket": 5971511,
+    "final_completed_at_utc": "2026-10-08 09:57:32.860000",
+    "six_consecutive_expected_buckets": [5971506, 5971507, 5971508, 5971509, 5971510, 5971511],
+    "six_consecutive_buckets_accounted": true,
+    "six_consecutive_buckets_succeeded": true,
+    "mac_uptime_and_power_assertions_captured": true,
+    "vmware_running_vm_observed": true,
+    "missing_bucket_cause": "NOT_INFERRED"
+  },
+  "capacity_and_backup": {
+    "status": "PASS_FOR_PREPARATION; NOT A TIERED50 ACTIVATION GATE BY ITSELF",
+    "provider_ceiling": 250000,
+    "normal_operational_maximum": 210000,
+    "retry_protection_boundary": 207500,
+    "rows_file_size_pages": 727840,
+    "rows_space_used_pages": 723688,
+    "rows_growth_pages": 8192,
+    "rows_max_size_pages": -1,
+    "log_size_pages": 238592,
+    "log_space_used_percent": 5.961666584014893,
+    "sql_volume_total_bytes": 95511638016,
+    "sql_volume_available_bytes": 44889190400,
+    "latest_full_backup_finish": "2026-10-07 09:00:52",
+    "latest_full_backup_copy_only": true,
+    "latest_full_backup_checksum": true,
+    "restore_verifyonly_with_checksum": "PASS",
+    "windows_vm_disk": "NOT_OBSERVABLE_FROM_MACOS_EVIDENCE"
+  },
+  "shared_credential_quota": {
+    "dashboard_selection": {
+      "month_label": "Oktober",
+      "year": 2026
+    },
+    "state_available": false,
+    "source": "MDD_MONITORING_DASHBOARD_OBSERVED_FACTS_ONLY",
+    "provider_dashboard_evidence": "docs/operational/mdd-october-monitoring-dashboard-evidence.json",
+    "displayed_cumulative_requests": 554,
+    "displayed_monthly_limit": 250000,
+    "nominal_display_headroom": 249446,
+    "measurement_cutoff_utc": null,
+    "provider_period_timezone": null,
+    "provider_period_bounds_utc": null,
+    "scope_verified": false,
+    "accounting_model_verified": false,
+    "operational_headroom": null,
+    "known_total": null,
+    "activation_blocker": "dashboard values are observed but required scope, freshness, reset-period, accounting-model, post-cutoff, permit, and external-reservation metadata are not verified",
+    "atomic_contract": "IMPLEMENTED; INITIAL and RETRY deny without complete baseline",
+    "http_500_is_quota_exhaustion": false,
+    "duplicate_authorization": "durable AuthorizationKey idempotence implemented"
+  },
+  "live_validation": {
+    "status": "NOT_RUN",
+    "first_completed_30_minute_tiered50_cycle": null,
+    "mdd_requests_issued": 0,
+    "reason": "activation remained blocked because the observed dashboard values do not establish a registrable provider-wide quota baseline"
+  },
+  "cutover_record": {
+    "status": "OUTAGE",
+    "reason": "TIERED50_ACTIVATION_BLOCKED_AFTER_LEGACY7_RETIREMENT",
+    "legacy7_retired_before_block": true,
+    "tiered50_targets_remained_disabled": true
+  },
+  "analytics": {
+    "power_bi_modified": false,
+    "collector_analytics_select_grants_added": false,
+    "historical_readiness_diagnostic_preserved": true
+  },
+  "sanitization": {
+    "credentials_included": false,
+    "api_keys_included": false,
+    "passwords_included": false,
+    "keychain_values_included": false,
+    "raw_mdd_payloads_included": false,
+    "manual_heumarkt_requests_issued": false,
+    "mdd_requests_issued_by_evidence": 0
+  },
+  "blockers": [
+    "The October dashboard displays 554 cumulative requests against a 250000 monthly limit, but provider scope, freshness, reset period, accounting model, post-cutoff usage, permits, and external reservations remain unverified; both INITIAL and RETRY quota permits fail closed.",
+    "Tiered50 activation and live validation remain unperformed; the installed Tiered50 LaunchAgent is disabled.",
+    "Legacy7 is retired and recorded as an outage after the blocked cutover; it is not a fallback writer."
+  ],
+  "fresh_evidence_artifact": "docs/operational/tiered50-production-evidence.json"
+}

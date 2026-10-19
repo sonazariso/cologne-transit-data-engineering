@@ -1,5 +1,8 @@
 # Semantic and Data Guardrails
 
+> **Historical freeze note (19 Oct 2026):** This document retains design/evidence captured **before** the operator-reported 16 Oct cleanup. Any statements that deletion, shrink or disk recovery had not occurred are superseded by [current project status](PROJECT-STATUS.md). Do not rerun historical destructive SQL without new independent review.
+
+
 These guardrails apply from project foundation unless explicitly replaced by a later approved decision.
 
 The approved Stage 02 source-contract package hands future collector work to
@@ -95,10 +98,16 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
 39. The intended future evidence flow is `SOURCE -> COLLECTOR -> APPEND-ONLY
     SOURCE OBSERVATIONS -> DERIVED ANALYTICAL STATE`; source disappearance must
     never erase previously observed evidence.
-40. PostgreSQL 18 is the approved future authoritative platform direction for
-    the redesigned architecture, with JSONB only where later justified. This
-    does not change source availability, create PostgreSQL tables, migrate SQL
-    Server assets, or authorize production persistence.
+40. The earlier PostgreSQL 18 direction for the redesigned architecture is
+    historical/deferred-cleanup material and is superseded for the active
+    roadmap by S87. Microsoft SQL Server is the sole authoritative project
+    database. The current Stage 14 overall status is
+    `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`; its
+    collector implementation remains `STAGE 14 COLLECTOR IMPLEMENTATION
+    COMPLETE`, and Stage 15 live remains `NOT STARTED — FIRST SCHEDULED
+    TIERED50 HEARTBEAT FAILED`. This does not change source availability,
+    create PostgreSQL tables, or authorize production persistence outside the
+    current Tiered50-only gates.
 41. A future short-term raw-payload retention option may be evaluated for
     forensic reprocessing and parser improvements. No duration is approved;
     storage volume, privacy/data considerations, reprocessing need, and
@@ -229,13 +238,17 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     observed sampling window, not provider-wide absence; a shorter validation
     requires separate approval and no shorter production cadence is
     pre-approved.
-87. The conservative monthly MDD ceiling remains exactly `250,000` requests.
-    Normal MDD planning must not consume the full ceiling; the planned monthly
-    operating envelope is `207,500–210,000` requests, or `83–84%`.
-88. Preserve `40,000–42,500` requests/month, approximately `16–17%`, as
-    unallocated headroom. Stage 13 must size normal production collection
-    inside the `207,500–210,000` envelope unless the user changes this
-    decision.
+87. The absolute provider MDD ceiling remains exactly `250,000` requests/month.
+    Normal planned operation must not intentionally exceed the separate
+    `210,000` normal operational maximum without a new explicit decision.
+88. The `207,500` value is the conservative automatic-retry protection
+    boundary: automatic retries must be blocked when projected/current shared-
+    credential monthly consumption would exceed it. There is no requirement to
+    consume at least `207,500`; lower utilization is valid and preserves quota
+    headroom. Stage 13's approved 30/31-day conservative totals are `182,980`
+    and `189,076`, safely below both operational thresholds.
+    Stage 7's historical `207,500–210,000` / 83–84% planning target remains
+    historical context only and is not a current minimum-utilization gate.
 89. An HTTP `429` stops the Stage 8 pilot immediately, is classified as
     rate-limit/provider evidence, and is never retried.
 90. Credential preflight must validate the API-key header format before any
@@ -259,7 +272,244 @@ is bounded post-Stage-02 design evidence and is not a Stage 02 blocker.
     aggregate evidence for the bounded observed sample and do not prove
     provider-wide absence.
 94. This hardening change is prospective only. Stage 8 remains **COMPLETE**;
-    the fixed future 50-station objective and the `250,000` monthly quota are
-    unchanged; Stage 13 retains production cadence, concurrency,
-    `NumberOfResults`, and rollout ownership; and Stage 9+ implementation is
-    not started.
+    the fixed `TIERED50_PANEL_V1` objective and the `250,000` monthly quota are
+    unchanged. Stage 13 is now **COMPLETE — APPROVED TIERED COLLECTOR
+    READINESS DESIGN; PRODUCTION NOT STARTED** after the explicit approval in
+    `prompts/S68.md`. Stage 14, physical implementation, scheduler work,
+    and activation remain separately gated.
+95. The approved Stage 13 density plan assigns ranks 1–8 / 9–28 / 29–50 to
+    Tier A/B/C, with 8 / 20 / 22 stations at 5 / 15 / 30-minute cadence.
+    Station membership uses retained density evidence and immutable panel
+    identity, never Stage 12 `SelectionRank`. The historical 10/20/20
+    plan is comparison evidence only.
+96. The unique future realtime execution identity is
+    `(SamplingTargetId, LogicalDueBucket)`. Claims must be atomic and durable;
+    a duplicate claim must not issue another HTTP request.
+97. A logical due bucket is a deterministic UTC five-minute bucket. A later
+    invocation may continue from the current wall-clock bucket, but it must
+    not replay a missed historical bucket or fabricate a realtime snapshot.
+98. Future phase assignments must be deterministic, persisted/configured,
+    auditable, versioned with the sampling panel, and independent of mutable
+    rank ordering. For the approved Stage 13 design, the assignment identity
+    is `source_parent_station_id / parent StopPointRef` and the hash is
+    `SHA-256(panel version + tier + source_parent_station_id)`; production
+    phase-index persistence is a Stage 14 materialization obligation. The
+    approved due sequence is 19/18/18/18/19/18, with capacities A 8, B 7/7/6,
+    and C 4/3/4/3/4/4.
+99. One failed station must not abort other due targets. Audit, HTTP status,
+    attempts, duration, parser, persistence, and error metadata remain
+    independently attributable to each target.
+100. The approved production result limits are Tier A/B/C
+     `NumberOfResults` 20 / 30 / 30. Retained static evidence supports
+     maximum station P95/max observed counts of A 19/20, B 23/23, and C 29/29,
+     with 50/50 total P95 support. This does not establish realtime
+     completeness, guaranteed event availability, or a provider-wide maximum.
+101. Unbounded MDD concurrency is prohibited. Maximum concurrency 2 is an
+     approved bounded design based on the retained cap-2 diagnostic and
+     failure isolation. Stage 14 must validate the complete persistence path;
+     this is not a provider-wide rate-limit claim or activation.
+102. Current shared-credential production usage must be auditable before
+     activation. Missing current `ctl.MddCollectorRun` history must not be
+     represented as zero usage. The approved normal retry reserve is 10% of
+     nominal Tiered50 requests, and automatic retries must be blocked when
+     projected/current shared-credential monthly consumption would exceed
+     207,500 across all known credential consumers. The Stage 14 runtime
+     decision must account for actual audited current-month shared-credential
+     attempts, projected remaining unavoidable/non-retry consumption for known
+     enabled consumers, the candidate retry, and any approved reserved
+     shared-account consumption. Current Legacy7 usage must not be fabricated;
+     until the audit path exists, retain the conservative Legacy7 reservation.
+103. Stage 13 readiness analysis does not authorize Stage 14, production
+     scheduler implementation, database objects, Power BI work, Windows tasks,
+     or Tiered50 activation. Stage 13 is
+     `COMPLETE — APPROVED TIERED COLLECTOR READINESS DESIGN; PRODUCTION NOT STARTED`;
+     production remains not started. D-051 separately authorizes the
+     cross-platform, offline Stage 14 collector implementation and validation;
+     production persistence, scheduling, and activation remain gated.
+104. Stage 12 panel membership is fixed after approval. A dynamic station
+     replacement is prohibited during collection; a membership change requires
+     a new version with effective date/time, reason, and predecessor panel
+     version.
+105. The approved Stage 12 panel version is `TIERED50_PANEL_V1`; historical
+     Legacy7 identities must never be deleted, and reporting must distinguish
+     sampling/panel eras.
+106. A Stage 12 `SelectionRank` is panel ordering evidence only. It must not be
+     interpreted as a production tier, cadence, result limit, concurrency,
+     retry budget, phase assignment, or overlap-claim decision.
+107. Parent-station panel membership requires a validated VRS source parent
+     with `location_type=1`, direct Cologne source identity, valid
+     `parent_station` child hierarchy, and scheduled child-stop evidence.
+     Names, operators, coordinates, and route labels do not establish Cologne
+     identity.
+108. Scheduled stop-event volume is timetable/service evidence, not passenger
+     demand. Ridership must not be inferred or invented from static schedule
+     density.
+109. A COMPLETE Stage 12 selection must retain a sanitized, exact-snapshot
+     candidate-universe artifact sufficient for offline replay through the
+     authoritative selector. The artifact must contain no raw GTFS ZIP, raw
+     MDD payload, or secret; deterministic algorithm reproducibility and exact
+     durable-input replayability are separate required gates.
+110. Stage 13 diagnostics may use only the inherited `MDD_API_KEY` environment
+     value. If it is missing, the diagnostic makes zero requests. The key,
+     request headers, raw MDD payloads, and credential-bearing errors must not
+     be persisted, printed, hashed, or committed; a 401/403 stops the run.
+111. The historical Stage 13 diagnostic budget was at most 100 new client-side
+     diagnostic invocations, including the original result-limit and cap-2
+     checks. Confirmed provider HTTP attempts must be derived from retained
+     response evidence rather than assumed from that invocation budget. The
+     separately approved 24-invocation extension is retained in the chronology
+     and does not rewrite the historical budget. Reuse of sanitized evidence
+     issues no request; this Stage 13 closeout issued no new request.
+112. Stage 13 machine-readable evidence distinguishes
+     `TECHNICALLY_EVALUATED_OPTION` from `USER_APPROVED_DESIGN`. The explicit
+     approval sets `production_number_of_results_approved`,
+     `production_concurrency_approved`, `production_cadence_approved`, and
+     `production_retry_policy_approved` to `true`. Stage 14 and all
+     production activation work remain separately gated.
+113. The historical Stage 13 `forward_temporal_span_seconds` values are not
+     valid result-limit forward-coverage evidence. Forward coverage must use
+     only the requested StopEventResult's THIS-call arrival timing at or after
+     the requested `DepArrTime` anchor; PreviousCall, OnwardCall, departure,
+     and route-context timings are contextual evidence only.
+114. Because raw MDD responses were not retained, the corrected Stage 13
+     NumberOfResults comparison used exactly 24 additional client-side MDD
+     request invocations: 0 HTTP responses, 0 confirmed provider HTTP attempts,
+     and unknown provider quota consumption. The 24 invocations are retained as
+     `conservative_quota_accounting_attempts`. Cumulative client invocations
+     are 114, not 114 claimed provider requests or quota units. The retained
+     sanitized failure category is `OTHER_NETWORK_FAILURE`; the exact
+     limitation is `CORRECTED_LIVE_FORWARD_COVERAGE_UNAVAILABLE_DUE_TO_EXECUTION_ENVIRONMENT`.
+115. The final approved tier-specific result-limit design is A20/B30/C30.
+     `PROVIDER_MAXIMUM_NOT_ESTABLISHED` remains explicit, and no claim may
+     be made for guaranteed 20/30-event availability, guaranteed realtime
+     completeness, or complete forward coverage. Static P95 support is retained
+     as planning evidence only.
+
+## Stage 14 implementation guardrails
+
+116. Stage 14's current status is `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`. The SQLite research profile and Legacy7 implementation are retained as bounded historical evidence, not active architecture; S87 makes SQL Server the sole authoritative project database. The separately documented macOS direct adapter is Tiered50-only, with exact IDs 8–50, a separate versioned bundle, durable SQL claims/lease, and a disabled LaunchAgent after the failed first scheduled heartbeat. Stage 15A readiness is in progress; Stage 15 live validation remains `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`.
+117. The offline Stage 14 runtime remains a Python, cross-platform,
+     standard-library-first collector package. Its offline core must not import
+     PostgreSQL/SQL-driver modules, platform-specific APIs, shell orchestration,
+     or hardcoded platform paths. The isolated optional direct adapter is the
+     sole exception for the prepared macOS path; it uses the pinned DB-API
+     dependency and creates no local shadow database. Deployment scheduling and
+     host selection remain outside the package.
+118. The versioned Stage 14 manifest is the authoritative offline runtime
+     configuration. The Legacy7 direct runner separately reads the unchanged
+     seven existing SQL sampling targets, requires IDs 1–7 and their exact
+     StopPointRef mapping, and refuses the deferred Tiered50 target list. The
+     separately guarded Tiered50 runner may use only the additive SQL-bound
+     target table after every materialization and activation gate passes. The
+     offline manifest still contains exactly 50 targets, fixed Stage 13 phase
+     indexes, and no fabricated future `SamplingTargetId` values. Manifest
+     phase changes fail closed against Stage 13 evidence.
+119. The production claim identity remains `(SamplingTargetId,
+     LogicalDueBucket)`. The additive Tiered50 materialization allocates
+     stable IDs 8–50 while preserving Legacy7 IDs 1–7; activation is the only
+     point at which those new rows may become enabled. A disposable local
+     backend may use the explicitly labeled development identity
+     `(panel_version, source_parent_station_id, logical_due_bucket)` before
+     SQL binding. The adapter boundary must prevent that local key from
+     replacing the production identity.
+120. The one-heartbeat command derives the current five-minute logical bucket
+     from UTC wall-clock time, executes only that bucket, and never replays
+     missed buckets or fabricates missed snapshots. It must not become a
+     permanent internal scheduler loop.
+121. SQLite has two retained historical profiles: `DEVELOPMENT` is disposable
+     local development/test state, while `LIVE_RESEARCH` is durable,
+     non-disposable evidence outside the repository. `LIVE_RESEARCH` retains
+     parsed history indefinitely, bounds sanitized raw forensic evidence to at
+     most 24 hours, and preserves three validated daily backups. It is not a
+     Tiered50 production cutover. The prepared macOS path uses direct
+     persistence and must not route through either SQLite profile.
+122. The real MDD client must be POST/TRIAS 1.2, arrival-scoped, per-target
+     result-limited, 30-second per-attempt, environment-secret-only, and
+     explicitly opted in. Importing or initializing the client must not issue
+     network traffic. Default plan/dry-run/simulate validation must remain
+     offline-safe.
+123. Ordinary successful live MDD payloads are not retained. The bounded
+     `LIVE_RESEARCH` exception may retain only sanitized forensic raw evidence
+     outside the repository for at most 24 hours, with an indexed expiry and
+     cleanup; parsed source-faithful history remains durable. Secrets,
+     authorization headers, unrestricted exceptions, and unsanitized raw live
+     payloads must not enter logs or durable evidence.
+124. Every authorized quota permit must move from `PENDING_AUTHORIZATION` to
+     exactly one terminal state: `RELEASED_NO_NETWORK`,
+     `CONSERVATIVE_LIVE_ATTEMPT`, or `HTTP_PROVIDER_ATTEMPT_CONFIRMED`.
+     A live permit must not be reusable between transport invocation and
+     durable attempt accounting. Confirmed provider attempts, HTTP responses,
+     client-side live invocations, provider-quota-unknown failures, and
+     conservative live-attempt protection remain separate accounting concepts;
+     simulation and credential/request-contract preflight failures do not
+     consume provider or conservative live headroom.
+125. Stage 14 implementation validation must include a no-network check,
+     manifest reconciliation, full repository tests, syntax checks, static
+     architecture checks, duplicate-claim behavior, retry/deadline/quota
+     fault injection, restart/crash visibility, failure isolation, and
+     whitespace/diff review. No validation step may consume MDD quota or issue
+     DNS activity.
+126. Tiered50 production cutover remains gated on a real sampling-era
+     timestamp, final heartbeat safety margin, deployment platform,
+     provider-wide quota baseline, capacity/backup readiness, Tiered50
+     activation, and post-activation smoke validation. The Tiered50 path has
+     separate gates for Windows/Legacy7 retirement, direct-database schema and
+     target validation, current-era exclusion, and idempotency. A manually
+     authorized live Heumarkt probe is not a gate; the first new request must
+     be a normal scheduled Tiered50 heartbeat after all gates pass.
+     PostgreSQL host/runtime is not active architecture.
+
+## Stage 15A validation-readiness guardrails
+
+127. Stage 15A is offline validation-framework/readiness work. The authoritative statuses are Stage 14 overall `TIERED50 ACTIVATION OUTAGE — NO ACTIVE STATIONS; LEGACY7 RETIRED`, Stage 14 collector `STAGE 14 COLLECTOR IMPLEMENTATION COMPLETE`, Stage 15 readiness `IN PROGRESS`, and Stage 15 live validation `NOT STARTED — FIRST SCHEDULED TIERED50 HEARTBEAT FAILED`.
+128. Stage 15A must not start live Stage 15, issue MDD requests, perform DNS or
+     live-network activity, install/configure PostgreSQL, create production
+     database objects, materialize the 43 new production targets, create a
+     Tiered50 sampling-era cutover timestamp, modify Power BI, or alter Stage
+     12/13 evidence. The separately documented Stage 14 Legacy7 adapter and
+     scheduler are not Stage 15A validation and do not constitute Tiered50
+     production cutover.
+129. The version-controlled Stage 15 validation contract may encode automatic
+     PASS/FAIL only for already approved invariants. Design-only production
+     checks are `NOT_APPLICABLE` or `INSUFFICIENT_EVIDENCE` when their evidence
+     is absent; absence is never a PASS.
+130. Stage 15 validation must use a backend-neutral read-only evidence adapter.
+     The validator must not claim buckets, mutate target or dispatcher claims,
+     finalize quota permits, write parsed snapshots, repair stale state, or
+     send transport requests. SQLite is a read-only development evidence
+     adapter, not a production database implementation.
+131. Expected target/bucket work is derived only from the approved manifest,
+     approved schedule engine, and logical bucket identity. Missing audit
+     evidence is `EXPECTED_BUT_MISSING`, not success. Duplicate dispatcher and
+     target-claim events remain explicit auditable classifications, and
+     unexpected execution remains visible as `UNEXPECTED_EXECUTION`.
+132. Dispatcher validation must preserve one durable owner per panel/bucket,
+     make duplicate invocations observable, prove zero duplicate target
+     transport when a duplicate sample exists, and keep incomplete/stale
+     claims visible. Target validation must preserve at most one winning claim
+     per target/bucket and must diagnose rather than repair stale claims.
+133. Attempt/retry validation must hard-fail attempt number greater than 2,
+     more than one automatic retry, retry after deterministic non-retryable
+     categories or 401/403, and duplicate target transport. Retry-rate
+     percentages remain policy pending and must not be given an invented
+     threshold.
+134. Quota validation must separately report scheduled logical requests, live
+     client invocations, network attempts, HTTP responses, confirmed provider
+     attempts, conservative provider-quota-unknown attempts, and active
+     reservations. Simulation/offline attempts must never count as provider
+     usage. Unavailable quota state must be explicit rather than treated as
+     zero.
+135. Stage 15 metrics may report measured rates, percentages, distributions,
+     parser gaps, zero-result frequency, error categories, and deterministic
+     duration statistics, but no failure-rate, retry-rate, timeout-rate,
+     coverage, parser-gap, or heartbeat-duration acceptance threshold may be
+     invented. The final persistence/cleanup safety margin remains deferred.
+136. A parser gap is measured evidence and is not automatically fatal. Zero
+     returned events are not automatically erroneous. `RecordedAtTime`, source
+     identity, sampling era, and Legacy7 lineage remain source-faithful and
+     nullable where evidence is absent.
+137. Stage 15B may validate a real era transition, Legacy7 history/identity
+     continuity, delete/reinsert continuity, and post-cutover Tiered50
+     attribution only after actual Tiered50 activation and a real production
+     sampling-era timestamp exist. Stage 15A must never infer or fabricate
+     either.

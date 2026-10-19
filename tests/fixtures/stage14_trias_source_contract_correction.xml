@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Trias xmlns="http://www.vdv.de/trias" version="1.2">
+  <ServiceDelivery>
+    <Status>OK</Status>
+    <ResponseTimestamp>2026-10-01T12:00:00Z[GMT]</ResponseTimestamp>
+    <DeliveryPayload>
+      <StopEventResponse>
+        <StopEventResult>
+          <ResultId>source-contract-correction-1</ResultId>
+          <StopEvent>
+            <PtMode>event-lookalike-mode</PtMode>
+            <Origin>
+              <StopPointRef>event-origin-lookalike</StopPointRef>
+              <Text>Event Origin Lookalike</Text>
+            </Origin>
+            <Destination>
+              <StopPointRef>event-destination-lookalike</StopPointRef>
+              <Text>Event Destination Lookalike</Text>
+            </Destination>
+            <Service>
+              <OperatingDayRef>2026-10-01</OperatingDayRef>
+              <VehicleJourneyRef>vehicle-journey-candidate-1</VehicleJourneyRef>
+              <DatedVehicleJourneyRef>dated-vehicle-journey-candidate-1</DatedVehicleJourneyRef>
+              <AffectedVehicleJourney>affected-vehicle-journey-1</AffectedVehicleJourney>
+              <VehicleJourneys>vehicle-journey-candidate-2</VehicleJourneys>
+              <VehicleJourneys>vehicle-journey-candidate-3</VehicleJourneys>
+              <OperatingDaysDescription>Monday-Friday</OperatingDaysDescription>
+              <DirectionRef>direction-ref-1</DirectionRef>
+              <Direction>Northbound candidate evidence</Direction>
+              <Origins>candidate-origin-1</Origins>
+              <Origins>candidate-origin-2</Origins>
+              <Destinations>candidate-destination-1</Destinations>
+              <IncidentCall>
+                <Attribute>
+                  <Code>INC-001</Code>
+                  <Text>Provider-reported incident text</Text>
+                </Attribute>
+                <GeneralAttribute>
+                  <Code>GEN-001</Code>
+                  <Text>Provider-reported general text</Text>
+                </GeneralAttribute>
+              </IncidentCall>
+              <Situation>
+                <ParticipantRef>participant-1</ParticipantRef>
+                <SituationNumber>situation-1</SituationNumber>
+                <Version>2</Version>
+                <Summary>Provider situation summary</Summary>
+                <Affects>SERVICE</Affects>
+                <AffectedEntity>
+                  <VehicleJourneyRef>affected-vehicle-journey-2</VehicleJourneyRef>
+                </AffectedEntity>
+                <AffectedJourney>
+                  <JourneyRef>affected-journey-1</JourneyRef>
+                </AffectedJourney>
+                <AffectedLine>
+                  <LineRef>affected-line-1</LineRef>
+                </AffectedLine>
+              </Situation>
+              <UnmappedServiceExtension>
+                <Value>retained-parser-gap-evidence</Value>
+              </UnmappedServiceExtension>
+            </Service>
+            <ThisCall>
+              <CallAtStop>
+                <StopPointRef>de:05315:11201</StopPointRef>
+                <StopPointName>Requested Stop</StopPointName>
+                <StopSeqNumber>4</StopSeqNumber>
+                <ServiceArrival>
+                  <TimetabledTime>2026-10-01T12:00:00Z[GMT]</TimetabledTime>
+                </ServiceArrival>
+              </CallAtStop>
+            </ThisCall>
+          </StopEvent>
+        </StopEventResult>
+      </StopEventResponse>
+    </DeliveryPayload>
+  </ServiceDelivery>
+</Trias>

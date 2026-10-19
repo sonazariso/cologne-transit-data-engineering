@@ -1,0 +1,2506 @@
+{
+  "active_requests": [],
+  "active_schema_before": {
+    "object_keys": [
+      "analytics.vwActiveDateProfile:V ",
+      "analytics.vwDailyScheduledTripProfile:V ",
+      "analytics.vwMddMacRecordedAtTimeHistory:V ",
+      "analytics.vwMddMacSourceFieldCoverage:V ",
+      "analytics.vwModeScheduleProfile:V ",
+      "analytics.vwNetworkBaselineKpi:V ",
+      "analytics.vwParentStationScheduleProfile:V ",
+      "analytics.vwRealtimeCollectorRunHealth:V ",
+      "analytics.vwRealtimeDataQualityCoverage:V ",
+      "analytics.vwRealtimeDelayHotspot:V ",
+      "analytics.vwRealtimeOperationalConsolidationQuality:V ",
+      "analytics.vwRealtimePlatformChangeEvidence:V ",
+      "analytics.vwRealtimeReliabilityByDimension:V ",
+      "analytics.vwRealtimeReliabilityOutcome:V ",
+      "analytics.vwRealtimeSituationLinkedOutcome:V ",
+      "analytics.vwRouteScheduleProfile:V ",
+      "analytics.vwStopPositionScheduleProfile:V ",
+      "ctl.CK_ctl_GtfsLoadBatch_Status:C ",
+      "ctl.CK_ctl_GtfsStagingState_Singleton:C ",
+      "ctl.CK_ctl_GtfsValidationResult_CheckStatus:C ",
+      "ctl.CK_ctl_GtfsValidationResult_FailedRows:C ",
+      "ctl.CK_ctl_GtfsValidationResult_Severity:C ",
+      "ctl.CK_ctl_MddCollectorRun_DurationMs:C ",
+      "ctl.CK_ctl_MddCollectorRun_HttpAttempts:C ",
+      "ctl.CK_ctl_MddCollectorRun_NonNegativeCounts:C ",
+      "ctl.CK_ctl_MddCollectorRun_NumberOfResults:C ",
+      "ctl.CK_ctl_MddCollectorRun_SamplingMode:C ",
+      "ctl.CK_ctl_MddCollectorRun_SamplingSlot:C ",
+      "ctl.CK_ctl_MddCollectorRun_Status:C ",
+      "ctl.CK_ctl_MddImportBatch_SourceByteSize:C ",
+      "ctl.CK_ctl_MddImportBatch_SourceSha256:C ",
+      "ctl.CK_ctl_MddImportBatch_Status:C ",
+      "ctl.CK_ctl_MddImportEvidenceAudit_ReconciliationStatus:C ",
+      "ctl.CK_ctl_MddImportSourceRow_Classification:C ",
+      "ctl.CK_ctl_MddImportSourceRow_RowStatus:C ",
+      "ctl.CK_ctl_MddImportTableAudit_Classification:C ",
+      "ctl.CK_ctl_MddImportTableAudit_ReconciliationStatus:C ",
+      "ctl.CK_ctl_MddMacQuotaPermit_Amount:C ",
+      "ctl.CK_ctl_MddRealtimeSamplingSlot_Positive:C ",
+      "ctl.CK_ctl_MddRealtimeSamplingTarget_NumberOfResults:C ",
+      "ctl.CK_ctl_StaticWarehouseLoadBatch_Status:C ",
+      "ctl.DF_ctl_GtfsLoadBatch_LoadedBy:D ",
+      "ctl.DF_ctl_GtfsLoadBatch_SourceName:D ",
+      "ctl.DF_ctl_GtfsLoadBatch_StartedAtUtc:D ",
+      "ctl.DF_ctl_GtfsStagingState_UpdatedAtUtc:D ",
+      "ctl.DF_ctl_GtfsValidationResult_ValidatedAtUtc:D ",
+      "ctl.DF_ctl_MddCollectorRun_Status:D ",
+      "ctl.DF_ctl_MddImportBatch_Status:D ",
+      "ctl.DF_ctl_MddImportOverlap_RecordedAtUtc:D ",
+      "ctl.DF_ctl_MddImportSourceRow_CreatedAtUtc:D ",
+      "ctl.DF_ctl_MddMacCollectorRun_CreatedAtUtc:D ",
+      "ctl.DF_ctl_MddMacCollectorRun_Status:D ",
+      "ctl.DF_ctl_MddMacDispatcherClaim_Status:D ",
+      "ctl.DF_ctl_MddMacQuotaPermit_LiveClientInvocation:D ",
+      "ctl.DF_ctl_MddMacSamplingEra_RecordedAtUtc:D ",
+      "ctl.DF_ctl_MddMacTargetAudit_HttpAttempts:D ",
+      "ctl.DF_ctl_MddMacTargetAudit_Status:D ",
+      "ctl.DF_ctl_MddMacTargetClaim_Status:D ",
+      "ctl.DF_ctl_MddRealtimeSamplingTarget_CreatedAtUtc:D ",
+      "ctl.DF_ctl_MddRealtimeSamplingTarget_IsEnabled:D ",
+      "ctl.DF_ctl_MddRealtimeSamplingTarget_NumberOfResults:D ",
+      "ctl.DF_ctl_StaticWarehouseLoadBatch_LoadedBy:D ",
+      "ctl.DF_ctl_StaticWarehouseLoadBatch_StartedAtUtc:D ",
+      "ctl.FK_ctl_GtfsStagingState_CurrentLoadBatch:F ",
+      "ctl.FK_ctl_GtfsValidationResult_GtfsLoadBatch:F ",
+      "ctl.FK_ctl_MddImportEvidenceAudit_Batch:F ",
+      "ctl.FK_ctl_MddImportOverlap_Batch:F ",
+      "ctl.FK_ctl_MddImportSourceRow_Batch:F ",
+      "ctl.FK_ctl_MddImportTableAudit_Batch:F ",
+      "ctl.FK_ctl_MddMacDispatcherClaim_Run:F ",
+      "ctl.FK_ctl_MddMacDispatcherClaimEvent_Run:F ",
+      "ctl.FK_ctl_MddMacHttpAttempt_Audit:F ",
+      "ctl.FK_ctl_MddMacHttpAttempt_QuotaPermit:F ",
+      "ctl.FK_ctl_MddMacQuotaAudit_Run:F ",
+      "ctl.FK_ctl_MddMacTargetAudit_Run:F ",
+      "ctl.FK_ctl_MddMacTargetClaim_Run:F ",
+      "ctl.FK_ctl_MddMacTargetClaimEvent_Run:F ",
+      "ctl.FK_ctl_MddRealtimeSamplingSlot_Target:F ",
+      "ctl.FK_ctl_StaticWarehouseLoadBatch_GtfsLoadBatch:F ",
+      "ctl.uspCompleteMddCollectorRun:P ",
+      "ctl.uspGetMddRealtimeSamplingTarget:P ",
+      "ctl.uspStartMddCollectorRun:P ",
+      "ctl.PK_ctl_GtfsLoadBatch:PK",
+      "ctl.PK_ctl_GtfsStagingState:PK",
+      "ctl.PK_ctl_GtfsValidationResult:PK",
+      "ctl.PK_ctl_MddCollectorRun:PK",
+      "ctl.PK_ctl_MddImportBatch:PK",
+      "ctl.PK_ctl_MddImportEvidenceAudit:PK",
+      "ctl.PK_ctl_MddImportOverlap:PK",
+      "ctl.PK_ctl_MddImportSourceRow:PK",
+      "ctl.PK_ctl_MddImportTableAudit:PK",
+      "ctl.PK_ctl_MddMacCollectorRun:PK",
+      "ctl.PK_ctl_MddMacDispatcherClaim:PK",
+      "ctl.PK_ctl_MddMacDispatcherClaimEvent:PK",
+      "ctl.PK_ctl_MddMacHttpAttempt:PK",
+      "ctl.PK_ctl_MddMacQuotaAudit:PK",
+      "ctl.PK_ctl_MddMacQuotaPermit:PK",
+      "ctl.PK_ctl_MddMacSamplingEra:PK",
+      "ctl.PK_ctl_MddMacTargetAudit:PK",
+      "ctl.PK_ctl_MddMacTargetClaim:PK",
+      "ctl.PK_ctl_MddMacTargetClaimEvent:PK",
+      "ctl.PK_ctl_MddRealtimeSamplingSlot:PK",
+      "ctl.PK_ctl_MddRealtimeSamplingTarget:PK",
+      "ctl.PK_ctl_StaticWarehouseLoadBatch:PK",
+      "ctl.GtfsLoadBatch:U ",
+      "ctl.GtfsStagingState:U ",
+      "ctl.GtfsValidationResult:U ",
+      "ctl.MddCollectorRun:U ",
+      "ctl.MddImportBatch:U ",
+      "ctl.MddImportEvidenceAudit:U ",
+      "ctl.MddImportOverlap:U ",
+      "ctl.MddImportSourceRow:U ",
+      "ctl.MddImportTableAudit:U ",
+      "ctl.MddMacCollectorRun:U ",
+      "ctl.MddMacDispatcherClaim:U ",
+      "ctl.MddMacDispatcherClaimEvent:U ",
+      "ctl.MddMacHttpAttempt:U ",
+      "ctl.MddMacQuotaAudit:U ",
+      "ctl.MddMacQuotaPermit:U ",
+      "ctl.MddMacSamplingEra:U ",
+      "ctl.MddMacTargetAudit:U ",
+      "ctl.MddMacTargetClaim:U ",
+      "ctl.MddMacTargetClaimEvent:U ",
+      "ctl.MddRealtimeSamplingSlot:U ",
+      "ctl.MddRealtimeSamplingTarget:U ",
+      "ctl.StaticWarehouseLoadBatch:U ",
+      "ctl.UQ_ctl_GtfsValidationResult_LoadBatch_CheckName:UQ",
+      "ctl.UQ_ctl_MddImportEvidenceAudit_Batch_Family:UQ",
+      "ctl.UQ_ctl_MddImportOverlap_Batch_Family_Source:UQ",
+      "ctl.UQ_ctl_MddImportSourceRow_Source_Lineage:UQ",
+      "ctl.UQ_ctl_MddImportTableAudit_Batch_Table:UQ",
+      "ctl.UQ_ctl_MddMacCollectorRun_RunId:UQ",
+      "ctl.UQ_ctl_MddMacHttpAttempt_Audit_Attempt:UQ",
+      "ctl.UQ_ctl_MddMacTargetAudit_Run_Target_Bucket:UQ",
+      "dw.CK_dw_BridgeServiceDate_ActivationSource:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_HasSituationEvidence:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_MatchStatus:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_ObservationCount:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_ObservedAtOrder:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_PlatformEvidence:C ",
+      "dw.CK_dw_FactOperationalStopOutcome_SituationLinkCount:C ",
+      "dw.DF_dw_FactOperationalStopOutcome_RefreshedAtUtc:D ",
+      "dw.FK_dw_BridgeServiceDate_Date:F ",
+      "dw.FK_dw_BridgeServiceDate_Service:F ",
+      "dw.FK_dw_BridgeServiceDate_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimAgency_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimDate_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimMode_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimRoute_Agency:F ",
+      "dw.FK_dw_DimRoute_Mode:F ",
+      "dw.FK_dw_DimRoute_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimService_WarehouseLoadBatch:F ",
+      "dw.FK_dw_DimStop_ParentStop:F ",
+      "dw.FK_dw_DimStop_WarehouseLoadBatch:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Date:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_FirstObservation:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_LastObservation:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Mode:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Route:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_ScheduledStopEvent:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Service:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Stop:F ",
+      "dw.FK_dw_FactOperationalStopOutcome_Trip:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Agency:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Mode:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Route:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Service:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Stop:F ",
+      "dw.FK_dw_FactScheduledStopEvent_Trip:F ",
+      "dw.FK_dw_FactScheduledStopEvent_WarehouseLoadBatch:F ",
+      "dw.FK_dw_FactScheduledTrip_Agency:F ",
+      "dw.FK_dw_FactScheduledTrip_Mode:F ",
+      "dw.FK_dw_FactScheduledTrip_Route:F ",
+      "dw.FK_dw_FactScheduledTrip_Service:F ",
+      "dw.FK_dw_FactScheduledTrip_WarehouseLoadBatch:F ",
+      "dw.uspRefreshFactOperationalStopOutcome:P ",
+      "dw.PK_dw_BridgeServiceDate:PK",
+      "dw.PK_dw_DimAgency:PK",
+      "dw.PK_dw_DimDate:PK",
+      "dw.PK_dw_DimMode:PK",
+      "dw.PK_dw_DimRoute:PK",
+      "dw.PK_dw_DimService:PK",
+      "dw.PK_dw_DimStop:PK",
+      "dw.PK_dw_FactOperationalStopOutcome:PK",
+      "dw.PK_dw_FactScheduledStopEvent:PK",
+      "dw.PK_dw_FactScheduledTrip:PK",
+      "dw.BridgeServiceDate:U ",
+      "dw.DimAgency:U ",
+      "dw.DimDate:U ",
+      "dw.DimMode:U ",
+      "dw.DimRoute:U ",
+      "dw.DimService:U ",
+      "dw.DimStop:U ",
+      "dw.FactOperationalStopOutcome:U ",
+      "dw.FactScheduledStopEvent:U ",
+      "dw.FactScheduledTrip:U ",
+      "dw.UQ_dw_DimAgency_AgencyId:UQ",
+      "dw.UQ_dw_DimDate_DateValue:UQ",
+      "dw.UQ_dw_DimMode_ModeDetail:UQ",
+      "dw.UQ_dw_DimRoute_RouteId:UQ",
+      "dw.UQ_dw_DimService_ServiceId:UQ",
+      "dw.UQ_dw_DimStop_StopId:UQ",
+      "dw.UQ_dw_FactScheduledTrip_TripId:UQ",
+      "stg.CK_MddRealtimeStopSituationLink_RelationScope:C ",
+      "stg.DF_MddRealtimeSituationObservation_CreatedAtUtc:D ",
+      "stg.DF_MddRealtimeStopObservation_CreatedAtUtc:D ",
+      "stg.DF_MddRealtimeStopSituationLink_CreatedAtUtc:D ",
+      "stg.DF_stg_MddMacSourceSnapshot_CreatedAtUtc:D ",
+      "stg.FK_MddRealtimeStopSituationLink_Observation:F ",
+      "stg.FK_MddRealtimeStopSituationLink_Situation:F ",
+      "stg.FK_stg_MddMacAttributeEvidence_Snapshot:F ",
+      "stg.FK_stg_MddMacCallObservation_Snapshot:F ",
+      "stg.FK_stg_MddMacParserGap_Snapshot:F ",
+      "stg.FK_stg_MddMacResponseError_Snapshot:F ",
+      "stg.FK_stg_MddMacServiceSectionEvidence_Snapshot:F ",
+      "stg.FK_stg_MddMacSituationEvidence_Snapshot:F ",
+      "stg.FK_stg_MddMacSourceSnapshot_Audit:F ",
+      "stg.FK_stg_MddMacSourceSnapshot_Run:F ",
+      "stg.FK_stg_MddMacTimingObservation_Snapshot:F ",
+      "stg.uspPersistMddMacSnapshot:P ",
+      "stg.uspPersistMddRealtimeSnapshot:P ",
+      "stg.PK_MddRealtimeSituationObservation:PK",
+      "stg.PK_MddRealtimeStopObservation:PK",
+      "stg.PK_MddRealtimeStopSituationLink:PK",
+      "stg.PK_stg_MddMacAttributeEvidence:PK",
+      "stg.PK_stg_MddMacCallObservation:PK",
+      "stg.PK_stg_MddMacParserGap:PK",
+      "stg.PK_stg_MddMacResponseError:PK",
+      "stg.PK_stg_MddMacServiceSectionEvidence:PK",
+      "stg.PK_stg_MddMacSituationEvidence:PK",
+      "stg.PK_stg_MddMacSourceSnapshot:PK",
+      "stg.PK_stg_MddMacTimingObservation:PK",
+      "stg.GtfsAgency:U ",
+      "stg.GtfsCalendar:U ",
+      "stg.GtfsCalendarDates:U ",
+      "stg.GtfsFeedInfo:U ",
+      "stg.GtfsFrequencies:U ",
+      "stg.GtfsRoutes:U ",
+      "stg.GtfsShapes:U ",
+      "stg.GtfsStops:U ",
+      "stg.GtfsStopTimes:U ",
+      "stg.GtfsTransfers:U ",
+      "stg.GtfsTrips:U ",
+      "stg.MddMacAttributeEvidence:U ",
+      "stg.MddMacCallObservation:U ",
+      "stg.MddMacParserGap:U ",
+      "stg.MddMacResponseError:U ",
+      "stg.MddMacServiceSectionEvidence:U ",
+      "stg.MddMacSituationEvidence:U ",
+      "stg.MddMacSourceSnapshot:U ",
+      "stg.MddMacTimingObservation:U ",
+      "stg.MddRealtimeSituationObservation:U ",
+      "stg.MddRealtimeStopObservation:U ",
+      "stg.MddRealtimeStopSituationLink:U ",
+      "stg.UQ_stg_MddMacAttributeEvidence_Occurrence:UQ",
+      "stg.UQ_stg_MddMacCallObservation_Occurrence:UQ",
+      "stg.UQ_stg_MddMacParserGap_Occurrence:UQ",
+      "stg.UQ_stg_MddMacResponseError_Occurrence:UQ",
+      "stg.UQ_stg_MddMacServiceSectionEvidence_Occurrence:UQ",
+      "stg.UQ_stg_MddMacSourceSnapshot_Audit:UQ",
+      "stg.UQ_stg_MddMacTimingObservation_Occurrence:UQ",
+      "wrk.GtfsTimeToSeconds:FN",
+      "wrk.vwCologneModeSummary:V ",
+      "wrk.vwCologneRealtimeEvidenceSituation:V ",
+      "wrk.vwCologneRealtimeStopEnriched:V ",
+      "wrk.vwCologneRealtimeStopObservation:V ",
+      "wrk.vwCologneRealtimeTripMatch:V ",
+      "wrk.vwCologneRealtimeTripMatchKey:V ",
+      "wrk.vwCologneScheduledStopEvent:V ",
+      "wrk.vwCologneServingRoute:V ",
+      "wrk.vwCologneServingTrip:V ",
+      "wrk.vwCologneStop:V "
+    ],
+    "objects": [
+      {
+        "object_name": "vwActiveDateProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwDailyScheduledTripProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwMddMacRecordedAtTimeHistory",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwMddMacSourceFieldCoverage",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwModeScheduleProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwNetworkBaselineKpi",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwParentStationScheduleProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeCollectorRunHealth",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeDataQualityCoverage",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeDelayHotspot",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeOperationalConsolidationQuality",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimePlatformChangeEvidence",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeReliabilityByDimension",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeReliabilityOutcome",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRealtimeSituationLinkedOutcome",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwRouteScheduleProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwStopPositionScheduleProfile",
+        "schema_name": "analytics",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "CK_ctl_GtfsLoadBatch_Status",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_GtfsStagingState_Singleton",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_GtfsValidationResult_CheckStatus",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_GtfsValidationResult_FailedRows",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_GtfsValidationResult_Severity",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_DurationMs",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_HttpAttempts",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_NonNegativeCounts",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_NumberOfResults",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_SamplingMode",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_SamplingSlot",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddCollectorRun_Status",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportBatch_SourceByteSize",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportBatch_SourceSha256",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportBatch_Status",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportEvidenceAudit_ReconciliationStatus",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportSourceRow_Classification",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportSourceRow_RowStatus",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportTableAudit_Classification",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddImportTableAudit_ReconciliationStatus",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddMacQuotaPermit_Amount",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddRealtimeSamplingSlot_Positive",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_MddRealtimeSamplingTarget_NumberOfResults",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_ctl_StaticWarehouseLoadBatch_Status",
+        "schema_name": "ctl",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_GtfsLoadBatch_LoadedBy",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_GtfsLoadBatch_SourceName",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_GtfsLoadBatch_StartedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_GtfsStagingState_UpdatedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_GtfsValidationResult_ValidatedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddCollectorRun_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddImportBatch_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddImportOverlap_RecordedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddImportSourceRow_CreatedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacCollectorRun_CreatedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacCollectorRun_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacDispatcherClaim_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacQuotaPermit_LiveClientInvocation",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacSamplingEra_RecordedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacTargetAudit_HttpAttempts",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacTargetAudit_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddMacTargetClaim_Status",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_CreatedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_IsEnabled",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_MddRealtimeSamplingTarget_NumberOfResults",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_StaticWarehouseLoadBatch_LoadedBy",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_ctl_StaticWarehouseLoadBatch_StartedAtUtc",
+        "schema_name": "ctl",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_GtfsStagingState_CurrentLoadBatch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_GtfsValidationResult_GtfsLoadBatch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddImportEvidenceAudit_Batch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddImportOverlap_Batch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddImportSourceRow_Batch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddImportTableAudit_Batch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacDispatcherClaim_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacDispatcherClaimEvent_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacHttpAttempt_Audit",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacHttpAttempt_QuotaPermit",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacQuotaAudit_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacTargetAudit_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacTargetClaim_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddMacTargetClaimEvent_Run",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_MddRealtimeSamplingSlot_Target",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_ctl_StaticWarehouseLoadBatch_GtfsLoadBatch",
+        "schema_name": "ctl",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "uspCompleteMddCollectorRun",
+        "schema_name": "ctl",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "uspGetMddRealtimeSamplingTarget",
+        "schema_name": "ctl",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "uspStartMddCollectorRun",
+        "schema_name": "ctl",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "PK_ctl_GtfsLoadBatch",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_GtfsStagingState",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_GtfsValidationResult",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddCollectorRun",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddImportBatch",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddImportEvidenceAudit",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddImportOverlap",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddImportSourceRow",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddImportTableAudit",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacCollectorRun",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacDispatcherClaim",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacDispatcherClaimEvent",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacHttpAttempt",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacQuotaAudit",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacQuotaPermit",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacSamplingEra",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacTargetAudit",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacTargetClaim",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddMacTargetClaimEvent",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddRealtimeSamplingSlot",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_MddRealtimeSamplingTarget",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_ctl_StaticWarehouseLoadBatch",
+        "schema_name": "ctl",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "GtfsLoadBatch",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsStagingState",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsValidationResult",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddCollectorRun",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddImportBatch",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddImportEvidenceAudit",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddImportOverlap",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddImportSourceRow",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddImportTableAudit",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacCollectorRun",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacDispatcherClaim",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacDispatcherClaimEvent",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacHttpAttempt",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacQuotaAudit",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacQuotaPermit",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacSamplingEra",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacTargetAudit",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacTargetClaim",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacTargetClaimEvent",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddRealtimeSamplingSlot",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddRealtimeSamplingTarget",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "StaticWarehouseLoadBatch",
+        "schema_name": "ctl",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "UQ_ctl_GtfsValidationResult_LoadBatch_CheckName",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddImportEvidenceAudit_Batch_Family",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddImportOverlap_Batch_Family_Source",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddImportSourceRow_Source_Lineage",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddImportTableAudit_Batch_Table",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddMacCollectorRun_RunId",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddMacHttpAttempt_Audit_Attempt",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_ctl_MddMacTargetAudit_Run_Target_Bucket",
+        "schema_name": "ctl",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_BridgeServiceDate_ActivationSource",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_HasSituationEvidence",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_MatchStatus",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_ObservationCount",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_ObservedAtOrder",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_PlatformEvidence",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_dw_FactOperationalStopOutcome_SituationLinkCount",
+        "schema_name": "dw",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_dw_FactOperationalStopOutcome_RefreshedAtUtc",
+        "schema_name": "dw",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_BridgeServiceDate_Date",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_BridgeServiceDate_Service",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_BridgeServiceDate_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimAgency_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimDate_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimMode_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimRoute_Agency",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimRoute_Mode",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimRoute_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimService_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimStop_ParentStop",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_DimStop_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Date",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_FirstObservation",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_LastObservation",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Mode",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Route",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_ScheduledStopEvent",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Service",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Stop",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactOperationalStopOutcome_Trip",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Agency",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Mode",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Route",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Service",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Stop",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_Trip",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledStopEvent_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledTrip_Agency",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledTrip_Mode",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledTrip_Route",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledTrip_Service",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_dw_FactScheduledTrip_WarehouseLoadBatch",
+        "schema_name": "dw",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "uspRefreshFactOperationalStopOutcome",
+        "schema_name": "dw",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "PK_dw_BridgeServiceDate",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimAgency",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimDate",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimMode",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimRoute",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimService",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_DimStop",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_FactOperationalStopOutcome",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_FactScheduledStopEvent",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_dw_FactScheduledTrip",
+        "schema_name": "dw",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "BridgeServiceDate",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimAgency",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimDate",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimMode",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimRoute",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimService",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "DimStop",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "FactOperationalStopOutcome",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "FactScheduledStopEvent",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "FactScheduledTrip",
+        "schema_name": "dw",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "UQ_dw_DimAgency_AgencyId",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_DimDate_DateValue",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_DimMode_ModeDetail",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_DimRoute_RouteId",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_DimService_ServiceId",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_DimStop_StopId",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_dw_FactScheduledTrip_TripId",
+        "schema_name": "dw",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "CK_MddRealtimeStopSituationLink_RelationScope",
+        "schema_name": "stg",
+        "type": "C ",
+        "type_desc": "CHECK_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_MddRealtimeSituationObservation_CreatedAtUtc",
+        "schema_name": "stg",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_MddRealtimeStopObservation_CreatedAtUtc",
+        "schema_name": "stg",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_MddRealtimeStopSituationLink_CreatedAtUtc",
+        "schema_name": "stg",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "DF_stg_MddMacSourceSnapshot_CreatedAtUtc",
+        "schema_name": "stg",
+        "type": "D ",
+        "type_desc": "DEFAULT_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_MddRealtimeStopSituationLink_Observation",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_MddRealtimeStopSituationLink_Situation",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacAttributeEvidence_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacCallObservation_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacParserGap_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacResponseError_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacServiceSectionEvidence_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacSituationEvidence_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacSourceSnapshot_Audit",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacSourceSnapshot_Run",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "FK_stg_MddMacTimingObservation_Snapshot",
+        "schema_name": "stg",
+        "type": "F ",
+        "type_desc": "FOREIGN_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "uspPersistMddMacSnapshot",
+        "schema_name": "stg",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "uspPersistMddRealtimeSnapshot",
+        "schema_name": "stg",
+        "type": "P ",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "object_name": "PK_MddRealtimeSituationObservation",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_MddRealtimeStopObservation",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_MddRealtimeStopSituationLink",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacAttributeEvidence",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacCallObservation",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacParserGap",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacResponseError",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacServiceSectionEvidence",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacSituationEvidence",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacSourceSnapshot",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "PK_stg_MddMacTimingObservation",
+        "schema_name": "stg",
+        "type": "PK",
+        "type_desc": "PRIMARY_KEY_CONSTRAINT"
+      },
+      {
+        "object_name": "GtfsAgency",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsCalendar",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsCalendarDates",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsFeedInfo",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsFrequencies",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsRoutes",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsShapes",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsStops",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsStopTimes",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsTransfers",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "GtfsTrips",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacAttributeEvidence",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacCallObservation",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacParserGap",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacResponseError",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacServiceSectionEvidence",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacSituationEvidence",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacSourceSnapshot",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddMacTimingObservation",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddRealtimeSituationObservation",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddRealtimeStopObservation",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "MddRealtimeStopSituationLink",
+        "schema_name": "stg",
+        "type": "U ",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "object_name": "UQ_stg_MddMacAttributeEvidence_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacCallObservation_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacParserGap_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacResponseError_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacServiceSectionEvidence_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacSourceSnapshot_Audit",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "UQ_stg_MddMacTimingObservation_Occurrence",
+        "schema_name": "stg",
+        "type": "UQ",
+        "type_desc": "UNIQUE_CONSTRAINT"
+      },
+      {
+        "object_name": "GtfsTimeToSeconds",
+        "schema_name": "wrk",
+        "type": "FN",
+        "type_desc": "SQL_SCALAR_FUNCTION"
+      },
+      {
+        "object_name": "vwCologneModeSummary",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneRealtimeEvidenceSituation",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneRealtimeStopEnriched",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneRealtimeStopObservation",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneRealtimeTripMatch",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneRealtimeTripMatchKey",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneScheduledStopEvent",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneServingRoute",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneServingTrip",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      },
+      {
+        "object_name": "vwCologneStop",
+        "schema_name": "wrk",
+        "type": "V ",
+        "type_desc": "VIEW"
+      }
+    ],
+    "table_keys": [
+      "ctl.GtfsLoadBatch",
+      "ctl.GtfsStagingState",
+      "ctl.GtfsValidationResult",
+      "ctl.MddCollectorRun",
+      "ctl.MddImportBatch",
+      "ctl.MddImportEvidenceAudit",
+      "ctl.MddImportOverlap",
+      "ctl.MddImportSourceRow",
+      "ctl.MddImportTableAudit",
+      "ctl.MddMacCollectorRun",
+      "ctl.MddMacDispatcherClaim",
+      "ctl.MddMacDispatcherClaimEvent",
+      "ctl.MddMacHttpAttempt",
+      "ctl.MddMacQuotaAudit",
+      "ctl.MddMacQuotaPermit",
+      "ctl.MddMacSamplingEra",
+      "ctl.MddMacTargetAudit",
+      "ctl.MddMacTargetClaim",
+      "ctl.MddMacTargetClaimEvent",
+      "ctl.MddRealtimeSamplingSlot",
+      "ctl.MddRealtimeSamplingTarget",
+      "ctl.StaticWarehouseLoadBatch",
+      "dw.BridgeServiceDate",
+      "dw.DimAgency",
+      "dw.DimDate",
+      "dw.DimMode",
+      "dw.DimRoute",
+      "dw.DimService",
+      "dw.DimStop",
+      "dw.FactOperationalStopOutcome",
+      "dw.FactScheduledStopEvent",
+      "dw.FactScheduledTrip",
+      "stg.GtfsAgency",
+      "stg.GtfsCalendar",
+      "stg.GtfsCalendarDates",
+      "stg.GtfsFeedInfo",
+      "stg.GtfsFrequencies",
+      "stg.GtfsRoutes",
+      "stg.GtfsShapes",
+      "stg.GtfsStops",
+      "stg.GtfsStopTimes",
+      "stg.GtfsTransfers",
+      "stg.GtfsTrips",
+      "stg.MddMacAttributeEvidence",
+      "stg.MddMacCallObservation",
+      "stg.MddMacParserGap",
+      "stg.MddMacResponseError",
+      "stg.MddMacServiceSectionEvidence",
+      "stg.MddMacSituationEvidence",
+      "stg.MddMacSourceSnapshot",
+      "stg.MddMacTimingObservation",
+      "stg.MddRealtimeSituationObservation",
+      "stg.MddRealtimeStopObservation",
+      "stg.MddRealtimeStopSituationLink"
+    ],
+    "tables": [
+      {
+        "schema_name": "ctl",
+        "table_name": "GtfsLoadBatch"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "GtfsStagingState"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "GtfsValidationResult"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddCollectorRun"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddImportBatch"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddImportEvidenceAudit"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddImportOverlap"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddImportSourceRow"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddImportTableAudit"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacCollectorRun"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacDispatcherClaim"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacDispatcherClaimEvent"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacHttpAttempt"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacQuotaAudit"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacQuotaPermit"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacSamplingEra"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacTargetAudit"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacTargetClaim"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddMacTargetClaimEvent"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddRealtimeSamplingSlot"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "MddRealtimeSamplingTarget"
+      },
+      {
+        "schema_name": "ctl",
+        "table_name": "StaticWarehouseLoadBatch"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "BridgeServiceDate"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimAgency"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimDate"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimMode"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimRoute"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimService"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "DimStop"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "FactOperationalStopOutcome"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "FactScheduledStopEvent"
+      },
+      {
+        "schema_name": "dw",
+        "table_name": "FactScheduledTrip"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsAgency"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsCalendar"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsCalendarDates"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsFeedInfo"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsFrequencies"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsRoutes"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsShapes"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsStops"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsStopTimes"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsTransfers"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "GtfsTrips"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacAttributeEvidence"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacCallObservation"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacParserGap"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacResponseError"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacServiceSectionEvidence"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacSituationEvidence"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacSourceSnapshot"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddMacTimingObservation"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddRealtimeSituationObservation"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddRealtimeStopObservation"
+      },
+      {
+        "schema_name": "stg",
+        "table_name": "MddRealtimeStopSituationLink"
+      }
+    ]
+  },
+  "archive": {
+    "archive_gate_pass": true,
+    "bak": {
+      "actual_byte_size": 1518825984,
+      "actual_sha256": "573faa7598bd37e1f70300f04d165f2c441fabdbdad816f30987d27210ea665b",
+      "exists": true,
+      "expected_byte_size": 1518825984,
+      "expected_sha256": "573faa7598bd37e1f70300f04d165f2c441fabdbdad816f30987d27210ea665b",
+      "path": "/Users/admin/Documents/CologneTransitData/NRWTransportDW-Archive-20261007T112120Z.bak",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    "manifest_checks": {
+      "backup_filename": true,
+      "byte_size": true,
+      "database": true,
+      "dependency_classification": true,
+      "filelistonly": true,
+      "headeronly": true,
+      "manifest_exists": true,
+      "migration_status": true,
+      "sha256": true,
+      "verifyonly_with_checksum": true
+    },
+    "manifest_path": "/Users/admin/Documents/cologne-transit-intelligence/docs/archives/nrwtransportdw/20261007T112120Z/NRWTransportDW-archive-manifest-20261007T112120Z.json",
+    "sql_server_backup_path": "\\\\vmware-host\\Shared Folders\\CologneTransitData\\NRWTransportDW-Archive-20261007T112120Z.bak",
+    "user_confirmed_verified_usb_copy": true,
+    "zip": {
+      "actual_byte_size": 1518968697,
+      "actual_sha256": "d096366e88a4b823bb8e4ad3b493dea274061419d8d65700f540582efb9aba7c",
+      "exists": true,
+      "expected_byte_size": 1518968697,
+      "expected_sha256": "d096366e88a4b823bb8e4ad3b493dea274061419d8d65700f540582efb9aba7c",
+      "path": "/Users/admin/Documents/CologneTransitData/NRWTransportDW-Archive-20261007T112120Z.zip",
+      "sha256_matches": true,
+      "size_matches": true
+    }
+  },
+  "database_dependency_audit": [
+    {
+      "cross_database_dependencies": [],
+      "database": "CologneTransitIntelligence",
+      "module_references": [],
+      "synonym_references": []
+    }
+  ],
+  "database_snapshot": {
+    "active_allocated_bytes": 5299765248,
+    "active_files": [
+      {
+        "allocated_bytes": 4217634816,
+        "allocated_mb": 4022.25,
+        "database_id": 6,
+        "database_name": "CologneTransitIntelligence",
+        "file_id": 1,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "CologneTransitIntelligence",
+        "max_size_bytes": null,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence.mdf",
+        "type_desc": "ROWS"
+      },
+      {
+        "allocated_bytes": 1082130432,
+        "allocated_mb": 1032.0,
+        "database_id": 6,
+        "database_name": "CologneTransitIntelligence",
+        "file_id": 2,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "CologneTransitIntelligence_log",
+        "max_size_bytes": 2199023255552,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence_log.ldf",
+        "type_desc": "LOG"
+      }
+    ],
+    "c_volume": {
+      "available_bytes": 8247713792,
+      "total_bytes": 95511638016,
+      "volume_mount_point": "C:\\"
+    },
+    "files": [
+      {
+        "allocated_bytes": 4217634816,
+        "allocated_mb": 4022.25,
+        "database_id": 6,
+        "database_name": "CologneTransitIntelligence",
+        "file_id": 1,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "CologneTransitIntelligence",
+        "max_size_bytes": null,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence.mdf",
+        "type_desc": "ROWS"
+      },
+      {
+        "allocated_bytes": 1082130432,
+        "allocated_mb": 1032.0,
+        "database_id": 6,
+        "database_name": "CologneTransitIntelligence",
+        "file_id": 2,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "CologneTransitIntelligence_log",
+        "max_size_bytes": 2199023255552,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\CologneTransitIntelligence_log.ldf",
+        "type_desc": "LOG"
+      },
+      {
+        "allocated_bytes": 19805503488,
+        "allocated_mb": 18888.0,
+        "database_id": 5,
+        "database_name": "NRWTransportDW",
+        "file_id": 1,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "NRWTransportDW",
+        "max_size_bytes": null,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\NRWTransportDW.mdf",
+        "type_desc": "ROWS"
+      },
+      {
+        "allocated_bytes": 20745027584,
+        "allocated_mb": 19784.0,
+        "database_id": 5,
+        "database_name": "NRWTransportDW",
+        "file_id": 2,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "NRWTransportDW_log",
+        "max_size_bytes": 2199023255552,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\NRWTransportDW_log.ldf",
+        "type_desc": "LOG"
+      }
+    ],
+    "legacy_allocated_bytes": 40550531072,
+    "legacy_files": [
+      {
+        "allocated_bytes": 19805503488,
+        "allocated_mb": 18888.0,
+        "database_id": 5,
+        "database_name": "NRWTransportDW",
+        "file_id": 1,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "NRWTransportDW",
+        "max_size_bytes": null,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\NRWTransportDW.mdf",
+        "type_desc": "ROWS"
+      },
+      {
+        "allocated_bytes": 20745027584,
+        "allocated_mb": 19784.0,
+        "database_id": 5,
+        "database_name": "NRWTransportDW",
+        "file_id": 2,
+        "growth": 8192,
+        "is_percent_growth": false,
+        "logical_name": "NRWTransportDW_log",
+        "max_size_bytes": 2199023255552,
+        "physical_name": "C:\\Program Files\\Microsoft SQL Server\\MSSQL17.MSSQLSERVER\\MSSQL\\DATA\\NRWTransportDW_log.ldf",
+        "type_desc": "LOG"
+      }
+    ],
+    "server": {
+      "collation": "SQL_Latin1_General_CP1_CI_AS",
+      "edition": "Standard Developer Edition (64-bit)",
+      "machine_name": "DataAnalyst-VM",
+      "product_level": "RTM",
+      "product_version": "17.0.1125.2",
+      "server_name": "DataAnalyst-VM",
+      "sqlserver_start_time": "2026-10-07T10:01:25.973333"
+    },
+    "states": [
+      {
+        "create_date": "2003-04-08T09:13:36.390000",
+        "database_id": 1,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "master",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      {
+        "create_date": "2026-10-07T10:01:29.237000",
+        "database_id": 2,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "tempdb",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      {
+        "create_date": "2003-04-08T09:13:36.390000",
+        "database_id": 3,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "model",
+        "recovery_model_desc": "FULL",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      {
+        "create_date": "2025-10-21T12:53:13.233000",
+        "database_id": 4,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "msdb",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      {
+        "create_date": "2026-08-19T20:16:40.297000",
+        "database_id": 5,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "NRWTransportDW",
+        "recovery_model_desc": "FULL",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      {
+        "create_date": "2026-08-29T14:50:44.597000",
+        "database_id": 6,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "CologneTransitIntelligence",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      }
+    ],
+    "states_by_name": {
+      "CologneTransitIntelligence": {
+        "create_date": "2026-08-29T14:50:44.597000",
+        "database_id": 6,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "CologneTransitIntelligence",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      "NRWTransportDW": {
+        "create_date": "2026-08-19T20:16:40.297000",
+        "database_id": 5,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "NRWTransportDW",
+        "recovery_model_desc": "FULL",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      "master": {
+        "create_date": "2003-04-08T09:13:36.390000",
+        "database_id": 1,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "master",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      "model": {
+        "create_date": "2003-04-08T09:13:36.390000",
+        "database_id": 3,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "model",
+        "recovery_model_desc": "FULL",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      "msdb": {
+        "create_date": "2025-10-21T12:53:13.233000",
+        "database_id": 4,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "msdb",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      },
+      "tempdb": {
+        "create_date": "2026-10-07T10:01:29.237000",
+        "database_id": 2,
+        "is_read_only": false,
+        "log_reuse_wait_desc": "NOTHING",
+        "name": "tempdb",
+        "recovery_model_desc": "SIMPLE",
+        "state_desc": "ONLINE",
+        "user_access_desc": "MULTI_USER"
+      }
+    }
+  },
+  "dependency_classification": "LEGACY_SAFE_TO_ARCHIVE",
+  "gates": {
+    "active_exists_and_online": true,
+    "c_free_space_captured": true,
+    "legacy_exists_and_online": true,
+    "no_active_cross_database_dependency": true,
+    "no_active_sql_module_reference": true,
+    "no_currently_executing_nrw_session": true,
+    "no_sql_agent_reference": true,
+    "no_synonym_dependency_reference": true,
+    "sql_server_can_see_shared_bak": true,
+    "verified_bak_present_and_matching": true,
+    "verified_zip_present_and_matching": true
+  },
+  "linked_servers": [],
+  "migration_status": "NO_NRWTRANSPORTDW_ASSET_REQUIRED_BY_ACTIVE_COLOGNE_PROJECT",
+  "sql_agent": {
+    "references": [],
+    "status": "PASS"
+  },
+  "sql_server_shared_backup_file_exists": true
+}

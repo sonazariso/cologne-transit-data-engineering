@@ -1,5 +1,8 @@
 # Stage 6 — Static Warehouse & Analytics Completion Decision
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Date:** 2026-09-28
 **Decision:** [D-030](../DECISION-LOG.md#d-030--stage-6-static-warehouse--analytics-design)
 **Final status:** COMPLETE — APPROVED DESIGN; PHYSICAL IMPLEMENTATION DEFERRED

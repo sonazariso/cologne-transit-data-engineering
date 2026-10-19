@@ -1,5 +1,8 @@
 # Stage 8 — Small Realtime Pilot Completion and Historical Authorization Chronology
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Current status:** `COMPLETE`
 **Current status date:** `2026-09-29`
 **Historical pre-success attempt:** `2026-09-28` — HTTP `401`

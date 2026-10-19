@@ -1,5 +1,8 @@
 # Stage 1 — Source Inventory & Permission
 
+> **Historical engineering record:** This page preserves an earlier design, experiment, incident or point-in-time operational result. For the current project name, final state and safety boundaries, use [Project Status](../PROJECT-STATUS.md). Archived instructions here are **not** authorization to run a collector, apply SQL, or change production resources.
+
+
 **Status:** NOT STARTED
 
 This is the working document for the next stage. No findings below should be marked approved until they are re-verified.

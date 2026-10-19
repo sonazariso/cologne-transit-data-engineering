@@ -1,0 +1,17 @@
+{
+  "selection_policy_version": "LEGACY7_SQL_SLOT_V1",
+  "bucket_to_slot_rule": "UTC_EPOCH_BUCKET_MOD_10_PLUS_1",
+  "slot_to_sampling_target_id": {
+    "1": 2,
+    "2": 7,
+    "3": 1,
+    "4": 4,
+    "5": 6,
+    "6": 2,
+    "7": 7,
+    "8": 1,
+    "9": 5,
+    "10": 3
+  },
+  "target_ids": [1, 2, 3, 4, 5, 6, 7]
+}
